@@ -49,8 +49,8 @@ _Static_assert(offsetof(binrwir_argument_t, slot) == 6U,
                "BinRWIR slot offset changed");
 _Static_assert(offsetof(binrwir_argument_t, payload) == 8U,
                "BinRWIR payload offset changed");
-_Static_assert(BINRWIR_BINARY_INTERFACE_GENERATION == 3U,
-               "BinRWIR binary interface generation must be 3");
+_Static_assert(BINRWIR_BINARY_INTERFACE_GENERATION == 4U,
+               "BinRWIR binary interface generation must be 4");
 _Static_assert(sizeof(binrwir_alias_rule_t) == 12U,
                "alias rules must remain twelve bytes");
 _Static_assert(sizeof(binrwir_instruction_t) == 4U,

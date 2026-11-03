@@ -5,7 +5,7 @@
 #       生成三平台导出脚本（README §9、§10）。当前产物名刻意带 _scaffold，禁止用于
 #       benchmark/tutorial/发布。
 # 联系：组件依赖只沿本文件声明的单向图连接；JIT 是 BinRWIR Compiler
-#       内部实现，只有 engine route 汇合 compiler 与 vmbin。
+#       内部实现，只有 engine/execution_window 汇合 compiler 与 vmbin。
 cmake_minimum_required(VERSION 3.20)
 
 project(kvlang_runtimec_scaffold VERSION 0.1.0 LANGUAGES C)

@@ -81,10 +81,14 @@ runtimec_status_t binrwir_program_find_instruction(
 /* 符号池规模：调用入口要在建绑定表前知道有多少个局部符号要留槽。 */
 runtimec_status_t binrwir_program_get_symbol_count(
     const binrwir_program_t *program, size_t *output_symbol_count);
-/* 符号池只读借出：LOCAL 与 FUNCTION 参数项的 slot 就是这个下标。 */
+/*
+ * 符号池只读借出：LOCAL / FUNCTION / STATIC 参数项的 slot 就是这个下标。
+ * 名字与语言类型一起给出——创建槽的调用入口两样都要。
+ */
 runtimec_status_t binrwir_program_get_symbol(
     const binrwir_program_t *program, uint16_t symbol_index,
-    runtimec_string_view_t *output_name);
+    runtimec_string_view_t *output_name,
+    runtimec_string_view_t *output_langtype);
 /* 字面量池规模：需要整池搬运（例如编译期深拷贝 Program）时必须先知道它。 */
 runtimec_status_t binrwir_program_get_literal_count(
     const binrwir_program_t *program, size_t *output_literal_count);
@@ -126,18 +130,27 @@ runtimec_status_t binrwir_program_builder_add_alias_rule(
     uint32_t *output_alias_rule_identifier);
 
 /*
- * 登记符号：函数名与局部变量名，**不存路径**（`/lib/` 由 vmbin 拼）。同名重复登记
- * 是幂等的，返回同一个下标。
+ * 登记符号：名字 + 语言类型。函数名与局部变量名都**不存路径**（`/lib/`、帧目录由
+ * 调用入口拼）。
+ *
+ * 为什么要带类型：局部槽必须**先以正确长度存在**——解析接口只能解析已存在的 key，
+ * 而执行器只接受与当前 body 等长的写入，零长槽写不进任何真实值。谁创建槽谁就得
+ * 知道槽多大：vmbin 没有 host，route 有 host 却不该有第二份类型事实源，类型只能
+ * 来自 Program。
+ *
+ * 冲突：同名重复登记且**类型相同**是幂等的，返回同一个下标；同名但类型不同是
+ * **非法 Program**，当场返回 INVALID——不去猜哪个精度对。读取位置上出现的局部，
+ * 其类型就是它被写的类型，由 encoder 判定后写入，Program 只存结果。
  *
  * 下标规范化：插入期返回 builder 内的序号，finalize 按名字的字节字典序把符号池
- * 重排成 Program 的规范顺序，并同步改写全部 LOCAL / FUNCTION 参数项的 slot。因此
- * 同一个函数体无论 encoder 以什么顺序登记符号，产出的 Program 都相同（编译缓存
+ * 重排成 Program 的规范顺序，并同步改写全部 LOCAL / FUNCTION / STATIC 参数项的 slot。
+ * 因此同一个函数体无论 encoder 以什么顺序登记符号，产出的 Program 都相同（编译缓存
  * 才可复用）；而 add_symbol 返回的下标只在 builder 内有效——拿到直接填进参数项，
  * 不要在 finalize 之后还拿它跟 Program 里的 slot 比对。
  */
 runtimec_status_t binrwir_program_builder_add_symbol(
     binrwir_program_builder_t *builder, runtimec_string_view_t name,
-    uint16_t *output_symbol_index);
+    runtimec_string_view_t langtype, uint16_t *output_symbol_index);
 
 /*
  * 登记字面量：wire_bytes 是该槽已编码的值字节（XValue head + body + attr），

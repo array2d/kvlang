@@ -154,6 +154,8 @@ typedef struct test_program_source {
     const test_alias_rule_t *alias_rules;
     size_t alias_rule_count;
     const char *symbols[8];
+    /* 只有被 LOCAL 引用的符号才需要类型；其余留 NULL（取空视图）。 */
+    const char *symbol_types[8];
     size_t symbol_count;
     const char *literal_types[8];
     const uint8_t *literal_bytes[8];
@@ -215,10 +217,16 @@ static runtimec_status_t test_program_build(
     for (ordinal = 0U; status == RUNTIMEC_STATUS_SUCCESS &&
                         ordinal < source->symbol_count;
          ++ordinal) {
+        const runtimec_string_view_t symbol_type =
+            source->symbol_types[ordinal] != NULL
+                ? runtimec_string_view_from_c_string(
+                      source->symbol_types[ordinal])
+                : runtimec_string_view_make(NULL, 0U);
+
         status = binrwir_program_builder_add_symbol(
             builder,
             runtimec_string_view_from_c_string(source->symbols[ordinal]),
-            &symbol_index);
+            symbol_type, &symbol_index);
     }
     for (ordinal = 0U; status == RUNTIMEC_STATUS_SUCCESS &&
                         ordinal < source->literal_count;

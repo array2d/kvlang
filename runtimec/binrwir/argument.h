@@ -33,9 +33,10 @@ extern "C" {
  *   1 = argidx + 对齐填充 + body_address（地址化模型，已删除）；
  *   2 = argidx + 引用种类 + 槽号 + payload（指针变量模型）；
  *   3 = 布局同 2，但 LOCAL / FUNCTION 的 slot 是 Program 符号池下标、LITERAL 的
- *       payload 是 Program 字面量池下标（当前）。
+ *       payload 是 Program 字面量池下标；
+ *   4 = 符号池条目从「名字」扩展为「名字 + 语言类型」（当前）。
  */
-#define BINRWIR_BINARY_INTERFACE_GENERATION 3U
+#define BINRWIR_BINARY_INTERFACE_GENERATION 4U
 
 typedef enum binrwir_reference_kind {
     BINRWIR_REFERENCE_INVALID = 0,

@@ -139,6 +139,13 @@ const vmkv_rwir_capability_t *vmkv_rwir_manifest_find_operation(
 const vmkv_rwir_capability_t *vmkv_rwir_manifest_capability(
     vmkv_rwir_capability_identifier_t identifier);
 
+/*
+ * 该 operation 是否是 `call`：`call` 的第一个读参是函数名而不是值操作数，
+ * 因此它既不参与类型收敛，也不算局部变量。判据只此一处，encoder 与
+ * local_types 共用。
+ */
+bool vmkv_rwir_manifest_is_call(runtimec_string_view_t operation_name);
+
 /* 按 .def 声明顺序求第一条匹配的改选规则。 */
 vmkv_rwir_specialization_result_t vmkv_rwir_manifest_find_specialization(
     runtimec_string_view_t surface_name,

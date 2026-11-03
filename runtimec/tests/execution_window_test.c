@@ -1,10 +1,10 @@
 /*
- * engine/route 验收：ROUTE_FUNCTION 的完整链路（取快照 → 命中 compilation
- * repository → 读执行目标 → 顶层帧形参绑定 → vmbin 执行 → 提交 checkpoint），
- * 未命中时的编码失败封闭，以及另外三种 kind 的失败封闭。
+ * engine/execution_window 验收：一次执行窗口的完整链路（取快照 → 命中
+ * compilation repository → 读执行目标 → 顶层帧形参绑定 → vmbin 执行 →
+ * 提交 checkpoint），未命中时的编码失败封闭，以及起始位置与帧路径的失败形状。
  *
  * 命中的那条路径由测试自己预置 compilation：Program 用 builder 构造、经
- * BinRWIR Compiler 编译、按 route 会算出的同一把 key 入仓。未命中的那条路径
+ * BinRWIR Compiler 编译、按执行窗口会算出的同一把 key 入仓。未命中的那条路径
  * 走真实 vmkv 编码，host 的读能力给的是失败封闭的替身，因此不产生 Program。
  */
 
@@ -25,7 +25,7 @@
 #include "contract/host_services.h"
 #include "contract/snapshot.h"
 #include "engine/compilation_repository.h"
-#include "engine/route.h"
+#include "engine/execution_window.h"
 #include "engine/session.h"
 #include "kvspace/xvalue_head.h"
 #include "vmbin/core_operations.h"
@@ -51,6 +51,7 @@ static int failures;
 #define TEST_DONE_TARGET "/lib/route-done"
 #define TEST_MISSING_TARGET "/lib/missing"
 #define TEST_VTHREAD "vthread-1"
+#define TEST_FRAME_PATH "/vthread/vthread-1"
 #define TEST_READ_KEY "/vthread/vthread-1/[0,0]"
 #define TEST_WRITE_KEY "/vthread/vthread-1/[0,-1]"
 /* 第一条 Program：COPY(3) CALL(4) COPY(5)，CALL 的后继是 source pc 5。 */
@@ -168,7 +169,7 @@ static runtimec_status_t test_resolve_frame_xvalue_address(
     return RUNTIMEC_STATUS_UNSUPPORTED;
 }
 
-/* 未命中路径会走到 vmkv 编码：读能力在这里明确失败，route 必须失败封闭。 */
+/* 未命中路径会走到 vmkv 编码：读能力在这里明确失败，窗口必须失败封闭。 */
 static runtimec_status_t test_read(void *context,
                                    const runtimec_snapshot_t *snapshot,
                                    runtimec_key_view_t key,
@@ -300,7 +301,8 @@ static runtimec_status_t test_program_begin(
     }
     if (status == RUNTIMEC_STATUS_SUCCESS &&
         binrwir_program_builder_add_symbol(
-            builder, runtimec_string_view_from_c_string("g"), &symbol_index) !=
+            builder, runtimec_string_view_from_c_string("g"),
+            runtimec_string_view_make(NULL, 0U), &symbol_index) !=
             RUNTIMEC_STATUS_SUCCESS) {
         status = RUNTIMEC_STATUS_INVALID;
     }
@@ -325,7 +327,7 @@ static runtimec_status_t test_program_begin(
  * 0 COPY  source 3
  * 1 CALL  source 4（读区只有函数名，写区为空）
  * 2 COPY  source 5
- * CALL 的后继存在，所以它的 resume source pc 是 5——route 提交一个可恢复位置。
+ * CALL 的后继存在，所以它的 resume source pc 是 5——窗口提交一个可恢复位置。
  */
 static runtimec_status_t test_program_build_call(
     const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
@@ -391,7 +393,7 @@ static runtimec_status_t test_program_build_done(
     return status;
 }
 
-/* route 会算出的同一把 key：snapshot + 四个版本号。 */
+/* 窗口会算出的同一把 key：snapshot + 四个版本号。 */
 static runtimec_status_t test_repository_key_build(
     const runtimec_session_runtime_components_t *components,
     const char *target, uint32_t canonical_encoding_revision,
@@ -421,7 +423,7 @@ static runtimec_status_t test_compile_and_insert(
     binrwir_compilation_t *compilation = NULL;
     runtimec_status_t status;
 
-    /* 编译器接管 program：route 不再销毁它。 */
+    /* 编译器接管 program：窗口不再销毁它。 */
     status = binrwir_compiler_compile(components->binrwir_compiler, program,
                                       &compilation, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -456,14 +458,9 @@ int main(void) {
     runtimec_error_t error;
     binrwir_program_t *program = NULL;
     runtimec_string_view_t arguments[2];
-    runtimec_route_request_t request;
-    runtimec_route_result_t result;
-    const runtimec_route_kind_t unsupported_kinds[3] = {
-        RUNTIMEC_ROUTE_PROGRAM_COUNTER, RUNTIMEC_ROUTE_VTHREAD,
-        RUNTIMEC_ROUTE_BOOTSTRAP};
-    const uint32_t unsupported_details[3] = {2U, 3U, 4U};
+    runtimec_execution_window_request_t request;
+    runtimec_execution_window_result_t result;
     uint32_t canonical_encoding_revision = 0U;
-    size_t ordinal;
 
     memset(&test, 0, sizeof(test));
     test_value_initialize(&read_value, UINT64_C(0x1122334455667788));
@@ -519,15 +516,16 @@ int main(void) {
     arguments[0] = runtimec_string_view_from_c_string(TEST_READ_KEY);
     arguments[1] = runtimec_string_view_from_c_string(TEST_WRITE_KEY);
     memset(&request, 0, sizeof(request));
-    request.kind = RUNTIMEC_ROUTE_FUNCTION;
-    request.target = runtimec_string_view_from_c_string(TEST_TARGET);
+    request.frame_path = runtimec_string_view_from_c_string(TEST_FRAME_PATH);
+    request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
+    request.function_path = runtimec_string_view_from_c_string(TEST_TARGET);
     request.vthread_identifier =
         runtimec_string_view_from_c_string(TEST_VTHREAD);
     request.arguments = arguments;
     request.argument_count = 2U;
 
     /* 1. CALL 出口：写参写回、提交一个可恢复位置。 */
-    EXPECT(runtimec_route_execute(session, &request, &result, &error) ==
+    EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     EXPECT(result.status == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_CALL);
@@ -543,8 +541,9 @@ int main(void) {
     EXPECT(strcmp(test.checkpoint_vthread, TEST_VTHREAD) == 0);
 
     /* 2. DONE 出口：正常结束也必须提交，位置是刚完成的 RETURN。 */
-    request.target = runtimec_string_view_from_c_string(TEST_DONE_TARGET);
-    EXPECT(runtimec_route_execute(session, &request, &result, &error) ==
+    request.function_path = runtimec_string_view_from_c_string(TEST_DONE_TARGET);
+    request.source_logical_program_counter = TEST_DONE_COPY_SOURCE_COUNTER;
+    EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_DONE);
     EXPECT(result.execution_exit.logical_program_counter ==
@@ -554,29 +553,33 @@ int main(void) {
                   "/lib/route-done/[10,0]") == 0);
     EXPECT(strcmp(test.checkpoint_status, "done") == 0);
 
-    /* 3. 未命中：走真实编码，读能力失败 → route 失败封闭且不提交。 */
-    request.target = runtimec_string_view_from_c_string(TEST_MISSING_TARGET);
-    EXPECT(runtimec_route_execute(session, &request, &result, &error) !=
+    /* 3. 未命中：走真实编码，读能力失败 → 窗口失败封闭且不提交。 */
+    request.function_path =
+        runtimec_string_view_from_c_string(TEST_MISSING_TARGET);
+    EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) !=
            RUNTIMEC_STATUS_SUCCESS);
-    /* 诊断码 8 = ENCODE_FAILED：证明真的走进了编码分支。 */
-    EXPECT(result.execution_exit.detail_code == 8U);
+    /* 诊断码 5 = ENCODE_FAILED：证明真的走进了编码分支。 */
+    EXPECT(result.execution_exit.detail_code == 5U);
     EXPECT(test.checkpoint_count == 2U);
 
-    /* 4. 另外三种 kind：诊断码各自独立，不绑定、不提交。 */
-    request.target = runtimec_string_view_from_c_string(TEST_TARGET);
-    for (ordinal = 0U; ordinal < 3U; ++ordinal) {
-        request.kind = unsupported_kinds[ordinal];
-        EXPECT(runtimec_route_execute(session, &request, &result, &error) ==
-               RUNTIMEC_STATUS_UNSUPPORTED);
-        EXPECT(result.execution_exit.detail_code ==
-               unsupported_details[ordinal]);
-    }
+    /* 4. 起始 source pc 不属于这份 Program：失败封闭，不执行、不提交。 */
+    request.function_path = runtimec_string_view_from_c_string(TEST_TARGET);
+    request.source_logical_program_counter = 4242U;
+    EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
+           RUNTIMEC_STATUS_INVALID);
+    EXPECT(result.execution_exit.detail_code == 12U);
     EXPECT(test.checkpoint_count == 2U);
 
     /* 5. 空 vthread：checkpoint 没有落点。 */
-    request.kind = RUNTIMEC_ROUTE_FUNCTION;
+    request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
     request.vthread_identifier = runtimec_string_view_make(NULL, 0U);
-    EXPECT(runtimec_route_execute(session, &request, &result, &error) ==
+    EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
+           RUNTIMEC_STATUS_INVALID);
+
+    /* 6. 空 frame 路径：局部槽没有父路径。 */
+    request.vthread_identifier = runtimec_string_view_from_c_string(TEST_VTHREAD);
+    request.frame_path = runtimec_string_view_make(NULL, 0U);
+    EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
            RUNTIMEC_STATUS_INVALID);
 
     EXPECT(runtimec_session_destroy(session) == RUNTIMEC_STATUS_SUCCESS);

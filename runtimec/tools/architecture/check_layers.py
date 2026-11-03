@@ -73,13 +73,13 @@ INTERNAL_PREFIXES = {
     "vmbin", "engine", "interface",
 }
 POLICY_LAYERS = {"binrwir_compiler", "vmbin"}
-ROUTE_FILES = {"engine/route.c", "engine/route.h"}
+EXECUTION_WINDOW_FILES = {"engine/execution_window.c", "engine/execution_window.h"}
 # 所有权不等于分派权：session 是 owner graph 的根，必须持有 host services、vmkv encoder、
 # BinRWIR Compiler 与 compilation repository，所以它引入两个执行层是职责，不是绕过。
 # 真正该防的「谁在选择执行器」由 DISPATCH_OWNER_FILES 那条直接守。
-ENGINE_OWNER_FILES = ROUTE_FILES | {"engine/session.c", "engine/session.h"}
-DISPATCH_OWNER_FILES = ROUTE_FILES
-# 每个执行入口的「定义 + 声明」所在模块（不含后缀）；调用只允许 route。
+ENGINE_OWNER_FILES = EXECUTION_WINDOW_FILES | {"engine/session.c", "engine/session.h"}
+DISPATCH_OWNER_FILES = EXECUTION_WINDOW_FILES
+# 每个执行入口的「定义 + 声明」所在模块（不含后缀）；调用只允许执行窗口。
 EXECUTION_ENTRY_POINTS = {
     "vmbin_execute(": "vmbin/interpreter",
     "binrwir_jit_execute(": "binrwir_compiler/jit/executor",
@@ -145,6 +145,17 @@ REMOVED_VALUE_CACHE_PATTERN = re.compile(
     r"payload_low|payload_high)\b",
     re.IGNORECASE,
 )
+# 部署约束：runtimec 只以共享库形态被嵌入扩展 runtime（如 byteseek），
+# 产品源不得拥有进程入口与进程级 hook。
+PROCESS_ENTRY_PATTERN = re.compile(r"\bint\s+main\s*\(")
+PROCESS_GLOBAL_HOOK_PATTERN = re.compile(
+    r"\b(?:atexit|signal|sigaction|pthread_create)\s*\(")
+LIBRARY_DECLARATION_PATTERN = re.compile(
+    r"add_library\(\s*([A-Za-z0-9_]+)\s+(SHARED|STATIC|MODULE|OBJECT|INTERFACE)\b")
+EXPORTED_PRODUCT_PATTERN = re.compile(
+    r"(?:target_link_options|target_sources)\(\s*([A-Za-z0-9_]+)[^)]*exports"
+    r"|set_property\(\s*TARGET\s+([A-Za-z0-9_]+)[^)]*exports",
+    re.DOTALL)
 HARDCODED_XVALUE_BODY_OFFSET_PATTERN = re.compile(
     r"\b(?:xvalue|resolved)[A-Za-z0-9_]*address\b\s*\+\s*"
     r"(?:8U?\b|UINT64_C\s*\(\s*8\s*\))",
@@ -161,7 +172,7 @@ AUDIT_RULES = (
     "body-address-derivation-outside-contract",
     "component-order",
     "contract-body-address-derivation",
-    "execution-dispatch-outside-route",
+    "execution-dispatch-outside-window",
     "forbidden-layer-edge",
     "forbidden-tree-include",
     "hardcoded-body-address-derivation-outside-contract",
@@ -176,11 +187,14 @@ AUDIT_RULES = (
     "missing-zero-address-rejection",
     "optional-instruction-boundary",
     "optional-or-ambiguous-jit-boundary",
+    "process-entry-in-product-source",
+    "process-global-hook-in-product-source",
+    "product-library-not-shared",
     "read-error",
     "removed-binrwir-storage-model",
     "removed-static-address-resolver",
     "removed-value-cache-model",
-    "route-bypass",
+    "policy-merge-outside-owner",
     "target-dependencies",
     "unresolved-private-include",
     "xvalue-body-address-contract",
@@ -653,6 +667,27 @@ def audit_build_graph(
                 display, 1, "target-dependencies",
                 f"{target} expected {sorted(expected)!r}, found {sorted(actual)!r}",
             ))
+
+    # 判据锚在「谁导出公共符号」而不是库名：引用 exports 映射的那个 target 必须是
+    # SHARED。改名、改 OUTPUT_NAME 都不会让规则失效，只有真的变成静态库才会红。
+    library_kinds = {name: kind
+                     for name, kind in LIBRARY_DECLARATION_PATTERN.findall(text)}
+    exported_targets = {first or second
+                        for first, second in EXPORTED_PRODUCT_PATTERN.findall(text)}
+    if not exported_targets:
+        findings.append(Finding(
+            display, 1, "product-library-not-shared",
+            "no target references the exported symbol map; the product must be a "
+            "SHARED library exporting interface/exports.txt",
+        ))
+    for target in sorted(exported_targets):
+        kind = library_kinds.get(target)
+        if kind != "SHARED":
+            findings.append(Finding(
+                display, 1, "product-library-not-shared",
+                f"{target} exports public symbols but is declared "
+                f"{kind or 'with an unresolvable kind'}; it must be SHARED",
+            ))
     return findings
 
 
@@ -721,17 +756,31 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                     f"{source_layer} -> {target_layer} via {token!r}",
                 ))
 
+        for match in PROCESS_ENTRY_PATTERN.finditer(code):
+            findings.append(Finding(
+                display, code.count("\n", 0, match.start()) + 1,
+                "process-entry-in-product-source",
+                "runtimec is embedded as a shared library; tests own process entry",
+            ))
+        for match in PROCESS_GLOBAL_HOOK_PATTERN.finditer(code):
+            findings.append(Finding(
+                display, code.count("\n", 0, match.start()) + 1,
+                "process-global-hook-in-product-source",
+                f"{match.group(0).rstrip('(')} owns process-global state; the "
+                "embeddable library must not",
+            ))
+
         merged_policy_layers = included_layers & POLICY_LAYERS
         if (source_layer == "engine" and len(merged_policy_layers) > 1 and
                 relative.as_posix() not in ENGINE_OWNER_FILES):
             findings.append(Finding(
-                display, 1, "route-bypass",
-                "only the engine owner graph (route, session) may merge "
+                display, 1, "policy-merge-outside-owner",
+                "only the engine owner graph (execution window, session) may merge "
                 "binrwir_compiler and vmbin",
             ))
 
-        # 直接守分派，而不是拿 include 计数当代理：只有 route 能调用执行入口，
-        # 也只有 route 能在编译器之外引用执行目标类型。
+        # 直接守分派，而不是拿 include 计数当代理：只有执行窗口能调用执行入口，
+        # 也只有它能在编译器之外引用执行目标类型。
         if relative.as_posix() not in DISPATCH_OWNER_FILES:
             module = relative.as_posix().rsplit(".", 1)[0]
             for entry_point, owner_module in EXECUTION_ENTRY_POINTS.items():
@@ -740,8 +789,8 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                 findings.append(Finding(
                     display,
                     code.count("\n", 0, code.index(entry_point)) + 1,
-                    "execution-dispatch-outside-route",
-                    f"only engine/route may call {entry_point[:-1]}; "
+                    "execution-dispatch-outside-window",
+                    f"only engine/execution_window may call {entry_point[:-1]}; "
                     f"its definition lives in {owner_module}",
                 ))
             if (EXECUTION_TARGET_TYPE in code and
@@ -750,8 +799,8 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                 findings.append(Finding(
                     display,
                     code.count("\n", 0, code.index(EXECUTION_TARGET_TYPE)) + 1,
-                    "execution-dispatch-outside-route",
-                    f"only engine/route and the compiler may reference "
+                    "execution-dispatch-outside-window",
+                    f"only engine/execution_window and the compiler may reference "
                     f"{EXECUTION_TARGET_TYPE}",
                 ))
     return sorted(set(findings)), scanned
@@ -773,6 +822,8 @@ runtimec_add_component(runtimec_binrwir_compiler binrwir_compiler)
 runtimec_add_component(runtimec_vmbin vmbin)
 runtimec_add_component(runtimec_engine engine)
 add_library(runtimec_interface STATIC interface/public_interface.c)
+add_library(runtimec_product SHARED interface/public_interface.c)
+target_link_options(runtimec_product PRIVATE "LINKER:--version-script=exports.map")
 target_link_libraries(runtimec_contract PUBLIC)
 target_link_libraries(runtimec_host PUBLIC runtimec_contract)
 target_link_libraries(runtimec_binrwir PUBLIC runtimec_contract)
@@ -840,10 +891,10 @@ runtimec_xvalue_body_address(runtimec_xvalue_address_t xvalue_address) {
 }
 """
 
-SELFTEST_ROUTE = """\
+SELFTEST_EXECUTION_WINDOW = """\
 #include "binrwir_compiler/compiler.h"
 #include "vmbin/interpreter.h"
-static runtimec_status_t route_dispatch(void) {
+static runtimec_status_t window_dispatch(void) {
     binrwir_execution_target_t target = BINRWIR_EXECUTION_TARGET_VMBIN;
     if (target == BINRWIR_EXECUTION_TARGET_VMBIN) {
         return vmbin_execute(0, 0, 0, 0, 0, 0);
@@ -946,7 +997,7 @@ def selftest_base_tree() -> dict[str, str]:
         ),
         "vmbin/interpreter.c": SELFTEST_VMBIN_INTERPRETER,
         "vmbin/value_access.c": SELFTEST_VMBIN_VALUE_ACCESS,
-        "engine/route.c": SELFTEST_ROUTE,
+        "engine/execution_window.c": SELFTEST_EXECUTION_WINDOW,
         "engine/session.c": SELFTEST_SESSION,
         "tests/contracts_test.c": SELFTEST_CONTRACTS_TEST,
     }
@@ -985,6 +1036,33 @@ SELFTEST_CASES = (
                              "runtimec_contract runtimec_binrwir)\n",
                              "target_link_libraries(runtimec_vmbin PUBLIC "
                              "runtimec_contract)\n")),)),
+    SelftestCase("product-library-static", ("product-library-not-shared",),
+                 write=(("CMakeLists.txt",
+                         SELFTEST_CMAKE.replace(
+                             "add_library(runtimec_product SHARED",
+                             "add_library(runtimec_product STATIC")),)),
+    SelftestCase("product-library-export-map-missing",
+                 ("product-library-not-shared",),
+                 write=(("CMakeLists.txt",
+                         SELFTEST_CMAKE.replace(
+                             'target_link_options(runtimec_product PRIVATE '
+                             '"LINKER:--version-script=exports.map")\n', "")),)),
+    SelftestCase("process-entry-in-product-source",
+                 ("process-entry-in-product-source",),
+                 write=(("engine/session.c",
+                         SELFTEST_SESSION +
+                         "int main(void) { return 0; }\n"),)),
+    SelftestCase("process-global-hook-in-product-source",
+                 ("process-global-hook-in-product-source",),
+                 write=(("vmbin/value_access.c",
+                         SELFTEST_VMBIN_VALUE_ACCESS + "int probe(void) { return atexit(0); }\n"),)),
+    # 正例：进程入口与 hook 归 tests，产品源不受这条规则约束。
+    SelftestCase("process-control-in-tests-allowed",
+                 forbid=("process-entry-in-product-source",
+                         "process-global-hook-in-product-source"),
+                 write=(("tests/contracts_test.c",
+                         SELFTEST_CONTRACTS_TEST +
+                         "int main(void) { atexit(0); return 0; }\n"),)),
     SelftestCase("binrwir-file-missing", ("missing-addressed-binrwir-file",),
                  delete=("binrwir/argument.h",)),
     SelftestCase("binrwir-layout-wrong", ("addressed-binrwir-layout",),
@@ -1095,39 +1173,39 @@ SELFTEST_CASES = (
     SelftestCase("removed-value-cache-model", ("removed-value-cache-model",),
                  write=(("vmbin/value_access.c", "struct value_cache probe;\n"),)),
     SelftestCase("forbidden-tree-include", ("forbidden-tree-include",),
-                 write=(("engine/route.c",
-                         '#include "runtime/legacy.h"\n' + SELFTEST_ROUTE),)),
+                 write=(("engine/execution_window.c",
+                         '#include "runtime/legacy.h"\n' + SELFTEST_EXECUTION_WINDOW),)),
     SelftestCase("unresolved-private-include", ("unresolved-private-include",),
-                 write=(("engine/route.c",
-                         '#include "not_here/missing.h"\n' + SELFTEST_ROUTE),)),
+                 write=(("engine/execution_window.c",
+                         '#include "not_here/missing.h"\n' + SELFTEST_EXECUTION_WINDOW),)),
     SelftestCase("forbidden-layer-edge", ("forbidden-layer-edge",),
                  write=(("contract/status.h", "int status_layer;\n"),
                         ("contract/status.c",
                          '#include "host/host_services.h"\n' + "int status_layer;\n"))),
     SelftestCase("binrwir-owned-by-vmbin", ("binrwir-owned-by-vmbin",),
                  write=(("vmbin/value.c", "int binrwir_value_copy;\n"),)),
-    SelftestCase("route-bypass-non-owner", ("route-bypass",),
+    SelftestCase("policy-merge-non-owner", ("policy-merge-outside-owner",),
                  write=(("engine/compilation_repository.c",
                          '#include "binrwir_compiler/compiler.h"\n'
                          '#include "vmbin/interpreter.h"\n'),)),
     # 正例：owner 同时持有两个执行层 —— 不得报。
-    SelftestCase("route-bypass-owner-allowed", forbid=("route-bypass",),
+    SelftestCase("policy-merge-owner-allowed", forbid=("policy-merge-outside-owner",),
                  write=(("engine/session.c", SELFTEST_SESSION),)),
-    SelftestCase("dispatch-call-outside-route",
-                 ("execution-dispatch-outside-route",),
+    SelftestCase("dispatch-call-outside-window",
+                 ("execution-dispatch-outside-window",),
                  write=(("engine/session.c",
                          SELFTEST_SESSION +
                          "static runtimec_status_t probe(void) {\n"
                          "    return vmbin_execute(0, 0, 0, 0, 0, 0);\n"
                          "}\n"),)),
-    SelftestCase("dispatch-target-type-outside-route",
-                 ("execution-dispatch-outside-route",),
+    SelftestCase("dispatch-target-type-outside-window",
+                 ("execution-dispatch-outside-window",),
                  write=(("engine/session.c",
                          "static binrwir_execution_target_t probe;\n"),)),
-    # 正例：分派只在 route。
-    SelftestCase("dispatch-in-route-allowed",
-                 forbid=("execution-dispatch-outside-route",),
-                 write=(("engine/route.c", SELFTEST_ROUTE),)),
+    # 正例：分派只在执行窗口。
+    SelftestCase("dispatch-in-window-allowed",
+                 forbid=("execution-dispatch-outside-window",),
+                 write=(("engine/execution_window.c", SELFTEST_EXECUTION_WINDOW),)),
 )
 
 

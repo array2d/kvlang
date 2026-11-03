@@ -213,22 +213,22 @@ add_test(NAME runtimec.engine.repository
 set_tests_properties(runtimec.engine.repository PROPERTIES
     LABELS "runtimec;scaffold;engine;repository")
 
-add_executable(runtimec_route_test route_test.c)
-target_compile_features(runtimec_route_test PRIVATE c_std_11)
-target_include_directories(runtimec_route_test PRIVATE
+add_executable(runtimec_execution_window_test execution_window_test.c)
+target_compile_features(runtimec_execution_window_test PRIVATE c_std_11)
+target_include_directories(runtimec_execution_window_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/.."
     "${RUNTIMEC_INCLUDE_DIRECTORY}"
     "${KVLANG_INCLUDE_DIRECTORY}")
-target_link_libraries(runtimec_route_test PRIVATE
+target_link_libraries(runtimec_execution_window_test PRIVATE
     runtimec_contract runtimec_binrwir runtimec_vmkv
     runtimec_binrwir_compiler runtimec_vmbin runtimec_engine)
-runtimec_test_warnings(runtimec_route_test)
-add_test(NAME runtimec.engine.route COMMAND runtimec_route_test)
-# BinRWIR Compiler 仍是失败封闭桩时 session 建不起来，用例返回 77 跳过；
-# 编译落地后同一个用例自动转成真跑，不需要改测试。
-set_tests_properties(runtimec.engine.route PROPERTIES
+runtimec_test_warnings(runtimec_execution_window_test)
+add_test(NAME runtimec.engine.execution_window COMMAND runtimec_execution_window_test)
+# 用例自带 77 跳过分支：session 建不起来时宁可报跳过，也不伪装成通过。
+# 当前编译器已落地，正常运行不会走到该分支。
+set_tests_properties(runtimec.engine.execution_window PROPERTIES
     SKIP_RETURN_CODE 77
-    LABELS "runtimec;scaffold;engine;route")
+    LABELS "runtimec;scaffold;engine;execution_window")
 
 add_executable(runtimec_public_interface_bootstrap_test
     public_interface_bootstrap_test.c)

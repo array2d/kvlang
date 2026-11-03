@@ -21,6 +21,7 @@
 #include "contract/snapshot.h"
 #include "contract/status.h"
 #include "contract/view.h"
+#include "vmkv/local_types.h"
 #include "vmkv/rwir.h"
 #include "vmkv/source.h"
 
@@ -133,6 +134,7 @@ runtimec_status_t vmkv_encode_instruction(
     vmkv_encoder_t *encoder,
     const vmkv_encode_request_t *request,
     binrwir_program_builder_t *builder,
+    const vmkv_local_types_t *local_types,
     vmkv_encode_function_t *function,
     const vmkv_rwir_instruction_view_t *source_instruction,
     vmkv_canonical_instruction_t *output_instruction,

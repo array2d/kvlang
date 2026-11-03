@@ -98,7 +98,7 @@ static runtimec_status_t vmbin_call_resolve_actual(
     }
     if (actual->reference_kind == BINRWIR_REFERENCE_STATIC) {
         runtimec_string_view_t key_text;
-        runtimec_string_view_t langtype;
+        runtimec_string_view_t key_langtype;
 
         if (actual->payload == BINRWIR_BODY_ADDRESS_NONE) {
             return RUNTIMEC_STATUS_INVALID;
@@ -111,11 +111,10 @@ static runtimec_status_t vmbin_call_resolve_actual(
         /* 静态实参没有调用方绑定可借键，用符号池里的绝对路径当槽键（借用，
          * 生命周期跟着调用方 Program）。 */
         if (binrwir_program_get_symbol(caller->program, actual->slot,
-                                       &key_text) !=
+                                       &key_text, &key_langtype) !=
             RUNTIMEC_STATUS_SUCCESS) {
             return RUNTIMEC_STATUS_INVALID;
         }
-        (void)langtype;
         output_actual->slot_key =
             runtimec_key_view_make(key_text.data, key_text.size);
         output_actual->kind = VMBIN_CALL_ACTUAL_ADDRESS;

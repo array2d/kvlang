@@ -31,6 +31,7 @@
 #include "kvspace/xvalue_head.h"
 #include "vmkv/encoder.h"
 #include "vmkv/parameter_type.h"
+#include "vmkv/local_types.h"
 #include "vmkv/rwir.h"
 #include "vmkv/rwir_manifest.h"
 #include "vmkv/source.h"
@@ -423,11 +424,11 @@ static bool make_builder(const runtimec_host_services_t *host,
            RUNTIMEC_STATUS_SUCCESS;
 }
 
-/* 读第一条指令并按 canonical 形状编码。 */
-static runtimec_status_t encode_first_instruction(
+/* 读第 instruction_ordinal 条指令（0 起）并按 canonical 形状编码。 */
+static runtimec_status_t encode_instruction_at(
     vmkv_encoder_t *encoder, const vmkv_encode_request_t *request,
-    vmkv_encode_function_t function, test_canonical_t *output,
-    runtimec_error_t *error) {
+    uint32_t instruction_ordinal, vmkv_encode_function_t function,
+    test_canonical_t *output, runtimec_error_t *error) {
     memset(output, 0, sizeof(*output));
     /* 非形参引用的 argidx 从形参区间之后开始，与 vmkv_encode 同一规则。 */
     function.next_operand_argument_index = function.read_parameter_count +
@@ -445,24 +446,40 @@ static runtimec_status_t encode_first_instruction(
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
+    vmkv_local_types_t *local_types = NULL;
+    status = vmkv_local_types_collect(source, request->host_services->allocator,
+                                      &local_types, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        binrwir_program_builder_destroy(builder);
+        vmkv_source_close_function(source);
+        return status;
+    }
     vmkv_rwir_reader_t *reader = NULL;
     status = vmkv_rwir_reader_create(source, &reader, error);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         vmkv_rwir_read_result_t read_result = VMKV_RWIR_READ_RESULT_INVALID;
         vmkv_rwir_instruction_view_t instruction;
-        status = vmkv_rwir_reader_next(reader, &read_result, &instruction, error);
+        for (uint32_t ordinal = 0U;
+             ordinal <= instruction_ordinal &&
+             status == RUNTIMEC_STATUS_SUCCESS;
+             ++ordinal) {
+            status =
+                vmkv_rwir_reader_next(reader, &read_result, &instruction, error);
+        }
         if (status == RUNTIMEC_STATUS_SUCCESS) {
             EXPECT(read_result == VMKV_RWIR_READ_RESULT_INSTRUCTION);
             vmkv_canonical_instruction_t canonical;
             status = vmkv_encode_instruction(encoder, request, builder,
-                                             &function, &instruction,
-                                             &canonical, error);
+                                             local_types, &function,
+                                             &instruction, &canonical, error);
             if (status == RUNTIMEC_STATUS_SUCCESS) {
                 test_canonical_copy(output, &canonical);
             }
         }
         vmkv_rwir_reader_destroy(reader);
     }
+    vmkv_local_types_destroy(local_types,
+                             request->host_services->allocator);
     binrwir_program_builder_destroy(builder);
     vmkv_source_close_function(source);
     return status;
@@ -502,8 +519,8 @@ static void test_alias_resolution_and_type_convergence(void) {
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
                                        .write_parameter_count = 1U};
     test_canonical_t instruction;
-    const runtimec_status_t status = encode_first_instruction(
-        encoder, &request, function, &instruction, &error);
+    const runtimec_status_t status = encode_instruction_at(
+        encoder, &request, 0U, function, &instruction, &error);
     EXPECT(status == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(instruction.instruction.operation_identifier == 0x0002U);
     EXPECT(instruction.instruction.logical_program_counter == 1U);
@@ -549,10 +566,12 @@ static void test_plus_and_add_share_one_operation_identifier(void) {
     test_canonical_t plus_instruction;
     vmkv_encode_request_t add_request = make_request(&host, "/lib/enc");
     vmkv_encode_request_t plus_request = make_request(&host, "/lib/plus");
-    EXPECT(encode_first_instruction(encoder, &add_request, function,
+    EXPECT(encode_instruction_at(
+        encoder, &add_request, 0U, function,
                                     &add_instruction,
                                     &error) == RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(encode_first_instruction(encoder, &plus_request, function,
+    EXPECT(encode_instruction_at(
+        encoder, &plus_request, 0U, function,
                                     &plus_instruction,
                                     &error) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(add_instruction.instruction.operation_identifier ==
@@ -581,7 +600,8 @@ static void test_union_parameter_is_rejected(void) {
     vmkv_encode_function_t function = {.read_parameter_count = 1U,
                                        .write_parameter_count = 1U};
     test_canonical_t instruction;
-    EXPECT(encode_first_instruction(encoder, &request, function, &instruction,
+    EXPECT(encode_instruction_at(
+        encoder, &request, 0U, function, &instruction,
                                     &error) == RUNTIMEC_STATUS_UNSUPPORTED);
     EXPECT(error.code == 24);
     EXPECT(instruction.instruction.read_arguments.data == NULL);
@@ -616,7 +636,8 @@ static void test_concrete_operand_type_wins_over_declaration(void) {
     vmkv_encode_function_t function = {.read_parameter_count = 1U,
                                        .write_parameter_count = 1U};
     test_canonical_t instruction;
-    EXPECT(encode_first_instruction(encoder, &request, function, &instruction,
+    EXPECT(encode_instruction_at(
+        encoder, &request, 0U, function, &instruction,
                                     &error) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(view_equals(instruction.instruction.read_parameter_types[0], "int16"));
     /* SAME_FIRST：写参类型就是读参的具体类型。 */
@@ -701,7 +722,8 @@ static void test_pointer_parameter_is_unsupported(void) {
     vmkv_encode_function_t function = {.read_parameter_count = 1U,
                                        .write_parameter_count = 1U};
     test_canonical_t instruction;
-    EXPECT(encode_first_instruction(encoder, &request, function, &instruction,
+    EXPECT(encode_instruction_at(
+        encoder, &request, 0U, function, &instruction,
                                     &error) == RUNTIMEC_STATUS_UNSUPPORTED);
     EXPECT(error.code == 25);
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
@@ -730,7 +752,8 @@ static void test_mixed_signed_unsigned_is_rejected(void) {
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
                                        .write_parameter_count = 1U};
     test_canonical_t instruction;
-    EXPECT(encode_first_instruction(encoder, &request, function, &instruction,
+    EXPECT(encode_instruction_at(
+        encoder, &request, 0U, function, &instruction,
                                     &error) == RUNTIMEC_STATUS_ERROR);
     EXPECT(error.code == 27);
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
@@ -762,7 +785,8 @@ static void test_not_equal_specialization_selects_dedicated_row(void) {
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
                                        .write_parameter_count = 1U};
     test_canonical_t instruction;
-    EXPECT(encode_first_instruction(encoder, &request, function, &instruction,
+    EXPECT(encode_instruction_at(
+        encoder, &request, 0U, function, &instruction,
                                     &error) == RUNTIMEC_STATUS_SUCCESS);
     /* BOOLEAN_NOT_EQUAL = 0x002B；BOOLEAN 结果规则给出 bool。 */
     EXPECT(instruction.instruction.operation_identifier == 0x002BU);
@@ -793,7 +817,8 @@ static void test_inline_literal_uses_literal_reference(void) {
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
                                        .write_parameter_count = 1U};
     test_canonical_t instruction;
-    EXPECT(encode_first_instruction(encoder, &request, function, &instruction,
+    EXPECT(encode_instruction_at(
+        encoder, &request, 0U, function, &instruction,
                                     &error) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(instruction.arguments[1].reference_kind ==
            BINRWIR_REFERENCE_LITERAL);
@@ -829,7 +854,8 @@ static void test_static_path_derives_body_address(void) {
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
                                        .write_parameter_count = 1U};
     test_canonical_t instruction;
-    EXPECT(encode_first_instruction(encoder, &request, function, &instruction,
+    EXPECT(encode_instruction_at(
+        encoder, &request, 0U, function, &instruction,
                                     &error) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(instruction.arguments[1].reference_kind ==
            BINRWIR_REFERENCE_STATIC);
@@ -845,17 +871,20 @@ static void test_static_path_derives_body_address(void) {
     if (program != NULL) {
         EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
         runtimec_string_view_t symbol = runtimec_string_view_make(NULL, 0U);
-        EXPECT(binrwir_program_get_symbol(program,
-                                          instruction.arguments[1].slot,
-                                          &symbol) == RUNTIMEC_STATUS_SUCCESS);
+        runtimec_string_view_t symbol_type = runtimec_string_view_make(NULL, 0U);
+        EXPECT(binrwir_program_get_symbol(program, instruction.arguments[1].slot,
+                                          &symbol, &symbol_type) ==
+               RUNTIMEC_STATUS_SUCCESS);
         EXPECT(view_equals(symbol, "/v/x"));
+        /* STATIC 登记的是目标路径与目标值类型，不是局部槽。 */
+        EXPECT(view_equals(symbol_type, "int64"));
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
     store_free(&store);
 }
 
-/* 具名帧槽：裸标识符是帧局部变量名，登进 Program 符号池（LOCAL）。 */
+/* 具名帧槽：裸标识符是帧局部变量名，登进 Program 符号池（LOCAL）并带类型。 */
 static void test_named_frame_slot_becomes_local_symbol(void) {
     fake_store_t store;
     memset(&store, 0, sizeof(store));
@@ -863,10 +892,14 @@ static void test_named_frame_slot_becomes_local_symbol(void) {
     add_parameter(&store, "/lib/local", -1, "a", "int64");
     add_parameter(&store, "/lib/local", -2, "b", "int64");
     add_parameter(&store, "/lib/local", 1, "R", "int64");
-    add_opcode(&store, "/lib/local", 1, 2U, 1U, "add");
+    /* 第 1 条先给 temporary 定值，第 2 条才用它：局部必须有写位置。 */
+    add_opcode(&store, "/lib/local", 1, 1U, 1U, "=");
     add_reference(&store, "/lib/local", 1, -1, "*[0,-1]", "int64");
-    add_reference(&store, "/lib/local", 1, -2, "temporary", "int64");
-    add_reference(&store, "/lib/local", 1, 1, "*[0,1]", "int64");
+    add_reference(&store, "/lib/local", 1, 1, "temporary", "int64");
+    add_opcode(&store, "/lib/local", 2, 2U, 1U, "add");
+    add_reference(&store, "/lib/local", 2, -1, "temporary", "int64");
+    add_reference(&store, "/lib/local", 2, -2, "*[0,-2]", "int64");
+    add_reference(&store, "/lib/local", 2, 1, "*[0,1]", "int64");
     runtimec_host_services_t host = make_host_services(&store);
     vmkv_encode_request_t request = make_request(&host, "/lib/local");
     vmkv_encoder_t *encoder = NULL;
@@ -877,13 +910,14 @@ static void test_named_frame_slot_becomes_local_symbol(void) {
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
                                        .write_parameter_count = 1U};
     test_canonical_t instruction;
-    EXPECT(encode_first_instruction(encoder, &request, function, &instruction,
-                                    &error) == RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(instruction.arguments[1].reference_kind ==
+    EXPECT(encode_instruction_at(encoder, &request, 1U, function, &instruction,
+                                 &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(instruction.arguments[0].reference_kind ==
            BINRWIR_REFERENCE_LOCAL);
-    EXPECT(instruction.arguments[1].payload == 0U);
-    /* 裸名不消耗形参编号：它是非形参引用，argidx 从 nr+nw = 3 起。 */
-    EXPECT(instruction.arguments[1].argument_index == 3U);
+    EXPECT(instruction.arguments[0].payload == 0U);
+    /* 裸名不消耗形参编号：argidx 从 nr+nw = 3 起按出现次序递增
+     * （vmkv_encode 里该计数器跨整份 Program 递增）。 */
+    EXPECT(instruction.arguments[0].argument_index == 3U);
 
     binrwir_program_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
@@ -891,10 +925,13 @@ static void test_named_frame_slot_becomes_local_symbol(void) {
     if (program != NULL) {
         EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
         runtimec_string_view_t symbol = runtimec_string_view_make(NULL, 0U);
-        EXPECT(binrwir_program_get_symbol(program,
-                                          instruction.arguments[1].slot,
-                                          &symbol) == RUNTIMEC_STATUS_SUCCESS);
+        runtimec_string_view_t symbol_type = runtimec_string_view_make(NULL, 0U);
+        EXPECT(binrwir_program_get_symbol(program, instruction.arguments[0].slot,
+                                          &symbol, &symbol_type) ==
+               RUNTIMEC_STATUS_SUCCESS);
         EXPECT(view_equals(symbol, "temporary"));
+        /* 局部符号带类型：route 靠它决定槽的长度。 */
+        EXPECT(view_equals(symbol_type, "int64"));
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
@@ -947,7 +984,8 @@ static void test_unknown_operation_is_rejected(void) {
     vmkv_encode_function_t function = {.read_parameter_count = 1U,
                                        .write_parameter_count = 1U};
     test_canonical_t instruction;
-    EXPECT(encode_first_instruction(encoder, &request, function, &instruction,
+    EXPECT(encode_instruction_at(
+        encoder, &request, 0U, function, &instruction,
                                     &error) == RUNTIMEC_STATUS_ERROR);
     EXPECT(error.code == 22);
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
@@ -1034,10 +1072,14 @@ static void test_symbol_pool_normalization_remaps_every_reference(void) {
     add_parameter(&store, "/lib/two", -1, "a", "int64");
     add_parameter(&store, "/lib/two", -2, "b", "int64");
     add_parameter(&store, "/lib/two", 1, "R", "int64");
-    add_opcode(&store, "/lib/two", 1, 2U, 1U, "add");
-    add_reference(&store, "/lib/two", 1, -1, "a", "int64");
-    add_reference(&store, "/lib/two", 1, -2, "/v/x", "int64");
-    add_reference(&store, "/lib/two", 1, 1, "*[0,1]", "int64");
+    /* 第 1 条给局部 a 定值，第 2 条同时读 a 与绝对路径：局部与 STATIC 同现。 */
+    add_opcode(&store, "/lib/two", 1, 1U, 1U, "=");
+    add_reference(&store, "/lib/two", 1, -1, "*[0,-1]", "int64");
+    add_reference(&store, "/lib/two", 1, 1, "a", "int64");
+    add_opcode(&store, "/lib/two", 2, 2U, 1U, "add");
+    add_reference(&store, "/lib/two", 2, -1, "a", "int64");
+    add_reference(&store, "/lib/two", 2, -2, "/v/x", "int64");
+    add_reference(&store, "/lib/two", 2, 1, "*[0,1]", "int64");
     store_add(&store, "/v/x", (const uint8_t *)"\0\0\0\0\0\0\0\0", 8U,
               "int64");
     runtimec_host_services_t host = make_host_services(&store);
@@ -1053,7 +1095,7 @@ static void test_symbol_pool_normalization_remaps_every_reference(void) {
     if (program != NULL) {
         EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
         binrwir_instruction_view_t instruction;
-        EXPECT(binrwir_program_get_instruction(program, 0U, &instruction) ==
+        EXPECT(binrwir_program_get_instruction(program, 1U, &instruction) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(instruction.read_arguments.count == 2U);
         EXPECT(instruction.read_arguments.data[0].reference_kind ==
@@ -1062,12 +1104,14 @@ static void test_symbol_pool_normalization_remaps_every_reference(void) {
                BINRWIR_REFERENCE_STATIC);
         runtimec_string_view_t local_symbol = runtimec_string_view_make(NULL, 0U);
         runtimec_string_view_t static_symbol = runtimec_string_view_make(NULL, 0U);
+        runtimec_string_view_t local_type = runtimec_string_view_make(NULL, 0U);
+        runtimec_string_view_t static_type = runtimec_string_view_make(NULL, 0U);
         EXPECT(binrwir_program_get_symbol(
                    program, instruction.read_arguments.data[0].slot,
-                   &local_symbol) == RUNTIMEC_STATUS_SUCCESS);
+                   &local_symbol, &local_type) == RUNTIMEC_STATUS_SUCCESS);
         EXPECT(binrwir_program_get_symbol(
                    program, instruction.read_arguments.data[1].slot,
-                   &static_symbol) == RUNTIMEC_STATUS_SUCCESS);
+                   &static_symbol, &static_type) == RUNTIMEC_STATUS_SUCCESS);
         EXPECT(view_equals(local_symbol, "a"));
         EXPECT(view_equals(static_symbol, "/v/x"));
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
@@ -1094,8 +1138,8 @@ static void test_call_target_becomes_function_symbol(void) {
     vmkv_encode_function_t function = {.read_parameter_count = 1U,
                                        .write_parameter_count = 0U};
     test_canonical_t instruction;
-    EXPECT(encode_first_instruction(encoder, &request, function, &instruction,
-                                    &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(encode_instruction_at(encoder, &request, 0U, function, &instruction,
+                                 &error) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(instruction.arguments[0].reference_kind ==
            BINRWIR_REFERENCE_FUNCTION);
     EXPECT(instruction.arguments[0].payload == 0U);
@@ -1105,12 +1149,145 @@ static void test_call_target_becomes_function_symbol(void) {
     if (program != NULL) {
         EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
         runtimec_string_view_t symbol = runtimec_string_view_make(NULL, 0U);
+        runtimec_string_view_t symbol_type = runtimec_string_view_make(NULL, 0U);
         EXPECT(binrwir_program_get_symbol(program, instruction.arguments[0].slot,
-                                          &symbol) == RUNTIMEC_STATUS_SUCCESS);
+                                          &symbol, &symbol_type) ==
+               RUNTIMEC_STATUS_SUCCESS);
         EXPECT(symbol.size == strlen("other·function"));
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    store_free(&store);
+}
+
+/* 打开函数源并跑局部类型采集；成功后由调用方关闭源。 */
+static runtimec_status_t collect_local_types(
+    const vmkv_encode_request_t *request, runtimec_allocator_t allocator,
+    vmkv_local_types_t **output_local_types, vmkv_function_source_t **output_source,
+    runtimec_error_t *error) {
+    *output_local_types = NULL;
+    *output_source = NULL;
+    runtimec_snapshot_t snapshot;
+    runtimec_snapshot_reset(&snapshot);
+    runtimec_status_t status = vmkv_source_open_function(
+        request->host_services, request->function_path, output_source, &snapshot,
+        error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    status = vmkv_local_types_collect(*output_source, allocator,
+                                      output_local_types, error);
+    return status;
+}
+
+/* 同一局部在两条指令被写成同一类型：采集成功，类型唯一。 */
+static void test_local_types_collects_unique_write_type(void) {
+    fake_store_t store;
+    memset(&store, 0, sizeof(store));
+    add_function(&store, "/lib/uniq", 1U, 1U);
+    add_parameter(&store, "/lib/uniq", -1, "a", "int64");
+    add_parameter(&store, "/lib/uniq", 1, "R", "int64");
+    add_opcode(&store, "/lib/uniq", 1, 1U, 1U, "=");
+    add_reference(&store, "/lib/uniq", 1, -1, "*[0,-1]", "int64");
+    add_reference(&store, "/lib/uniq", 1, 1, "x", "int64");
+    add_opcode(&store, "/lib/uniq", 2, 1U, 1U, "=");
+    add_reference(&store, "/lib/uniq", 2, -1, "*[0,-1]", "int64");
+    add_reference(&store, "/lib/uniq", 2, 1, "x", "int64");
+    runtimec_host_services_t host = make_host_services(&store);
+    vmkv_encode_request_t request = make_request(&host, "/lib/uniq");
+    vmkv_local_types_t *local_types = NULL;
+    vmkv_function_source_t *source = NULL;
+    runtimec_error_t error;
+    runtimec_error_reset(&error);
+    EXPECT(collect_local_types(&request, host.allocator, &local_types, &source,
+                               &error) == RUNTIMEC_STATUS_SUCCESS);
+    runtimec_string_view_t langtype = runtimec_string_view_make(NULL, 0U);
+    EXPECT(vmkv_local_types_find(local_types,
+                                 runtimec_string_view_from_c_string("x"),
+                                 &langtype));
+    EXPECT(view_equals(langtype, "int64"));
+    EXPECT(!vmkv_local_types_find(local_types,
+                                  runtimec_string_view_from_c_string("nope"),
+                                  &langtype));
+    (void)vmkv_local_types_destroy(local_types, host.allocator);
+    vmkv_source_close_function(source);
+    store_free(&store);
+}
+
+/* 同一局部被写成两种类型：编译期失败，不选其一、不做提升。 */
+static void test_local_types_conflict_is_rejected(void) {
+    fake_store_t store;
+    memset(&store, 0, sizeof(store));
+    add_function(&store, "/lib/conflict", 1U, 1U);
+    add_parameter(&store, "/lib/conflict", -1, "a", "int64");
+    add_parameter(&store, "/lib/conflict", 1, "R", "int64");
+    add_opcode(&store, "/lib/conflict", 1, 1U, 1U, "=");
+    add_reference(&store, "/lib/conflict", 1, -1, "*[0,-1]", "int64");
+    add_reference(&store, "/lib/conflict", 1, 1, "x", "int64");
+    add_opcode(&store, "/lib/conflict", 2, 1U, 1U, "=");
+    add_reference(&store, "/lib/conflict", 2, -1, "*[0,-1]", "float64");
+    add_reference(&store, "/lib/conflict", 2, 1, "x", "float64");
+    runtimec_host_services_t host = make_host_services(&store);
+    vmkv_encode_request_t request = make_request(&host, "/lib/conflict");
+    vmkv_local_types_t *local_types = NULL;
+    vmkv_function_source_t *source = NULL;
+    runtimec_error_t error;
+    runtimec_error_reset(&error);
+    EXPECT(collect_local_types(&request, host.allocator, &local_types, &source,
+                               &error) == RUNTIMEC_STATUS_ERROR);
+    EXPECT(error.code == 41);
+    EXPECT(local_types == NULL);
+    vmkv_source_close_function(source);
+    store_free(&store);
+}
+
+/* 只读不写的局部：没有定值就没有槽大小，失败封闭。 */
+static void test_local_types_read_only_is_rejected(void) {
+    fake_store_t store;
+    memset(&store, 0, sizeof(store));
+    add_function(&store, "/lib/readonly", 2U, 1U);
+    add_parameter(&store, "/lib/readonly", -1, "a", "int64");
+    add_parameter(&store, "/lib/readonly", -2, "b", "int64");
+    add_parameter(&store, "/lib/readonly", 1, "R", "int64");
+    add_opcode(&store, "/lib/readonly", 1, 2U, 1U, "add");
+    add_reference(&store, "/lib/readonly", 1, -1, "x", "int64");
+    add_reference(&store, "/lib/readonly", 1, -2, "*[0,-2]", "int64");
+    add_reference(&store, "/lib/readonly", 1, 1, "*[0,1]", "int64");
+    runtimec_host_services_t host = make_host_services(&store);
+    vmkv_encode_request_t request = make_request(&host, "/lib/readonly");
+    vmkv_local_types_t *local_types = NULL;
+    vmkv_function_source_t *source = NULL;
+    runtimec_error_t error;
+    runtimec_error_reset(&error);
+    EXPECT(collect_local_types(&request, host.allocator, &local_types, &source,
+                               &error) == RUNTIMEC_STATUS_UNSUPPORTED);
+    EXPECT(error.code == 42);
+    EXPECT(local_types == NULL);
+    vmkv_source_close_function(source);
+    store_free(&store);
+}
+
+/* 写位置的类型不具体（并集）：推不出槽大小，失败封闭。 */
+static void test_local_types_non_concrete_write_is_rejected(void) {
+    fake_store_t store;
+    memset(&store, 0, sizeof(store));
+    add_function(&store, "/lib/ambiguous", 1U, 1U);
+    add_parameter(&store, "/lib/ambiguous", -1, "a", "int64");
+    add_parameter(&store, "/lib/ambiguous", 1, "R", "int64");
+    add_opcode(&store, "/lib/ambiguous", 1, 1U, 1U, "=");
+    add_reference(&store, "/lib/ambiguous", 1, -1, "*[0,-1]", "int64");
+    add_reference(&store, "/lib/ambiguous", 1, 1, "x", "int64|float64");
+    runtimec_host_services_t host = make_host_services(&store);
+    vmkv_encode_request_t request = make_request(&host, "/lib/ambiguous");
+    vmkv_local_types_t *local_types = NULL;
+    vmkv_function_source_t *source = NULL;
+    runtimec_error_t error;
+    runtimec_error_reset(&error);
+    EXPECT(collect_local_types(&request, host.allocator, &local_types, &source,
+                               &error) == RUNTIMEC_STATUS_UNSUPPORTED);
+    EXPECT(error.code == 43);
+    EXPECT(local_types == NULL);
+    vmkv_source_close_function(source);
     store_free(&store);
 }
 
@@ -1163,6 +1340,10 @@ int main(void) {
     test_stale_snapshot_is_rejected();
     test_symbol_pool_normalization_remaps_every_reference();
     test_call_target_becomes_function_symbol();
+    test_local_types_collects_unique_write_type();
+    test_local_types_conflict_is_rejected();
+    test_local_types_read_only_is_rejected();
+    test_local_types_non_concrete_write_is_rejected();
     test_parameter_type_classification();
     if (failures != 0) {
         fprintf(stderr, "%d failure(s)\n", failures);

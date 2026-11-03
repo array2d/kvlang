@@ -53,6 +53,15 @@ typedef struct binrwir_program_literal_record {
     runtimec_string_view_t langtype;
 } binrwir_program_literal_record_t;
 
+/*
+ * 符号池项：名字 + 语言类型。类型让调用入口在没有第二事实源的前提下知道槽该多大
+ * ——局部槽必须先以正确长度存在，而执行器只接受等长写入。
+ */
+typedef struct binrwir_program_symbol_record {
+    runtimec_string_view_t name;
+    runtimec_string_view_t langtype;
+} binrwir_program_symbol_record_t;
+
 struct binrwir_program {
     runtimec_allocator_t allocator;
     binrwir_program_identity_t identity;
@@ -61,7 +70,7 @@ struct binrwir_program {
     size_t argument_count;
     binrwir_program_parameter_arrays_t read_parameters;
     binrwir_program_parameter_arrays_t write_parameters;
-    runtimec_string_view_t *symbols;
+    binrwir_program_symbol_record_t *symbols;
     size_t symbol_count;
     binrwir_program_literal_record_t *literals;
     size_t literal_count;
@@ -83,7 +92,7 @@ struct binrwir_program_builder {
     size_t argument_capacity;
     binrwir_program_parameter_arrays_t read_parameters;
     binrwir_program_parameter_arrays_t write_parameters;
-    runtimec_string_view_t *symbols;
+    binrwir_program_symbol_record_t *symbols;
     size_t symbol_count;
     size_t symbol_capacity;
     binrwir_program_literal_record_t *literals;
@@ -205,7 +214,8 @@ static int binrwir_program_symbol_compare(runtimec_string_view_t left,
 
 /* 把符号池排成规范顺序：n 很小，插入排序让「稳定 + 总序」一眼可读。 */
 static void binrwir_program_symbol_order(
-    const runtimec_string_view_t *symbols, size_t count, size_t *output_order) {
+    const binrwir_program_symbol_record_t *symbols, size_t count,
+    size_t *output_order) {
     size_t ordinal;
 
     for (ordinal = 0U; ordinal < count; ++ordinal) {
@@ -214,8 +224,8 @@ static void binrwir_program_symbol_order(
         output_order[ordinal] = ordinal;
         while (candidate > 0U &&
                binrwir_program_symbol_compare(
-                   symbols[output_order[candidate - 1U]],
-                   symbols[output_order[candidate]]) > 0) {
+                   symbols[output_order[candidate - 1U]].name,
+                   symbols[output_order[candidate]].name) > 0) {
             size_t moved = output_order[candidate - 1U];
 
             output_order[candidate - 1U] = output_order[candidate];
@@ -237,7 +247,7 @@ static int binrwir_program_size_add(size_t *total, size_t size) {
 static int binrwir_program_text_size(
     const binrwir_program_parameter_arrays_t *read_parameters,
     const binrwir_program_parameter_arrays_t *write_parameters,
-    const runtimec_string_view_t *symbols, size_t symbol_count,
+    const binrwir_program_symbol_record_t *symbols, size_t symbol_count,
     const binrwir_program_literal_record_t *literals, size_t literal_count,
     size_t *output_size) {
     size_t ordinal;
@@ -255,7 +265,9 @@ static int binrwir_program_text_size(
         }
     }
     for (ordinal = 0U; ordinal < symbol_count; ++ordinal) {
-        if (!binrwir_program_size_add(output_size, symbols[ordinal].size)) {
+        if (!binrwir_program_size_add(output_size, symbols[ordinal].name.size) ||
+            !binrwir_program_size_add(output_size,
+                                      symbols[ordinal].langtype.size)) {
             return 0;
         }
     }
@@ -336,6 +348,16 @@ static int binrwir_program_argument_is_unbound(
     }
 }
 
+/* 局部符号必须带具体 langtype：调用入口靠它决定槽的长度，没有类型就建不出槽。 */
+static int binrwir_program_local_symbol_is_untyped(
+    const binrwir_program_t *program, const binrwir_argument_t *argument) {
+    if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL) {
+        return 0;
+    }
+    return (size_t)argument->slot >= program->symbol_count ||
+           program->symbols[argument->slot].langtype.size == 0U;
+}
+
 static int binrwir_program_span_is_invalid(
     const binrwir_program_t *program, const binrwir_argument_t *arguments,
     size_t count) {
@@ -345,7 +367,8 @@ static int binrwir_program_span_is_invalid(
         const binrwir_argument_t *argument = &arguments[argument_ordinal];
 
         if (binrwir_argument_validate(argument) != RUNTIMEC_STATUS_SUCCESS ||
-            binrwir_program_argument_is_unbound(program, argument)) {
+            binrwir_program_argument_is_unbound(program, argument) ||
+            binrwir_program_local_symbol_is_untyped(program, argument)) {
             return 1;
         }
     }
@@ -405,12 +428,20 @@ static int binrwir_program_pools_are_invalid(
         return 1;
     }
     for (ordinal = 0U; ordinal < program->symbol_count; ++ordinal) {
-        if (program->symbols[ordinal].size == 0U) {
+        const binrwir_program_symbol_record_t *symbol =
+            &program->symbols[ordinal];
+
+        /* 名字非空；类型要么为空（函数名、静态 key 没有值类型），要么是具体
+         * langtype。局部符号不允许为空——下面的 instructions 校验会强制这一条。 */
+        if (symbol->name.size == 0U ||
+            (symbol->langtype.size != 0U &&
+             binrwir_signature_validate_parameter_type(symbol->langtype) !=
+                 RUNTIMEC_STATUS_SUCCESS)) {
             return 1;
         }
         if (ordinal != 0U &&
-            binrwir_program_symbol_compare(program->symbols[ordinal - 1U],
-                                           program->symbols[ordinal]) >= 0) {
+            binrwir_program_symbol_compare(program->symbols[ordinal - 1U].name,
+                                           symbol->name) >= 0) {
             return 1;
         }
     }
@@ -584,15 +615,20 @@ runtimec_status_t binrwir_program_get_symbol_count(
 
 runtimec_status_t binrwir_program_get_symbol(
     const binrwir_program_t *program, uint16_t symbol_index,
-    runtimec_string_view_t *output_name) {
+    runtimec_string_view_t *output_name,
+    runtimec_string_view_t *output_langtype) {
     if (output_name != NULL) {
         *output_name = runtimec_string_view_make(NULL, 0U);
     }
-    if (program == NULL || output_name == NULL ||
+    if (output_langtype != NULL) {
+        *output_langtype = runtimec_string_view_make(NULL, 0U);
+    }
+    if (program == NULL || output_name == NULL || output_langtype == NULL ||
         (size_t)symbol_index >= program->symbol_count) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    *output_name = program->symbols[symbol_index];
+    *output_name = program->symbols[symbol_index].name;
+    *output_langtype = program->symbols[symbol_index].langtype;
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
@@ -662,8 +698,8 @@ static void binrwir_program_release(binrwir_program_t *program) {
                                   _Alignof(runtimec_string_view_t));
     binrwir_program_release_array(allocator, program->symbols,
                                   program->symbol_count,
-                                  sizeof(runtimec_string_view_t),
-                                  _Alignof(runtimec_string_view_t));
+                                  sizeof(binrwir_program_symbol_record_t),
+                                  _Alignof(binrwir_program_symbol_record_t));
     binrwir_program_release_array(allocator, program->literals,
                                   program->literal_count,
                                   sizeof(binrwir_program_literal_record_t),
@@ -772,9 +808,11 @@ static runtimec_status_t binrwir_program_allocate_storage(
           program->write_parameters.types == NULL))) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
-    program->symbols = (runtimec_string_view_t *)binrwir_program_allocate_exact(
-        allocator, program->symbol_count, sizeof(runtimec_string_view_t),
-        _Alignof(runtimec_string_view_t));
+    program->symbols = (binrwir_program_symbol_record_t *)
+        binrwir_program_allocate_exact(allocator, program->symbol_count,
+                                       sizeof(binrwir_program_symbol_record_t),
+                                       _Alignof(
+                                           binrwir_program_symbol_record_t));
     if (program->symbol_count != 0U && program->symbols == NULL) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
@@ -830,8 +868,10 @@ static void binrwir_program_copy_pools(binrwir_program_t *program,
     for (ordinal = 0U; ordinal < builder->symbol_count; ++ordinal) {
         size_t source_index = symbol_order[ordinal];
 
-        program->symbols[ordinal] = binrwir_program_copy_text(
-            program, builder->symbols[source_index], &text_offset);
+        program->symbols[ordinal].name = binrwir_program_copy_text(
+            program, builder->symbols[source_index].name, &text_offset);
+        program->symbols[ordinal].langtype = binrwir_program_copy_text(
+            program, builder->symbols[source_index].langtype, &text_offset);
         symbol_remap[source_index] = ordinal;
     }
     for (ordinal = 0U; ordinal < builder->literal_count; ++ordinal) {
@@ -997,12 +1037,12 @@ static int binrwir_program_builder_reserve_symbols(
     }
     grown = binrwir_program_regrow(
         &builder->allocator, builder->symbols, builder->symbol_capacity,
-        grown_capacity, sizeof(runtimec_string_view_t),
-        _Alignof(runtimec_string_view_t));
+        grown_capacity, sizeof(binrwir_program_symbol_record_t),
+        _Alignof(binrwir_program_symbol_record_t));
     if (grown == NULL) {
         return 0;
     }
-    builder->symbols = (runtimec_string_view_t *)grown;
+    builder->symbols = (binrwir_program_symbol_record_t *)grown;
     builder->symbol_capacity = grown_capacity;
     return 1;
 }
@@ -1116,8 +1156,8 @@ runtimec_status_t binrwir_program_builder_destroy(
         _Alignof(runtimec_string_view_t));
     binrwir_program_release_array(&allocator, builder->symbols,
                                   builder->symbol_capacity,
-                                  sizeof(runtimec_string_view_t),
-                                  _Alignof(runtimec_string_view_t));
+                                  sizeof(binrwir_program_symbol_record_t),
+                                  _Alignof(binrwir_program_symbol_record_t));
     binrwir_program_release_array(&allocator, builder->literals,
                                   builder->literal_capacity,
                                   sizeof(binrwir_program_literal_record_t),
@@ -1197,23 +1237,34 @@ runtimec_status_t binrwir_program_builder_add_alias_rule(
 
 runtimec_status_t binrwir_program_builder_add_symbol(
     binrwir_program_builder_t *builder, runtimec_string_view_t name,
-    uint16_t *output_symbol_index) {
+    runtimec_string_view_t langtype, uint16_t *output_symbol_index) {
     size_t ordinal;
 
     if (output_symbol_index != NULL) {
         *output_symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
     }
     if (!binrwir_program_builder_is_writable(builder) ||
-        output_symbol_index == NULL || name.size == 0U || name.data == NULL) {
+        output_symbol_index == NULL || name.size == 0U || name.data == NULL ||
+        !runtimec_string_view_is_valid(langtype) ||
+        (langtype.size != 0U &&
+         binrwir_signature_validate_parameter_type(langtype) !=
+             RUNTIMEC_STATUS_SUCCESS)) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    /* 同名重复登记是幂等的：一个名字对应一个符号，这也挡住池内重名。 */
     for (ordinal = 0U; ordinal < builder->symbol_count; ++ordinal) {
-        if (builder->symbols[ordinal].size == name.size &&
-            memcmp(builder->symbols[ordinal].data, name.data, name.size) == 0) {
-            *output_symbol_index = (uint16_t)ordinal;
-            return RUNTIMEC_STATUS_SUCCESS;
+        if (builder->symbols[ordinal].name.size != name.size ||
+            memcmp(builder->symbols[ordinal].name.data, name.data, name.size) !=
+                0) {
+            continue;
         }
+        /* 同名同类型 = 幂等；同名不同类型 = 冲突，不选其一。 */
+        if (builder->symbols[ordinal].langtype.size != langtype.size ||
+            memcmp(builder->symbols[ordinal].langtype.data, langtype.data,
+                   langtype.size) != 0) {
+            return RUNTIMEC_STATUS_INVALID;
+        }
+        *output_symbol_index = (uint16_t)ordinal;
+        return RUNTIMEC_STATUS_SUCCESS;
     }
     if (builder->symbol_count >= (size_t)UINT16_MAX) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
@@ -1222,7 +1273,8 @@ runtimec_status_t binrwir_program_builder_add_symbol(
                                                  builder->symbol_count + 1U)) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
-    builder->symbols[builder->symbol_count] = name;
+    builder->symbols[builder->symbol_count].name = name;
+    builder->symbols[builder->symbol_count].langtype = langtype;
     *output_symbol_index = (uint16_t)builder->symbol_count;
     builder->symbol_count += 1U;
     return RUNTIMEC_STATUS_SUCCESS;

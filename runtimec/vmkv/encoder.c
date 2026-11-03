@@ -13,6 +13,7 @@
 #include "contract/error.h"
 #include "contract/host_services.h"
 #include "contract/view.h"
+#include "vmkv/local_types.h"
 #include "vmkv/parameter_type.h"
 #include "vmkv/rwir_manifest.h"
 #include "vmkv/vmkv_internal.h"
@@ -33,7 +34,8 @@ enum {
     VMKV_ENCODER_DIAG_ADDRESS_DERIVATION = 31,
     VMKV_ENCODER_DIAG_OUT_OF_MEMORY = 32,
     VMKV_ENCODER_DIAG_STALE_SNAPSHOT = 33,
-    VMKV_ENCODER_DIAG_PROGRAM_REJECTED = 34
+    VMKV_ENCODER_DIAG_PROGRAM_REJECTED = 34,
+    VMKV_ENCODER_DIAG_LOCAL_TYPE_UNKNOWN = 36
 };
 
 #define VMKV_ENCODER_CANONICAL_ENCODING_REVISION 1U
@@ -476,10 +478,10 @@ runtimec_status_t vmkv_encoder_get_canonical_encoding_revision(
 /* 登记一个符号；失败时带上当前逻辑程序计数器。 */
 static runtimec_status_t vmkv_encoder_register_symbol(
     binrwir_program_builder_t *builder, runtimec_string_view_t name,
-    uint16_t *output_symbol_index, runtimec_string_view_t logical_program_counter,
-    runtimec_error_t *error) {
+    runtimec_string_view_t langtype, uint16_t *output_symbol_index,
+    runtimec_string_view_t logical_program_counter, runtimec_error_t *error) {
     const runtimec_status_t status = binrwir_program_builder_add_symbol(
-        builder, name, output_symbol_index);
+        builder, name, langtype, output_symbol_index);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -548,7 +550,8 @@ runtimec_status_t vmkv_encode_static_argument(
     status = vmkv_encoder_register_symbol(
         builder, runtimec_string_view_make(source_argument->key.data,
                                           source_argument->key.size),
-        &symbol_index, runtimec_string_view_make(NULL, 0U), error);
+        source_argument->parameter_type_name, &symbol_index,
+        runtimec_string_view_make(NULL, 0U), error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -583,7 +586,7 @@ static runtimec_status_t vmkv_encoder_take_operand_argument_index(
  */
 static runtimec_status_t vmkv_encoder_map_argument(
     const vmkv_encode_request_t *request, binrwir_program_builder_t *builder,
-    vmkv_encode_function_t *function,
+    const vmkv_local_types_t *local_types, vmkv_encode_function_t *function,
     const vmkv_rwir_argument_view_t *source_argument, bool function_target,
     binrwir_argument_t *output, runtimec_string_view_t logical_program_counter,
     runtimec_error_t *error) {
@@ -644,11 +647,26 @@ static runtimec_status_t vmkv_encoder_map_argument(
             logical_program_counter);
     }
     /* 名字：调用目标是函数名，其余是帧局部变量名。两者都只登名字进符号池。 */
+    const runtimec_string_view_t name = runtimec_string_view_make(
+        source_argument->key.data, source_argument->key.size);
+    runtimec_string_view_t symbol_type =
+        source_argument->parameter_type_name;
+    if (!function_target) {
+        /* 局部槽的大小由 route 按这里登记的类型创建，所以类型必须来自
+         * 「该名字在写位置被赋予的那一个类型」，不是本条指令的用法。 */
+        if (local_types == NULL ||
+            !vmkv_local_types_find(local_types, name, &symbol_type)) {
+            return vmkv_encoder_fail(
+                error, RUNTIMEC_STATUS_INVALID,
+                VMKV_ENCODER_DIAG_LOCAL_TYPE_UNKNOWN,
+                "vmkv encoder: local symbol has no unique write type",
+                logical_program_counter);
+        }
+    }
     uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
-    status = vmkv_encoder_register_symbol(
-        builder, runtimec_string_view_make(source_argument->key.data,
-                                          source_argument->key.size),
-        &symbol_index, logical_program_counter, error);
+    status = vmkv_encoder_register_symbol(builder, name, symbol_type,
+                                          &symbol_index,
+                                          logical_program_counter, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -813,7 +831,8 @@ static runtimec_status_t vmkv_encoder_resolve_write_types(
 
 runtimec_status_t vmkv_encode_instruction(
     vmkv_encoder_t *encoder, const vmkv_encode_request_t *request,
-    binrwir_program_builder_t *builder, vmkv_encode_function_t *function,
+    binrwir_program_builder_t *builder,
+    const vmkv_local_types_t *local_types, vmkv_encode_function_t *function,
     const vmkv_rwir_instruction_view_t *source_instruction,
     vmkv_canonical_instruction_t *output_instruction,
     runtimec_error_t *error) {
@@ -868,7 +887,7 @@ runtimec_status_t vmkv_encode_instruction(
     const size_t write_count = source_instruction->write_argument_count;
     const size_t total = read_count + write_count;
     const bool function_target =
-        capability == vmkv_rwir_manifest_capability(RUNTIMEC_RWIR_CALL);
+        vmkv_rwir_manifest_is_call(source_instruction->operation_name);
     runtimec_status_t status = vmkv_encoder_reserve(
         encoder, total == 0U ? 1U : total, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -952,7 +971,7 @@ runtimec_status_t vmkv_encode_instruction(
 
     for (size_t ordinal = 0U; ordinal < read_count; ++ordinal) {
         status = vmkv_encoder_map_argument(
-            request, builder, function,
+            request, builder, local_types, function,
             &source_instruction->read_arguments[ordinal],
             function_target && ordinal == 0U, &encoder->arguments[ordinal],
             logical_program_counter, error);
@@ -964,7 +983,7 @@ runtimec_status_t vmkv_encode_instruction(
     }
     for (size_t ordinal = 0U; ordinal < write_count; ++ordinal) {
         status = vmkv_encoder_map_argument(
-            request, builder, function,
+            request, builder, local_types, function,
             &source_instruction->write_arguments[ordinal], false,
             &encoder->arguments[read_count + ordinal],
             logical_program_counter, error);
@@ -1197,6 +1216,12 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
     }
     encoder->alias_rule_count = 0U;
     status = vmkv_encoder_register_parameters(builder, function, error);
+    /* 局部槽的类型必须在编码任何指令之前定下来：route 按它建槽，vmbin 没有类型。 */
+    vmkv_local_types_t *local_types = NULL;
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = vmkv_local_types_collect(function, encoder->allocator,
+                                          &local_types, error);
+    }
     vmkv_rwir_reader_t *reader = NULL;
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         status = vmkv_rwir_reader_create(function, &reader, error);
@@ -1210,7 +1235,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
             break;
         }
         vmkv_canonical_instruction_t canonical;
-        status = vmkv_encode_instruction(encoder, request, builder,
+        status = vmkv_encode_instruction(encoder, request, builder, local_types,
                                          &function_shape, &instruction,
                                          &canonical, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -1239,6 +1264,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
     if (reader != NULL) {
         vmkv_rwir_reader_destroy(reader);
     }
+    (void)vmkv_local_types_destroy(local_types, encoder->allocator);
     for (size_t ordinal = 0U;
          status == RUNTIMEC_STATUS_SUCCESS &&
          ordinal < encoder->alias_rule_count;

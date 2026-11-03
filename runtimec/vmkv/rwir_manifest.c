@@ -83,6 +83,11 @@ const vmkv_rwir_capability_t *vmkv_rwir_manifest_capability(
     return &vmkv_rwir_capabilities[identifier];
 }
 
+bool vmkv_rwir_manifest_is_call(runtimec_string_view_t operation_name) {
+    return vmkv_rwir_manifest_find_operation(operation_name) ==
+           &vmkv_rwir_capabilities[RUNTIMEC_RWIR_CALL];
+}
+
 const vmkv_rwir_capability_t *vmkv_rwir_manifest_find_operation(
     runtimec_string_view_t surface_name) {
     if (!runtimec_string_view_is_valid(surface_name) ||
