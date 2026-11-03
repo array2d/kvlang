@@ -570,6 +570,18 @@ runtimec_status_t binrwir_program_find_instruction(
     return RUNTIMEC_STATUS_INVALID;
 }
 
+runtimec_status_t binrwir_program_get_symbol_count(
+    const binrwir_program_t *program, size_t *output_symbol_count) {
+    if (output_symbol_count != NULL) {
+        *output_symbol_count = 0U;
+    }
+    if (program == NULL || output_symbol_count == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    *output_symbol_count = program->symbol_count;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 runtimec_status_t binrwir_program_get_symbol(
     const binrwir_program_t *program, uint16_t symbol_index,
     runtimec_string_view_t *output_name) {

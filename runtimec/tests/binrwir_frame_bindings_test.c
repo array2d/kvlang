@@ -70,8 +70,9 @@ static void test_create_and_teardown(void) {
 
     {
         const binrwir_frame_binding_t *binding = NULL;
-        RUNTIMEC_EXPECT(binrwir_frame_bindings_get(storage, 0U, &binding) ==
-                        RUNTIMEC_STATUS_INVALID);
+        /* 槽在容量内但没绑定：UNSUPPORTED；越界才是 INVALID（见下面的用例）。 */
+        RUNTIMEC_EXPECT(binrwir_frame_bindings_get(storage, 0U, 1U, &binding) ==
+                        RUNTIMEC_STATUS_UNSUPPORTED);
         RUNTIMEC_EXPECT(binding == NULL);
     }
 
@@ -81,39 +82,34 @@ static void test_create_and_teardown(void) {
                     RUNTIMEC_STATUS_INVALID);
 }
 
-static void test_bind_and_resolve(void) {
+static void test_bind_and_get(void) {
     runtimec_allocator_t allocator = test_allocator();
     binrwir_frame_bindings_t *bindings = NULL;
-    runtimec_xvalue_address_t address = RUNTIMEC_XVALUE_ADDRESS_NONE;
-    uint64_t generation = 0U;
+    const binrwir_frame_binding_t *binding = NULL;
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_create(&allocator, 4U, &bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
-    /* 未绑定槽：解析必须失败，输出保持 NONE。 */
-    RUNTIMEC_EXPECT(binrwir_frame_bindings_resolve(bindings, 0U, 5U, &address,
-                                                   &generation) ==
+    /* 未绑定槽：取绑定必须失败，输出保持空。 */
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 0U, 5U, &binding) ==
                     RUNTIMEC_STATUS_UNSUPPORTED);
-    RUNTIMEC_EXPECT(address == RUNTIMEC_XVALUE_ADDRESS_NONE);
-    RUNTIMEC_EXPECT(generation == BINRWIR_FRAME_BINDING_GENERATION_NONE);
+    RUNTIMEC_EXPECT(binding == NULL);
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_bind(
                         bindings, 1U,
                         slot_key_of("/vthread/7/[1]/[0,-1]", 21U),
                         slot_key_of("/caller/a", 9U),
                         UINT64_C(0x1000), 5U) == RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_frame_bindings_resolve(bindings, 1U, 5U, &address,
-                                                   &generation) ==
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 1U, 5U, &binding) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(address == UINT64_C(0x1000));
-    RUNTIMEC_EXPECT(generation == 5U);
+    RUNTIMEC_EXPECT(binding->xvalue_address == UINT64_C(0x1000));
+    RUNTIMEC_EXPECT(binding->generation == 5U);
+    RUNTIMEC_EXPECT(binding->kind == (uint8_t)BINRWIR_BINDING_ADDRESS);
 
-    /* generation 不匹配：拒绝，且不返回旧地址。 */
-    RUNTIMEC_EXPECT(binrwir_frame_bindings_resolve(bindings, 1U, 6U, &address,
-                                                   &generation) ==
+    /* generation 不匹配：拒绝，且不交出旧绑定。 */
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 1U, 6U, &binding) ==
                     RUNTIMEC_STATUS_UNSUPPORTED);
-    RUNTIMEC_EXPECT(address == RUNTIMEC_XVALUE_ADDRESS_NONE);
-    RUNTIMEC_EXPECT(generation == BINRWIR_FRAME_BINDING_GENERATION_NONE);
+    RUNTIMEC_EXPECT(binding == NULL);
 
     /* 同一槽重新绑定覆盖旧值。 */
     RUNTIMEC_EXPECT(binrwir_frame_bindings_bind(
@@ -121,11 +117,10 @@ static void test_bind_and_resolve(void) {
                         slot_key_of("/vthread/42/[3]/[0,-1]", 22U),
                         slot_key_of("/caller/b", 9U),
                         UINT64_C(0x2000), 6U) == RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_frame_bindings_resolve(bindings, 1U, 6U, &address,
-                                                   &generation) ==
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 1U, 6U, &binding) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(address == UINT64_C(0x2000));
-    RUNTIMEC_EXPECT(generation == 6U);
+    RUNTIMEC_EXPECT(binding->xvalue_address == UINT64_C(0x2000));
+    RUNTIMEC_EXPECT(binding->generation == 6U);
 
     /* 两个不同槽可以绑定到同一个基址：别名由签名策略裁定，绑定表如实记录。 */
     RUNTIMEC_EXPECT(binrwir_frame_bindings_bind(
@@ -133,10 +128,9 @@ static void test_bind_and_resolve(void) {
                         slot_key_of("/vthread/42/[3]/[0,+1]", 22U),
                         slot_key_of("/caller/b", 9U),
                         UINT64_C(0x2000), 6U) == RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_frame_bindings_resolve(bindings, 2U, 6U, &address,
-                                                   NULL) ==
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 2U, 6U, &binding) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(address == UINT64_C(0x2000));
+    RUNTIMEC_EXPECT(binding->xvalue_address == UINT64_C(0x2000));
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
@@ -196,8 +190,6 @@ static void test_invalidate_and_rebind(void) {
     runtimec_allocator_t allocator = test_allocator();
     binrwir_frame_bindings_t *bindings = NULL;
     const binrwir_frame_binding_t *binding = NULL;
-    runtimec_xvalue_address_t address = UINT64_C(0xffff);
-    uint64_t generation = 1U;
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_create(&allocator, 2U, &bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
@@ -206,7 +198,7 @@ static void test_invalidate_and_rebind(void) {
                         slot_key_of("/vthread/7/[1]/[0,-1]", 21U),
                         slot_key_of("/caller/a", 9U),
                         UINT64_C(0x1000), 3U) == RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 0U, &binding) ==
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 0U, 3U, &binding) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binding->valid);
     RUNTIMEC_EXPECT(binding->xvalue_address == UINT64_C(0x1000));
@@ -216,13 +208,12 @@ static void test_invalidate_and_rebind(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_invalidate(bindings, 0U) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    /* 失效后：不得返回旧地址。 */
-    RUNTIMEC_EXPECT(binrwir_frame_bindings_resolve(bindings, 0U, 3U, &address,
-                                                   &generation) ==
+    /* 失效后：不得交出旧绑定。 */
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 0U, 3U, &binding) ==
                     RUNTIMEC_STATUS_UNSUPPORTED);
-    RUNTIMEC_EXPECT(address == RUNTIMEC_XVALUE_ADDRESS_NONE);
-    RUNTIMEC_EXPECT(generation == BINRWIR_FRAME_BINDING_GENERATION_NONE);
-    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 0U, &binding) ==
+    RUNTIMEC_EXPECT(binding == NULL);
+    /* 槽号越界是另一个错误类别。 */
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 2U, 3U, &binding) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(binding == NULL);
 
@@ -232,11 +223,10 @@ static void test_invalidate_and_rebind(void) {
                         slot_key_of("/vthread/7/[1]/[0,-1]", 21U),
                         slot_key_of("/caller/a", 9U),
                         UINT64_C(0x3000), 4U) == RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_frame_bindings_resolve(bindings, 0U, 4U, &address,
-                                                   &generation) ==
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 0U, 4U, &binding) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(address == UINT64_C(0x3000));
-    RUNTIMEC_EXPECT(generation == 4U);
+    RUNTIMEC_EXPECT(binding->xvalue_address == UINT64_C(0x3000));
+    RUNTIMEC_EXPECT(binding->generation == 4U);
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_invalidate(bindings, 2U) ==
                     RUNTIMEC_STATUS_INVALID);
@@ -247,8 +237,7 @@ static void test_invalidate_and_rebind(void) {
     RUNTIMEC_EXPECT(binrwir_frame_bindings_reset(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binrwir_frame_bindings_get_capacity(bindings) == 2U);
-    RUNTIMEC_EXPECT(binrwir_frame_bindings_resolve(bindings, 0U, 4U, &address,
-                                                   &generation) ==
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 0U, 4U, &binding) ==
                     RUNTIMEC_STATUS_UNSUPPORTED);
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
@@ -293,7 +282,7 @@ static void test_execution_frame_holds_bindings(void) {
 
 int main(void) {
     test_create_and_teardown();
-    test_bind_and_resolve();
+    test_bind_and_get();
     test_bind_rejects_invalid_content();
     test_invalidate_and_rebind();
     test_execution_frame_holds_bindings();

@@ -17,6 +17,7 @@ struct binrwir_frame_bindings {
 
 static void binrwir_frame_binding_clear(binrwir_frame_binding_t *binding) {
     memset(binding, 0, sizeof(*binding));
+    binding->kind = (uint8_t)BINRWIR_BINDING_INVALID;
     binding->valid = false;
 }
 
@@ -122,41 +123,35 @@ runtimec_status_t binrwir_frame_bindings_bind(
     binding->slot_key = slot_key;
     binding->caller_key = caller_key;
     binding->xvalue_address = xvalue_address;
+    binding->bytes = NULL;
+    binding->length = 0U;
     binding->generation = generation;
+    binding->kind = (uint8_t)BINRWIR_BINDING_ADDRESS;
     binding->valid = true;
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_frame_bindings_resolve(
-    const binrwir_frame_bindings_t *bindings, uint16_t slot,
-    uint64_t expected_generation,
-    runtimec_xvalue_address_t *output_xvalue_address,
-    uint64_t *output_generation) {
-    const binrwir_frame_binding_t *binding;
+runtimec_status_t binrwir_frame_bindings_bind_inline(
+    binrwir_frame_bindings_t *bindings, uint16_t slot,
+    runtimec_key_view_t slot_key, runtimec_bytes_view_t bytes,
+    uint64_t generation) {
+    binrwir_frame_binding_t *binding;
 
-    if (output_xvalue_address != NULL) {
-        *output_xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
-    }
-    if (output_generation != NULL) {
-        *output_generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
-    }
     if (!binrwir_frame_bindings_is_valid(bindings) ||
-        slot >= bindings->capacity || output_xvalue_address == NULL ||
-        expected_generation == BINRWIR_FRAME_BINDING_GENERATION_NONE) {
+        slot >= bindings->capacity || !runtimec_key_view_is_valid(slot_key) ||
+        !runtimec_bytes_view_is_valid(bytes) ||
+        generation == BINRWIR_FRAME_BINDING_GENERATION_NONE) {
         return RUNTIMEC_STATUS_INVALID;
     }
     binding = &bindings->entries[slot];
-    if (!binding->valid || binding->generation != expected_generation) {
-        /* 失效或 generation 不匹配：绝不返回旧地址。 */
-        return RUNTIMEC_STATUS_UNSUPPORTED;
-    }
-    if (binding->xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE) {
-        return RUNTIMEC_STATUS_UNSUPPORTED;
-    }
-    *output_xvalue_address = binding->xvalue_address;
-    if (output_generation != NULL) {
-        *output_generation = binding->generation;
-    }
+    binding->slot_key = slot_key;
+    binding->caller_key = runtimec_key_view_make(NULL, 0U);
+    binding->xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+    binding->bytes = bytes.data;
+    binding->length = bytes.size;
+    binding->generation = generation;
+    binding->kind = (uint8_t)BINRWIR_BINDING_INLINE;
+    binding->valid = true;
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
@@ -172,15 +167,23 @@ runtimec_status_t binrwir_frame_bindings_invalidate(
 
 runtimec_status_t binrwir_frame_bindings_get(
     const binrwir_frame_bindings_t *bindings, uint16_t slot,
+    uint64_t expected_generation,
     const binrwir_frame_binding_t **output_binding) {
+    const binrwir_frame_binding_t *entry;
+
     if (output_binding != NULL) {
         *output_binding = NULL;
     }
     if (!binrwir_frame_bindings_is_valid(bindings) ||
         slot >= bindings->capacity || output_binding == NULL ||
-        !bindings->entries[slot].valid) {
+        expected_generation == BINRWIR_FRAME_BINDING_GENERATION_NONE) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    *output_binding = &bindings->entries[slot];
+    entry = &bindings->entries[slot];
+    if (!entry->valid || entry->generation != expected_generation) {
+        /* 失效或 generation 不匹配：绝不交出旧绑定。 */
+        return RUNTIMEC_STATUS_UNSUPPORTED;
+    }
+    *output_binding = entry;
     return RUNTIMEC_STATUS_SUCCESS;
 }

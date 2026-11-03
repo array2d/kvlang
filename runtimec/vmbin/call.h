@@ -39,9 +39,9 @@ runtimec_status_t vmbin_call_enter(
     binrwir_execution_frame_t *callee,
     const vmbin_call_control_t *control,
     binrwir_execution_exit_t *output_exit);
+/* 返回：释放绑定表并把被调帧还原成「没进过调用」的状态，帧可再次进入。 */
 runtimec_status_t vmbin_call_return(
-    binrwir_execution_frame_t *caller,
-    const binrwir_execution_frame_t *callee,
+    binrwir_execution_frame_t *caller, binrwir_execution_frame_t *callee,
     const vmbin_call_control_t *control,
     binrwir_execution_exit_t *output_exit);
 

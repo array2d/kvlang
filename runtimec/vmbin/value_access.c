@@ -3,6 +3,7 @@
  * 作用：按 reference_kind 找值体地址（或池内字面量），并直接读写值体字节。
  * 约束：值头/值体的几何只经合同——基址 → 值体用 runtimec_xvalue_body_address，
  *       值体 → 当前长度用 runtimec_value_body_length；本文件不写任何偏移算术。
+ *       实参是字面量时绑定表给的是内联字节，直接借出，不推导任何地址。
  *       写只接受与当前值体等长的值：改长度要连带改值头与 attr 位置，那是存储层
  *       的事，vmbin 不做，也不回退成按 key 写。
  */
@@ -10,6 +11,8 @@
 #include "value_access.h"
 
 #include <string.h>
+
+#include "frame_slot.h"
 
 typedef enum vmbin_value_access_diagnostic {
     VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST = 1,
@@ -28,36 +31,6 @@ static runtimec_status_t vmbin_value_access_fail(
                        runtimec_string_view_from_c_string(message),
                        runtimec_string_view_make(NULL, 0U));
     return status;
-}
-
-/* 帧绑定只存 XValue 基址；基址 → 值体由合同唯一实现。 */
-static runtimec_status_t vmbin_value_access_bound_address(
-    const binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
-    runtimec_xvalue_address_t *output_xvalue_address,
-    runtimec_error_t *error) {
-    const binrwir_frame_binding_t *binding = NULL;
-
-    if (frame->bindings == NULL) {
-        return vmbin_value_access_fail(
-            error, RUNTIMEC_STATUS_INVALID,
-            VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT,
-            "frame has no binding table");
-    }
-    if (binrwir_frame_bindings_get(frame->bindings, argument->slot, &binding) !=
-        RUNTIMEC_STATUS_SUCCESS) {
-        return vmbin_value_access_fail(
-            error, RUNTIMEC_STATUS_INVALID,
-            VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT,
-            "argument slot is not bound");
-    }
-    if (binding->xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE) {
-        return vmbin_value_access_fail(
-            error, RUNTIMEC_STATUS_INVALID,
-            VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT,
-            "binding carries no XValue address");
-    }
-    *output_xvalue_address = binding->xvalue_address;
-    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 runtimec_status_t vmbin_value_access_locate(
@@ -107,12 +80,38 @@ runtimec_status_t vmbin_value_access_locate(
         break;
     case BINRWIR_REFERENCE_PARAMETER_READ:
     case BINRWIR_REFERENCE_PARAMETER_WRITE:
-    case BINRWIR_REFERENCE_LOCAL:
-        status = vmbin_value_access_bound_address(frame, argument,
-                                                 &xvalue_address, error);
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            return status;
+    case BINRWIR_REFERENCE_LOCAL: {
+        const binrwir_frame_binding_t *binding = NULL;
+        uint16_t binding_slot = BINRWIR_FRAME_BINDING_SLOT_NONE;
+
+        if (frame->bindings == NULL ||
+            vmbin_frame_slot_of_argument(frame->program, argument,
+                                         &binding_slot) !=
+                RUNTIMEC_STATUS_SUCCESS ||
+            binrwir_frame_bindings_get(frame->bindings, binding_slot,
+                                       frame->snapshot_generation,
+                                       &binding) != RUNTIMEC_STATUS_SUCCESS) {
+            return vmbin_value_access_fail(
+                error, RUNTIMEC_STATUS_INVALID,
+                VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT,
+                "argument slot is not bound");
         }
+        if (binding->kind == (uint8_t)BINRWIR_BINDING_INLINE) {
+            /* 内联实参：字节就在 Program 字面量池里，只有读视图。 */
+            output_location->read_bytes = binding->bytes;
+            output_location->write_bytes = NULL;
+            output_location->size = binding->length;
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+        if (binding->kind != (uint8_t)BINRWIR_BINDING_ADDRESS ||
+            binding->xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE) {
+            return vmbin_value_access_fail(
+                error, RUNTIMEC_STATUS_INVALID,
+                VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT,
+                "binding carries no XValue address");
+        }
+        xvalue_address = binding->xvalue_address;
+    }
         body_address = runtimec_xvalue_body_address(xvalue_address);
         if (body_address == RUNTIMEC_VALUE_BODY_ADDRESS_NONE) {
             return vmbin_value_access_fail(

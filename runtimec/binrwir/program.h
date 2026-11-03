@@ -78,6 +78,9 @@ runtimec_status_t binrwir_program_get_instruction(
 runtimec_status_t binrwir_program_find_instruction(
     const binrwir_program_t *program, uint32_t source_logical_program_counter,
     uint32_t *output_instruction_identifier);
+/* 符号池规模：调用入口要在建绑定表前知道有多少个局部符号要留槽。 */
+runtimec_status_t binrwir_program_get_symbol_count(
+    const binrwir_program_t *program, size_t *output_symbol_count);
 /* 符号池只读借出：LOCAL 与 FUNCTION 参数项的 slot 就是这个下标。 */
 runtimec_status_t binrwir_program_get_symbol(
     const binrwir_program_t *program, uint16_t symbol_index,

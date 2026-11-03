@@ -3,11 +3,12 @@
 
 /*
  * 组件：binrwir/frame_bindings
- * 作用：保存一次调用期间「参数槽/局部槽 → XValue 基址」的绑定表。
+ * 作用：保存一次调用期间「参数槽/局部槽 → 值的位置」的绑定表。
  * 联系：vmbin 在调用入口建立并写入；vmbin 与 BinRWIR JIT 在执行时按槽查表。
  * 约束：绑定表是帧派生状态——可丢弃、可重建，不是值缓存，也不是第二事实源。
- *       表里存 XValue 基址与 generation，不存 body 地址、不存值；body 地址只能
- *       由合同的唯一推导函数在访问时算出。
+ *       地址变体只存 XValue 基址与 generation，不存 body 地址、不存值；body 地址
+ *       只能由合同的唯一推导函数在访问时算出。内联变体只用于「实参是字面量」：
+ *       它直接指向 Program 字面量池的一段只读字节，不拷贝、不参与别名判定。
  */
 
 #include <stdbool.h>
@@ -26,11 +27,21 @@ extern "C" {
 #define BINRWIR_FRAME_BINDING_SLOT_NONE UINT16_MAX
 #define BINRWIR_FRAME_BINDING_GENERATION_NONE UINT64_C(0)
 
+typedef enum binrwir_binding_kind {
+    BINRWIR_BINDING_INVALID = 0,
+    BINRWIR_BINDING_ADDRESS = 1, /* xvalue_address 有效 */
+    BINRWIR_BINDING_INLINE = 2   /* bytes/length 指向 Program 字面量池 */
+} binrwir_binding_kind_t;
+
 typedef struct binrwir_frame_binding {
     runtimec_key_view_t slot_key;
     runtimec_key_view_t caller_key;
     runtimec_xvalue_address_t xvalue_address;
+    /* 内联变体：实参是字面量时直接借出池内字节，Program 生命周期内有效。 */
+    const uint8_t *bytes;
+    size_t length;
     uint64_t generation;
+    uint8_t kind; /* binrwir_binding_kind_t */
     bool valid;
 } binrwir_frame_binding_t;
 
@@ -63,22 +74,29 @@ runtimec_status_t binrwir_frame_bindings_bind(
     runtimec_xvalue_address_t xvalue_address,
     uint64_t generation);
 /*
- * 解析一个槽：返回当前有效的 XValue 基址与绑定时记录的 generation。
- * 槽未绑定、已失效、或 generation 与传入的 expected_generation 不一致时返回
- * UNSUPPORTED，并把输出保持为 NONE。表为空/越界返回 INVALID。
+ * 绑定一个内联值：字面量实参没有存储位置，直接把池内字节区间记在槽上。
+ * 只在读参槽有意义（写槽不可能是字面量）；键视图可空，generation 仍必须非零。
  */
-runtimec_status_t binrwir_frame_bindings_resolve(
+runtimec_status_t binrwir_frame_bindings_bind_inline(
+    binrwir_frame_bindings_t *bindings, uint16_t slot,
+    runtimec_key_view_t slot_key, runtimec_bytes_view_t bytes,
+    uint64_t generation);
+/*
+ * 取一个槽的绑定：唯一访问器，地址变体与内联变体都走它。
+ *
+ * 槽未绑定、已失效、或绑定时的 generation 与 expected_generation 不一致时返回
+ * UNSUPPORTED 并清空输出——**绝不交出旧绑定**。表为空或槽号越界返回 INVALID。
+ * 调用方传的是自己帧的 snapshot_generation：generation 变了就说明存储被换过，
+ * 旧绑定不再对应同一份值。
+ */
+runtimec_status_t binrwir_frame_bindings_get(
     const binrwir_frame_bindings_t *bindings, uint16_t slot,
     uint64_t expected_generation,
-    runtimec_xvalue_address_t *output_xvalue_address,
-    uint64_t *output_generation);
+    const binrwir_frame_binding_t **output_binding);
 /* 让一个槽失效；旧地址从此不得再用。 */
 runtimec_status_t binrwir_frame_bindings_invalidate(
     binrwir_frame_bindings_t *bindings, uint16_t slot);
-/* 只读访问单条绑定；未绑定槽返回 INVALID 且不写出任何借用视图。 */
-runtimec_status_t binrwir_frame_bindings_get(
-    const binrwir_frame_bindings_t *bindings, uint16_t slot,
-    const binrwir_frame_binding_t **output_binding);
+
 
 #ifdef __cplusplus
 }
