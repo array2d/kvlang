@@ -208,6 +208,34 @@ def resolve_include(
     return next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
 
 
+def function_body(code: str, name: str) -> tuple[str, int] | None:
+    """Return the brace-matched body of the definition `name`, and its offset.
+
+    A prototype (`..._;`) before the first `{` means there is no body. Comments and
+    literals are masked first so a brace or a decoy call inside them can neither skew the
+    brace matching nor satisfy a token count; masking an already masked text is a no-op.
+    """
+    code = c_code_without_comments_or_literals(code)
+    start = code.find(name + "(")
+    while start >= 0:
+        opening = code.find("{", start)
+        terminator = code.find(";", start)
+        if opening >= 0 and (terminator < 0 or opening < terminator):
+            break
+        start = code.find(name + "(", start + 1)
+    else:
+        return None
+    depth = 0
+    for index in range(opening, len(code)):
+        if code[index] == "{":
+            depth += 1
+        elif code[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return code[opening:index + 1], opening
+    return None
+
+
 def iter_product_sources(runtimec_root: Path):
     for directory_name in PRODUCT_DIRECTORIES:
         directory = runtimec_root / directory_name
@@ -468,14 +496,26 @@ def audit_addressed_binrwir_model(
             "contract-body-address-derivation",
             f"the contract must declare {CONTRACT_BODY_ADDRESS_FUNCTION[:-1]}",
         ))
-    for token in REQUIRED_BODY_ADDRESS_DERIVATION_TOKENS:
-        occurrences = contract_code.count(token)
-        if occurrences != 1:
-            findings.append(Finding(
-                relative_display(contract_implementation, repository_root), 1,
-                "contract-body-address-derivation",
-                f"expected exactly one {token!r}, found {occurrences}",
-            ))
+    definition = function_body(contract_code,
+                               CONTRACT_BODY_ADDRESS_FUNCTION[:-1])
+    if definition is None:
+        findings.append(Finding(
+            relative_display(contract_implementation, repository_root), 1,
+            "contract-body-address-derivation",
+            f"{CONTRACT_BODY_ADDRESS_FUNCTION[:-1]} must have a definition body",
+        ))
+    else:
+        body, body_offset = definition
+        body_line = contract_code.count("\n", 0, body_offset) + 1
+        for token in REQUIRED_BODY_ADDRESS_DERIVATION_TOKENS:
+            occurrences = body.count(token)
+            if occurrences != 1:
+                findings.append(Finding(
+                    relative_display(contract_implementation, repository_root),
+                    body_line, "contract-body-address-derivation",
+                    f"expected exactly one {token!r} inside "
+                    f"{CONTRACT_BODY_ADDRESS_FUNCTION[:-1]}, found {occurrences}",
+                ))
     for path, code in code_by_path.items():
         if path in (host_services, contract_implementation):
             continue
