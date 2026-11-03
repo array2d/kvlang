@@ -71,156 +71,6 @@ static bool binrwir_compiler_jit_configuration_is_valid(
            configuration->jit_target.feature_mask == 0U;
 }
 
-/* 用 builder 把 Program 逐项重放成新 Program：这是唯一的深拷贝路径。 */
-static runtimec_status_t binrwir_compiler_clone_program(
-    const runtimec_allocator_t *allocator, const binrwir_program_t *source,
-    binrwir_program_t **output_program, runtimec_error_t *error) {
-    binrwir_program_view_t view;
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *clone = NULL;
-    size_t ordinal;
-    runtimec_status_t status;
-
-    *output_program = NULL;
-    status = binrwir_program_get_view(source, &view);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return binrwir_compiler_fail(error, status, 20,
-                                     "canonical program is not readable");
-    }
-    status = binrwir_program_builder_create(allocator, &view.identity, &builder);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return binrwir_compiler_fail(error, status, 21,
-                                     "program clone builder failed");
-    }
-    for (ordinal = 0U; ordinal < view.signature.read_parameter_count; ++ordinal) {
-        uint32_t parameter_index = 0U;
-
-        status = binrwir_program_builder_add_parameter(
-            builder, BINRWIR_PARAMETER_DIRECTION_READ,
-            view.signature.read_parameter_argument_indices[ordinal],
-            view.signature.read_parameter_types[ordinal], &parameter_index);
-        if (status != RUNTIMEC_STATUS_SUCCESS ||
-            parameter_index != (uint32_t)ordinal) {
-            status = RUNTIMEC_STATUS_INVALID;
-            goto fail;
-        }
-    }
-    for (ordinal = 0U; ordinal < view.signature.write_parameter_count;
-         ++ordinal) {
-        uint32_t parameter_index = 0U;
-
-        status = binrwir_program_builder_add_parameter(
-            builder, BINRWIR_PARAMETER_DIRECTION_WRITE,
-            view.signature.write_parameter_argument_indices[ordinal],
-            view.signature.write_parameter_types[ordinal], &parameter_index);
-        if (status != RUNTIMEC_STATUS_SUCCESS ||
-            parameter_index != (uint32_t)ordinal) {
-            status = RUNTIMEC_STATUS_INVALID;
-            goto fail;
-        }
-    }
-    for (ordinal = 0U; ordinal < view.signature.alias_rule_count; ++ordinal) {
-        uint32_t alias_rule_identifier = 0U;
-
-        status = binrwir_program_builder_add_alias_rule(
-            builder, &view.signature.alias_rules[ordinal],
-            &alias_rule_identifier);
-        if (status != RUNTIMEC_STATUS_SUCCESS ||
-            alias_rule_identifier != (uint32_t)ordinal) {
-            status = RUNTIMEC_STATUS_INVALID;
-            goto fail;
-        }
-    }
-    {
-        size_t symbol_count = 0U;
-
-        status = binrwir_program_get_symbol_count(source, &symbol_count);
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            goto fail;
-        }
-        for (ordinal = 0U; ordinal < symbol_count; ++ordinal) {
-            runtimec_string_view_t name;
-            uint16_t symbol_index = 0U;
-
-            status = binrwir_program_get_symbol(source, (uint16_t)ordinal, &name);
-            if (status != RUNTIMEC_STATUS_SUCCESS) {
-                goto fail;
-            }
-            /* Program 的符号池已是名字字典序；重放后下标必须原地不动。 */
-            status = binrwir_program_builder_add_symbol(builder, name,
-                                                        &symbol_index);
-            if (status != RUNTIMEC_STATUS_SUCCESS ||
-                symbol_index != (uint16_t)ordinal) {
-                status = RUNTIMEC_STATUS_INVALID;
-                goto fail;
-            }
-        }
-    }
-    {
-        size_t literal_count = 0U;
-
-        status = binrwir_program_get_literal_count(source, &literal_count);
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            goto fail;
-        }
-        for (ordinal = 0U; ordinal < literal_count; ++ordinal) {
-            runtimec_bytes_view_t wire_bytes;
-            runtimec_string_view_t langtype;
-            uint32_t literal_index = BINRWIR_LITERAL_INDEX_NONE;
-
-            status = binrwir_program_get_literal(source, (uint32_t)ordinal,
-                                                 &wire_bytes, &langtype);
-            if (status != RUNTIMEC_STATUS_SUCCESS) {
-                goto fail;
-            }
-            /* 字面量池按下标被 payload 引用，重放必须保持同一顺序。 */
-            status = binrwir_program_builder_add_literal(
-                builder, wire_bytes, langtype, &literal_index);
-            if (status != RUNTIMEC_STATUS_SUCCESS ||
-                literal_index != (uint32_t)ordinal) {
-                status = RUNTIMEC_STATUS_INVALID;
-                goto fail;
-            }
-        }
-    }
-    for (ordinal = 0U; ordinal < view.instruction_count; ++ordinal) {
-        binrwir_instruction_view_t instruction;
-        binrwir_instruction_build_request_t request;
-        uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
-
-        status = binrwir_program_get_instruction(source, (uint32_t)ordinal,
-                                                 &instruction);
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            goto fail;
-        }
-        request.source_logical_program_counter =
-            instruction.source_logical_program_counter;
-        request.operation_identifier =
-            instruction.instruction->operation_identifier;
-        request.read_arguments = instruction.read_arguments;
-        request.write_arguments = instruction.write_arguments;
-        status = binrwir_program_builder_add_instruction(
-            builder, &request, &instruction_identifier);
-        if (status != RUNTIMEC_STATUS_SUCCESS ||
-            instruction_identifier != (uint32_t)ordinal) {
-            status = RUNTIMEC_STATUS_INVALID;
-            goto fail;
-        }
-    }
-    status = binrwir_program_builder_finalize(builder, &clone);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        goto fail;
-    }
-    (void)binrwir_program_builder_destroy(builder);
-    *output_program = clone;
-    return RUNTIMEC_STATUS_SUCCESS;
-
-fail:
-    (void)binrwir_program_builder_destroy(builder);
-    return binrwir_compiler_fail(error, status, 22,
-                                 "canonical program cannot be copied");
-}
-
 runtimec_status_t binrwir_compiler_create(
     const runtimec_allocator_t *allocator,
     const binrwir_compiler_configuration_t *configuration,
@@ -282,41 +132,45 @@ runtimec_status_t binrwir_compiler_get_revision(
 }
 
 runtimec_status_t binrwir_compiler_compile(
-    binrwir_compiler_t *compiler, const binrwir_program_t *canonical_program,
+    binrwir_compiler_t *compiler, binrwir_program_t *program,
     binrwir_compilation_t **output_compilation, runtimec_error_t *error) {
-    binrwir_program_t *program_copy = NULL;
     binrwir_execution_plan_t *execution_plan = NULL;
     binrwir_compilation_t *compilation = NULL;
     uint64_t plan_generation;
+    runtimec_error_t ignored;
     runtimec_status_t status;
 
     if (output_compilation != NULL) {
         *output_compilation = NULL;
     }
-    if (compiler == NULL || canonical_program == NULL ||
-        output_compilation == NULL) {
+    /* program 一进来就归编译器：任何出口都不还给调用方。 */
+    if (program == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    if (binrwir_program_validate(canonical_program) != RUNTIMEC_STATUS_SUCCESS) {
+    if (compiler == NULL || output_compilation == NULL) {
+        runtimec_error_reset(&ignored);
+        (void)binrwir_program_destroy(program);
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    if (binrwir_program_validate(program) != RUNTIMEC_STATUS_SUCCESS) {
+        runtimec_error_reset(&ignored);
+        (void)binrwir_program_destroy(program);
         return binrwir_compiler_fail(error, RUNTIMEC_STATUS_INVALID, 3,
                                      "canonical program is not valid");
     }
     if (compiler->plan_generation == UINT64_MAX) {
+        runtimec_error_reset(&ignored);
+        (void)binrwir_program_destroy(program);
         return binrwir_compiler_fail(error, RUNTIMEC_STATUS_INVALID, 4,
                                      "plan generation is exhausted");
     }
-    status = binrwir_compiler_clone_program(&compiler->allocator,
-                                            canonical_program, &program_copy,
-                                            error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return status;
-    }
     plan_generation = compiler->plan_generation + 1U;
     status = binrwir_compiler_build_execution_plan(
-        &compiler->allocator, program_copy, plan_generation,
+        &compiler->allocator, program, plan_generation,
         compiler->compiler_revision, &execution_plan, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_destroy(program_copy);
+        runtimec_error_reset(&ignored);
+        (void)binrwir_program_destroy(program);
         return status;
     }
     /*
@@ -328,16 +182,17 @@ runtimec_status_t binrwir_compiler_compile(
         _Alignof(binrwir_compilation_t));
     if (compilation == NULL) {
         (void)binrwir_execution_plan_destroy(execution_plan);
-        (void)binrwir_program_destroy(program_copy);
+        runtimec_error_reset(&ignored);
+        (void)binrwir_program_destroy(program);
         return binrwir_compiler_fail(error, RUNTIMEC_STATUS_OUT_OF_MEMORY, 5,
                                      "compilation allocation failed");
     }
     memset(compilation, 0, sizeof(*compilation));
     compilation->allocator = compiler->allocator;
-    compilation->canonical_program = program_copy;
+    compilation->canonical_program = program;
     compilation->execution_plan = execution_plan;
     compilation->view.execution_target = BINRWIR_EXECUTION_TARGET_VMBIN;
-    compilation->view.canonical_program = program_copy;
+    compilation->view.canonical_program = program;
     compilation->view.execution_plan = execution_plan;
     compilation->view.binrwir_jit_code = NULL;
     compiler->plan_generation = plan_generation;

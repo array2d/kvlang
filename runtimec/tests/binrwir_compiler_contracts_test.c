@@ -12,6 +12,7 @@
 #include "binrwir_compiler/jit/safepoint.h"
 #include "binrwir_compiler/optimization.h"
 #include "vmkv/encoder.h"
+#include "vmkv/rwir_manifest.h"
 
 #define RUNTIMEC_ASSERT_FUNCTION_TYPE(function_name, function_pointer_type)       \
     _Static_assert(_Generic(&(function_name), function_pointer_type: 1,           \
@@ -28,7 +29,7 @@
     } while (0)
 
 typedef runtimec_status_t (*binrwir_compile_function_t)(
-    binrwir_compiler_t *, const binrwir_program_t *,
+    binrwir_compiler_t *, binrwir_program_t *,
     binrwir_compilation_t **, runtimec_error_t *);
 typedef runtimec_status_t (*binrwir_compiler_revision_function_t)(
     const binrwir_compiler_t *, uint32_t *);
@@ -530,6 +531,137 @@ static void test_jit_register_and_safepoint_failure_shapes(void) {
     RUNTIMEC_EXPECT(execution_interface.safepoint_contract_revision == 0U);
 }
 
+/* ---- Program 所有权：编译接管，成败都不还给调用方 ---- */
+
+typedef struct test_allocation_counts {
+    size_t outstanding;
+    bool fail_next;
+} test_allocation_counts_t;
+
+static void *counting_allocate(void *context, size_t size, size_t alignment) {
+    test_allocation_counts_t *counts = context;
+
+    (void)alignment;
+    if (counts->fail_next) {
+        counts->fail_next = false;
+        return NULL;
+    }
+    void *memory = malloc(size);
+    if (memory != NULL) {
+        counts->outstanding += 1U;
+    }
+    return memory;
+}
+
+static void counting_deallocate(void *context, void *allocation, size_t size,
+                                size_t alignment) {
+    test_allocation_counts_t *counts = context;
+
+    (void)size;
+    (void)alignment;
+    if (allocation != NULL) {
+        counts->outstanding -= 1U;
+        free(allocation);
+    }
+}
+
+/* 一条无操作数的 COPY 指令就足够：编译只看 Program 形状，不看语义。 */
+static runtimec_status_t build_program(const runtimec_allocator_t *allocator,
+                                       binrwir_program_t **output_program) {
+    binrwir_program_identity_t identity = {
+        .snapshot_generation = 1U,
+        .program_generation = 1U,
+        .schema_version = 1U,
+        .rwir_manifest_version = VMKV_RWIR_MANIFEST_VERSION,
+        .binrwir_binary_interface_generation =
+            BINRWIR_BINARY_INTERFACE_GENERATION,
+        .canonical_encoding_revision = 1U,
+    };
+    binrwir_program_builder_t *builder = NULL;
+    binrwir_instruction_build_request_t instruction = {
+        .source_logical_program_counter = 1U,
+        .operation_identifier = 1U,
+        .read_arguments = {.data = NULL, .count = 0U},
+        .write_arguments = {.data = NULL, .count = 0U},
+    };
+    uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
+    runtimec_status_t status;
+
+    *output_program = NULL;
+    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = binrwir_program_builder_add_instruction(
+            builder, &instruction, &instruction_identifier);
+    }
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = binrwir_program_builder_finalize(builder, output_program);
+    }
+    (void)binrwir_program_builder_destroy(builder);
+    return status;
+}
+
+static void test_program_ownership(void) {
+    test_allocation_counts_t program_counts = {0U, false};
+    test_allocation_counts_t compiler_counts = {0U, false};
+    const runtimec_allocator_t program_allocator = {
+        .context = &program_counts,
+        .allocate = counting_allocate,
+        .deallocate = counting_deallocate,
+    };
+    const runtimec_allocator_t compiler_allocator = {
+        .context = &compiler_counts,
+        .allocate = counting_allocate,
+        .deallocate = counting_deallocate,
+    };
+    binrwir_compiler_configuration_t configuration = {
+        .structure_size = sizeof(configuration),
+        .compiler_revision = 1U,
+        .enable_jit = false,
+        .jit_machine_code_capacity = 0U,
+        .jit_target = {0},
+    };
+    binrwir_compiler_t *compiler = NULL;
+    binrwir_program_t *program = NULL;
+    binrwir_compilation_t *compilation = NULL;
+    binrwir_compilation_view_t view;
+
+    RUNTIMEC_EXPECT(binrwir_compiler_create(&compiler_allocator, &configuration,
+                                            &compiler, NULL) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+
+    /* 成功路径：compilation 接管 Program，销毁它时必须连 Program 一起释放。 */
+    RUNTIMEC_EXPECT(build_program(&program_allocator, &program) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(program_counts.outstanding != 0U);
+    RUNTIMEC_EXPECT(binrwir_compiler_compile(compiler, program, &compilation,
+                                             NULL) == RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(compilation != NULL);
+    RUNTIMEC_EXPECT(binrwir_compilation_get_view(compilation, &view, NULL) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(view.execution_target == BINRWIR_EXECUTION_TARGET_VMBIN);
+    RUNTIMEC_EXPECT(view.canonical_program != NULL);
+    RUNTIMEC_EXPECT(view.execution_plan != NULL);
+    RUNTIMEC_EXPECT(view.binrwir_jit_code == NULL);
+    RUNTIMEC_EXPECT(binrwir_compilation_destroy(compilation, NULL) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    /* 调用方没有、也不再销毁 Program：归零就证明是 compilation 释放的。 */
+    RUNTIMEC_EXPECT(program_counts.outstanding == 0U);
+
+    /* 失败路径：plan 分配失败，编译器必须就地销毁 Program，不泄漏。 */
+    RUNTIMEC_EXPECT(build_program(&program_allocator, &program) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(program_counts.outstanding != 0U);
+    compiler_counts.fail_next = true;
+    RUNTIMEC_EXPECT(binrwir_compiler_compile(compiler, program, &compilation,
+                                             NULL) ==
+                    RUNTIMEC_STATUS_OUT_OF_MEMORY);
+    RUNTIMEC_EXPECT(compilation == NULL);
+    RUNTIMEC_EXPECT(program_counts.outstanding == 0U);
+
+    RUNTIMEC_EXPECT(binrwir_compiler_destroy(compiler, NULL) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+}
+
 int main(void) {
     test_vmkv_xvalue_address_encoding();
     test_compiler_configuration();
@@ -539,6 +671,7 @@ int main(void) {
     test_optimization_failure_shape();
     test_jit_failure_shapes();
     test_jit_register_and_safepoint_failure_shapes();
+    test_program_ownership();
     if (failures != 0) {
         fprintf(stderr, "binrwir_compiler_contracts_test: %d failure(s)\n", failures);
         return 1;

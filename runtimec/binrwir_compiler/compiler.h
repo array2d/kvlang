@@ -80,17 +80,18 @@ runtimec_status_t binrwir_compiler_get_revision(
     uint32_t *output_compiler_revision);
 
 /*
- * 唯一内容输入是 canonical_program。其全部 argument 必须已由 VMKV 解析为
- * 非零 V.body 地址。成功产生的 compilation 持有该 Program 的不可变副本、
- * execution plan 与可选机器码，但不拥有地址指向的 body。地址只在生成它的
- * snapshot/source revision 有效期间可用；该 revision 失效时必须使整份
- * compilation 失效。调用者仍拥有输入 Program。
+ * 唯一内容输入是 program，其全部 argument 必须已由 VMKV 解析为非零 V.body
+ * 地址。compilation 持有 Program、execution plan 与可选机器码，但不拥有地址
+ * 指向的 body。地址只在生成它的 snapshot/source revision 有效期间可用；该
+ * revision 失效时必须使整份 compilation 失效。
+ *
+ * 所有权：program 在这里被**接管**——成功时归 compilation，失败时由编译器
+ * 就地销毁。无论成败调用方都不再拥有它，不得再销毁。不做「成功才消费、失败
+ * 还给你」那种不对称契约，那正是 double free 的来源。
  */
 runtimec_status_t binrwir_compiler_compile(
-    binrwir_compiler_t *compiler,
-    const binrwir_program_t *canonical_program,
-    binrwir_compilation_t **output_compilation,
-    runtimec_error_t *error);
+    binrwir_compiler_t *compiler, binrwir_program_t *program,
+    binrwir_compilation_t **output_compilation, runtimec_error_t *error);
 
 runtimec_status_t binrwir_compilation_get_view(
     const binrwir_compilation_t *compilation,

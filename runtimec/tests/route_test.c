@@ -421,9 +421,9 @@ static runtimec_status_t test_compile_and_insert(
     binrwir_compilation_t *compilation = NULL;
     runtimec_status_t status;
 
+    /* 编译器接管 program：route 不再销毁它。 */
     status = binrwir_compiler_compile(components->binrwir_compiler, program,
                                       &compilation, error);
-    (void)binrwir_program_destroy(program);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }

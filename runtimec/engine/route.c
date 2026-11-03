@@ -361,10 +361,9 @@ static runtimec_status_t runtimec_route_compile_and_insert(
         *output_detail = RUNTIMEC_ROUTE_DIAG_ENCODE_FAILED;
         return status;
     }
+    /* 编译器接管 program：成败都由它处置，route 不再销毁。 */
     status = binrwir_compiler_compile(components->binrwir_compiler, program,
                                       &compilation, error);
-    /* compilation 自持 Program 的不可变副本，输入 Program 仍归 route 释放。 */
-    (void)binrwir_program_destroy(program);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         *output_detail = RUNTIMEC_ROUTE_DIAG_COMPILE_FAILED;
         return status;
