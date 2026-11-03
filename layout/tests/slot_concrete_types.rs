@@ -8,7 +8,7 @@
 //! 3. 推不出 → 保留并集，由 encoder 拒绝（不猜精度）。
 
 use kvlanglayout::{init_dirs, kvkind, Kv};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 fn bin() -> &'static str {

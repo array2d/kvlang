@@ -23,7 +23,6 @@ fn fresh_kv(tag: &str) -> Kv {
 
 fn slot_text(kv: &mut Kv, key: &str) -> String {
     let v = kv.get_one(key);
-    let lt = kv.langtype_of(key);
     let h = kvkind::head(&v);
     let b = kvkind::body(&v, &h);
     String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
