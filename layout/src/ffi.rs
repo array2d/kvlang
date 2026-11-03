@@ -133,30 +133,41 @@ pub struct kvspaceHead_t {
     pub body_cap: u64,
 }
 
-// ── 原位 head 访问（v2 固定 8 字节头，#566：偏移直取，不建结构、不校验）──
+// ── 原位 head 访问（16 字节固定头：长度全在 head 里，attr 区无前缀）──
 
-/// wire: [len:u48 LE@0-5][storetype:u8@6][ptr:u8@7][body@8]；body 偏移恒 = 8。
-pub const PREFIX: usize = 8;
+/// wire: [bodylen:u64 @0-7][attrslen:u32 @8-11][storetype@12][ptr@13][pad@14-15]
+/// [body][attr records]；body 偏移恒 = 16。总长 = 16 + bodylen + attrslen。
+pub const PREFIX: usize = 16;
 
-/// u48 小端 body 长度（offset 0-5）。data 过短 → 0。
+const OFF_ATTRSLEN: usize = 8;
+const OFF_STORETYPE: usize = 12;
+const OFF_PTR: usize = 13;
+
+/// body 长度（u64 小端 @0-7）。data 过短 → 0。
 #[inline]
 pub fn xh_len(data: &[u8]) -> u64 {
-    let b = data.get(0..6).unwrap_or(&[]);
-    let mut v = 0u64;
-    for i in (0..b.len()).rev() {
-        v = (v << 8) | u64::from(b[i]);
+    match data.get(0..8) {
+        Some(b) => u64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]),
+        None => 0,
     }
-    v
 }
-/// storetype（offset 6）；data 过短 → 0。
+/// attr 区字节数（u32 小端 @8-11）；data 过短 → 0。
+#[inline]
+pub fn xh_attrs_len(data: &[u8]) -> u32 {
+    match data.get(OFF_ATTRSLEN..OFF_ATTRSLEN + 4) {
+        Some(b) => u32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+        None => 0,
+    }
+}
+/// storetype（offset 12）；data 过短 → 0。
 #[inline]
 pub fn xh_storetype(data: &[u8]) -> u8 {
-    data.get(6).copied().unwrap_or(0)
+    data.get(OFF_STORETYPE).copied().unwrap_or(0)
 }
-/// ptr（offset 7）：0 inline / 1 PTR / 2 EXT；data 过短 → 0。
+/// ptr（offset 13）：0 inline / 1 PTR / 2 EXT；data 过短 → 0。
 #[inline]
 pub fn xh_ptr(data: &[u8]) -> u8 {
-    data.get(7).copied().unwrap_or(0)
+    data.get(OFF_PTR).copied().unwrap_or(0)
 }
 #[inline]
 pub fn xh_is_ptr(data: &[u8]) -> bool {
@@ -168,7 +179,7 @@ pub fn xh_is_none(data: &[u8]) -> bool {
     data.is_empty() || (data.len() >= PREFIX && xh_len(data) == 0 && xh_ptr(data) == 0)
 }
 
-/// body 切片（偏移恒 = PREFIX，长度 = len）；越界 → 空。
+/// body 切片（偏移恒 = PREFIX，长度 = head 的 bodylen）；越界 → 空。
 pub fn xh_body_slice(data: &[u8]) -> &[u8] {
     let len = xh_len(data) as usize;
     let Some(end) = PREFIX.checked_add(len) else {
@@ -281,14 +292,13 @@ impl Kv {
             // 末段含 ‥ 的 key 是系统变量本体：无类型（保留 codec 空 attr）。
             // 前缀可含 ‥（如 /lib/‥labels/），只拦末段。
             let last_seg = key.rsplit('/').next().unwrap_or(key);
+            /* langtype 必须在**构造期**就进 wire：head 的 attrslen 与 attr 区是
+             * 一次成形的。构造器拿不到类型时（系统变量本体、空 lt），保持它产的
+             * 空 attr（attrslen=0）。这里只做这一次拼装，且**不带任何 attr 前缀**。 */
             let wire = if xvalue.is_empty() || lt.is_empty() || last_seg.contains('\u{2025}') {
                 xvalue.clone()
             } else {
-                // 用真实 langtype 替换 codec 产出的空 attr 占位：[head+body] + attr(lt)。
-                let body_len = xh_len(xvalue) as usize;
-                let mut w = xvalue[..PREFIX + body_len].to_vec();
-                w.extend_from_slice(&attr_bytes(lt));
-                w
+                with_langtype(xvalue, lt)
             };
             self.set_one(key, &wire)?;
         }
@@ -430,21 +440,51 @@ fn al_to_dims(kind: &str, array_len: i32) -> Vec<i32> {
     }
 }
 
-/// 空 C 串（codec langtype 参数：空 = 空 attr 占位，真实类型由 Kv::set 按 pair 的 lt 写入）。
+/// 空 C 串（langtype 参数的"无类型"取值：attrslen=0，attr 区零字节）。
 pub static EMPTY_CSTR: [u8; 1] = [0];
 
-/// attr 区字节（#571）：langtype 记录（含 attr_len 前缀）；空 lt = 空 attr `[2,0]`。
-pub fn attr_bytes(lt: &str) -> Vec<u8> {
-    if lt.is_empty() {
-        return vec![2, 0];
+/// langtype 的 C 串。空串 → [`EMPTY_CSTR`]。
+///
+/// 构造器**直接收 langtype**：wire 一次成形，`Kv::set` 不再二次拼 attr。此前是
+/// 「构造器传空串、`Kv::set` 用 `attr_bytes` 覆写」两段拼装，head 扩容后两处各按
+/// 自己的布局拼，必然对不上。
+pub fn langtype_cstr(langtype: &str) -> CString {
+    CString::new(langtype).unwrap_or_else(|_| CString::new("").unwrap())
+}
+
+/// 给已构造的 wire 换上 langtype：保留 head 的 bodylen/storetype/ptr 与 body，
+/// 按**新布局**重写 attrslen 与 attr 区（record = `[tag][len:u16][data]`，无前缀）。
+///
+/// 之所以不是「拼一段前缀」：attrslen 住在 head 里，attr 区本身没有长度字段。
+/// 一次成形、只写一处，才不会出现「head 说 3 字节、实际拼了 5 字节」这种裂开。
+pub fn with_langtype(wire: &[u8], langtype: &str) -> Vec<u8> {
+    if wire.len() < PREFIX {
+        return wire.to_vec();
     }
-    let alen = 2u16 + 3 + lt.len() as u16;
-    let mut v = Vec::with_capacity(5 + lt.len());
-    v.extend_from_slice(&alen.to_le_bytes());
-    v.push(1); // tag = langtype
-    v.extend_from_slice(&(lt.len() as u16).to_le_bytes());
-    v.extend_from_slice(lt.as_bytes());
-    v
+    let bodylen = xh_len(wire) as usize;
+    let Some(body_end) = PREFIX.checked_add(bodylen) else {
+        return wire.to_vec();
+    };
+    if body_end > wire.len() {
+        return wire.to_vec();
+    }
+    let mut out = wire[..body_end].to_vec();
+    let attr_len_pos = OFF_ATTRSLEN;
+    if langtype.is_empty() {
+        out[attr_len_pos..attr_len_pos + 4].copy_from_slice(&0u32.to_le_bytes());
+        return out;
+    }
+    let l = langtype.len();
+    if l > usize::from(u16::MAX) {
+        return wire.to_vec();
+    }
+    let mut attr = Vec::with_capacity(3 + l);
+    attr.push(1u8); // tag = langtype
+    attr.extend_from_slice(&(l as u16).to_le_bytes());
+    attr.extend_from_slice(langtype.as_bytes());
+    out[attr_len_pos..attr_len_pos + 4].copy_from_slice(&(attr.len() as u32).to_le_bytes());
+    out.extend_from_slice(&attr);
+    out
 }
 
 /// 按 kind+body 产 wire（固定 8 字节 head + body + 空 attr 占位；真实类型由 Kv::set 按
@@ -493,8 +533,9 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>,
     })
 }
 
-/// 按 wire 字节原位填 head 视图（v2 固定 8 字节头：#566）。
-/// langtype 不在 head——由调用方从 kvspaceGetHead（x‥langtype attr key）读入后传入。
+/// 按 wire 字节原位填 head 视图（16 字节固定头）。
+/// langtype 不在 head 的结构体视图里——调用方若已知道类型可传入；否则留空，
+/// 由 `langtype_from_wire` 从 attr 区取。
 pub fn from_wire_head(data: &[u8], langtype: &str) -> kvspaceHead_t {
     let mut h = kvspaceHead_t {
         headlen: 0,
@@ -512,8 +553,8 @@ pub fn from_wire_head(data: &[u8], langtype: &str) -> kvspaceHead_t {
         return h;
     }
     let len = xh_len(data);
-    let storetype = data[6];
-    let ptr = data[7];
+    let storetype = xh_storetype(data);
+    let ptr = xh_ptr(data);
     if storetype > 3 || ptr > 2 {
         return h;
     }
