@@ -64,6 +64,11 @@ typedef struct kvlang_runtime_error {
 
 typedef struct kvlang_runtime_create_request {
     const char *data_source_name;
+    /*
+     * 该 store 实例的稳定身份，必须非零。由组合根（调用方）提供：compilation
+     * 缓存与已解析地址都以它为失效判据，换实例就必须换号。
+     */
+    uint64_t instance_identifier;
 } kvlang_runtime_create_request_t;
 
 typedef enum kvlang_runtime_entry_kind {

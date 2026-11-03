@@ -596,6 +596,18 @@ runtimec_status_t binrwir_program_get_symbol(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+runtimec_status_t binrwir_program_get_literal_count(
+    const binrwir_program_t *program, size_t *output_literal_count) {
+    if (output_literal_count != NULL) {
+        *output_literal_count = 0U;
+    }
+    if (program == NULL || output_literal_count == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    *output_literal_count = program->literal_count;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 runtimec_status_t binrwir_program_get_literal(
     const binrwir_program_t *program, uint32_t literal_index,
     runtimec_bytes_view_t *output_wire_bytes,

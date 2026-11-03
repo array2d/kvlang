@@ -38,10 +38,16 @@ typedef enum runtimec_route_kind_t {
 } runtimec_route_kind_t;
 typedef struct runtimec_route_request_t {
     runtimec_route_kind_t kind;
+    /* ROUTE_FUNCTION 的 target 是函数的绝对路径。 */
     runtimec_string_view_t target;
+    /* checkpoint 的落点：非空。route 不用它拼路径，只原样交给适配层。 */
+    runtimec_string_view_t vthread_identifier;
+    /*
+     * 绝对槽键，读参在前、写参在后，数量等于被调签名的读参 + 写参数。
+     * route 不解包、不拼路径、不猜 vid/depth：裸名与相对名一律失败封闭。
+     */
     const runtimec_string_view_t *arguments;
     size_t argument_count;
-    uint64_t instruction_budget;
 } runtimec_route_request_t;
 typedef struct runtimec_route_result_t {
     runtimec_status_t status;

@@ -476,6 +476,8 @@ vmbin_execute(const binrwir_program_t *program,
     execution.builtin_registry = builtin_registry;
     execution.profile = profile;
     execution.frame = frame;
+    /* call 出口要靠它判断「有没有后继指令」，从而给出可恢复位置。 */
+    execution.instruction_count = program_view.instruction_count;
 
     for (;;) {
         uint32_t identifier = frame->logical_program_counter;

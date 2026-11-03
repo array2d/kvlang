@@ -54,7 +54,7 @@ int main(void) {
         char error_text[512];
         kvlang_runtime_error_t error =
             prepare_error(error_text, sizeof(error_text));
-        kvlang_runtime_create_request_t request = {data_source_name};
+        kvlang_runtime_create_request_t request = {data_source_name, UINT64_C(1)};
         kvlang_runtime_t *runtime = NULL;
         const runtimec_status_t status =
             kvlang_runtime_create(&request, &runtime, &error);
@@ -124,7 +124,7 @@ int main(void) {
         char error_text[512];
         kvlang_runtime_error_t error =
             prepare_error(error_text, sizeof(error_text));
-        kvlang_runtime_create_request_t request = {data_source_name};
+        kvlang_runtime_create_request_t request = {data_source_name, UINT64_C(1)};
         kvlang_runtime_t *runtime = NULL;
         EXPECT(kvlang_runtime_create(&request, &runtime, &error) ==
                RUNTIMEC_STATUS_SUCCESS);
@@ -139,7 +139,7 @@ int main(void) {
         char error_text[512];
         kvlang_runtime_error_t error =
             prepare_error(error_text, sizeof(error_text));
-        kvlang_runtime_create_request_t request = {"bogus://nowhere"};
+        kvlang_runtime_create_request_t request = {"bogus://nowhere", UINT64_C(1)};
         kvlang_runtime_t *runtime = NULL;
         const runtimec_status_t status =
             kvlang_runtime_create(&request, &runtime, &error);
@@ -153,7 +153,7 @@ int main(void) {
         char error_text[64];
         kvlang_runtime_error_t error =
             prepare_error(error_text, sizeof(error_text));
-        kvlang_runtime_create_request_t request = {""};
+        kvlang_runtime_create_request_t request = {"", UINT64_C(1)};
         kvlang_runtime_t *runtime = NULL;
         EXPECT(kvlang_runtime_create(&request, &runtime, &error) ==
                RUNTIMEC_STATUS_INVALID);

@@ -32,7 +32,8 @@ int main(void) {
         error_message, sizeof(error_message));
     kvlang_runtime_t *runtime = (kvlang_runtime_t *)(uintptr_t)1U;
     kvlang_runtime_t *created_runtime = runtime;
-    kvlang_runtime_create_request_t create_request = {"shared-memory://test"};
+    kvlang_runtime_create_request_t create_request = {
+        "shared-memory://test", UINT64_C(1)};
     const char *arguments[] = {"value"};
     kvlang_runtime_execute_request_t execute_request = {
         KVLANG_RUNTIME_ENTRY_FUNCTION, "example", arguments, 1U,

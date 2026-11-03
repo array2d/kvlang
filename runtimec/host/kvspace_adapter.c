@@ -49,6 +49,8 @@ typedef struct runtimec_kvspace_adapter_context {
     size_t resolved_address_capacity;
     uint64_t generation;
     bool generation_started;
+    /* 组合根给的 store 实例身份，逐字进 source revision。 */
+    uint64_t instance_identifier;
 } runtimec_kvspace_adapter_context_t;
 
 static runtimec_status_t runtimec_kvspace_adapter_fail(
@@ -528,7 +530,7 @@ static runtimec_status_t runtimec_kvspace_adapter_source_revision(
         adapter->generation += 1U;
         adapter->generation_started = true;
     }
-    revision->instance_identifier = 0U;
+    revision->instance_identifier = adapter->instance_identifier;
     revision->generation = adapter->generation;
     revision->schema_version = 0U;
     revision->instruction_set_version = source_generation > UINT32_MAX
@@ -882,6 +884,7 @@ runtimec_status_t runtimec_kvspace_adapter_create_services(
     runtimec_host_services_initialize(output);
     if (request == NULL || binary_interface == NULL || output == NULL ||
         error == NULL || request->borrowed_kvspace_handle == NULL ||
+        request->instance_identifier == 0U ||
         !runtimec_allocator_is_valid(&request->allocator) ||
         !runtimec_kvspace_binary_interface_is_complete(binary_interface)) {
         return runtimec_kvspace_adapter_fail(
@@ -900,6 +903,7 @@ runtimec_status_t runtimec_kvspace_adapter_create_services(
     adapter->allocator = request->allocator;
     adapter->handle = request->borrowed_kvspace_handle;
     adapter->binary_interface = *binary_interface;
+    adapter->instance_identifier = request->instance_identifier;
 
     runtimec_host_services_initialize(output);
     output->context = adapter;

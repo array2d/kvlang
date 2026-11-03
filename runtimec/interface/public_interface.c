@@ -67,7 +67,8 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_create(
     if (request == NULL || output == NULL || error == NULL ||
         !kvlang_runtime_text_buffer_is_valid(&error->message) ||
         request->data_source_name == NULL ||
-        request->data_source_name[0] == '\0') {
+        request->data_source_name[0] == '\0' ||
+        request->instance_identifier == 0U) {
         return kvlang_runtime_fail(
             error, RUNTIMEC_STATUS_INVALID,
             "invalid runtimec create request");
@@ -78,14 +79,22 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_create(
     options.allocator = runtimec_default_allocator();
     /* 编译缓存与机器码容量是派生状态的容量上限，不表达正确性开关。 */
     options.compilation_cache_capacity = RUNTIMEC_DEFAULT_COMPILATION_CACHE_CAPACITY;
-    options.machine_code_capacity = RUNTIMEC_DEFAULT_MACHINE_CODE_CAPACITY;
-    options.enable_jit = true;
+    /*
+     * phase 2 的阶段选择：BinRWIR Compiler 只有 VMBIN 档，这里关掉 JIT。
+     * 不是缺省值——`enable_jit=true` 时编译器会明确返回 NOT_IMPLEMENTED（配置
+     * 自洽不等于能力存在），公共入口就会必然失败。JIT 落地时把这两行改回
+     * 计划值：machine_code_capacity 恢复 RUNTIMEC_DEFAULT_MACHINE_CODE_CAPACITY、
+     * enable_jit 置真。
+     */
+    options.machine_code_capacity = 0U;
+    options.enable_jit = false;
 
     runtimec_platform_session_t *platform_session = NULL;
     runtimec_error_t engine_error;
     runtimec_error_reset(&engine_error);
     const runtimec_status_t status = runtimec_platform_session_create(
-        request->data_source_name, &options, &platform_session, &engine_error);
+        request->data_source_name, request->instance_identifier, &options,
+        &platform_session, &engine_error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         /* engine 的错误文本是借用视图：在本帧内转成公共错误结构。 */
         if (engine_error.message.size != 0U &&

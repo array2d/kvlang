@@ -120,6 +120,7 @@ int main(void) {
                       .allocate = test_allocate,
                       .deallocate = test_deallocate},
         .borrowed_kvspace_handle = &store,
+        .instance_identifier = UINT64_C(1),
     };
     runtimec_host_services_t services;
     runtimec_error_t error;

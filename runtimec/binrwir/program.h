@@ -85,6 +85,9 @@ runtimec_status_t binrwir_program_get_symbol_count(
 runtimec_status_t binrwir_program_get_symbol(
     const binrwir_program_t *program, uint16_t symbol_index,
     runtimec_string_view_t *output_name);
+/* 字面量池规模：需要整池搬运（例如编译期深拷贝 Program）时必须先知道它。 */
+runtimec_status_t binrwir_program_get_literal_count(
+    const binrwir_program_t *program, size_t *output_literal_count);
 /* 字面量池只读借出：LITERAL 参数项的 payload 就是这个下标。 */
 runtimec_status_t binrwir_program_get_literal(
     const binrwir_program_t *program, uint32_t literal_index,

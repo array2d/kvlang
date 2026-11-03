@@ -213,6 +213,23 @@ add_test(NAME runtimec.engine.repository
 set_tests_properties(runtimec.engine.repository PROPERTIES
     LABELS "runtimec;scaffold;engine;repository")
 
+add_executable(runtimec_route_test route_test.c)
+target_compile_features(runtimec_route_test PRIVATE c_std_11)
+target_include_directories(runtimec_route_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVLANG_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_route_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmkv
+    runtimec_binrwir_compiler runtimec_vmbin runtimec_engine)
+runtimec_test_warnings(runtimec_route_test)
+add_test(NAME runtimec.engine.route COMMAND runtimec_route_test)
+# BinRWIR Compiler 仍是失败封闭桩时 session 建不起来，用例返回 77 跳过；
+# 编译落地后同一个用例自动转成真跑，不需要改测试。
+set_tests_properties(runtimec.engine.route PROPERTIES
+    SKIP_RETURN_CODE 77
+    LABELS "runtimec;scaffold;engine;route")
+
 add_executable(runtimec_public_interface_bootstrap_test
     public_interface_bootstrap_test.c)
 target_compile_features(runtimec_public_interface_bootstrap_test

@@ -46,6 +46,38 @@ runtimec_status_t runtimec_session_get_host_services(
 runtimec_status_t runtimec_session_clear_derived_state(
     runtimec_session_t *session);
 
+/*
+ * route 需要的运行期组件，一次借出。session 仍是唯一 owner：这些指针只在
+ * session 销毁之前有效，调用者不得销毁或替换它们。builtin 注册表本阶段为零
+ * 条目表——没有 builtin 实现，走 route 的 builtin 指令因此失败封闭。
+ *
+ * 只前置声明、不 include 各组件头：`check_layers` 允许 session 作为 owner
+ * graph 的根同时持有两个策略层，但分派仍然只有 route 一处。
+ */
+typedef struct vmkv_encoder_t vmkv_encoder_t;
+typedef struct binrwir_compiler_t binrwir_compiler_t;
+typedef struct runtimec_compilation_repository_t
+    runtimec_compilation_repository_t;
+typedef struct vmbin_builtin_registry vmbin_builtin_registry_t;
+
+typedef struct runtimec_session_runtime_components_t {
+    vmkv_encoder_t *vmkv_encoder;
+    binrwir_compiler_t *binrwir_compiler;
+    runtimec_compilation_repository_t *compilation_repository;
+    const vmbin_builtin_registry_t *builtin_registry;
+} runtimec_session_runtime_components_t;
+
+runtimec_status_t runtimec_session_get_runtime_components(
+    runtimec_session_t *session,
+    runtimec_session_runtime_components_t *output_components);
+
+/*
+ * checkpoint 的单调提交序号：取号即前进，session 销毁前一直递增。route 不在
+ * 自己身上存状态，序号只能由 owner graph 的根给出。
+ */
+runtimec_status_t runtimec_session_take_checkpoint_sequence(
+    runtimec_session_t *session, uint64_t *output_sequence);
+
 #ifdef __cplusplus
 }
 #endif

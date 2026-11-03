@@ -36,7 +36,8 @@ runtimec_allocator_t runtimec_default_allocator(void);
  * 资源，error 里给出可定位的原因。
  */
 runtimec_status_t runtimec_platform_session_create(
-    const char *data_source_name, const runtimec_session_options_t *options,
+    const char *data_source_name, uint64_t instance_identifier,
+    const runtimec_session_options_t *options,
     runtimec_platform_session_t **output, runtimec_error_t *error);
 
 /* 释放整条链路：session → host 能力表 → kvspace 句柄 → 库句柄。 */

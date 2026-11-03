@@ -13,6 +13,7 @@
 
 #include "binrwir_compiler/compiler.h"
 #include "engine/compilation_repository.h"
+#include "vmbin/builtin/registry.h"
 #include "vmkv/encoder.h"
 
 /* 编译器修订号：compilation repository 的 key 字段之一，非零且在构建内固定。 */
@@ -39,6 +40,10 @@ struct runtimec_session_t {
     vmkv_encoder_t *vmkv_encoder;
     binrwir_compiler_t *binrwir_compiler;
     runtimec_compilation_repository_t *compilation_repository;
+    /* builtin 注册表本阶段零条目：没有实现，所以没有条目。 */
+    vmbin_builtin_registry_t builtin_registry;
+    /* checkpoint 的单调提交序号，route 经访问器取号。 */
+    uint64_t checkpoint_sequence;
 };
 
 static runtimec_status_t runtimec_session_fail(runtimec_error_t *error,
@@ -102,8 +107,14 @@ runtimec_status_t runtimec_session_create(
     session->host_services = *host_services;
     session->options = *options;
 
-    runtimec_status_t status = vmkv_encoder_create(
-        allocator, &session->vmkv_encoder, error);
+    runtimec_status_t status = vmbin_builtin_registry_initialize(
+        &session->builtin_registry, NULL, 0U);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        status = runtimec_session_forward(error, status, "builtin registry");
+        goto fail;
+    }
+
+    status = vmkv_encoder_create(allocator, &session->vmkv_encoder, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         status = runtimec_session_forward(error, status, "vmkv encoder");
         goto fail;
@@ -219,4 +230,37 @@ runtimec_status_t runtimec_session_clear_derived_state(
     /* 派生状态只有 compilation repository：清空即可，kvspace 明文不动。 */
     return runtimec_compilation_repository_clear(
         session->compilation_repository);
+}
+
+runtimec_status_t runtimec_session_get_runtime_components(
+    runtimec_session_t *session,
+    runtimec_session_runtime_components_t *output_components) {
+    if (output_components != NULL) {
+        *output_components = (runtimec_session_runtime_components_t){0};
+    }
+    if (session == NULL || output_components == NULL ||
+        session->vmkv_encoder == NULL || session->binrwir_compiler == NULL ||
+        session->compilation_repository == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    output_components->vmkv_encoder = session->vmkv_encoder;
+    output_components->binrwir_compiler = session->binrwir_compiler;
+    output_components->compilation_repository =
+        session->compilation_repository;
+    output_components->builtin_registry = &session->builtin_registry;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+runtimec_status_t runtimec_session_take_checkpoint_sequence(
+    runtimec_session_t *session, uint64_t *output_sequence) {
+    if (output_sequence != NULL) {
+        *output_sequence = 0U;
+    }
+    if (session == NULL || output_sequence == NULL ||
+        session->checkpoint_sequence == UINT64_MAX) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    session->checkpoint_sequence += 1U;
+    *output_sequence = session->checkpoint_sequence;
+    return RUNTIMEC_STATUS_SUCCESS;
 }

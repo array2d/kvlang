@@ -345,10 +345,25 @@ static void test_compiler_configuration(void) {
         .jit_target = {0},
     };
 
+    /* 这个分配器故意返回 NULL：create 必须失败封闭，不留半初始化对象。 */
     RUNTIMEC_EXPECT(binrwir_compiler_create(
         &allocator, &configuration, &compiler, NULL) ==
-        RUNTIMEC_STATUS_NOT_IMPLEMENTED);
+        RUNTIMEC_STATUS_OUT_OF_MEMORY);
     RUNTIMEC_EXPECT(compiler == NULL);
+
+    /* VMBIN 档是确定能力：正常分配器下 enable_jit 为假必须建得起来。 */
+    const runtimec_allocator_t working_allocator = {
+        .context = NULL,
+        .allocate = test_allocate_working,
+        .deallocate = test_deallocate,
+    };
+    RUNTIMEC_EXPECT(binrwir_compiler_create(
+        &working_allocator, &configuration, &compiler, NULL) ==
+        RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(compiler != NULL);
+    RUNTIMEC_EXPECT(binrwir_compiler_destroy(compiler, NULL) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    compiler = (binrwir_compiler_t *)(uintptr_t)1U;
 
     configuration.compiler_revision = 0U;
     RUNTIMEC_EXPECT(binrwir_compiler_create(

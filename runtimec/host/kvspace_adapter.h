@@ -28,6 +28,12 @@ extern "C" {
 typedef struct runtimec_kvspace_adapter_request {
     runtimec_allocator_t allocator;
     void *borrowed_kvspace_handle;
+    /*
+     * 该 store 实例的稳定身份，必须非零。由组合根提供：适配层不知道自己在跟谁
+     * 说话，不推导、不哈希路径、不猜。它随每次 source revision 原样外送，是
+     * 派生状态（compilation、地址）随 store 实例失效的判据。
+     */
+    uint64_t instance_identifier;
 } runtimec_kvspace_adapter_request_t;
 
 /*

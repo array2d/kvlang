@@ -1004,6 +1004,21 @@ static void test_literal_pool_round_trip(void) {
     RUNTIMEC_EXPECT(instruction_view.read_arguments.data[0].reference_kind ==
                     BINRWIR_REFERENCE_LITERAL);
     RUNTIMEC_EXPECT(instruction_view.read_arguments.data[0].payload == 0U);
+    {
+        size_t literal_count = 0U;
+
+        RUNTIMEC_EXPECT(binrwir_program_get_literal_count(program,
+                                                          &literal_count) ==
+                        RUNTIMEC_STATUS_SUCCESS);
+        RUNTIMEC_EXPECT(literal_count == 1U);
+        literal_count = 1U;
+        RUNTIMEC_EXPECT(binrwir_program_get_literal_count(NULL,
+                                                          &literal_count) ==
+                        RUNTIMEC_STATUS_INVALID);
+        RUNTIMEC_EXPECT(literal_count == 0U);
+        RUNTIMEC_EXPECT(binrwir_program_get_literal_count(program, NULL) ==
+                        RUNTIMEC_STATUS_INVALID);
+    }
 
     /* 越界与空输入：失败封闭，输出回到无效值。 */
     wire_bytes = runtimec_bytes_view_make(encoded, sizeof(encoded));

@@ -145,7 +145,8 @@ static void runtimec_platform_release_chain(
 }
 
 runtimec_status_t runtimec_platform_session_create(
-    const char *data_source_name, const runtimec_session_options_t *options,
+    const char *data_source_name, uint64_t instance_identifier,
+    const runtimec_session_options_t *options,
     runtimec_platform_session_t **output, runtimec_error_t *error) {
     runtimec_error_reset(error);
     if (output != NULL) {
@@ -220,6 +221,7 @@ runtimec_status_t runtimec_platform_session_create(
     runtimec_kvspace_adapter_request_t adapter_request;
     adapter_request.allocator = allocator;
     adapter_request.borrowed_kvspace_handle = platform_session->kvspace_handle;
+    adapter_request.instance_identifier = instance_identifier;
     status = runtimec_kvspace_adapter_create_services(
         &adapter_request, &binary_interface, &platform_session->host_services,
         error);

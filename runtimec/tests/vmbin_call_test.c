@@ -1114,6 +1114,96 @@ static void test_slot_capacity_includes_symbols(void) {
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
 
+/*
+ * CALL 出口必须给出可恢复位置：调用指令后面还有后继指令时，
+ * resume_logical_program_counter 是后继的 source pc，不是 NONE。
+ */
+static void test_call_exit_reports_resume_position(void) {
+    test_allocator_context_t counters = {0U};
+    runtimec_allocator_t allocator = test_allocator(&counters);
+    test_value_t read_value;
+    test_value_t write_value;
+    binrwir_argument_t read_actual;
+    binrwir_argument_t write_actual;
+    binrwir_execution_exit_t exit_state;
+    vmbin_builtin_registry_t registry;
+    test_parameter_t caller_parameters[2];
+    test_parameter_t callee_parameters[2];
+    test_instruction_t caller_instructions[2];
+    test_instruction_t callee_instruction;
+    test_program_source_t caller_source;
+    test_program_source_t callee_source;
+    call_fixture_t fixture;
+
+    test_value_initialize(&read_value, sizeof(int64_t));
+    test_value_initialize(&write_value, sizeof(int64_t));
+    RUNTIMEC_EXPECT(binrwir_argument_create(
+                        1U, BINRWIR_REFERENCE_PARAMETER_READ, 0U, 0U,
+                        &read_actual) == RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_argument_create(
+                        2U, BINRWIR_REFERENCE_PARAMETER_WRITE, 0U, 0U,
+                        &write_actual) == RUNTIMEC_STATUS_SUCCESS);
+
+    /* [0] call（source pc 1），[1] copy（source pc 2）= 后继。 */
+    caller_parameters[0].direction = BINRWIR_PARAMETER_DIRECTION_READ;
+    caller_parameters[0].argument_index = 1U;
+    caller_parameters[0].type_name = "int64";
+    caller_parameters[1].direction = BINRWIR_PARAMETER_DIRECTION_WRITE;
+    caller_parameters[1].argument_index = 2U;
+    caller_parameters[1].type_name = "int64";
+    memset(caller_instructions, 0, sizeof(caller_instructions));
+    test_call_instruction(&caller_instructions[0], "callee", &read_actual, 1U,
+                          &write_actual, 1U);
+    caller_instructions[1].operation_identifier = TEST_COPY_OPERATION;
+    caller_instructions[1].source_program_counter = 2U;
+    /* argidx 必须等于签名里同槽参数的 argidx：读参 slot0 = 1，写参 slot0 = 2。 */
+    caller_instructions[1].reads[0] = read_actual;
+    caller_instructions[1].read_count = 1U;
+    caller_instructions[1].writes[0] = write_actual;
+    caller_instructions[1].write_count = 1U;
+    memset(&caller_source, 0, sizeof(caller_source));
+    caller_source.parameters = caller_parameters;
+    caller_source.parameter_count = 2U;
+    caller_source.symbols[0] = "callee";
+    caller_source.symbol_count = 1U;
+    caller_source.instructions = caller_instructions;
+    caller_source.instruction_count = 2U;
+
+    callee_parameters[0] = caller_parameters[0];
+    callee_parameters[1] = caller_parameters[1];
+    memset(&callee_instruction, 0, sizeof(callee_instruction));
+    callee_instruction.operation_identifier = TEST_COPY_OPERATION;
+    callee_instruction.source_program_counter = 1U;
+    RUNTIMEC_EXPECT(binrwir_argument_create(
+                        1U, BINRWIR_REFERENCE_PARAMETER_READ, 0U, 0U,
+                        &callee_instruction.reads[0]) == RUNTIMEC_STATUS_SUCCESS);
+    callee_instruction.read_count = 1U;
+    RUNTIMEC_EXPECT(binrwir_argument_create(
+                        2U, BINRWIR_REFERENCE_PARAMETER_WRITE, 0U, 0U,
+                        &callee_instruction.writes[0]) == RUNTIMEC_STATUS_SUCCESS);
+    callee_instruction.write_count = 1U;
+    memset(&callee_source, 0, sizeof(callee_source));
+    callee_source.parameters = callee_parameters;
+    callee_source.parameter_count = 2U;
+    callee_source.instructions = &callee_instruction;
+    callee_source.instruction_count = 1U;
+
+    RUNTIMEC_EXPECT(call_fixture_build(&allocator, &callee_source, &read_value,
+                                       &write_value, &caller_source,
+                                       &fixture) == RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    /* 执行调用方自己的 Program：第一条就是 call。 */
+    RUNTIMEC_EXPECT(vmbin_execute(fixture.caller_program, NULL, &fixture.caller,
+                                  &registry, NULL, &exit_state) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_CALL);
+    RUNTIMEC_EXPECT(exit_state.logical_program_counter == 1U);
+    RUNTIMEC_EXPECT(exit_state.resume_logical_program_counter == 2U);
+    call_fixture_release(&allocator, &fixture);
+    RUNTIMEC_EXPECT(counters.live_allocations == 0U);
+}
+
 /* 失败形状：缺参、已进入过的帧、返回前没进入。 */
 static void test_call_failure_shapes(void) {
     test_allocator_context_t counters = {0U};
@@ -1213,6 +1303,7 @@ int main(void) {
     test_static_actual_is_bound_by_inverse();
     test_return_restores_frame_for_reuse();
     test_slot_capacity_includes_symbols();
+    test_call_exit_reports_resume_position();
     test_call_failure_shapes();
     if (failures != 0) {
         fprintf(stderr, "vmbin_call_test: %d failure(s)\n", failures);
