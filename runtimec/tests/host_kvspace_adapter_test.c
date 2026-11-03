@@ -53,21 +53,20 @@ static void store_text(fake_kvspace_store_t *store, const char *key,
     free(wire);
 }
 
-/* 构造一条 int64 wire（`‥ctime` 的形态：body 是 8 字节小端）。 */
+/* 构造一条 int64 wire（`‥ctime` 的形态：body 是 8 字节小端，无 attr）。 */
 static void store_int64(fake_kvspace_store_t *store, const char *key,
                         int64_t value) {
-    uint8_t wire[KVSPACE_XVALUE_HEAD_LEN + 8U + 2U];
+    uint8_t wire[KVSPACE_XVALUE_HEAD_LEN + 8U];
     memset(wire, 0, sizeof(wire));
-    /* 8 字节 body 的短定长值：6B len(u48) + storetype + inline + body + 2B 空 attr。
-     * 按字节偏移拼，避免书写被命名检查判为缩写的结构体字段名。 */
-    wire[0] = 8U;
-    wire[6] = KVSPACE_XVALUE_ST_SHORT;
-    wire[7] = 0U;                       /* 指向形态：0 = 值内联 */
+    /* 16 字节 head：bodylen(u64)@0、attrslen(u32)@8、storetype@12、inline@13、
+     * padding@14-15；attr 区为空时 attrslen = 0。按字节偏移拼，不写结构体字段名。 */
+    wire[0] = 8U;                       /* bodylen = 8，小端 */
+    wire[12] = KVSPACE_XVALUE_ST_SHORT;
+    wire[13] = 0U;                      /* 指向形态：0 = 值内联 */
     for (size_t index = 0U; index < 8U; index++) {
         wire[KVSPACE_XVALUE_HEAD_LEN + index] =
             (uint8_t)(((uint64_t)value >> (8U * index)) & 0xffU);
     }
-    wire[KVSPACE_XVALUE_HEAD_LEN + 8U] = 2U;
     EXPECT(fake_kvspace_put(store, key, wire, (uint32_t)sizeof(wire), false) ==
            0);
 }
@@ -295,8 +294,7 @@ int main(void) {
         EXPECT(wire != NULL);
         kvspaceXvalueHead head;
         memcpy(&head, wire, sizeof(head));
-        EXPECT(header.value_size ==
-               KVSPACE_XVALUE_HEAD_LEN + kvspaceXvalueHeadLen(&head) + 2U);
+        EXPECT(header.value_size == kvspaceXvalueHeadTotalLen(&head));
         const runtimec_key_view_t missing =
             RUNTIMEC_KEY_VIEW_LITERAL("/lib/sum/nothere");
         EXPECT(services.read_header(services.context, &snapshot, missing,

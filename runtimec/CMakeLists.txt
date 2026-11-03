@@ -22,11 +22,24 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 option(RUNTIMEC_ENABLE_JIT "Enable BinRWIR JIT compilation capability" ON)
 
 set(RUNTIMEC_INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include")
-get_filename_component(KVLANG_INCLUDE_DIRECTORY
-    "${CMAKE_CURRENT_SOURCE_DIR}/../include" ABSOLUTE)
-if(NOT EXISTS "${KVLANG_INCLUDE_DIRECTORY}/kvspace/xvalue_head.h")
+# kvspace 头只有一个定义点：`kvspace` 仓自己的 include/。kvlang 内的
+# `include/kvspace/` 是 .gitignore 的过期副本，早已删除；它一旦重新出现，
+# 就会出现「真头是 16 字节、副本是 8 字节」这种无法验证的局面，故在此拦住。
+set(KVLANG_STALE_INCLUDE_DIRECTORY
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/kvspace")
+get_filename_component(KVSPACE_INCLUDE_DIRECTORY
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../kvspace/include" ABSOLUTE)
+if(EXISTS "${KVLANG_STALE_INCLUDE_DIRECTORY}")
     message(FATAL_ERROR
-        "runtimec requires kvlang include/kvspace/xvalue_head.h")
+        "kvlang/include/kvspace/ must not exist (stale copy of the kvspace "
+        "headers). Delete it; the single definition is "
+        "${KVSPACE_INCLUDE_DIRECTORY}/kvspace.")
+endif()
+if(NOT EXISTS "${KVSPACE_INCLUDE_DIRECTORY}/kvspace/xvalue_head.h")
+    message(FATAL_ERROR
+        "runtimec requires kvspace/include/kvspace/xvalue_head.h "
+        "(looked in ${KVSPACE_INCLUDE_DIRECTORY}/kvspace; clone array2d/kvspace "
+        "as a sibling of kvlang).")
 endif()
 set(RUNTIMEC_GENERATED_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${RUNTIMEC_GENERATED_DIRECTORY}")
@@ -52,7 +65,7 @@ function(runtimec_configure_target target_name)
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}"
             "${RUNTIMEC_INCLUDE_DIRECTORY}"
-            "${KVLANG_INCLUDE_DIRECTORY}")
+            "${KVSPACE_INCLUDE_DIRECTORY}")
     set_target_properties(${target_name} PROPERTIES
         C_VISIBILITY_PRESET hidden
         POSITION_INDEPENDENT_CODE ON)
@@ -96,7 +109,7 @@ runtimec_add_component(runtimec_engine engine)
 target_include_directories(runtimec_contract
     PUBLIC
         "$<BUILD_INTERFACE:${RUNTIMEC_INCLUDE_DIRECTORY}>"
-        "$<BUILD_INTERFACE:${KVLANG_INCLUDE_DIRECTORY}>")
+        "$<BUILD_INTERFACE:${KVSPACE_INCLUDE_DIRECTORY}>")
 target_link_libraries(runtimec_host
     PRIVATE runtimec_contract)
 target_link_libraries(runtimec_binrwir

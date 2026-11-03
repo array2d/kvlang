@@ -82,32 +82,34 @@ bool vmkv_source_split_wire(const uint8_t *wire, size_t wire_size,
     *output_body = NULL;
     *output_body_size = 0U;
     *output_langtype = runtimec_string_view_make(NULL, 0U);
-    if (wire == NULL || wire_size < KVSPACE_XVALUE_HEAD_LEN) {
+    if (wire == NULL) {
+        return false;
+    }
+    /*
+     * 读 head 本身要求 wire 至少有 head 那么长；这是「能不能解引用」，不是
+     * body/attr 的边界算术。除此之外的边界判定全部交给 head helper。
+     */
+    if (wire_size < sizeof(kvspaceXvalueHead)) {
         return false;
     }
     const kvspaceXvalueHead *head =
         (const kvspaceXvalueHead *)(const void *)wire;
-    const uint64_t body_size = kvspaceXvalueHeadLen(head);
-    if (body_size > (uint64_t)(wire_size - KVSPACE_XVALUE_HEAD_LEN)) {
+    /* 总长 = 16 + bodylen + attrslen；helper 同时校验 padding 为零与乘法溢出。 */
+    const uint64_t total_size = kvspaceXvalueHeadTotalLen(head);
+    if (total_size == 0U || total_size > (uint64_t)wire_size) {
         return false;
     }
-    const uint64_t body_end =
-        (uint64_t)KVSPACE_XVALUE_HEAD_LEN + body_size;
-    /* attr 区必须完整落在值内（空 attr 至少 2 字节）。 */
-    if (wire_size - (size_t)body_end < 2U) {
-        return false;
-    }
-    const uint16_t attr_length = kvspaceXvalueHeadAttrLen(wire, body_size);
-    if (attr_length < 2U ||
-        (uint64_t)body_end + attr_length != (uint64_t)wire_size) {
-        return false;
-    }
+    /*
+     * langtype 记录是可选的：`‥ctime` 这类值没有它，仍然是合法值。所以「无
+     * langtype」与「值非法」不能都靠 Bounded 的返回 0 来判——上面已经用总长
+     * 判过合法性，这里只取 langtype。
+     */
     const uint8_t *langtype = NULL;
     const uint16_t langtype_size =
-        kvspaceXvalueHeadLangtype(wire, body_size, &langtype);
+        kvspaceXvalueHeadLangtypeBounded(wire, (uint64_t)wire_size, &langtype);
     *output_body = wire + KVSPACE_XVALUE_HEAD_LEN;
-    *output_body_size = (size_t)body_size;
-    if (langtype_size != 0U) {
+    *output_body_size = (size_t)kvspaceXvalueHeadLen(head);
+    if (langtype_size != 0U && langtype != NULL) {
         *output_langtype = runtimec_string_view_make(
             (const char *)(const void *)langtype, langtype_size);
     }

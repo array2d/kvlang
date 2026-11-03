@@ -103,7 +103,8 @@ static void store_free(fake_store_t *store) {
 static uint8_t *make_wire(const uint8_t *body, size_t body_size,
                           const char *langtype, size_t *output_size) {
     const size_t langtype_size = strlen(langtype);
-    const size_t attr_size = 2U + (langtype_size == 0U ? 0U : 3U + langtype_size);
+    /* attr 区无长度前缀：长度进 head 的 attrslen。 */
+    const size_t attr_size = (langtype_size == 0U ? 0U : 3U + langtype_size);
     const size_t total = KVSPACE_XVALUE_HEAD_LEN + body_size + attr_size;
     uint8_t *wire = calloc(1, total);
     if (wire == NULL) {
@@ -112,20 +113,18 @@ static uint8_t *make_wire(const uint8_t *body, size_t body_size,
     kvspaceXvalueHead head;
     memset(&head, 0, sizeof(head));
     kvspaceXvalueHeadSetLen(&head, (uint64_t)body_size);
+    kvspaceXvalueHeadSetAttrsLen(&head, (uint32_t)attr_size);
     head.storetype = KVSPACE_XVALUE_ST_SLACK;
     memcpy(wire, &head, KVSPACE_XVALUE_HEAD_LEN);
     if (body_size != 0U) {
         memcpy(wire + KVSPACE_XVALUE_HEAD_LEN, body, body_size);
     }
-    uint8_t *attr = wire + KVSPACE_XVALUE_HEAD_LEN + body_size;
-    const uint16_t attr_length = (uint16_t)attr_size;
-    attr[0] = (uint8_t)(attr_length & 0xFFU);
-    attr[1] = (uint8_t)(attr_length >> 8U);
     if (langtype_size != 0U) {
-        attr[2] = KVSPACE_XVALUE_ATTR_TAG_LANGTYPE;
-        attr[3] = (uint8_t)(langtype_size & 0xFFU);
-        attr[4] = (uint8_t)(langtype_size >> 8U);
-        memcpy(attr + 5, langtype, langtype_size);
+        uint8_t *attr = wire + KVSPACE_XVALUE_HEAD_LEN + body_size;
+        attr[0] = KVSPACE_XVALUE_ATTR_TAG_LANGTYPE;
+        attr[1] = (uint8_t)(langtype_size & 0xFFU);
+        attr[2] = (uint8_t)(langtype_size >> 8U);
+        memcpy(attr + 3, langtype, langtype_size);
     }
     *output_size = total;
     return wire;

@@ -257,7 +257,10 @@ static void test_vmkv_xvalue_address_encoding(void) {
                     BINRWIR_REFERENCE_STATIC);
     RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
     RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.payload == UINT64_C(0x1008));
+    /* payload 是推导出的值体地址：基址 + 头长度，不写死偏移。 */
+    RUNTIMEC_EXPECT(encoded_argument.payload ==
+                    UINT64_C(0x1000) +
+                        RUNTIMEC_XVALUE_BODY_OFFSET_BYTES);
 
     dynamic_argument.key_addressability = VMKV_KEY_ADDRESSABILITY_DYNAMIC;
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(

@@ -112,7 +112,7 @@ target_compile_features(runtimec_vmkv_reader_test PRIVATE c_std_11)
 target_include_directories(runtimec_vmkv_reader_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/.."
     "${RUNTIMEC_INCLUDE_DIRECTORY}"
-    "${KVLANG_INCLUDE_DIRECTORY}")
+    "${KVSPACE_INCLUDE_DIRECTORY}")
 target_link_libraries(runtimec_vmkv_reader_test PRIVATE
     runtimec_contract runtimec_binrwir runtimec_vmkv)
 runtimec_test_warnings(runtimec_vmkv_reader_test)
@@ -125,7 +125,7 @@ target_compile_features(runtimec_vmkv_encoder_test PRIVATE c_std_11)
 target_include_directories(runtimec_vmkv_encoder_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/.."
     "${RUNTIMEC_INCLUDE_DIRECTORY}"
-    "${KVLANG_INCLUDE_DIRECTORY}")
+    "${KVSPACE_INCLUDE_DIRECTORY}")
 target_link_libraries(runtimec_vmkv_encoder_test PRIVATE
     runtimec_contract runtimec_binrwir runtimec_vmkv)
 runtimec_test_warnings(runtimec_vmkv_encoder_test)
@@ -178,7 +178,7 @@ target_compile_features(runtimec_vmbin_execute_test PRIVATE c_std_11)
 target_include_directories(runtimec_vmbin_execute_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/.."
     "${RUNTIMEC_INCLUDE_DIRECTORY}"
-    "${KVLANG_INCLUDE_DIRECTORY}")
+    "${KVSPACE_INCLUDE_DIRECTORY}")
 target_link_libraries(runtimec_vmbin_execute_test PRIVATE
     runtimec_contract runtimec_binrwir runtimec_vmkv runtimec_vmbin)
 runtimec_test_warnings(runtimec_vmbin_execute_test)
@@ -191,7 +191,7 @@ target_compile_features(runtimec_vmbin_call_test PRIVATE c_std_11)
 target_include_directories(runtimec_vmbin_call_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/.."
     "${RUNTIMEC_INCLUDE_DIRECTORY}"
-    "${KVLANG_INCLUDE_DIRECTORY}")
+    "${KVSPACE_INCLUDE_DIRECTORY}")
 target_link_libraries(runtimec_vmbin_call_test PRIVATE
     runtimec_contract runtimec_binrwir runtimec_vmbin)
 runtimec_test_warnings(runtimec_vmbin_call_test)
@@ -218,7 +218,7 @@ target_compile_features(runtimec_execution_window_test PRIVATE c_std_11)
 target_include_directories(runtimec_execution_window_test PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/.."
     "${RUNTIMEC_INCLUDE_DIRECTORY}"
-    "${KVLANG_INCLUDE_DIRECTORY}")
+    "${KVSPACE_INCLUDE_DIRECTORY}")
 target_link_libraries(runtimec_execution_window_test PRIVATE
     runtimec_contract runtimec_binrwir runtimec_vmkv
     runtimec_binrwir_compiler runtimec_vmbin runtimec_engine)

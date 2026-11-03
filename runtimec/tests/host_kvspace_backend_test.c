@@ -83,18 +83,17 @@ static bool store_text(runtimec_kvspace_binary_interface_t *binary_interface,
 
 static bool store_int64(runtimec_kvspace_binary_interface_t *binary_interface,
                         void *handle, const char *key, int64_t value) {
-    uint8_t wire[KVSPACE_XVALUE_HEAD_LEN + 8U + 2U];
+    uint8_t wire[KVSPACE_XVALUE_HEAD_LEN + 8U];
     memset(wire, 0, sizeof(wire));
-    /* 8 字节 body 的短定长值：6B len(u48) + storetype + inline + body + 2B 空 attr。
-     * 按字节偏移拼，避免书写被命名检查判为缩写的结构体字段名。 */
-    wire[0] = 8U;
-    wire[6] = KVSPACE_XVALUE_ST_SHORT;
-    wire[7] = 0U;                       /* 指向形态：0 = 值内联 */
+    /* 16 字节 head：bodylen(u64)@0、attrslen(u32)@8、storetype@12、inline@13、
+     * padding@14-15；无 attr 时 attrslen = 0。按字节偏移拼，不写结构体字段名。 */
+    wire[0] = 8U;                       /* bodylen = 8，小端 */
+    wire[12] = KVSPACE_XVALUE_ST_SHORT;
+    wire[13] = 0U;                      /* 指向形态：0 = 值内联 */
     for (size_t index = 0U; index < 8U; index++) {
         wire[KVSPACE_XVALUE_HEAD_LEN + index] =
             (uint8_t)(((uint64_t)value >> (8U * index)) & 0xffU);
     }
-    wire[KVSPACE_XVALUE_HEAD_LEN + 8U] = 2U;
     char error_text[256];
     error_text[0] = '\0';
     return binary_interface->set_value(handle, key, wire,
@@ -322,11 +321,11 @@ int main(int argument_count, char **arguments) {
                              runtimec_key_view_from_c_string(
                                  "/lib/sum.[0,-1]"),
                              &output, &error) == RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(output.size ==
-               KVSPACE_XVALUE_HEAD_LEN +
-                   kvspaceXvalueHeadLen(
-                       (const kvspaceXvalueHead *)(const void *)buffer) +
-                   2U);
+        /* 总长只经 TotalLen：它含 head + bodylen + attrslen 并校验 padding，
+         * 与探针同一判据，两者不会分叉。 */
+        EXPECT(output.size == kvspaceXvalueHeadTotalLen(
+                                  (const kvspaceXvalueHead *)(const void *)
+                                      buffer));
     }
 
     /* 4. source_revision：读函数的 `‥ctime`，重复取不变，搬移后推进。 */

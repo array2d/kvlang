@@ -332,7 +332,9 @@ static int fake_kvspace_new_slack(const uint8_t *data, uint64_t data_size,
     }
     const uint64_t langtype_size =
         langtype != NULL ? (uint64_t)strlen(langtype) : 0U;
-    const uint64_t attribute_size = 2U + (langtype_size != 0U ? 3U + langtype_size : 0U);
+    /* attr 区无长度前缀：长度进 head 的 attrslen（16 字节 head 的布局）。 */
+    const uint64_t attribute_size =
+        langtype_size != 0U ? 3U + langtype_size : 0U;
     const uint64_t total = KVSPACE_XVALUE_HEAD_LEN + data_size + attribute_size;
     uint8_t *wire = calloc(1U, (size_t)total);
     if (wire == NULL) {
@@ -342,21 +344,17 @@ static int fake_kvspace_new_slack(const uint8_t *data, uint64_t data_size,
     memset(&head, 0, sizeof(head));
     head.storetype = KVSPACE_XVALUE_ST_SLACK;
     kvspaceXvalueHeadSetLen(&head, data_size);
+    kvspaceXvalueHeadSetAttrsLen(&head, (uint32_t)attribute_size);
     memcpy(wire, &head, sizeof(head));
-    /* 指向形态字节固定为 inline：按偏移写，避免在测试里书写被命名检查判为
-     * 缩写的结构体字段。 */
-    wire[7] = 0U;                       /* 指向形态：0 = 值内联 */
     if (data_size != 0U) {
         memcpy(wire + KVSPACE_XVALUE_HEAD_LEN, data, (size_t)data_size);
     }
-    uint8_t *attribute = wire + KVSPACE_XVALUE_HEAD_LEN + data_size;
-    attribute[0] = (uint8_t)attribute_size;
-    attribute[1] = (uint8_t)(attribute_size >> 8U);
     if (langtype_size != 0U) {
-        attribute[2] = KVSPACE_XVALUE_ATTR_TAG_LANGTYPE;
-        attribute[3] = (uint8_t)langtype_size;
-        attribute[4] = (uint8_t)(langtype_size >> 8U);
-        memcpy(attribute + 5U, langtype, (size_t)langtype_size);
+        uint8_t *attribute = wire + KVSPACE_XVALUE_HEAD_LEN + data_size;
+        attribute[0] = KVSPACE_XVALUE_ATTR_TAG_LANGTYPE;
+        attribute[1] = (uint8_t)langtype_size;
+        attribute[2] = (uint8_t)(langtype_size >> 8U);
+        memcpy(attribute + 3U, langtype, (size_t)langtype_size);
     }
     *output = wire;
     *output_size = total;

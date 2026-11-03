@@ -471,8 +471,9 @@ static bool runtimec_kvspace_adapter_read_source_generation(
     }
     kvspaceXvalueHead head;
     memcpy(&head, value, sizeof(head));
+    /* 长度与总长都只经 head helper 判：本层不写偏移算术。 */
     if (kvspaceXvalueHeadLen(&head) != 8U ||
-        (uint64_t)KVSPACE_XVALUE_HEAD_LEN + 8U > (uint64_t)value_size) {
+        kvspaceXvalueHeadTotalLen(&head) > (uint64_t)value_size) {
         return false;
     }
     uint64_t generation = 0U;
@@ -564,10 +565,10 @@ static runtimec_status_t runtimec_kvspace_adapter_resolve_address(
     }
     kvspaceXvalueHead head;
     memcpy(&head, value, sizeof(head));
-    const uint64_t body_size = kvspaceXvalueHeadLen(&head);
-    if (body_size > (uint64_t)value_size - KVSPACE_XVALUE_HEAD_LEN) {
+    if (kvspaceXvalueHeadTotalLen(&head) > (uint64_t)value_size) {
         return runtimec_kvspace_adapter_fail(
-            error, RUNTIMEC_STATUS_ERROR, 42, "XValue body exceeds the value");
+            error, RUNTIMEC_STATUS_ERROR, 42,
+            "XValue body and attrs exceed the value");
     }
     const uint64_t address = (uint64_t)(uintptr_t)value;
     if (address == RUNTIMEC_XVALUE_ADDRESS_NONE) {

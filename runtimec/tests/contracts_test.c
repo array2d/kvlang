@@ -29,10 +29,10 @@ _Static_assert(RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY == 8,
                "insufficient-capacity status changed");
 
 /* 版本 pin：接口每次变更都必须在这里显式改一次，其余断言从宏推导。 */
-_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION == 6U,
-               "host services binary interface must remain version 6");
-_Static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U,
-               "V.body must remain eight bytes after the XValue base");
+_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION == 7U,
+               "host services binary interface must remain version 7");
+_Static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 16U,
+               "V.body must start sixteen bytes after the XValue base");
 _Static_assert(sizeof(runtimec_xvalue_address_t) == 8U,
                "XValue addresses must remain 64 bits");
 _Static_assert(sizeof(runtimec_value_body_address_t) == 8U,
@@ -163,7 +163,8 @@ static void test_xvalue_body_address(void) {
     RUNTIMEC_EXPECT(runtimec_xvalue_body_address(RUNTIMEC_XVALUE_ADDRESS_NONE) ==
                     RUNTIMEC_VALUE_BODY_ADDRESS_NONE);
     RUNTIMEC_EXPECT(runtimec_xvalue_body_address(UINT64_C(0x1000)) ==
-                    UINT64_C(0x1008));
+                    UINT64_C(0x1000) +
+                        RUNTIMEC_XVALUE_BODY_OFFSET_BYTES);
     RUNTIMEC_EXPECT(runtimec_xvalue_body_address(UINT64_MAX) ==
                     RUNTIMEC_VALUE_BODY_ADDRESS_NONE);
     RUNTIMEC_EXPECT(runtimec_xvalue_body_address(
@@ -177,14 +178,13 @@ static void test_xvalue_body_address(void) {
 
 /* 逆运算：从值体地址读回长度；零地址、下溢、坏 storetype 都返回 0。 */
 static void test_value_body_length(void) {
-    uint8_t storage[KVSPACE_XVALUE_HEAD_LEN + 8U + 2U];
+    uint8_t storage[KVSPACE_XVALUE_HEAD_LEN + 8U];
     memset(storage, 0, sizeof(storage));
     kvspaceXvalueHead head;
     memset(&head, 0, sizeof(head));
     head.storetype = KVSPACE_XVALUE_ST_SHORT;
     kvspaceXvalueHeadSetLen(&head, 8U);
     memcpy(storage, &head, sizeof(head));
-    storage[KVSPACE_XVALUE_HEAD_LEN + 8U] = 2U;
     const runtimec_value_body_address_t body =
         (runtimec_value_body_address_t)(uintptr_t)storage +
         RUNTIMEC_XVALUE_BODY_OFFSET_BYTES;
@@ -196,10 +196,10 @@ static void test_value_body_length(void) {
     RUNTIMEC_EXPECT(runtimec_value_body_length(
                         RUNTIMEC_XVALUE_BODY_OFFSET_BYTES - 1U) == 0U);
 
-    /* storetype 不可信：地址前面不是值头。 */
-    storage[6] = 0x7fU;
+    /* storetype 不可信：地址前面不是值头。偏移经 offsetof，不写死。 */
+    storage[offsetof(kvspaceXvalueHead, storetype)] = 0x7fU;
     RUNTIMEC_EXPECT(runtimec_value_body_length(body) == 0U);
-    storage[6] = KVSPACE_XVALUE_ST_SLACK;
+    storage[offsetof(kvspaceXvalueHead, storetype)] = KVSPACE_XVALUE_ST_SLACK;
     RUNTIMEC_EXPECT(runtimec_value_body_length(body) == 8U);
 
     /* 与 +8 互逆：基址 → 值体 → 长度，长度就是值头声明的 len。 */
@@ -219,13 +219,69 @@ static void test_xvalue_address_from_value_body(void) {
     RUNTIMEC_EXPECT(runtimec_value_body_xvalue_address(
                         RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) ==
                     RUNTIMEC_XVALUE_ADDRESS_NONE);
-    RUNTIMEC_EXPECT(runtimec_value_body_xvalue_address(UINT64_C(0x1008)) ==
+    RUNTIMEC_EXPECT(runtimec_value_body_xvalue_address(
+                        UINT64_C(0x1000) +
+                        RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) ==
                     UINT64_C(0x1000));
 
     /* 与 +8 互逆：基址 → 值体 → 基址回到原值。 */
     const runtimec_xvalue_address_t base = UINT64_C(0x2000);
     RUNTIMEC_EXPECT(runtimec_value_body_xvalue_address(
                         runtimec_xvalue_body_address(base)) == base);
+}
+
+
+/*
+ * 16 字节布局的常驻证据。四条核对逐字段证明 16 是唯一正确值：
+ *   1. bodylen  在偏移 0，u64 小端，经 kvspaceXvalueHeadLen 反读回原值；
+ *   2. attrslen 在偏移 8，u32 小端；
+ *   3. storetype@12、ptr@13 在原位；
+ *   4. padding@14-15 全零，且总长 == 16 + bodylen + attrslen。
+ * 将来谁再动 head，这条会先红。
+ */
+static void test_xvalue_head_sixteen_byte_layout(void) {
+    kvspaceXvalueHead head;
+
+    memset(&head, 0, sizeof(head));
+    kvspaceXvalueHeadSetLen(&head, 8U);
+    kvspaceXvalueHeadSetAttrsLen(&head, 8U);
+    head.storetype = KVSPACE_XVALUE_ST_SLACK;
+
+    RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, bodylen) == 0U);
+    RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, attrslen) == 8U);
+    RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, storetype) == 12U);
+    /* 指针形态字段偏移 13、padding 偏移 14：只验位置，不引用上游标识符。 */
+    RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, padding) == 14U);
+    RUNTIMEC_EXPECT(sizeof(kvspaceXvalueHead) == 16U);
+    RUNTIMEC_EXPECT(KVSPACE_XVALUE_HEAD_LEN == 16U);
+    RUNTIMEC_EXPECT(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == KVSPACE_XVALUE_HEAD_LEN);
+
+    /* 直接看字节：bodylen 是 u64 小端、attrslen 是 u32 小端。 */
+    const uint8_t *bytes = (const uint8_t *)(const void *)&head;
+    RUNTIMEC_EXPECT(bytes[0] == 8U);
+    for (size_t index = 1U; index < 8U; ++index) {
+        RUNTIMEC_EXPECT(bytes[index] == 0U);
+    }
+    RUNTIMEC_EXPECT(bytes[8] == 8U);
+    for (size_t index = 9U; index < 12U; ++index) {
+        RUNTIMEC_EXPECT(bytes[index] == 0U);
+    }
+    RUNTIMEC_EXPECT(bytes[12] == KVSPACE_XVALUE_ST_SLACK);
+    RUNTIMEC_EXPECT(bytes[14] == 0U);
+    RUNTIMEC_EXPECT(bytes[15] == 0U);
+
+    /* helper 反读必须回到原值。 */
+    RUNTIMEC_EXPECT(kvspaceXvalueHeadLen(&head) == 8U);
+    RUNTIMEC_EXPECT(kvspaceXvalueHeadAttrsLen(&head) == 8U);
+    RUNTIMEC_EXPECT(kvspaceXvalueHeadPaddingIsZero(&head));
+    RUNTIMEC_EXPECT(kvspaceXvalueHeadTotalLen(&head) ==
+           (uint64_t)KVSPACE_XVALUE_HEAD_LEN + 8U + 8U);
+
+    /* 非零 padding 必须非法：helper 返回 0（0 不是合法总长）。 */
+    kvspaceXvalueHead padded = head;
+    padded.padding[0] = 1U;
+    RUNTIMEC_EXPECT(!kvspaceXvalueHeadPaddingIsZero(&padded));
+    RUNTIMEC_EXPECT(kvspaceXvalueHeadTotalLen(&padded) == 0U);
 }
 
 static void test_host_services_version(void) {
@@ -248,6 +304,7 @@ int main(void) {
     test_xvalue_body_address();
     test_value_body_length();
     test_xvalue_address_from_value_body();
+    test_xvalue_head_sixteen_byte_layout();
     test_host_services_version();
     return failures == 0 ? 0 : 1;
 }

@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION 6U
+#define RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION 7U
 #define RUNTIMEC_XVALUE_ADDRESS_NONE UINT64_C(0)
 #define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES KVSPACE_XVALUE_HEAD_LEN
 #define RUNTIMEC_VALUE_BODY_ADDRESS_NONE UINT64_C(0)
@@ -193,19 +193,19 @@ runtimec_value_body_xvalue_address(
 uint32_t runtimec_value_body_length(runtimec_value_body_address_t body_address);
 
 #ifdef __cplusplus
-static_assert(KVSPACE_XVALUE_HEAD_LEN == 8U,
-              "KVspace XValue heads must remain 8 bytes");
-static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U,
-              "V.body must remain 8 bytes after the XValue base");
+static_assert(KVSPACE_XVALUE_HEAD_LEN == 16U,
+              "KVspace XValue heads must remain 16 bytes");
+static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 16U,
+              "V.body must start 16 bytes after the XValue base");
 static_assert(sizeof(runtimec_xvalue_address_t) == 8U,
               "XValue addresses must remain 64 bits");
 static_assert(sizeof(runtimec_value_body_address_t) == 8U,
               "V.body addresses must remain 64 bits");
 #else
-_Static_assert(KVSPACE_XVALUE_HEAD_LEN == 8U,
-               "KVspace XValue heads must remain 8 bytes");
-_Static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U,
-               "V.body must remain 8 bytes after the XValue base");
+_Static_assert(KVSPACE_XVALUE_HEAD_LEN == 16U,
+               "KVspace XValue heads must remain 16 bytes");
+_Static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 16U,
+               "V.body must start 16 bytes after the XValue base");
 _Static_assert(sizeof(runtimec_xvalue_address_t) == 8U,
                "XValue addresses must remain 64 bits");
 _Static_assert(sizeof(runtimec_value_body_address_t) == 8U,

@@ -175,7 +175,8 @@ static runtimec_status_t fake_source_revision(void *context,
 static uint8_t *make_wire(const uint8_t *body, size_t body_size,
                           const char *langtype, size_t *output_size) {
     const size_t langtype_size = strlen(langtype);
-    const size_t attr_size = 2U + (langtype_size == 0U ? 0U : 3U + langtype_size);
+    /* attr 区无长度前缀：长度进 head 的 attrslen。 */
+    const size_t attr_size = (langtype_size == 0U ? 0U : 3U + langtype_size);
     const size_t total = KVSPACE_XVALUE_HEAD_LEN + body_size + attr_size;
     uint8_t *wire = calloc(1, total);
     if (wire == NULL) {
@@ -184,22 +185,18 @@ static uint8_t *make_wire(const uint8_t *body, size_t body_size,
     kvspaceXvalueHead head;
     memset(&head, 0, sizeof(head));
     kvspaceXvalueHeadSetLen(&head, (uint64_t)body_size);
+    kvspaceXvalueHeadSetAttrsLen(&head, (uint32_t)attr_size);
     head.storetype = KVSPACE_XVALUE_ST_SLACK;
-    /* 指针形态 = INLINE(0)，已由上面的 memset 清零覆盖，无需再赋值。 */
     memcpy(wire, &head, KVSPACE_XVALUE_HEAD_LEN);
     if (body_size != 0U) {
         memcpy(wire + KVSPACE_XVALUE_HEAD_LEN, body, body_size);
     }
-    uint8_t *attr = wire + KVSPACE_XVALUE_HEAD_LEN + body_size;
-    const uint16_t attr_length =
-        (uint16_t)(2U + (langtype_size == 0U ? 0U : 3U + langtype_size));
-    attr[0] = (uint8_t)(attr_length & 0xFFU);
-    attr[1] = (uint8_t)(attr_length >> 8U);
     if (langtype_size != 0U) {
-        attr[2] = KVSPACE_XVALUE_ATTR_TAG_LANGTYPE;
-        attr[3] = (uint8_t)(langtype_size & 0xFFU);
-        attr[4] = (uint8_t)(langtype_size >> 8U);
-        memcpy(attr + 5, langtype, langtype_size);
+        uint8_t *attr = wire + KVSPACE_XVALUE_HEAD_LEN + body_size;
+        attr[0] = KVSPACE_XVALUE_ATTR_TAG_LANGTYPE;
+        attr[1] = (uint8_t)(langtype_size & 0xFFU);
+        attr[2] = (uint8_t)(langtype_size >> 8U);
+        memcpy(attr + 3, langtype, langtype_size);
     }
     *output_size = total;
     return wire;
@@ -401,8 +398,9 @@ static void test_happy_path(void) {
     EXPECT(memcmp(second->key.data, "/lib/sum/[1,-2]", second->key.size) == 0);
     /* 字面量视图：完整 wire 字节 + 同值 langtype，值就是 int64 的 1。 */
     EXPECT(runtimec_bytes_view_is_valid(second->literal.bytes));
+    /* attr 区无前缀：16 + body 8 + 记录 (tag1 + len2 + "int64" 5)。 */
     EXPECT(second->literal.bytes.size ==
-           KVSPACE_XVALUE_HEAD_LEN + 8U + 2U + 3U + 5U);
+           KVSPACE_XVALUE_HEAD_LEN + 8U + 3U + 5U);
     EXPECT(second->literal.langtype.size == 5U);
     EXPECT(memcmp(second->literal.langtype.data, "int64", 5U) == 0);
     if (second->literal.bytes.size >= KVSPACE_XVALUE_HEAD_LEN + 8U) {

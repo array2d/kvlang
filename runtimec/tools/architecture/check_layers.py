@@ -128,6 +128,8 @@ JIT_EXCLUSIVE_STORAGE_PATTERN = re.compile(
 BINARY_INTERFACE_VERSION_DEFINITION = re.compile(
     r"#define\s+RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION\s+(\d+)U\b"
 )
+BODY_OFFSET_DEFINITION = re.compile(
+    r"#define\s+RUNTIMEC_XVALUE_BODY_OFFSET_BYTES\s+(\S+)")
 BINARY_INTERFACE_VERSION_PIN = re.compile(
     r"RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION\s*==\s*(\d+)U\b"
 )
@@ -195,6 +197,7 @@ AUDIT_RULES = (
     "removed-static-address-resolver",
     "removed-value-cache-model",
     "policy-merge-outside-owner",
+    "stale-kvspace-header-copy",
     "target-dependencies",
     "unresolved-private-include",
     "xvalue-body-address-contract",
@@ -221,9 +224,9 @@ class Finding:
 def parse_arguments(command_arguments: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--source-root", type=Path,
-        default=Path(__file__).resolve().parents[3],
-        help="repository source root, or the runtimec directory itself",
+        "--source-root", type=Path, default=None,
+        help="repository source root, or the runtimec directory itself; "
+             "defaults to the tree this script lives in",
     )
     parser.add_argument("--quiet", action="store_true", help="suppress success output")
     parser.add_argument("--selftest", action="store_true",
@@ -276,7 +279,9 @@ def resolve_include(
         runtimec_root / "include" / token,
         *(runtimec_root / directory / token for directory in INTERNAL_PREFIXES),
         repository_root / token,
-        repository_root / "include" / token,
+        # kvspace 头只有 kvspace 仓自己的 include/ 一个定义点；kvlang/include 下
+        # 的同名副本早已删除，构建对它还有 FATAL_ERROR 守卫，所以这里不再列它。
+        repository_root.parent / "kvspace" / "include" / token,
     ]
     return next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
 
@@ -536,11 +541,18 @@ def audit_addressed_binrwir_model(
                     f"contract test pins version {pinned} while the header "
                     f"declares {version.group(1)}",
                 ))
-    for token in (
-        "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES KVSPACE_XVALUE_HEAD_LEN",
-        "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U",
-        "resolve_static_xvalue_address",
-    ):
+    # 判据是「偏移等于值头长度」，不是一个会过期的数字：头从 8 长到 16 时，
+    # `== 8U` 会变成假红，而真正的不变量没变。
+    offset_definition = BODY_OFFSET_DEFINITION.search(host_text)
+    if offset_definition is None or \
+            offset_definition.group(1) != "KVSPACE_XVALUE_HEAD_LEN":
+        findings.append(Finding(
+            relative_display(host_services, repository_root), 1,
+            "xvalue-body-address-contract",
+            "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES must be defined as "
+            "KVSPACE_XVALUE_HEAD_LEN, never as a numeric literal",
+        ))
+    for token in ("resolve_static_xvalue_address",):
         if token not in host_text:
             findings.append(Finding(
                 relative_display(host_services, repository_root), 1,
@@ -688,6 +700,18 @@ def audit_build_graph(
                 f"{target} exports public symbols but is declared "
                 f"{kind or 'with an unresolvable kind'}; it must be SHARED",
             ))
+
+    # kvspace 头只有一个定义点：kvspace 仓自己的 include/kvspace/。仓库内任何同名副本
+    # 都是过期拷贝，包含它会让两份头悄悄分叉。CMake 的 FATAL_ERROR 只在 configure 期
+    # 生效（已有 build 目录时新建该目录不会被发现），所以守卫放在每次都会跑的地方。
+    stale_copy = repository_root / "include" / "kvspace"
+    if stale_copy.exists():
+        findings.append(Finding(
+            relative_display(stale_copy, repository_root), 1,
+            "stale-kvspace-header-copy",
+            "kvspace headers have one definition point, "
+            "kvspace/include/kvspace/; a copy under include/kvspace/ must not exist",
+        ))
     return findings
 
 
@@ -1111,6 +1135,21 @@ SELFTEST_CASES = (
                  write=(("tests/contracts_test.c",
                          "_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION "
                          "== 5U, \"version\");\n"),)),
+    # 头从 8 长到 16：偏移定义不改形，规则不得因为数字变了而红。
+    SelftestCase("xvalue-body-offset-follows-head-length",
+                 forbid=("xvalue-body-address-contract",),
+                 write=(("contract/host_services.h",
+                         SELFTEST_HOST_HEADER.replace(
+                             "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U",
+                             "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 16U")),)),
+    # 偏移被写成数字字面量 —— 数字一旦被写死，换头长就没人能证明两者还相等。
+    SelftestCase("xvalue-body-offset-numeric-literal",
+                 ("xvalue-body-address-contract",),
+                 write=(("contract/host_services.h",
+                         SELFTEST_HOST_HEADER.replace(
+                             "#define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES "
+                             "KVSPACE_XVALUE_HEAD_LEN",
+                             "#define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES 8U")),)),
     SelftestCase("xvalue-body-contract-token-missing",
                  ("xvalue-body-address-contract",),
                  write=(("contract/host_services.h",
@@ -1165,6 +1204,10 @@ SELFTEST_CASES = (
     SelftestCase("removed-resolver-name", ("removed-static-address-resolver",),
                  write=(("contract/status.c",
                          "int resolve_static_value_body_address(void);\n"),)),
+    # kvspace 头只有一个定义点；仓库内的同名副本必须报。
+    SelftestCase("stale-kvspace-header-copy", ("stale-kvspace-header-copy",),
+                 write=(("../include/kvspace/xvalue_head.h",
+                         "#define KVSPACE_XVALUE_HEAD_LEN 16u\n"),)),
     SelftestCase("unreadable-source", ("read-error",),
                  write=(("vmbin/value_access.c", b"\xff\xfe\x00"),)),
     SelftestCase("jit-storage-outside-jit", ("jit-storage-outside-jit",),
@@ -1175,6 +1218,12 @@ SELFTEST_CASES = (
     SelftestCase("forbidden-tree-include", ("forbidden-tree-include",),
                  write=(("engine/execution_window.c",
                          '#include "runtime/legacy.h"\n' + SELFTEST_EXECUTION_WINDOW),)),
+    # kvspace 头只存在于 kvspace 仓自己的 include/；runtimec 源引用它是正常依赖。
+    SelftestCase("kvspace-include-resolves", forbid=("unresolved-private-include",),
+                 write=(("contract/host_services.h",
+                         '#include "kvspace/xvalue_head.h"\n' + SELFTEST_HOST_HEADER),
+                        ("../../kvspace/include/kvspace/xvalue_head.h",
+                         "#define KVSPACE_XVALUE_HEAD_LEN 16u\n"))),
     SelftestCase("unresolved-private-include", ("unresolved-private-include",),
                  write=(("engine/execution_window.c",
                          '#include "not_here/missing.h"\n' + SELFTEST_EXECUTION_WINDOW),)),
@@ -1214,17 +1263,20 @@ def run_selftest() -> int:
     covered: set[str] = set()
     rule_names = {case_rule for case in SELFTEST_CASES for case_rule in case.expect}
     with tempfile.TemporaryDirectory(prefix="runtimec-layers-selftest-") as directory:
-        root = Path(directory)
+        workspace = Path(directory)
         for case in SELFTEST_CASES:
+            root = workspace / "kvlang"
             runtimec_root = root / "runtimec"
-            if runtimec_root.exists():
-                shutil.rmtree(runtimec_root)
+            # 每个 fixture 从干净的仓库根开始：这条规则看的是 runtimec/ 之外的路径。
+            if root.exists():
+                shutil.rmtree(root)
             tree = selftest_base_tree()
             for relative in case.delete:
                 tree.pop(relative, None)
             tree.update(dict(case.write))
             for relative, content in tree.items():
-                path = runtimec_root / relative
+                # `../../` 形态用于写出仓库之外的兄弟仓（kvspace）。
+                path = (runtimec_root / relative).resolve()
                 path.parent.mkdir(parents=True, exist_ok=True)
                 if isinstance(content, bytes):
                     path.write_bytes(content)
@@ -1268,7 +1320,11 @@ def main(command_arguments: list[str] | None = None) -> int:
     arguments = parse_arguments(command_arguments or sys.argv[1:])
     if arguments.selftest:
         return run_selftest()
-    repository_root, runtimec_root = locate_runtimec(arguments.source_root)
+    source_root = arguments.source_root
+    if source_root is None:
+        script = Path(__file__).resolve()
+        source_root = script.parents[3] if len(script.parents) > 3 else Path.cwd()
+    repository_root, runtimec_root = locate_runtimec(source_root)
     if not runtimec_root.is_dir():
         print(f"{runtimec_root}:1: [missing-runtimec] runtimec source directory does not exist")
         return 2
