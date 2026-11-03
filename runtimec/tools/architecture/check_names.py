@@ -17,6 +17,19 @@ PRODUCT_DIRECTORIES = (
     "specification", "tests",
 )
 TEXT_SUFFIXES = {".c", ".h", ".cmake", ".in", ".map", ".exports", ".def"}
+# runtimec 交付形态是共享库：产品代码没有 stdout/stderr 的语义，诊断走 error 对象
+# （routing/README.md §六之三第 2 条）。测试打印失败信息是正当的，所以这个守卫
+# 只看产品目录——`PRODUCT_DIRECTORIES` 含 tests（缩写规则要扫它），不能直接复用。
+OUTPUT_FREE_DIRECTORIES = (
+    "include", "interface", "contract", "host", "binrwir", "vmkv",
+    "binrwir_compiler", "vmbin", "engine", "generated",
+)
+# `printf(` 会把 `snprintf(` 一起匹配——写这种判据时词边界是必需品，不是讲究。
+STDOUT_WRITE_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_])(?:fprintf\s*\(\s*stderr|fprintf\s*\(\s*stdout|"
+    r"f?printf\s*\(|puts\s*\(|putchar\s*\()")
+# 调试标记：只看字符串字面量里的，注释里写 TODO 是正常的。
+DEBUG_MARKER_PATTERN = re.compile(r'"(?:[^"\\]|\\.)*\b(?:DBG|TODO|XXX|FIXME)\b')
 FORBIDDEN_PATH_PARTS = {
     "abi": "execution_interface", "api": "interface", "compat": "delete",
     "compatibility": "delete", "docs": "documentation", "legacy": "delete",
@@ -214,8 +227,43 @@ def mask_foreign_abi_positions(code: str) -> str:
     return masked
 
 
+def audit_output_channels(runtimec_root: Path,
+                          repository_root: Path) -> list[Finding]:
+    """产品源不得直写标准输出，也不得在字符串里留调试标记。"""
+    findings: list[Finding] = []
+    for directory_name in OUTPUT_FREE_DIRECTORIES:
+        directory = runtimec_root / directory_name
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.rglob("*")):
+            if not path.is_file() or path.suffix not in {".c", ".h"}:
+                continue
+            display = relative_display(path, repository_root)
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError):
+                continue
+            code = c_code_without_comments_or_literals(text)
+            for match in STDOUT_WRITE_PATTERN.finditer(code):
+                findings.append(Finding(
+                    display, code.count("\n", 0, match.start()) + 1,
+                    "stdout-write-in-product-source",
+                    "the shared library has no stdout; report diagnostics through the "
+                    "error object",
+                ))
+            # 标记在字面量里，注释已被抹掉——所以这里直接扫原文。
+            for match in DEBUG_MARKER_PATTERN.finditer(text):
+                findings.append(Finding(
+                    display, text.count("\n", 0, match.start()) + 1,
+                    "debug-marker-in-product-source",
+                    "a debug marker left in a product string literal",
+                ))
+    return findings
+
+
 def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], int]:
     findings = audit_public_headers(runtimec_root, repository_root)
+    findings.extend(audit_output_channels(runtimec_root, repository_root))
     scanned = 0
     forbidden_directories = {
         "api": "interface",
@@ -305,6 +353,19 @@ SELFTEST_CASES = (
                       "}\n", ()),
     ("own-uppercase-abbreviation", "#define OUR_PTR_LIMIT 4\n",
      ("abbreviation-ptr-use-pointer",)),
+    # 产品源不得直写标准输出；测试可以（它们是正当的失败信息）。
+    ("stdout-write", "static void probe(void) {\n"
+                     '    fprintf(stderr, "boom");\n'
+                     "}\n", ("stdout-write-in-product-source",)),
+    ("stdout-write-plain-printf", 'printf("hello");\n',
+     ("stdout-write-in-product-source",)),
+    ("snprintf-is-not-stdout", "static int probe(char *b, int n) {\n"
+                               '    return snprintf(b, n, "%d", 1);\n'
+                               "}\n", ()),
+    ("debug-marker", 'static const char *message = "DBG reject";\n',
+     ("debug-marker-in-product-source",)),
+    ("todo-in-comment-is-fine", "/* TODO: 稍后处理 */\nstatic int probe(void) { return 0; }\n",
+     ()),
     # 成员访问旁边的独立使用不得被豁免连带放过。
     ("mixed-member-and-local",
      "static int ptr;\n"

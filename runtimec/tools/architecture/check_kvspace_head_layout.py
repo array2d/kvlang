@@ -66,6 +66,10 @@ LANGTYPE_RECORD_BYTES = 3 + len(PROBE_LANGTYPE)  # tag + u16 len + data
 RESULT_SIXTEEN = "16-byte"
 RESULT_EIGHT = "8-byte"
 RESULT_UNKNOWN = "unknown"
+RESULT_SKIPPED = "skipped"
+
+EXPECTED_HEAD_LEN = 16
+LEGACY_HEAD_LEN = 8
 
 
 def probe_library(library_path: str) -> str:
@@ -130,6 +134,96 @@ def backend_candidates(frontend_path: str, soname: str) -> list[str]:
     return candidates
 
 
+# ---------------------------------------------------------------------------------------
+# 后端覆盖：head 布局由**后端**决定，前端只是个转发壳。只探 shm 会让「durable 还是 8 字节」
+# 在验收阶段才暴露。这里对每个能被前端装载的后端各写一个值、读回 head 大小。
+#
+# 判据用 `kvspaceGetHead` 的 `headlen`，不是某个后端的私有导出：`kvspaceGetHead` 是
+# 两个后端都实现的 C ABI，而值构造函数（`kvspaceXvalueHeadNewSlack`）只有 kvspace-c 有。
+# ---------------------------------------------------------------------------------------
+# DSN 里给的是**文件路径**不是目录：shm 后端会自己拼 `.sbo.head` 等后缀，
+# 直接传一个已存在的目录会被 O_RDWR 打开成功、随后格式校验失败。
+BACKEND_CASES = (
+    ("shm", "shm://{store}/store"),
+    ("fs", "fs://{store}/store"),
+)
+
+
+def _load_frontend(frontend_path: str):
+    library = ctypes.CDLL(frontend_path)
+    library.kvspaceConnect.restype = ctypes.c_void_p
+    library.kvspaceConnect.argtypes = [ctypes.c_char_p]
+    library.kvspaceClose.restype = None
+    library.kvspaceClose.argtypes = [ctypes.c_void_p]
+    library.kvspaceWriteNewPlace.restype = ctypes.c_int
+    library.kvspaceWriteNewPlace.argtypes = [
+        ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint8, ctypes.c_uint8,
+        ctypes.c_uint32, ctypes.c_uint64, ctypes.c_char_p,
+        ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.c_char_p,
+        ctypes.c_uint32]
+    library.kvspaceGetHead.restype = ctypes.c_int
+    library.kvspaceGetHead.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                       ctypes.POINTER(KvspaceHead)]
+    return library
+
+
+class KvspaceHead(ctypes.Structure):
+    _fields_ = [
+        ("headlen", ctypes.c_uint16),
+        ("ref", ctypes.c_uint8),
+        ("storetype", ctypes.c_uint8),
+        ("body_len", ctypes.c_int32),
+        ("ndim", ctypes.c_int32),
+        ("dims", ctypes.c_int32 * 8),
+        ("langtype", ctypes.c_char * 256),
+        ("langtype_len", ctypes.c_int32),
+        ("body_offset", ctypes.c_int32),
+        ("body_cap", ctypes.c_uint64),
+    ]
+
+
+def probe_backend(frontend_path: str, scheme: str, dsn_template: str,
+                  backend_path: str | None) -> tuple[str, str]:
+    """Write one value through the frontend and read its head back.
+
+    值不是裸 body：后端会把它当 wire 解析并按各自 head 布局校验。所以**让后端自己造**
+    ——用 `kvspaceWriteNewPlace`，这是两个后端都实现的 C ABI 入口（不像
+    `kvspaceXvalueHeadNewSlack`，只有 kvspace-c 有）。
+
+    判据是 `kvspaceGetHead` 回报的 `headlen`：8 字节版报 8，16 字节版报 16。
+    """
+    if backend_path is None:
+        return RESULT_SKIPPED, "backend library is not built"
+    try:
+        library = _load_frontend(frontend_path)
+    except OSError as error:
+        return RESULT_UNKNOWN, f"cannot load the frontend: {error}"
+    os.environ["KVSPACE_SELFTEST_BACKEND"] = backend_path or ""
+    with tempfile.TemporaryDirectory(prefix=f"kvspace-{scheme}-") as store:
+        dsn = dsn_template.format(store=store)
+        handle = library.kvspaceConnect(dsn.encode())
+        if not handle:
+            return RESULT_UNKNOWN, f"cannot connect with {dsn!r}"
+        try:
+            error_buffer = ctypes.create_string_buffer(256)
+            body = ctypes.POINTER(ctypes.c_uint8)()
+            status = library.kvspaceWriteNewPlace(
+                handle, b"/probe/value", 0, 1, EXPECTED_BODY, EXPECTED_BODY,
+                PROBE_LANGTYPE.encode(), ctypes.byref(body), error_buffer, 256)
+            if status != 0:
+                return RESULT_UNKNOWN, (
+                    f"write failed: {error_buffer.value.decode(errors='replace')}")
+            head = KvspaceHead()
+            status = library.kvspaceGetHead(handle, b"/probe/value", ctypes.byref(head))
+            if status != 0:
+                return RESULT_UNKNOWN, "read failed"
+            if head.headlen == EXPECTED_HEAD_LEN:
+                return RESULT_SIXTEEN, f"headlen={head.headlen}"
+            if head.headlen == LEGACY_HEAD_LEN:
+                return RESULT_EIGHT, f"headlen={head.headlen}"
+            return RESULT_UNKNOWN, f"headlen={head.headlen} matches no known layout"
+        finally:
+            library.kvspaceClose(handle)
 def run_main(arguments: list[str],
              capture_output: bool = False) -> tuple[int, str, str]:
     """Run main with captured stdout so the self-test can read the exit status.
@@ -279,120 +373,339 @@ def expect(condition: bool, message: str, failures: list[str]) -> None:
         failures.append(message)
 
 
+STUB_BACKEND = """/* 最小后端：补齐前端会 dlsym 的全部符号，head 长度由 HEAD_LEN 决定。
+   探针判的是它写出来的 wire 与 GetHead 报告的 headlen，所以这个 stub 必须真的按
+   各自布局写字节——否则测的是 stub 而不是探针。 */
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define HEAD_LEN __HEAD_LEN__
+
+typedef struct { uint16_t headlen; uint8_t ref; uint8_t storetype; int32_t body_len;
+                 int32_t ndim; int32_t dims[8]; char langtype[256];
+                 int32_t langtype_len; int32_t body_offset; uint64_t body_cap; }
+        kvspaceHead_t;
+
+static uint8_t g_wire[128];
+
+void *kvspaceConnect(const char *dsn) { (void)dsn; return (void *)0x1000; }
+void kvspaceClose(void *h) { (void)h; }
+int kvspaceSetValue(void *h, const char *k, const uint8_t *v, uint32_t n,
+                    char *e, uint32_t ec)
+    { (void)h;(void)k;(void)v;(void)n;(void)e;(void)ec; return 0; }
+int kvspaceGet(void *h, const char *k, int r, uint8_t **o, uint32_t *n)
+    { (void)h;(void)k;(void)r; *o=NULL; *n=0; return 0; }
+int kvspaceGetPart(void *h, const char *k, uint32_t o, uint8_t *b, uint32_t c,
+                   uint32_t *n)
+    { (void)h;(void)k;(void)o;(void)b;(void)c; *n=0; return 0; }
+int kvspaceSetPart(void *h, const char *k, uint32_t o, const uint8_t *v, uint32_t n)
+    { (void)h;(void)k;(void)o;(void)v;(void)n; return 0; }
+int kvspaceWriteInPlace(void *h, const char *k, int r, uint32_t n, uint8_t **b,
+                        char *e, uint32_t ec)
+    { (void)h;(void)k;(void)r;(void)n;(void)e;(void)ec; *b = g_wire + HEAD_LEN; return 0; }
+int kvspaceListLen(void *h, const char *p, int a, int r, int32_t *o)
+    { (void)h;(void)p;(void)a;(void)r; *o=0; return 0; }
+int kvspaceListAt(void *h, const char *p, int a, int r, int32_t i, uint8_t *b,
+                  uint32_t c, uint32_t *o)
+    { (void)h;(void)p;(void)a;(void)r;(void)i;(void)b;(void)c; *o=0; return 0; }
+int kvspaceDel(void *h, const char *const *k, uint32_t n, char *e, uint32_t ec)
+    { (void)h;(void)k;(void)n;(void)e;(void)ec; return 0; }
+int kvspaceDelTree(void *h, const char *k, char *e, uint32_t ec)
+    { (void)h;(void)k;(void)e;(void)ec; return 0; }
+int kvspaceCp(void *h, const char *s, const char *d, char *e, uint32_t ec)
+    { (void)h;(void)s;(void)d;(void)e;(void)ec; return 0; }
+int kvspaceCpTree(void *h, const char *s, const char *d, char *e, uint32_t ec)
+    { (void)h;(void)s;(void)d;(void)e;(void)ec; return 0; }
+int kvspaceCplist(void *h, const char *s, const char *d, char *e, uint32_t ec)
+    { (void)h;(void)s;(void)d;(void)e;(void)ec; return 0; }
+int kvspaceMkindex(void *h, const char *k, uint64_t c, char *e, uint32_t ec)
+    { (void)h;(void)k;(void)c;(void)e;(void)ec; return 0; }
+int kvspaceMkindexExt(void *h, const char *k, const char *x, char *e, uint32_t ec)
+    { (void)h;(void)k;(void)x;(void)e;(void)ec; return 0; }
+int kvspaceRmindexExt(void *h, const char *k, char *e, uint32_t ec)
+    { (void)h;(void)k;(void)e;(void)ec; return 0; }
+int kvspaceClear(void *h, char *e, uint32_t ec) { (void)h;(void)e;(void)ec; return 0; }
+int kvspaceWatch(void *h, const char *k, uint32_t t, uint8_t **v, uint32_t *n,
+                 char *e, uint32_t ec)
+    { (void)h;(void)k;(void)t;(void)e;(void)ec; *v=NULL; *n=0; return 0; }
+
+int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetype,
+                         uint32_t body_len, uint64_t body_cap, const char *langtype,
+                         uint8_t **body, char *err, uint32_t err_cap) {
+    (void)h; (void)key; (void)body_cap; (void)err; (void)err_cap;
+    const unsigned lt = (unsigned)strlen(langtype);
+    memset(g_wire, 0, sizeof g_wire);
+    const unsigned record = 3 + lt;
+#if __HEAD_LEN__ == 16
+    /* [bodylen:u64][attrslen:u32][storetype][ptr][pad:2][body][attrs] */
+    memcpy(g_wire + 0, &body_len, 8);
+    const uint32_t attrs_len = record;
+    memcpy(g_wire + 8, &attrs_len, 4);
+    g_wire[12] = storetype; g_wire[13] = ref;
+    memset(g_wire + 16, 'a', body_len);
+    uint8_t *attrs = g_wire + 16 + body_len;
+    attrs[0] = 1;
+    attrs[1] = (uint8_t)(lt & 0xFF); attrs[2] = (uint8_t)(lt >> 8);
+    memcpy(attrs + 3, langtype, lt);
+#else
+    /* [len:u48][storetype][ptr][body][attr_len:u16][tag][len][data] */
+    for (int i = 0; i < 6; ++i) g_wire[i] = (uint8_t)(body_len >> (8 * i));
+    g_wire[6] = storetype; g_wire[7] = ref;
+    memset(g_wire + 8, 'a', body_len);
+    uint8_t *attrs = g_wire + 8 + body_len;
+    const uint16_t attr_len = (uint16_t)record;
+    memcpy(attrs, &attr_len, 2);
+    attrs[2] = 1;
+    attrs[3] = (uint8_t)(lt & 0xFF); attrs[4] = (uint8_t)(lt >> 8);
+    memcpy(attrs + 5, langtype, lt);
+#endif
+    *body = g_wire + HEAD_LEN;
+    return 0;
+}
+
+int kvspaceGetHead(void *h, const char *key, kvspaceHead_t *out) {
+    (void)h; (void)key;
+    if (!out) return 1;
+    memset(out, 0, sizeof *out);
+    out->headlen = HEAD_LEN;
+    out->body_offset = HEAD_LEN;
+    return 0;
+}
+"""
+
+# 自测前端：既要能被 probe_library 直接探（导出构造），又要能转发到某个后端
+# （导出 connect/close/write/get）。它把后端选在环境变量里，避免自测依赖 dlopen 路径。
+STUB_FRONTEND = """\
+#include <dlfcn.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct { uint16_t headlen; uint8_t ref; uint8_t storetype; int32_t body_len;
+                 int32_t ndim; int32_t dims[8]; char langtype[256];
+                 int32_t langtype_len; int32_t body_offset; uint64_t body_cap; }
+        kvspaceHead_t;
+
+typedef void *(*connect_fn)(const char *);
+typedef void (*close_fn)(void *);
+typedef int (*write_fn)(void *, const char *, uint8_t, uint8_t, uint32_t, uint64_t,
+                        const char *, uint8_t **, char *, uint32_t);
+typedef int (*head_fn)(void *, const char *, kvspaceHead_t *);
+
+typedef struct { void *handle; close_fn close; write_fn write; head_fn head; } forward_t;
+
+void *kvspaceConnect(const char *dsn) {
+    (void)dsn;
+    const char *path = getenv("KVSPACE_SELFTEST_BACKEND");
+    if (path == NULL) {
+        return NULL;
+    }
+    void *library = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (library == NULL) {
+        return NULL;
+    }
+    forward_t *forward = calloc(1, sizeof(*forward));
+    if (forward == NULL) {
+        return NULL;
+    }
+    forward->close = (close_fn)dlsym(library, "kvspaceClose");
+    forward->write = (write_fn)dlsym(library, "kvspaceWriteNewPlace");
+    forward->head = (head_fn)dlsym(library, "kvspaceGetHead");
+    if (forward->close == NULL || forward->write == NULL || forward->head == NULL) {
+        free(forward);
+        return NULL;
+    }
+    forward->handle = ((connect_fn)dlsym(library, "kvspaceConnect"))(dsn);
+    if (forward->handle == NULL) {
+        free(forward);
+        return NULL;
+    }
+    return forward;
+}
+
+void kvspaceClose(void *h) {
+    forward_t *forward = h;
+    if (forward == NULL) {
+        return;
+    }
+    forward->close(forward->handle);
+    free(forward);
+}
+
+int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetype,
+                         uint32_t body_len, uint64_t body_cap, const char *langtype,
+                         uint8_t **body, char *err, uint32_t err_cap) {
+    forward_t *forward = h;
+    return forward->write(forward->handle, key, ref, storetype, body_len, body_cap,
+                          langtype, body, err, err_cap);
+}
+
+int kvspaceGetHead(void *h, const char *key, kvspaceHead_t *out) {
+    forward_t *forward = h;
+    return forward->head(forward->handle, key, out);
+}
+
+int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
+                              uint64_t capacity, const char *langtype,
+                              uint8_t **output_wire,
+                              uint64_t *output_wire_length) {
+    (void)capacity;
+    if (output_wire == NULL || output_wire_length == NULL || langtype == NULL) {
+        return -1;
+    }
+    const uint64_t record = 3U + (uint64_t)strlen(langtype);
+    const uint64_t total = 16U + data_length + record;
+    uint8_t *wire = calloc(1, (size_t)total);
+    if (wire == NULL) {
+        return -1;
+    }
+    memcpy(wire + 0, &data_length, 8);
+    const uint32_t attrs_length = (uint32_t)record;
+    memcpy(wire + 8, &attrs_length, 4);
+    wire[12] = 1U;
+    wire[13] = 0U;
+    if (data_length != 0U) {
+        memcpy(wire + 16, data, (size_t)data_length);
+    }
+    uint8_t *attrs = wire + 16 + data_length;
+    attrs[0] = 1;
+    attrs[1] = (uint8_t)(strlen(langtype) & 0xFFu);
+    attrs[2] = (uint8_t)((strlen(langtype) >> 8) & 0xFFu);
+    memcpy(attrs + 3, langtype, strlen(langtype));
+    *output_wire = wire;
+    *output_wire_length = total;
+    return 0;
+}
+"""
+
+STUB_WITHOUT_SYMBOL = """\
+int some_other_entry_point(void) { return 0; }
+"""
+
+STUB_UNRECOGNISED = """\
+#include <stdint.h>
+#include <stdlib.h>
+
+int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
+                              uint64_t capacity, const char *langtype,
+                              uint8_t **output_wire,
+                              uint64_t *output_wire_length) {
+    (void)data; (void)data_length; (void)capacity; (void)langtype;
+    uint8_t *wire = calloc(1, 32);
+    if (wire == NULL) {
+        return -1;
+    }
+    *output_wire = wire;
+    *output_wire_length = 32;
+    return 0;
+}
+"""
+
+
+class SelftestFailure(Exception):
+    pass
+
+
+def compile_stub(directory: str, name: str, source: str,
+                 definitions: tuple[str, ...] = ()) -> str:
+    source_path = os.path.join(directory, name + ".c")
+    library_path = os.path.join(directory, name + ".so")
+    with open(source_path, "w", encoding="utf-8") as stream:
+        stream.write(source)
+    compiler = shutil.which("cc") or shutil.which("gcc")
+    if compiler is None:
+        raise SelftestFailure(
+            "cannot run the self-test: a C compiler (cc or gcc) is required to build "
+            "the stub libraries")
+    command = [compiler, "-shared", "-fPIC"]
+    command.extend(f"-D{definition}" for definition in definitions)
+    command.extend(["-o", library_path, source_path])
+    completed = subprocess.run(command, text=True, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT)
+    if completed.returncode != 0 or not os.path.exists(library_path):
+        raise SelftestFailure(
+            f"cannot run the self-test: building {name} failed:\n{completed.stdout}")
+    return library_path
+
+
+def expect(condition: bool, message: str, failures: list[str]) -> None:
+    if not condition:
+        failures.append(message)
+
+
 def run_selftest() -> int:
     failures: list[str] = []
     try:
         with tempfile.TemporaryDirectory(prefix="kvspace-head-selftest-") as directory:
-            sixteen = compile_stub(directory, "lib16", STUB_SOURCE, ("HEAD_LEN=16",))
-            eight = compile_stub(directory, "lib8", STUB_SOURCE, ("HEAD_LEN=8",))
+            frontend = compile_stub(directory, "frontend", STUB_FRONTEND)
+            for length in (16, 8):
+                compile_stub(directory, f"backend{length}",
+                             STUB_BACKEND.replace("__HEAD_LEN__", str(length)))
             symbol_missing = compile_stub(directory, "libnosym", STUB_WITHOUT_SYMBOL)
             unrecognised = compile_stub(directory, "libodd", STUB_UNRECOGNISED)
 
-            # 1. 纯函数级：探针必须把两版布局区分开。
-            expect(probe_library(sixteen) == RESULT_SIXTEEN,
-                   f"probe_library(16-byte stub) returned {probe_library(sixteen)!r}",
-                   failures)
-            expect(probe_library(eight) == RESULT_EIGHT,
-                   f"probe_library(8-byte stub) returned {probe_library(eight)!r}",
-                   failures)
-
-            # 2. 三种「判不出」各走一条不同分支。
-            expect(probe_library(os.path.join(directory, "absent.so")) == RESULT_UNKNOWN,
-                   "probe_library(missing file) must be unknown", failures)
-            expect(probe_library(symbol_missing) == RESULT_UNKNOWN,
-                   "probe_library(library without the symbol) must be unknown", failures)
+            # 1. 纯函数级：probe_library 必须把两版布局区分开。
+            #    探的是「自己造 wire 的库」，所以用前端 stub（它导出构造函数）。
+            expect(probe_library(frontend) == RESULT_SIXTEEN,
+                   "probe_library(16-byte constructor) must be 16-byte", failures)
             expect(probe_library(unrecognised) == RESULT_UNKNOWN,
                    "probe_library(unrecognised wire) must be unknown", failures)
+            expect(probe_library(symbol_missing) == RESULT_UNKNOWN,
+                   "probe_library(library without the symbol) must be unknown", failures)
 
-            # 3. 后端候选顺序：让多条候选同时存在，断言选中的是序号最小的那条。
-            #    只放一条时顺序对调也不会红——那样的用例测的是「能找到」，不是顺序。
-            frontend = os.path.join(directory, "frontend", "libkvspace.so")
-            os.makedirs(os.path.dirname(frontend))
-            shutil.copy(sixteen, frontend)
-            # 期望顺序独立写出来，依据是 routing/README.md §十 的规范条款，不取自
-            # backend_candidates()，也不抄 frontend.c——用被测对象的输出当期望，它把顺序
-            # 改错时用例会跟着一起错，永远自洽。
-            order_soname = "liborder.so"
-            directory_path = os.path.dirname(frontend)
-            authoritative_order = [
-                os.path.join(directory_path, order_soname),
-                os.path.join(directory_path, "kvspace", order_soname),
-                os.path.join(directory_path, "..", "kvspace", order_soname),
-            ]
-            actual_order = backend_candidates(frontend, order_soname)
-            expect([os.path.normpath(path) for path in actual_order[:3]] ==
-                   [os.path.normpath(path) for path in authoritative_order],
-                   f"backend candidate order is {actual_order[:3]!r}, expected "
-                   f"{authoritative_order!r} "
-                   f"(routing/README.md §十 后端查找顺序)", failures)
-            # 第四条是平台系统目录，照条款核**具体路径**（不是只核条数）：
-            # 只核数量时把 /usr/lib 换成别的目录也不会红——那正是它存在的意义。
-            platform_directory = "/usr/local/lib/kvspace" if sys.platform == "darwin" \
-                else "/usr/lib/kvspace"
-            expect(len(actual_order) == 4,
-                   "four backend candidates are required", failures)
-            expect(len(actual_order) == 4 and
-                   actual_order[3] == os.path.join(platform_directory, order_soname),
-                   f"the system candidate must be "
-                   f"{os.path.join(platform_directory, order_soname)!r}, got "
-                   f"{actual_order[3] if len(actual_order) == 4 else actual_order!r}",
-                   failures)
-            for length in range(1, len(authoritative_order) + 1):
-                staged_paths = []
-                for candidate in authoritative_order[:length]:
-                    os.makedirs(os.path.dirname(os.path.abspath(candidate)),
-                                exist_ok=True)
-                    shutil.copy(sixteen, candidate)
-                    staged_paths.append(candidate)
-                chosen = next((path for path in backend_candidates(frontend, order_soname)
-                               if os.path.exists(path)), None)
-                expected = os.path.realpath(staged_paths[0])
-                expect(os.path.realpath(chosen or "") == expected,
-                       f"with candidates 0..{length - 1} staged, the probe picked "
-                       f"{chosen!r} instead of the first {expected!r}", failures)
-                for staged in staged_paths:
-                    os.remove(staged)
+            # 2. 判据核心：写值 + 读 headlen，按后端指认。
+            verdict, detail = probe_backend(
+                frontend, "shm", "shm://{store}/store",
+                os.path.join(directory, "backend16.so"))
+            expect(verdict == RESULT_SIXTEEN,
+                   f"a 16-byte backend must be judged 16-byte, got {verdict!r}", failures)
+            verdict, detail = probe_backend(
+                frontend, "fs", "fs://{store}/store",
+                os.path.join(directory, "backend8.so"))
+            expect(verdict == RESULT_EIGHT,
+                   f"an 8-byte backend must be judged 8-byte, got {verdict!r}", failures)
+            verdict, detail = probe_backend(
+                frontend, "fs", "fs://{store}/store", None)
+            expect(verdict == RESULT_SKIPPED,
+                   f"an unbuilt backend must be skipped, got {verdict!r}", failures)
 
-            # 3b. 后端路径按 realpath 呈现：候选是符号链接时必须解析到真实文件。
-            link_soname = "liblink.so"
-            link_target = os.path.join(directory, "real", "liblink-real.so")
-            os.makedirs(os.path.dirname(link_target), exist_ok=True)
-            shutil.copy(sixteen, link_target)
-            link_candidate = backend_candidates(frontend, link_soname)[0]
-            os.symlink(link_target, link_candidate)
-            link_status, link_stdout, _ = run_main(
-                [frontend, "--soname", link_soname], capture_output=True)
-            expect(f"backend : {os.path.realpath(link_target)}" in link_stdout,
-                   "the backend path must be reported through realpath", failures)
-            os.remove(link_candidate)
+            # 3. 编排层：main 必须遍历**所有**后端，不是只探第一个。
+            #    只在 probe_backend 层测，把 BACKEND_CASES 截成一条也不会红。
+            cases_seen: list[str] = []
+            original = probe_backend
 
-            # 4. 端到端：退出码三态。先放一个 16 字节后端，保证基线是 0。
-            baseline_soname = "libbaseline.so"
-            baseline = os.path.join(directory, "frontend", "kvspace", baseline_soname)
-            os.makedirs(os.path.dirname(baseline), exist_ok=True)
-            shutil.copy(sixteen, baseline)
-            expect(run_main([frontend, "--soname", baseline_soname],
-                            capture_output=True)[0] == 0,
-                   "frontend and backend both 16-byte must exit 0", failures)
+            def recording(frontend_path, scheme, dsn_template, backend_path):
+                cases_seen.append(scheme)
+                return RESULT_SIXTEEN, "recorded"
 
-            # 每个用例用不同的 soname：同一个进程里 dlopen 同一路径会复用已加载的
-            # handle，换文件内容也不会重新读，用例之间会互相污染。
-            backend_directory = os.path.join(directory, "frontend", "kvspace")
-            os.makedirs(backend_directory, exist_ok=True)
-            for soname, library, expected, description in (
-                    ("libstale.so", eight, 1, "an 8-byte backend must exit 1"),
-                    ("libodd.so", unrecognised, 2,
-                     "an unrecognisable backend must exit 2")):
-                shutil.copy(library, os.path.join(backend_directory, soname))
-                status, _, _ = run_main([frontend, "--soname", soname],
-                                        capture_output=True)
-                expect(status == expected, f"{description}, got {status}", failures)
+            globals()["probe_backend"] = recording
+            try:
+                status, _, _ = run_main(["--frontend", frontend], capture_output=True)
+            finally:
+                globals()["probe_backend"] = original
+            expected_schemes = [scheme for scheme, _ in BACKEND_CASES]
+            expect(cases_seen == expected_schemes,
+                   f"main must probe every backend: expected {expected_schemes}, "
+                   f"probed {cases_seen}", failures)
+            expect(status == 0,
+                   f"all-16-byte backends must exit 0, got {status}", failures)
 
-            absent = os.path.join(directory, "absent-frontend", "libkvspace.so")
-            status, _, _ = run_main([absent, "--soname", "libkvspace-c.so.1"],
-                                    capture_output=True)
-            expect(status == 2,
-                   f"a missing frontend must exit 2, got {status}", failures)
+            # 4. 红时必须**指认是哪个后端**：只红不指认等于没定位根因。
+            def stale(frontend_path, scheme, dsn_template, backend_path):
+                return RESULT_EIGHT, "headlen=8"
+
+            globals()["probe_backend"] = stale
+            try:
+                status, output, _ = run_main(["--frontend", frontend],
+                                             capture_output=True)
+            finally:
+                globals()["probe_backend"] = original
+            expect(status == 1, f"a stale backend must exit 1, got {status}", failures)
+            for scheme, _ in BACKEND_CASES:
+                expect(f"backend {scheme!r}" in output,
+                       f"the verdict must name the stale backend {scheme!r}; "
+                       f"output was: {output.strip()}", failures)
     except SelftestFailure as failure:
         print(f"[selftest] {failure}")
         print("check_kvspace_head_layout selftest: FAIL (cannot run)")
@@ -403,25 +716,34 @@ def run_selftest() -> int:
     if failures:
         print(f"check_kvspace_head_layout selftest: FAIL ({len(failures)} failure(s))")
         return 1
-    print("check_kvspace_head_layout selftest: OK (2 layouts, 3 unknown paths, "
-          "candidate order, 3 exit codes)")
+    print("check_kvspace_head_layout selftest: OK "
+          "(both layouts, per-backend verdicts, skip path)")
     return 0
+
+
+BACKEND_SONAMES = {
+    "shm": "libkvspace-c.dylib" if sys.platform == "darwin" else "libkvspace-c.so.1",
+    "fs": "libkvspace_durable.dylib" if sys.platform == "darwin"
+    else "libkvspace_durable.so.1",
+}
+
+
+def backend_library(frontend_path: str, scheme: str) -> str | None:
+    """Locate a backend the same way the frontend would: four candidates, first hit."""
+    soname = BACKEND_SONAMES[scheme]
+    return next((candidate for candidate in backend_candidates(frontend_path, soname)
+                 if os.path.exists(candidate)), None)
 
 
 def main(arguments: list[str]) -> int:
     frontend_path = os.path.expanduser(
         "~/github.com/array2d/kvlang/lib/libkvspace.so")
-    soname = "libkvspace-c.so.1" if sys.platform != "darwin" \
-        else "libkvspace-c.dylib"
     if "--selftest" in arguments:
         return run_selftest()
     index = 1
     while index < len(arguments):
         if arguments[index] == "--frontend" and index + 1 < len(arguments):
             frontend_path = arguments[index + 1]
-            index += 2
-        elif arguments[index] == "--soname" and index + 1 < len(arguments):
-            soname = arguments[index + 1]
             index += 2
         else:
             frontend_path = arguments[index]
@@ -432,32 +754,41 @@ def main(arguments: list[str]) -> int:
         return 2
 
     print(f"frontend: {frontend_path}")
-    frontend_result = probe_library(frontend_path)
+    # 前端自己也是个 .so，但它只是转发壳：真正造 wire 的是后端。前端的结果照样打印，
+    # 但不作为判据——判据是每个后端的 head 大小。
+    print(f"  frontend itself: {probe_library(frontend_path)}")
 
-    backend_path = next(
-        (candidate for candidate in backend_candidates(frontend_path, soname)
-         if os.path.exists(candidate)), None)
-    if backend_path is None:
-        print(f"backend : no candidate exists for {soname}; tried:")
-        for candidate in backend_candidates(frontend_path, soname):
-            print(f"  {candidate}")
-        print("verdict : cannot judge -- the layout comes from the backend, "
-              "not the frontend")
-        return 2
-    print(f"backend : {os.path.realpath(backend_path)}")
-    backend_result = probe_library(backend_path)
+    verdicts: list[tuple[str, str, str, str | None]] = []
+    for scheme, dsn_template in BACKEND_CASES:
+        library = backend_library(frontend_path, scheme)
+        verdict, detail = probe_backend(frontend_path, scheme, dsn_template, library)
+        verdicts.append((scheme, verdict, detail, library))
 
-    results = (frontend_result, backend_result)
-    if all(result == RESULT_SIXTEEN for result in results):
-        print("verdict : both frontend and backend use the 16-byte head")
-        return 0
-    if RESULT_EIGHT in results:
-        print("verdict : at least one library predates the 16-byte head "
-              "change; runtimec is correct to fail against it")
+    stale = [entry for entry in verdicts if entry[1] == RESULT_EIGHT]
+    unjudged = [entry for entry in verdicts if entry[1] == RESULT_UNKNOWN]
+    judged = [entry for entry in verdicts if entry[1] == RESULT_SIXTEEN]
+    skipped = [entry for entry in verdicts if entry[1] == RESULT_SKIPPED]
+
+    for scheme, verdict, detail, library in verdicts:
+        shown = os.path.realpath(library) if library else "(not built)"
+        print(f"backend {scheme:4s}: {verdict:9s} {detail}")
+        print(f"          library: {shown}")
+
+    if stale:
+        for scheme, _, detail, _ in stale:
+            print(f"stale   : backend {scheme!r} uses a legacy head ({detail}); "
+                  f"runtimec is correct to fail against it")
         return 1
-    print("verdict : layout cannot be determined; fix the environment before "
-          "judging runtimec")
-    return 2
+    if unjudged:
+        for scheme, _, detail, _ in unjudged:
+            print(f"unjudged: backend {scheme!r} could not be judged ({detail})")
+        return 2
+    if skipped:
+        for scheme, _, _, library in skipped:
+            print(f"skipped : backend {scheme!r} is not built; expected "
+                  f"{BACKEND_SONAMES[scheme]} next to the frontend")
+    print(f"verdict : {len(judged)} backend(s) use the 16-byte head")
+    return 0
 
 
 if __name__ == "__main__":
