@@ -1860,11 +1860,7 @@ fn exact_kind(
     if op == ast::DEREF_OP || op == "kvlang·abs" {
         return None;
     }
-    // op 可能是符号（`+`）也可能已是语义名（`add`，specialize 之后）。
-    let entry = {
-        let by_glyph = symbol::lookup(op);
-        if by_glyph.word.is_empty() { symbol::by_word(op) } else { by_glyph }
-    };
+    let entry = symbol::lookup(op);
     let mut word = entry.word.to_string();
     if word.is_empty() {
         word = op.to_string();
@@ -1913,7 +1909,9 @@ fn exact_kind(
         | "string·formatuint" => return Some("char/utf32".to_string()),
         _ => {}
     }
-    let arith = entry.arith || builtin::num_op(&word);
+    // 只认字形表：exact_kind 的所有调用点都在 specialize 之前（见 analyze_func
+    // 的调用顺序），此时 e.op 仍是源码字形，不会是语义名。
+    let arith = entry.arith;
     let maxmin = matches!(word.as_str(), "max" | "min");
     if !arith && !maxmin {
         return None;
@@ -2176,10 +2174,10 @@ pub fn specialize(
     tm: &HashMap<String, String>,
     declared: &HashMap<String, String>,
     type_sets: &HashMap<String, Vec<String>>,
+    stable: &HashMap<String, String>,
 ) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
-    let stable = stable_kinds(fn_, tm, declared);
-    specialize_body(&mut fn_.body, tm, declared, &stable, type_sets, &mut diags);
+    specialize_body(&mut fn_.body, tm, declared, stable, type_sets, &mut diags);
     diags
 }
 

@@ -196,14 +196,19 @@ fn analyze_func(
     let declared = lower::declared_types(&fn_);
     let type_sets = lower::infer_type_sets(&fn_);
     let mut diags = lower::validate_writes(&fn_, &type_map, structs, sigs);
-    diags.extend(lower::specialize(&mut fn_, &type_map, &declared, &type_sets));
-    // 两个证据来源合并：`stable_kinds` 认声明为单一具体类型的变量，
-    // `assigned_concrete_kinds` 认「声明是并集、但每次赋值都是同一具体 kind」的变量。
-    // 后者是 encoder 收敛的关键（并集声明本身无法收敛成单一类型）。
+    /* 推断必须在 specialize 之前算一次，且只算一次：specialize 只改 e.op 的字形
+     * （`+` → `add`）与 `operator`/`operand_kind`，不改赋值来源与类型，所以两处
+     * 结果相同；在它之后重算既多余，又逼着 `exact_kind` 同时认两种 op 形态。
+     * 两个证据来源：`stable_kinds` 认声明为单一具体类型的变量，
+     * `assigned_concrete_kinds` 认「声明是并集、但每次赋值都是同一具体 kind」的
+     * 变量——后者是 encoder 收敛的关键。 */
     let mut stable = lower::stable_kinds(&fn_, &type_map, &declared);
     for (name, kind) in lower::assigned_concrete_kinds(&fn_, &declared) {
         stable.entry(name).or_insert(kind);
     }
+    diags.extend(lower::specialize(
+        &mut fn_, &type_map, &declared, &type_sets, &stable,
+    ));
     for d in &diags {
         eprintln!("{}", d.string());
     }
