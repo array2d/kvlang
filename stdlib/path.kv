@@ -1,105 +1,105 @@
 lib path {
-	rwfunc isabs(p:[]char/utf32) -> (r:bool) {
-		string·startswith(p, "/") -> r
+	rwfunc isabs(*[]char/utf32 $p) -> (*bool $r) {
+		string·startswith(*p, "/") -> *r
 	}
 
-	rwfunc join(a:[]char/utf32, b:[]char/utf32) -> (r:[]char/utf32) {
-		if (string·len(b) == 0) {
-			a -> r
-		} else if (path·isabs(b) || string·len(a) == 0) {
-			b -> r
-		} else if (string·endswith(a, "/")) {
-			a + b -> r
+	rwfunc join(*[]char/utf32 $a, *[]char/utf32 $b) -> (*[]char/utf32 $r) {
+		if (string·len(*b) == 0) {
+			*a -> *r
+		} else if (path·isabs(*b) || string·len(*a) == 0) {
+			*b -> *r
+		} else if (string·endswith(*a, "/")) {
+			*a + *b -> *r
 		} else {
-			a + "/" + b -> r
+			*a + "/" + *b -> *r
 		}
 	}
 
-	rwfunc trim_slashes(p:[]char/utf32) -> (r:[]char/utf32) {
-		hi = string·len(p)
+	rwfunc trim_slashes(*[]char/utf32 $p) -> (*[]char/utf32 $r) {
+		hi = string·len(*p)
 		while (hi > 1) {
-			if (string·char(p, hi - 1) != "/") {
+			if (string·char(*p, hi - 1) != "/") {
 				break
 			}
 			hi = hi - 1
 		}
-		string·slice(p, 0, hi) -> r
+		string·slice(*p, 0, hi) -> *r
 	}
 
-	rwfunc dirname(p:[]char/utf32) -> (d:[]char/utf32) {
-		if (string·len(p) == 0) {
-			"." -> d
+	rwfunc dirname(*[]char/utf32 $p) -> (*[]char/utf32 $d) {
+		if (string·len(*p) == 0) {
+			"." -> *d
 		} else {
-			path·trim_slashes(p) -> t
+			path·trim_slashes(*p) -> t
 			string·rfind(t, "/") -> idx
 			if (idx == -1) {
-				"." -> d
+				"." -> *d
 			} else {
 				string·slice(t, 0, max(1, idx)) -> prefix
-				path·trim_slashes(prefix) -> d
+				path·trim_slashes(prefix) -> *d
 			}
 		}
 	}
 
-	rwfunc basename(p:[]char/utf32) -> (b:[]char/utf32) {
-		if (string·len(p) == 0) {
-			"" -> b
+	rwfunc basename(*[]char/utf32 $p) -> (*[]char/utf32 $b) {
+		if (string·len(*p) == 0) {
+			"" -> *b
 		} else {
-			path·trim_slashes(p) -> t
+			path·trim_slashes(*p) -> t
 			if (t == "/") {
-				"/" -> b
+				"/" -> *b
 			} else {
 				string·rfind(t, "/") -> idx
-				string·slice(t, idx + 1, string·len(t)) -> b
+				string·slice(t, idx + 1, string·len(t)) -> *b
 			}
 		}
 	}
 
-	rwfunc split(p:[]char/utf32) -> (dir:[]char/utf32, base:[]char/utf32) {
-		path·dirname(p) -> dir
-		path·basename(p) -> base
+	rwfunc split(*[]char/utf32 $p) -> (*[]char/utf32 $dir, *[]char/utf32 $base) {
+		path·dirname(*p) -> *dir
+		path·basename(*p) -> *base
 	}
 
-	rwfunc splitext(p:[]char/utf32) -> (root:[]char/utf32, e:[]char/utf32) {
-		plen = string·len(p)
-		string·rfind(p, "/") -> slash
-		string·rfind(p, ".") -> dot
+	rwfunc splitext(*[]char/utf32 $p) -> (*[]char/utf32 $root, *[]char/utf32 $e) {
+		plen = string·len(*p)
+		string·rfind(*p, "/") -> slash
+		string·rfind(*p, ".") -> dot
 		if (dot <= slash + 1) {
-			p -> root
-			"" -> e
+			*p -> *root
+			"" -> *e
 		} else {
-			string·slice(p, slash + 1, dot) -> prefix
+			string·slice(*p, slash + 1, dot) -> prefix
 			if (string·allinset(prefix, ".")) {
-				p -> root
-				"" -> e
+				*p -> *root
+				"" -> *e
 			} else {
-				string·slice(p, 0, dot) -> root
-				string·slice(p, dot, plen) -> e
+				string·slice(*p, 0, dot) -> *root
+				string·slice(*p, dot, plen) -> *e
 			}
 		}
 	}
 
-	rwfunc ext(p:[]char/utf32) -> (e:[]char/utf32) {
-		path·basename(p) -> b
-		path·splitext(b) -> (_, e)
+	rwfunc ext(*[]char/utf32 $p) -> (*[]char/utf32 $e) {
+		path·basename(*p) -> b
+		path·splitext(b) -> (_, *e)
 	}
 
-	rwfunc stem(p:[]char/utf32) -> (s:[]char/utf32) {
-		path·basename(p) -> b
-		path·splitext(b) -> (s, _)
+	rwfunc stem(*[]char/utf32 $p) -> (*[]char/utf32 $s) {
+		path·basename(*p) -> b
+		path·splitext(b) -> (*s, _)
 	}
 
-	rwfunc normpath(p:[]char/utf32) -> (r:[]char/utf32) {
-		n = string·len(p)
+	rwfunc normpath(*[]char/utf32 $p) -> (*[]char/utf32 $r) {
+		n = string·len(*p)
 		if (n == 0) {
-			"." -> r
+			"." -> *r
 		} else {
-			path·isabs(p) -> is_abs
+			path·isabs(*p) -> is_abs
 			"" -> acc
 			i = 0
 			while (i < n) {
 				while (i < n) {
-					if (string·char(p, i) != "/") {
+					if (string·char(*p, i) != "/") {
 						break
 					}
 					i = i + 1
@@ -107,12 +107,12 @@ lib path {
 				if (i < n) {
 					start = i
 					while (i < n) {
-						if (string·char(p, i) == "/") {
+						if (string·char(*p, i) == "/") {
 							break
 						}
 						i = i + 1
 					}
-					string·slice(p, start, i) -> seg
+					string·slice(*p, start, i) -> seg
 					if (seg == "..") {
 						al = string·len(acc)
 						if (al == 0) {
@@ -140,11 +140,11 @@ lib path {
 				}
 			}
 			if (is_abs) {
-				"/" + acc -> r
+				"/" + acc -> *r
 			} else if (string·len(acc) == 0) {
-				"." -> r
+				"." -> *r
 			} else {
-				acc -> r
+				acc -> *r
 			}
 		}
 	}

@@ -20,7 +20,7 @@ lib kvlang {
 7. 写参初值是 `None` 不是 0：累加前先 `0 -> acc`，否则 `None + x` 报错。
 8. 数组要带 `[]` 前缀：`a:[]int64 = [1,2,3]`；写成 `a:int64 = [..]` 会报错。空容器必须标类型（`d:[]char/utf32·int64 = {}`）。
 9. `+` 只允许同类：字符+字符=拼接，数值+数值=相加；`"标签" + 数字` 会 TypeError。带标签打印用 `println("answer =", n)` 多参数（自动空格）。
-10. 函数没有返回值，结果通过写参传出：`rwfunc f(x:int64) -> (r:int64) { x + 1 -> r }`；调用 `f(3) -> y`。
+10. 函数没有返回值，结果通过写参传出：`rwfunc f(*int64 $x) -> (*int64 $r) { *x + 1 -> *r }`；调用 `f(3) -> y`。
 
 ## 1. 骨架与常见任务
 
@@ -167,7 +167,7 @@ map 遍历用 `while + kvspace·listlen + kvspace·listat`（for-in 对 map 不�
 
 ```kv
 lib mylib {
-    rwfunc add(a:int64, b:int64) -> (c:int64) { a + b -> c }
+    rwfunc add(*int64 $a, *int64 $b) -> (*int64 $c) { *a + *b -> *c }
 }
 rwfunc main() -> () {
     mylib·add(3,4) -> s
@@ -219,7 +219,7 @@ networld/fs·write("/tmp/x.txt", compactarray·newreinterpret("hi", "[]uint8")) 
 - 路径字符串读/写用 `=` / 成员读写 / `{t}·new`；`kvspace·del(path)`、`kvspace·deltree(path)`。
 - `kvspace·listlen("/dir/")`、`kvspace·listat("/dir/",i)`（列目录 path 要带尾 `/`）。
 - `kvlang·abs(x)`（= `&x`，取址）、`kvspace·cp(src,dst)`、`kvspace·cpdir(src,dst)`、`kvspace·cplist(src,dst)`。
-- rwfunc 便利：`kvspace·members(path)->(names,n)`、`kvspace·count(path)->n`。
+- rwfunc 便利：`kvspace·members($path) -> ($names,$n)`、`kvspace·count(*path)->*n`。
 
 ### 字符串（string·*）
 - `len / char / ord / cmp / find / slice / concat / set / formatint / formatuint / parseint / parseuint / parsefloat`。
@@ -227,8 +227,8 @@ networld/fs·write("/tmp/x.txt", compactarray·newreinterpret("hi", "[]uint8")) 
 - rwfunc 修剪/切分：`trim / trimstart / trimend / trimprefix / trimsuffix / padstart / padend`、`split / splitn / lines / fields / join`。
 - rwfunc 变换/分类：`reverse / repeat / upper / lower / capitalize / title / swapcase`、`allinset / isalpha / isdigit / isalnum / isspace / isupper / islower / isxdigit / ispunct / lang`（大小写与分类一律 ASCII；`lang` 按文字系统返 `zh/en/ja/ko/other`）。
 
-### 路径（path·*）
-- `path·isabs(p)->b`、`path·join(a,b)->p`、`path·dirname(p)->d`、`path·basename(p)->b`、`path·ext(p)->e`（含 `.`，如 `".txt"`）、`path·stem(p)->s`、`path·split(p)->(dir,base)`、`path·splitext(p)->(root,ext)`、`path·normpath(p)->r`。
+### 路径（(*path)·*）
+- `(*path)·isabs(p)->b`、`(*path)·join(a,b)->p`、`(*path)·dirname(p)->d`、`(*path)·basename(p)->b`、`(*path)·ext(p)->e`（含 `.`，如 `".txt"`）、`(*path)·stem(p)->s`、`(*path)·split(p)->(dir,base)`、`(*path)·splitext(p)->(root,ext)`、`(*path)·normpath(p)->r`。
 
 ### 数组（ndarray·* / xv·*）
 - `compactarray·numel / dim / shape`；`compactarray·at / set / reshape / reinterpret / langtype / bodylen`。
@@ -244,7 +244,7 @@ networld/fs·write("/tmp/x.txt", compactarray·newreinterpret("hi", "[]uint8")) 
 ### 时间/时长/随机
 - `time·now()`、`time·sub/add/before/after`；rwfunc：`time·since / until / equal / elapsed_ns / elapsed_ms / elapsed_s / max / min`。
 - `time/duration·nanos/millis/seconds/minutes/hours(...)`、`time/duration·as_nanos/as_millis/as_seconds/as_minutes/as_hours(...)`、`time/duration·add/sub/before/after`；rwfunc：`time/duration·days / as_days / is_zero / is_neg / is_pos / abs / equal / max / min / clamp`。
-- `random·intn(n)`、`random·uint64()`、`random·int63()`。
+- `random·intn(*n)`、`random·uint64()`、`random·int63()`。
 
 ### 线程/调试
 - `vthread·create(funckey)->vid`、`vthread·run(vid)`、`vthread·call(funckey)`、`vthread·sleep(dur)`、`vthread·setstatus("paused")`。
