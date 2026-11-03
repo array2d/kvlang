@@ -399,11 +399,6 @@ KIND_SPECIALIZED_OPERATIONS = {
     "lt": "LESS", "le": "LESS_EQUAL", "gt": "GREATER", "ge": "GREATER_EQUAL",
 }
 
-# Rows that the compiler selects from static operand types; no registered name resolves to
-# them. Asserted to be exactly this set.
-COMPILER_SELECTED = ("CONCAT", "CHARACTER_EQUAL", "POINTER_EQUAL", "BOOLEAN_EQUAL",
-                     "CHARACTER_NOT_EQUAL", "POINTER_NOT_EQUAL", "BOOLEAN_NOT_EQUAL")
-
 # (surface, first operand mask, second operand mask, invert, row). Every entry is a
 # selection: the row itself already carries the semantics, so no selection inverts.
 SPECIALIZATIONS = (
@@ -588,13 +583,15 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
     if not images <= row_identifiers:
         findings.append(f"alias image outside the capability rows: "
                         f"{sorted(images - row_identifiers)[:5]}")
+    # 没有 surface 名字的行只能由特化表选择 —— 白名单不存在，合法身份的代价是写一条
+    # 特化规则（surface 必须已注册、掩码合法、目标行存在），而不是写一个名字。
+    selected = {f"RUNTIMEC_RWIR_{target}" for _, _, _, _, target in SPECIALIZATIONS}
     unreachable = row_identifiers - images
-    selected = {f"RUNTIMEC_RWIR_{name}" for name in COMPILER_SELECTED}
-    if unreachable - selected:
-        findings.append(f"capability row unreachable from any surface name: "
-                        f"{sorted(unreachable - selected)[:5]}")
-    if not selected <= row_identifiers:
-        findings.append(f"compiler-selected row missing: {sorted(selected - row_identifiers)}")
+    if unreachable != selected:
+        findings.append(
+            f"compiler-selected rows must be exactly the specialization targets: "
+            f"rows without a surface name {sorted(unreachable)}, "
+            f"specialization targets {sorted(selected)}")
     for surface, first_mask, second_mask, _, target in SPECIALIZATIONS:
         if surface not in registered:
             findings.append(f"specialization names an unregistered surface {surface}")
