@@ -39,6 +39,12 @@ REGISTRY_SOURCE = Path("runtime/src/myrwircaps.c")
 MANIFEST = SPEC / "rwir_catalog.def"
 ALIAS_TABLE = SPEC / "rwir_alias_table.def"
 GAPS = SPEC / "rwir_catalog_gaps.md"
+# 第四份产物：layout 在构建期消费的签名表。layout 不访问 kvspace（用户裁决），
+# 所以 native rwir 的返回类型只能从这份生成表里读，不能运行期查 `/lib/<op>`。
+SIGNATURE_TABLE = SPEC / "native_rwir_decls.kv"
+# 产物清单是封闭集合：--check 必须逐份比对，少一份就红。否则某份产物可以从校验
+# 里静默消失，而生成器照样打印 OK。
+ARTIFACTS = (MANIFEST, ALIAS_TABLE, GAPS, SIGNATURE_TABLE)
 MATRIX = SPEC / "five-language-behavior-matrix.md"
 INSTRUCTION_HEADER = Path("runtimec/binrwir/instruction.h")
 
@@ -86,6 +92,14 @@ STRUCT_REF = type_set("structref")
 POINTER = type_set("pointer")
 FLOAT64 = type_set("float64")
 
+# 签名表允许出现的名字型 langtype。取自 layout/src/langtype.rs 的 known_kind：
+# 列在这里的是**校验集**，不是事实源——写少了会误报，写多了会让生成器放过 layout
+# 认不出的名字。time 族今天只用 time、time/duration、int64、bool，扩展时同步。
+SIGNATURE_LANGTYPES = ("time", "time/duration", "int64", "bool")
+# 类型串直接嵌进声明文本：逗号会切断参数表、竖线与引号会改变语义。这些字符一出现，
+# 生成物就会被 layout 解析成另一件事，而肉眼看着仍然像一条合法声明。
+FORBIDDEN_LANGTYPE_CHARACTERS = (",", "|", '"', "'", " ", "\t", "(", ")")
+
 TYPE_SET_NAMES = {
     SIGNED_INTEGER: "signed integer",
     UNSIGNED_INTEGER: "unsigned integer",
@@ -126,6 +140,10 @@ class Row:
     # `value` rows are on the scalar union channel; `parameterized` and `control` rows are
     # not, and their mask must stay zero unless a category bit is stated explicitly.
     channel: str
+    # 名字型类型（`time` / `time/duration`）：TypeSet 位表达不了它们，因为它们是 langtype 的
+    # 名字而不是宽度。空串 = 该行不声明，由 `/lib/<op>` 的安装签名给出。
+    read_langtypes: tuple[str, ...] = ()
+    write_langtypes: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------------------
@@ -251,6 +269,11 @@ class FamilyRow:
     read_mask: int = 0
     write_mask: int = 0
     alias_policy: str = "FORBIDDEN"
+    # 名字型类型：`time` / `time/duration` 没有对应的 TypeSet 位（它们是 langtype 的名字，
+    # 不是宽度），用逗号分隔的 langtype 名表达。缺省为空 = 该行不声明签名，
+    # 由 `/lib/<op>` 的安装签名给出。
+    read_langtypes: str = ""
+    write_langtypes: str = ""
 
 
 # alias policy: only the writers that rewrite their own destination in place may alias a
@@ -313,27 +336,48 @@ FAMILY_ROWS = (
     FamilyRow("ndarray", "numel", 0x0140, "array-element-access-by-kind"),
     FamilyRow("ndarray", "dim", 0x0141, "array-element-access-by-kind"),
     FamilyRow("ndarray", "shape", 0x0142, "array-element-access-by-kind"),
-    # time
-    FamilyRow("time", "now", 0x0150, "time-realtime-nanoseconds"),
-    FamilyRow("time", "sub", 0x0151, "time-arithmetic-result"),
-    FamilyRow("time", "add", 0x0152, "time-arithmetic-result"),
-    FamilyRow("time", "before", 0x0153, "time-arithmetic-result"),
-    FamilyRow("time", "after", 0x0154, "time-arithmetic-result"),
-    # duration
-    FamilyRow("time/duration", "nanos", 0x0160, "duration-overflow-wrap"),
-    FamilyRow("time/duration", "millis", 0x0161, "duration-overflow-wrap"),
-    FamilyRow("time/duration", "seconds", 0x0162, "duration-overflow-wrap"),
-    FamilyRow("time/duration", "minutes", 0x0163, "duration-overflow-wrap"),
-    FamilyRow("time/duration", "hours", 0x0164, "duration-overflow-wrap"),
-    FamilyRow("time/duration", "as_nanos", 0x0165, "duration-truncating-scale"),
-    FamilyRow("time/duration", "as_millis", 0x0166, "duration-truncating-scale"),
-    FamilyRow("time/duration", "as_seconds", 0x0167, "duration-truncating-scale"),
-    FamilyRow("time/duration", "as_minutes", 0x0168, "duration-truncating-scale"),
-    FamilyRow("time/duration", "as_hours", 0x0169, "duration-truncating-scale"),
-    FamilyRow("time/duration", "add", 0x016A, "duration-overflow-wrap"),
-    FamilyRow("time/duration", "sub", 0x016B, "duration-overflow-wrap"),
-    FamilyRow("time/duration", "before", 0x016C, "duration-truncating-scale"),
-    FamilyRow("time/duration", "after", 0x016D, "duration-truncating-scale"),
+    # time：签名来自 runtime/src/rwir_time.c 的实现（不是推断）。
+    #   现在 → time；time·sub(time,time) → time/duration；time·add(time,time/duration) → time；
+    #   before/after(time,time) → bool。
+    FamilyRow("time", "now", 0x0150, "time-realtime-nanoseconds",
+              read_langtypes="", write_langtypes="time"),
+    FamilyRow("time", "sub", 0x0151, "time-arithmetic-result",
+              read_langtypes="time,time", write_langtypes="time/duration"),
+    FamilyRow("time", "add", 0x0152, "time-arithmetic-result",
+              read_langtypes="time,time/duration", write_langtypes="time"),
+    FamilyRow("time", "before", 0x0153, "time-arithmetic-result",
+              read_langtypes="time,time", write_langtypes="bool"),
+    FamilyRow("time", "after", 0x0154, "time-arithmetic-result",
+              read_langtypes="time,time", write_langtypes="bool"),
+    # time/duration：整数进、time/duration 出，或 time/duration 进、int64/bool 出。
+    FamilyRow("time/duration", "nanos", 0x0160, "duration-overflow-wrap",
+              read_langtypes="int64", write_langtypes="time/duration"),
+    FamilyRow("time/duration", "millis", 0x0161, "duration-overflow-wrap",
+              read_langtypes="int64", write_langtypes="time/duration"),
+    FamilyRow("time/duration", "seconds", 0x0162, "duration-overflow-wrap",
+              read_langtypes="int64", write_langtypes="time/duration"),
+    FamilyRow("time/duration", "minutes", 0x0163, "duration-overflow-wrap",
+              read_langtypes="int64", write_langtypes="time/duration"),
+    FamilyRow("time/duration", "hours", 0x0164, "duration-overflow-wrap",
+              read_langtypes="int64", write_langtypes="time/duration"),
+    FamilyRow("time/duration", "as_nanos", 0x0165, "duration-truncating-scale",
+              read_langtypes="time/duration", write_langtypes="int64"),
+    FamilyRow("time/duration", "as_millis", 0x0166, "duration-truncating-scale",
+              read_langtypes="time/duration", write_langtypes="int64"),
+    FamilyRow("time/duration", "as_seconds", 0x0167, "duration-truncating-scale",
+              read_langtypes="time/duration", write_langtypes="int64"),
+    FamilyRow("time/duration", "as_minutes", 0x0168, "duration-truncating-scale",
+              read_langtypes="time/duration", write_langtypes="int64"),
+    FamilyRow("time/duration", "as_hours", 0x0169, "duration-truncating-scale",
+              read_langtypes="time/duration", write_langtypes="int64"),
+    FamilyRow("time/duration", "add", 0x016A, "duration-overflow-wrap",
+              read_langtypes="time/duration,time/duration", write_langtypes="time/duration"),
+    FamilyRow("time/duration", "sub", 0x016B, "duration-overflow-wrap",
+              read_langtypes="time/duration,time/duration", write_langtypes="time/duration"),
+    FamilyRow("time/duration", "before", 0x016C, "duration-truncating-scale",
+              read_langtypes="time/duration,time/duration", write_langtypes="bool"),
+    FamilyRow("time/duration", "after", 0x016D, "duration-truncating-scale",
+              read_langtypes="time/duration,time/duration", write_langtypes="bool"),
     # kvspace
     FamilyRow("kvspace", "get", 0x0170, "kvspace-get-missing-key"),
     FamilyRow("kvspace", "set", 0x0171, "kvspace-set-write-scope"),
@@ -505,6 +549,10 @@ def family_identifier(family: str, operation: str) -> str:
         "_" + IDENTIFIER_WORDS[operation]
 
 
+def _split_langtypes(text: str) -> tuple[str, ...]:
+    return tuple(part.strip() for part in text.split(",") if part.strip())
+
+
 def build_rows() -> list[Row]:
     rows: list[Row] = []
     for (identifier, operator, opid, read_mask, write_mask, constraint,
@@ -520,7 +568,9 @@ def build_rows() -> list[Row]:
         rows.append(Row(identifier, f"{family_row.family}{MIDDLE_DOT}{family_row.operation}",
                         family_row.opid, family_row.read_mask, family_row.write_mask,
                         "NONE", "IDENTITY", alias_policy, (family_row.decision,),
-                        "parameterized"))
+                        "parameterized",
+                        _split_langtypes(family_row.read_langtypes),
+                        _split_langtypes(family_row.write_langtypes)))
     return rows
 
 
@@ -623,6 +673,37 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
             f"compiler-selected rows must be exactly the specialization targets: "
             f"rows without a surface name {sorted(unreachable)}, "
             f"specialization targets {sorted(selected)}")
+    declared = [row for row in rows if row.read_langtypes or row.write_langtypes]
+    row_by_surface = {row.operator: row for row in rows}
+    for row in declared:
+        if row.operator not in row_by_surface:
+            findings.append(f"{row.identifier}: signature row has no surface name")
+        for langtype in row.read_langtypes + row.write_langtypes:
+            if langtype not in SIGNATURE_LANGTYPES:
+                findings.append(
+                    f"{row.identifier}: {langtype!r} is not a langtype layout accepts")
+            for character in FORBIDDEN_LANGTYPE_CHARACTERS:
+                if character in langtype:
+                    findings.append(
+                        f"{row.identifier}: langtype {langtype!r} contains "
+                        f"{character!r}, which would corrupt the declaration text")
+    if not declared:
+        findings.append("the signature table would be empty; "
+                        "layout needs it for name-typed returns")
+    else:
+        expected_shapes = [
+            (row.operator,
+             [f"{SIGNATURE_PARAMETER_NAME}{index}: {langtype}"
+              for index, langtype in enumerate(row.read_langtypes)],
+             [f"{SIGNATURE_RESULT_NAME}{index}: {langtype}"
+              for index, langtype in enumerate(row.write_langtypes)])
+            for row in declared]
+        recovered = read_back_signature_table(render_signature_table(rows))
+        if recovered != expected_shapes:
+            findings.append(
+                "the signature table does not read back as written: "
+                f"expected {expected_shapes[:2]}…, recovered {recovered[:2]}…")
+
     for surface, first_mask, second_mask, _, target in SPECIALIZATIONS:
         if surface not in registered:
             findings.append(f"specialization names an unregistered surface {surface}")
@@ -632,6 +713,76 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
             if mask == 0 or mask & ~(TYPE_SET_LIMIT - 1):
                 findings.append(f"specialization for {surface} has an invalid mask")
     return findings
+
+
+def render_signature_table(rows: list[Row]) -> str:
+    """Emit the layout-facing native rwir declarations.
+
+    格式就是 kvlang 的 `rwir` 声明语法——与 `rwfunc` 同形，只差函数体（由 runtime 实现）。
+    这样 layout 现成的 `rwir_decls` 解析器直接消费，不需要为这张表再写一个解析器；手写的
+    `rwir xxx` 声明与 runtime 提供的 native rwir 从此是同一件事，只是兑现方不同。
+
+    空 kindexpr（`name:` 后面什么都不写）就是「该参数/返回值不声明类型」的官方写法：
+    `any` 已被禁用、缺冒号是错误。生成物只用这一种写法，不发明第三种占位。
+
+    只收录声明了名字型类型的行。其余行的类型由 TypeSet 位或 `/lib/<op>` 的安装签名给出，
+    在 layout 侧是另一套判据，不该在这份声明里出现第二份。
+    """
+    declared = [row for row in rows if row.read_langtypes or row.write_langtypes]
+    lines = [
+        "// 组件：specification/native_rwir_decls.kv",
+        "// 作用：native rwir 的签名声明，供 layout 在**构建期**编进二进制。",
+        "// 联系：真源是 runtime/src/myrwircaps.c 的注册表 + five-language-behavior-matrix.md",
+        "//       的裁决；二者生成 rwir_catalog.def 的能力行，再由能力行生成本文件。",
+        "//       改签名要改真源，不改任何一份产物。本文件由",
+        "//       tools/architecture/generate_rwir_catalog.py 生成并由同一脚本校验。",
+        "// 约束：不让 layout 运行期访问 kvspace 读 /lib/<op>；也不在 layout 里手写第二份。",
+        "// 语法：与 rwfunc 同形的 rwir 声明，只差函数体——兑现方是 runtime。",
+        "//       空 kindexpr（`name:`）表示该参数/返回值不声明类型。",
+        f"// 统计：{len(declared)} 条声明"
+        "（其余行的签名由 TypeSet 位或安装签名给出）。",
+        "",
+    ]
+    for row in declared:
+        parameters = ", ".join(
+            f"{SIGNATURE_PARAMETER_NAME}{index}: {langtype}"
+            for index, langtype in enumerate(row.read_langtypes))
+        returns = ", ".join(
+            f"{SIGNATURE_RESULT_NAME}{index}: {langtype}"
+            for index, langtype in enumerate(row.write_langtypes))
+        lines.append(f"rwir {row.operator}({parameters}) -> ({returns})")
+    lines.append("")
+    return "\n".join(lines)
+
+
+# 参数名与返回值名是我们自己造的，就必须无歧义：`a` 可读成 argument/array/address，
+# `r` 可读成 result/register。名字只是占位（layout 不按名字匹配），但读的人会。
+SIGNATURE_PARAMETER_NAME = "argument"
+SIGNATURE_RESULT_NAME = "result"
+
+SIGNATURE_LINE_PATTERN = re.compile(
+    r"^rwir (\S+)\(([^)]*)\) -> \(([^)]*)\)$")
+
+
+def read_back_signature_table(text: str) -> list[tuple[str, list[str], list[str]]]:
+    """Parse the emitted declarations the way layout's `rwir` reader would.
+
+    独立于渲染器：渲染器把行拼成字符串，这里把它读回来。两边同时写错才会互相抵消，
+    而那种情形由 layout 自己的 `vet` 兜底——本函数只保证生成物**结构**没坏
+    （括号、箭头、参数名与类型能对上）。
+    """
+    recovered: list[tuple[str, list[str], list[str]]] = []
+    for line in text.splitlines():
+        if not line.startswith("rwir "):
+            continue
+        match = SIGNATURE_LINE_PATTERN.match(line)
+        if match is None:
+            raise SystemExit(f"generated declaration is malformed: {line!r}")
+        surface, raw_parameters, raw_returns = match.groups()
+        parameters = [item.strip() for item in raw_parameters.split(",") if item.strip()]
+        returns = [item.strip() for item in raw_returns.split(",") if item.strip()]
+        recovered.append((surface, parameters, returns))
+    return recovered
 
 
 def render_catalog(rows: list[Row], aliases: list[tuple[str, str]],
@@ -788,6 +939,7 @@ def main() -> int:
         MANIFEST: render_catalog(rows, aliases, opcodes, gaps),
         ALIAS_TABLE: render_alias_table(aliases, opcodes),
         GAPS: render_gaps(gaps, opcodes, rows),
+        SIGNATURE_TABLE: render_signature_table(rows),
     }
 
     if not arguments.check:
@@ -805,6 +957,14 @@ def main() -> int:
         actual = (root / path).read_text(encoding="utf-8") if (root / path).is_file() else ""
         if actual != text:
             drift.append(f"{path}: out of date; re-run without --check")
+    compared = set(expected)
+    for artifact in ARTIFACTS:
+        if artifact not in compared:
+            drift.append(f"{artifact}: declared artifact is not verified by --check")
+    unseen = compared - set(ARTIFACTS)
+    if unseen:
+        drift.append(f"verification covers undeclared artifacts: {sorted(unseen)}")
+
     if drift:
         for finding in drift:
             print(f"[drift] {finding}")

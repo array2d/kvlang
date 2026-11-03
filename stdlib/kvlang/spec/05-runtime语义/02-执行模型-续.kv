@@ -57,7 +57,7 @@ vthread 是 kvlang 的执行线程，句柄为整数 `vid`，根在 `/vthread/<v
   `out_pc` 冒泡给上层驱动派发、推进子 pc 后重入续驱。
 - `vthread·call(funckey)`：在**当前 vthread（同 vid）**内按运行时 funckey 造一次动态 `call`，被调函
   数跑到结束再回本指令后继。**不新开 vid、不挂起**——被调里的 rwir 由当前驱动就地派发。
-- `vthread·sleep(dur)`：让当前 vthread 阻塞 `dur`（duration，纳秒），到点后推进 PC。
+- `vthread·sleep(dur)`：让当前 vthread 阻塞 `dur`（`time/duration`，纳秒），到点后推进 PC。
 - `vthread·setstatus(status)`：置本 vthread 状态并把 PC 前进到下一指令。恢复执行即把 `‥status` 改回
   `running` 再驱动该 vid。
 

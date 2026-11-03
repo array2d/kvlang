@@ -8,7 +8,7 @@ lib kvlang/spec/类型系统/langtype语义类型 {
 
 | langtype（示例） | storetype | 说明 |
 |------------------|-----------|------|
-| `int64` `bool` `time` `duration` | 0 | 定宽标量 |
+| `int64` `bool` `time` `time/duration` | 0 | 定宽标量 |
 | `[N]char/utf8`、`[N]char/utf32`、`[N]char/ascii` | 1 | 字符序列；UTF-8 的 len 为字节数，N 为码点数 |
 | `[3,4]float32` | 2 | 定宽张量 |
 | `rwir` / `rwfunc` 调用槽 | 1 | 5 字节计数头加目标名 |

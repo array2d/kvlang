@@ -1,0 +1,30 @@
+// 组件：specification/native_rwir_decls.kv
+// 作用：native rwir 的签名声明，供 layout 在**构建期**编进二进制。
+// 联系：真源是 runtime/src/myrwircaps.c 的注册表 + five-language-behavior-matrix.md
+//       的裁决；二者生成 rwir_catalog.def 的能力行，再由能力行生成本文件。
+//       改签名要改真源，不改任何一份产物。本文件由
+//       tools/architecture/generate_rwir_catalog.py 生成并由同一脚本校验。
+// 约束：不让 layout 运行期访问 kvspace 读 /lib/<op>；也不在 layout 里手写第二份。
+// 语法：与 rwfunc 同形的 rwir 声明，只差函数体——兑现方是 runtime。
+//       空 kindexpr（`name:`）表示该参数/返回值不声明类型。
+// 统计：19 条声明（其余行的签名由 TypeSet 位或安装签名给出）。
+
+rwir time·now() -> (result0: time)
+rwir time·sub(argument0: time, argument1: time) -> (result0: time/duration)
+rwir time·add(argument0: time, argument1: time/duration) -> (result0: time)
+rwir time·before(argument0: time, argument1: time) -> (result0: bool)
+rwir time·after(argument0: time, argument1: time) -> (result0: bool)
+rwir time/duration·nanos(argument0: int64) -> (result0: time/duration)
+rwir time/duration·millis(argument0: int64) -> (result0: time/duration)
+rwir time/duration·seconds(argument0: int64) -> (result0: time/duration)
+rwir time/duration·minutes(argument0: int64) -> (result0: time/duration)
+rwir time/duration·hours(argument0: int64) -> (result0: time/duration)
+rwir time/duration·as_nanos(argument0: time/duration) -> (result0: int64)
+rwir time/duration·as_millis(argument0: time/duration) -> (result0: int64)
+rwir time/duration·as_seconds(argument0: time/duration) -> (result0: int64)
+rwir time/duration·as_minutes(argument0: time/duration) -> (result0: int64)
+rwir time/duration·as_hours(argument0: time/duration) -> (result0: int64)
+rwir time/duration·add(argument0: time/duration, argument1: time/duration) -> (result0: time/duration)
+rwir time/duration·sub(argument0: time/duration, argument1: time/duration) -> (result0: time/duration)
+rwir time/duration·before(argument0: time/duration, argument1: time/duration) -> (result0: bool)
+rwir time/duration·after(argument0: time/duration, argument1: time/duration) -> (result0: bool)

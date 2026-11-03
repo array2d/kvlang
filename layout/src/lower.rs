@@ -440,10 +440,67 @@ fn annotate_returns_inst(inst: &mut Instruction, sigs: &SigTable) {
     }
 }
 
+/// native rwir 的**名字型**签名（`time`、`duration` 这类不是 TypeSet 位的类型）。
+///
+/// 唯一源是 `runtimec/specification/native_rwir_decls.kv`——一份**与 rwfunc 同形**的
+/// `rwir` 声明片段，由 `generate_rwir_catalog.py` 生成并在 `--check` 里逐份校验；
+/// `include_str!` 把它的**文本**编进二进制。
+///
+/// 用 `.kv` 而不是自定义 X-macro：签名格式**只有一套**（`rwir name(a:T) -> (r:U)`），
+/// 解析器也只有一套（`parser::parse_code`）。格式分叉会造出第二份「什么算合法签名」
+/// 的判断，那是漂移的源头。
+///
+/// **构建期同步，运行期不查 kvspace、不查 runtime**——这正是 layout 与 kvspace 的
+/// 访问边界（见 `answer-layout-kvspace-access-boundary.md`）。
+///
+/// 注意：这里**只取内存里的签名表**，绝不调用 `write_rwir_decl`——那会往 `/lib`
+/// 写 native rwir 的声明，让每次 layout 都产生一次副作用写。
+const NATIVE_RWIR_DECLS: &str =
+    include_str!("../../runtimec/specification/native_rwir_decls.kv");
+
+fn native_rwir_signatures() -> &'static HashMap<String, ast::FuncSig> {
+    static TABLE: std::sync::OnceLock<HashMap<String, ast::FuncSig>> =
+        std::sync::OnceLock::new();
+    TABLE.get_or_init(|| {
+        /* 表是编译期固定输入：解析不出声明说明生成器漏产，属构建产物损坏，
+         * 不是运行期可恢复的状态。与「查表未命中」是两件事——后者保持现状，
+         * 前者必须硬失败，否则会静默退化成「没有签名」。 */
+        let (file, diags) = crate::parser::parse_code(NATIVE_RWIR_DECLS)
+            .unwrap_or_else(|e| panic!("native_rwir_decls.kv: parse failed: {e}"));
+        /* `warn`/`info` 之外的都是 error（Diagnostic 没有 level 字段，
+         * 用两个布尔位表达三档）。 */
+        let errors: Vec<String> = diags
+            .iter()
+            .filter(|d| !d.warn && !d.info)
+            .map(|d| d.string())
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "native_rwir_decls.kv: {} error diagnostic(s): {:?}",
+            errors.len(),
+            errors
+        );
+        assert!(
+            !file.rwir_decls.is_empty(),
+            "native_rwir_decls.kv: parsed 0 rwir declarations; the generator produced an empty table"
+        );
+        file.rwir_decls
+            .iter()
+            .map(|d| (d.sig.name.clone(), d.sig.clone()))
+            .collect()
+    })
+}
+
 /// 调用名 → 签名：支持裸名、`pkg·名`、`/lib/` 绝对路径。
 /// 调用名就是 `/lib` 去掉后的全路径：不做「包内裸名回退」。
+///
+/// 本文件/已装载代码里查不到时，**兜底查一次** native rwir 生成表：那是
+/// `time·now` 这类不落 `/lib` 的能力唯一的名字型签名来源。查不到就返回 None，
+/// 由调用方保持现状（裸名、无类型），**不在这里猜**。
 fn sig_lookup<'a>(sigs: &'a SigTable, op: &str) -> Option<&'a ast::FuncSig> {
-    sigs.get(op.strip_prefix("/lib/").unwrap_or(op))
+    let key = op.strip_prefix("/lib/").unwrap_or(op);
+    sigs.get(key)
+        .or_else(|| native_rwir_signatures().get(key))
 }
 
 /// 将函数体中 if/while 控制流降级为 ScopeStmt + br/goto，展开复合表达式。

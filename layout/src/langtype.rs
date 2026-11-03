@@ -44,7 +44,7 @@ fn known_kind(k: &str) -> bool {
             | "scope"
             | "struct"
             | "time"
-            | "duration"
+            | "time/duration"
     )
 }
 

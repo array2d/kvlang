@@ -3,11 +3,11 @@
 // since/until/equal/elapsed_ns/elapsed_ms/elapsed_s/max/min 是 rwfunc 封装（kv 源码，可寻址/可自改）。
 
 lib time {
-	rwfunc since(t:time) -> (dur:duration) {
+	rwfunc since(t:time) -> (dur:time/duration) {
 		time·now() -> now
 		time·sub(now, t) -> dur
 	}
-	rwfunc until(t:time) -> (dur:duration) {
+	rwfunc until(t:time) -> (dur:time/duration) {
 		time·now() -> now
 		time·sub(t, now) -> dur
 	}

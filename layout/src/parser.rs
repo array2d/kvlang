@@ -704,6 +704,12 @@ impl Parser {
         //
         // 注意 `*` **不切换**传递方式——kvlang 只有传址，不存在按值传（spec 03-类型系统/16-ptr
         // 末段、05-runtime语义/04-函数调用）。这条校验只是要求作者把值容器显式标注出来。
+        //
+        // 判据是 `is_value_container_ty`：**以 `/` 开头**（structref）或**含 `·`**（mapexpr）。
+        // 裸名不是种类名时，`langtype::expand_struct_refs` 会先把它展开成 `/lib/<名字>`
+        // （这是 struct 引用的语法糖），因此「写错/写漏种类名」的表现就是它突然被当成
+        // structref 容器、要求加 `*`。遇到这条诊断而类型看着像标量时，先看它是不是
+        // 拼错或未登记的种类名，而不是急着加 `*`。
         for (slot, ret) in sig
             .params
             .iter()
