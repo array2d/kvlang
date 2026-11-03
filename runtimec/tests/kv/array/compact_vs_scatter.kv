@@ -1,0 +1,13 @@
+// 判据：[] 是 compact（单 XValue、连续打包），{} 是散 key。
+// 两者的元素访问语法也不同：compact 用 a[i]，散 key 用 a·[i]。
+// 若把 {} 也当 compact，scatter·[1] 会报 TypeError。
+// 依据：03-类型系统/09-数组形态.kv、10-compact形态.kv。
+// 期望输出:
+//   20
+//   20
+rwfunc test() -> () {
+	compact:[3]int64 = [10, 20, 30]
+	scatter:[int64]·int64 = {10, 20, 30}
+	println(compact[1])
+	println(scatter·[1])
+}

@@ -1,0 +1,12 @@
+// 判据：调用可作另一个调用的实参；内层结果先物化再传外层。
+// 若实参位只接受裸名，add1(add1(40)) 在 layout 就失败。
+// 依据：04-layout语义/03-函数.kv、07-lib/inline_lib.kv 的嵌套调用。
+// 期望输出:
+//   42
+rwfunc add1(x:int64) -> (r:int64) {
+	x + 1 -> r
+}
+
+rwfunc test() -> () {
+	println(add1(add1(40)))
+}

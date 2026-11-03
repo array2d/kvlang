@@ -1,0 +1,10 @@
+// 判据：rwir 声明与 rwfunc 同形，只差函数体；兑现方是 runtime。
+// 若把无 body 的 rwir 当成语法错误，layout 会直接拒绝本文件。
+// 依据：runtimec/specification/native_rwir_decls.kv 的语法说明。
+// 期望输出:
+//   1
+rwir demo·echo(x:int64) -> (r:int64)
+
+rwfunc test() -> () {
+	println(1)
+}

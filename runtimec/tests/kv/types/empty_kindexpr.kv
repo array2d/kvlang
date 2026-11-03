@@ -1,0 +1,14 @@
+// 判据：空 kindexpr（name:）只表示不约束，不是「缺注解」。
+// 若把 x: 当成缺类型拒绝，两条调用都过不了 layout。
+// 依据：03-类型系统/07-文法与合法性.kv、05-langtype签名类型表达式.kv。
+// 期望输出:
+//   5
+//   hi
+rwfunc echo(x:) -> (r:) {
+	x -> r
+}
+
+rwfunc test() -> () {
+	println(echo(5))
+	println(echo("hi"))
+}

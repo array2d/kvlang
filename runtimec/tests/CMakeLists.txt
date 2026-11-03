@@ -208,6 +208,25 @@ find_library(RUNTIMEC_TEST_LAYOUT_LIBRARY
     NAMES kvlanglayout
     PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../../lib"
     NO_DEFAULT_PATH)
+# kv 用例运行器：以 kvlang 语法为单位的三态判据（pass/fail/blocked）。
+#
+# 与 C 用例的分工：C 用例证明「组件按契约工作」，本运行器证明「一段 kvlang 程序
+# 能被正确执行」。三态里 blocked 不是 skip —— 它是**有名字的缺口**，必须打印
+# 文件名 + pc + 算子名，按算子名分组后就是能力缺口表。
+add_executable(runtimec_kv_runner kv_runner.c)
+target_compile_features(runtimec_kv_runner PRIVATE c_std_11)
+target_include_directories(runtimec_kv_runner PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_kv_runner PRIVATE
+    runtimec_contract runtimec_host runtimec_binrwir runtimec_vmkv
+    runtimec_engine "${CMAKE_DL_LIBS}")
+runtimec_test_warnings(runtimec_kv_runner)
+# 骨架阶段**不注册 ctest**：运行器还没接执行链，不产出 pass 数。
+# 一个不执行的 runner 若进 ctest 并显示通过，就是「永远绿的 runner」——
+# 与「Skipped 伪装成通过」同族。执行链接通、能真正判 pass/fail 后再注册。
+
 add_executable(runtimec_vmkv_end_to_end_test vmkv_end_to_end_test.c)
 target_compile_features(runtimec_vmkv_end_to_end_test PRIVATE c_std_11)
 target_include_directories(runtimec_vmkv_end_to_end_test PRIVATE

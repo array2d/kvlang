@@ -1,0 +1,16 @@
+// 判据：/ 开头的裸路径是绝对路径字面量，可直接读写 kvspace；
+// ·[i] 是坐标段，不是表达式下标。
+// 若把路径当字符串或把 ·[0] 当数组下标，读写会落到别的 key。
+// 依据：01-词法/05-绝对路径字面量.kv、02-kvspace模型/05-键系统与数组访问.kv。
+// 期望输出:
+//   42
+//   7
+rwfunc test() -> () {
+	42 -> /tmp/kv_corpus/path_scalar
+	/tmp/kv_corpus/path_scalar -> v
+	println(v)
+	/tmp/kv_corpus/nums:[int64]·int64 = {}
+	7 -> /tmp/kv_corpus/nums·[0]
+	/tmp/kv_corpus/nums·[0] -> w
+	println(w)
+}

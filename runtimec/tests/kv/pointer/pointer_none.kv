@@ -1,0 +1,15 @@
+// 判据：*T 槽只有 Ptr 或 None；判空只写 p == None / p != None。
+// 若空指针用空串或 0 表示，第一条与第二条会给出错误布尔。
+// 依据：03-类型系统/16-ptr.kv「空指针即 None」。
+// 期望输出:
+//   true
+//   true
+//   7
+rwfunc test() -> () {
+	p:*int64 = None
+	println(p == None)
+	x = 7
+	&x -> p
+	println(p != None)
+	println(*p)
+}
