@@ -418,6 +418,10 @@ runtimec_status_t vmbin_call_enter(binrwir_execution_frame_t *caller,
     /* 被调帧与调用方共享同一份存储快照：代数必须一起继承，访问层才对得上。 */
     callee->snapshot_generation = caller->snapshot_generation;
     callee->bindings = bindings;
+    /* 一次调用总是从被调 Program 的第一条指令开始。这一句同时让「同一帧连续
+     * 多次进入」成立：上一轮把游标跑到了末尾，不复位的话下一次会直接落进
+     * 「执行越过末尾」分支、静默产出 DONE 而不执行任何指令。 */
+    callee->logical_program_counter = 0U;
     return RUNTIMEC_STATUS_SUCCESS;
 }
 

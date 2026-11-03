@@ -1204,6 +1204,133 @@ static void test_call_exit_reports_resume_position(void) {
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
 
+/*
+ * 同一帧连续多次调用：每个 round 用不同的实参存储，绑定表每次都重建，
+ * 槽号与容量保持自洽，且早先的写不会被后续调用污染。
+ *
+ * 被调带两个局部符号：容量必须覆盖 读参 + 写参 + 符号数，连续进入也如此。
+ */
+static void test_repeated_calls_on_same_frame(void) {
+    enum { TEST_ROUNDS = 3 };
+    test_allocator_context_t counters = {0U};
+    runtimec_allocator_t allocator = test_allocator(&counters);
+    test_value_t read_values[TEST_ROUNDS];
+    test_value_t write_values[TEST_ROUNDS];
+    binrwir_argument_t read_actual;
+    binrwir_argument_t write_actual;
+    binrwir_execution_exit_t exit_state;
+    vmbin_builtin_registry_t registry;
+    test_parameter_t caller_parameters[2];
+    test_parameter_t callee_parameters[2];
+    test_instruction_t caller_instruction;
+    test_instruction_t callee_instruction;
+    test_program_source_t caller_source;
+    test_program_source_t callee_source;
+    call_fixture_t fixture;
+    int round;
+
+    for (round = 0; round < TEST_ROUNDS; ++round) {
+        test_value_initialize(&read_values[round], sizeof(int64_t));
+        test_value_set_int64(&read_values[round], (int64_t)(round + 1) * 10);
+        test_value_initialize(&write_values[round], sizeof(int64_t));
+    }
+    RUNTIMEC_EXPECT(binrwir_argument_create(
+                        1U, BINRWIR_REFERENCE_PARAMETER_READ, 0U, 0U,
+                        &read_actual) == RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_argument_create(
+                        2U, BINRWIR_REFERENCE_PARAMETER_WRITE, 0U, 0U,
+                        &write_actual) == RUNTIMEC_STATUS_SUCCESS);
+    call_fixture_caller_source(caller_parameters, &caller_instruction,
+                               &caller_source, &read_actual, &write_actual);
+
+    /* 被调带两个局部符号：容量应当是 2 + 2 = 4，且连续进入都成立。 */
+    callee_parameters[0] = caller_parameters[0];
+    callee_parameters[1] = caller_parameters[1];
+    memset(&callee_instruction, 0, sizeof(callee_instruction));
+    callee_instruction.operation_identifier = TEST_COPY_OPERATION;
+    callee_instruction.source_program_counter = 1U;
+    RUNTIMEC_EXPECT(binrwir_argument_create(
+                        1U, BINRWIR_REFERENCE_PARAMETER_READ, 0U, 0U,
+                        &callee_instruction.reads[0]) == RUNTIMEC_STATUS_SUCCESS);
+    callee_instruction.read_count = 1U;
+    RUNTIMEC_EXPECT(binrwir_argument_create(
+                        2U, BINRWIR_REFERENCE_PARAMETER_WRITE, 0U, 0U,
+                        &callee_instruction.writes[0]) == RUNTIMEC_STATUS_SUCCESS);
+    callee_instruction.write_count = 1U;
+    memset(&callee_source, 0, sizeof(callee_source));
+    callee_source.parameters = callee_parameters;
+    callee_source.parameter_count = 2U;
+    callee_source.symbols[0] = "/t/local_a";
+    callee_source.symbols[1] = "/t/local_b";
+    callee_source.symbol_count = 2U;
+    callee_source.instructions = &callee_instruction;
+    callee_source.instruction_count = 1U;
+
+    RUNTIMEC_EXPECT(call_fixture_build(&allocator, &callee_source,
+                                       &read_values[0], &write_values[0],
+                                       &caller_source, &fixture) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+
+    for (round = 0; round < TEST_ROUNDS; ++round) {
+        const binrwir_frame_binding_t *binding = NULL;
+
+        /* 每个 round 把调用方实参改指向本 round 的存储。 */
+        RUNTIMEC_EXPECT(binrwir_frame_bindings_bind(
+                            fixture.caller.bindings, 0U,
+                            runtimec_key_view_from_c_string("/vthread/1/rd"),
+                            runtimec_key_view_from_c_string("/t/read_actual"),
+                            test_value_xvalue_address(&read_values[round]),
+                            1U) == RUNTIMEC_STATUS_SUCCESS);
+        RUNTIMEC_EXPECT(binrwir_frame_bindings_bind(
+                            fixture.caller.bindings, 1U,
+                            runtimec_key_view_from_c_string("/vthread/1/wr"),
+                            runtimec_key_view_from_c_string("/t/write_actual"),
+                            test_value_xvalue_address(&write_values[round]),
+                            1U) == RUNTIMEC_STATUS_SUCCESS);
+
+        RUNTIMEC_EXPECT(vmbin_call_enter(&fixture.caller, &fixture.callee,
+                                         fixture.control, &exit_state) ==
+                        RUNTIMEC_STATUS_SUCCESS);
+        /* 每次进入都重建表，容量含符号，槽号仍是「读 0 / 写 nr+0」。 */
+        RUNTIMEC_EXPECT(binrwir_frame_bindings_get_capacity(
+                            fixture.callee.bindings) == 4U);
+        RUNTIMEC_EXPECT(binrwir_frame_bindings_get(
+                            fixture.callee.bindings, 0U,
+                            fixture.callee.snapshot_generation, &binding) ==
+                        RUNTIMEC_STATUS_SUCCESS);
+        RUNTIMEC_EXPECT(binding->xvalue_address ==
+                        test_value_xvalue_address(&read_values[round]));
+        binding = NULL;
+        RUNTIMEC_EXPECT(binrwir_frame_bindings_get(
+                            fixture.callee.bindings, 1U,
+                            fixture.callee.snapshot_generation, &binding) ==
+                        RUNTIMEC_STATUS_SUCCESS);
+        RUNTIMEC_EXPECT(binding->xvalue_address ==
+                        test_value_xvalue_address(&write_values[round]));
+
+        RUNTIMEC_EXPECT(vmbin_execute(fixture.callee_program, NULL,
+                                      &fixture.callee, &registry, NULL,
+                                      &exit_state) == RUNTIMEC_STATUS_SUCCESS);
+        RUNTIMEC_EXPECT(test_value_int64(&write_values[round]) ==
+                        (int64_t)(round + 1) * 10);
+        RUNTIMEC_EXPECT(vmbin_call_return(&fixture.caller, &fixture.callee,
+                                          fixture.control, &exit_state) ==
+                        RUNTIMEC_STATUS_SUCCESS);
+        RUNTIMEC_EXPECT(fixture.callee.bindings == NULL);
+    }
+
+    /* 前面的 round 没有被后面的调用写脏。 */
+    for (round = 0; round < TEST_ROUNDS; ++round) {
+        RUNTIMEC_EXPECT(test_value_int64(&write_values[round]) ==
+                        (int64_t)(round + 1) * 10);
+    }
+
+    call_fixture_release(&allocator, &fixture);
+    RUNTIMEC_EXPECT(counters.live_allocations == 0U);
+}
+
 /* 失败形状：缺参、已进入过的帧、返回前没进入。 */
 static void test_call_failure_shapes(void) {
     test_allocator_context_t counters = {0U};
@@ -1304,6 +1431,7 @@ int main(void) {
     test_return_restores_frame_for_reuse();
     test_slot_capacity_includes_symbols();
     test_call_exit_reports_resume_position();
+    test_repeated_calls_on_same_frame();
     test_call_failure_shapes();
     if (failures != 0) {
         fprintf(stderr, "vmbin_call_test: %d failure(s)\n", failures);
