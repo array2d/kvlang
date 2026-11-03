@@ -288,10 +288,15 @@ add_test(NAME runtimec.architecture.behavior_matrix
     COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/../tools/architecture/check_behavior_matrix.py"
             --source-root "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+add_test(NAME runtimec.architecture.layer_selftest
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tools/architecture/check_layers.py"
+            --selftest)
 set_tests_properties(
     runtimec.architecture.layers
     runtimec.architecture.names
     runtimec.architecture.behavior_matrix
+    runtimec.architecture.layer_selftest
     PROPERTIES LABELS "runtimec;scaffold;architecture")
 
 if(UNIX)
