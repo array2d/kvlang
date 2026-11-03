@@ -70,6 +70,18 @@ INTERNAL_PREFIXES = {
 }
 POLICY_LAYERS = {"binrwir_compiler", "vmbin"}
 ROUTE_FILES = {"engine/route.c", "engine/route.h"}
+# 所有权不等于分派权：session 是 owner graph 的根，必须持有 host services、vmkv encoder、
+# BinRWIR Compiler 与 compilation repository，所以它引入两个执行层是职责，不是绕过。
+# 真正该防的「谁在选择执行器」由 DISPATCH_OWNER_FILES 那条直接守。
+ENGINE_OWNER_FILES = ROUTE_FILES | {"engine/session.c", "engine/session.h"}
+DISPATCH_OWNER_FILES = ROUTE_FILES
+# 每个执行入口的「定义 + 声明」所在模块（不含后缀）；调用只允许 route。
+EXECUTION_ENTRY_POINTS = {
+    "vmbin_execute(": "vmbin/interpreter",
+    "binrwir_jit_execute(": "binrwir_compiler/jit/executor",
+}
+EXECUTION_TARGET_TYPE = "binrwir_execution_target_t"
+EXECUTION_TARGET_OWNER = "binrwir_compiler"
 BINRWIR_NEUTRAL_FILE_NAMES = {
     "value.c", "value.h", "reference.c", "reference.h", "signature.c",
     "signature.h", "instruction.c", "instruction.h", "program.c",
@@ -617,6 +629,7 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
         except (OSError, UnicodeError) as error:
             findings.append(Finding(display, 1, "read-error", str(error)))
             continue
+        code = c_code_without_comments_or_literals("\n".join(lines))
 
         included_layers: set[str] = set()
         for line_number, line in enumerate(lines, 1):
@@ -659,11 +672,37 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
 
         merged_policy_layers = included_layers & POLICY_LAYERS
         if (source_layer == "engine" and len(merged_policy_layers) > 1 and
-                relative.as_posix() not in ROUTE_FILES):
+                relative.as_posix() not in ENGINE_OWNER_FILES):
             findings.append(Finding(
                 display, 1, "route-bypass",
-                "only engine/route may merge binrwir_compiler and vmbin",
+                "only the engine owner graph (route, session) may merge "
+                "binrwir_compiler and vmbin",
             ))
+
+        # 直接守分派，而不是拿 include 计数当代理：只有 route 能调用执行入口，
+        # 也只有 route 能在编译器之外引用执行目标类型。
+        if relative.as_posix() not in DISPATCH_OWNER_FILES:
+            module = relative.as_posix().rsplit(".", 1)[0]
+            for entry_point, owner_module in EXECUTION_ENTRY_POINTS.items():
+                if entry_point not in code or module == owner_module:
+                    continue
+                findings.append(Finding(
+                    display,
+                    code.count("\n", 0, code.index(entry_point)) + 1,
+                    "execution-dispatch-outside-route",
+                    f"only engine/route may call {entry_point[:-1]}; "
+                    f"its definition lives in {owner_module}",
+                ))
+            if (EXECUTION_TARGET_TYPE in code and
+                    not relative.as_posix().startswith(
+                        EXECUTION_TARGET_OWNER + "/")):
+                findings.append(Finding(
+                    display,
+                    code.count("\n", 0, code.index(EXECUTION_TARGET_TYPE)) + 1,
+                    "execution-dispatch-outside-route",
+                    f"only engine/route and the compiler may reference "
+                    f"{EXECUTION_TARGET_TYPE}",
+                ))
     return sorted(set(findings)), scanned
 
 
