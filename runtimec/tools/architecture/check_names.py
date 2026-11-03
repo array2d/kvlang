@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,7 +17,6 @@ PRODUCT_DIRECTORIES = (
     "specification", "tests",
 )
 TEXT_SUFFIXES = {".c", ".h", ".cmake", ".in", ".map", ".exports", ".def"}
-ALLOWED_EXTERNAL_IDENTIFIERS = ("KVSPACE_XVALUE_HEAD_LEN",)
 FORBIDDEN_PATH_PARTS = {
     "abi": "execution_interface", "api": "interface", "compat": "delete",
     "compatibility": "delete", "docs": "documentation", "legacy": "delete",
@@ -139,6 +139,8 @@ def parse_arguments(command_arguments: list[str]) -> argparse.Namespace:
         help="repository source root, or the runtimec directory itself",
     )
     parser.add_argument("--quiet", action="store_true", help="suppress success output")
+    parser.add_argument("--selftest", action="store_true",
+                        help="prove every judgment can fire, using synthetic fixtures")
     return parser.parse_args(command_arguments)
 
 
@@ -185,6 +187,31 @@ def c_code_without_comments_or_literals(text: str) -> str:
     return C_NON_CODE_PATTERN.sub(
         lambda match: re.sub(r"[^\n]", " ", match.group(0)), text,
     )
+
+
+# 上游 ABI 里的短字段名（如 kvspace 值头的 `ptr`）在我们这里没有命名权：成员访问与
+# `offsetof` 第二参数里的标识符必须与上游同名。缩写规则要守的是「我们自己命名时不用
+# 缩写」，所以这些位置不参与缩写检查。独立出现的同名标识符仍然照报。
+MEMBER_ACCESS_PATTERN = re.compile(r"(?:->|\.)\s*([A-Za-z_][A-Za-z0-9_]*)")
+OFFSETOF_FIELD_PATTERN = re.compile(r"\boffsetof\s*\([^,()]*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")
+
+
+# 上游 ABI 的宏名同样由上游定义。列出具体名字而不是整体豁免大写标识符的缩写检查：
+# 白名单膨胀是可见的，而「宏名一律放过」会连带放过我们自己造的大写缩写。
+FOREIGN_ABI_IDENTIFIERS = ("KVSPACE_XVALUE_HEAD_LEN", "KVSPACE_XVALUE_PTR_INLINE")
+
+
+def mask_foreign_abi_positions(code: str) -> str:
+    """Blank out identifiers whose spelling is dictated by an upstream ABI."""
+    def blank(match: re.Match[str]) -> str:
+        start, end = match.span(1)
+        return match.group(0)[:start - match.start()] + " " * (end - start) + \
+            match.group(0)[end - match.start():]
+    masked = OFFSETOF_FIELD_PATTERN.sub(blank, code)
+    masked = MEMBER_ACCESS_PATTERN.sub(blank, masked)
+    for identifier in FOREIGN_ABI_IDENTIFIERS:
+        masked = masked.replace(identifier, " " * len(identifier))
+    return masked
 
 
 def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], int]:
@@ -244,11 +271,7 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                     findings.append(Finding(display, line_number, rule, match.group(0)))
             if path.name == "CMakeLists.txt":
                 continue
-            abbreviation_line = masked_line
-            for identifier in ALLOWED_EXTERNAL_IDENTIFIERS:
-                abbreviation_line = abbreviation_line.replace(
-                    identifier, " " * len(identifier),
-                )
+            abbreviation_line = mask_foreign_abi_positions(masked_line)
             for abbreviation, replacement, pattern in ABBREVIATION_PATTERNS:
                 for match in pattern.finditer(abbreviation_line):
                     findings.append(Finding(
@@ -258,8 +281,64 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
     return sorted(set(findings)), scanned
 
 
+# ---------------------------------------------------------------------------------------
+# Self-test: every judgment must be able to fire, and the positional exemption must be an
+# explicit exemption rather than a coincidence. Fixtures live in a temporary tree.
+# ---------------------------------------------------------------------------------------
+SELFTEST_CASES = (
+    # 上游 ABI 的短字段名：成员访问与 offsetof 字段位置不参与缩写检查。
+    ("foreign-member-access", "static void probe(const kvspaceXvalueHead *head) {\n"
+                              "    int value = head->ptr;\n"
+                              "    int other = head.ptr;\n"
+                              "}\n", ()),
+    ("foreign-offsetof-field", "static int probe(void) {\n"
+                               "    return (int)offsetof(kvspaceXvalueHead, ptr);\n"
+                               "}\n", ()),
+    # 我们自己命名时仍然不许用缩写。
+    ("local-variable", "static int ptr;\n", ("abbreviation-ptr-use-pointer",)),
+    ("parameter", "static int probe(int ptr) { return ptr; }\n",
+     ("abbreviation-ptr-use-pointer",)),
+    ("type-alias", "typedef int ptr;\n", ("abbreviation-ptr-use-pointer",)),
+    # 上游宏名由上游定义；但豁免只覆盖具体名字，不是「所有大写都放过」。
+    ("foreign-macro", "static unsigned probe(void) {\n"
+                      "    return (unsigned)KVSPACE_XVALUE_PTR_INLINE;\n"
+                      "}\n", ()),
+    ("own-uppercase-abbreviation", "#define OUR_PTR_LIMIT 4\n",
+     ("abbreviation-ptr-use-pointer",)),
+    # 成员访问旁边的独立使用不得被豁免连带放过。
+    ("mixed-member-and-local",
+     "static int ptr;\n"
+     "static void probe(const kvspaceXvalueHead *head) { (void)head->ptr; }\n",
+     ("abbreviation-ptr-use-pointer",)),
+)
+
+
+def run_selftest() -> int:
+    failures: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="runtimec-names-selftest-") as directory:
+        root = Path(directory)
+        runtimec_root = root / "runtimec"
+        source = runtimec_root / "contract" / "probe.c"
+        source.parent.mkdir(parents=True)
+        for name, body, expected in SELFTEST_CASES:
+            source.write_text(body, encoding="utf-8")
+            findings, _ = audit(root, runtimec_root)
+            rules = {finding.rule for finding in findings}
+            if rules != set(expected):
+                failures.append(f"{name}: expected {sorted(expected)}, got {sorted(rules)}")
+    for failure in failures:
+        print(f"[selftest] {failure}")
+    if failures:
+        print(f"check_names selftest: FAIL ({len(failures)} failure(s))")
+        return 1
+    print(f"check_names selftest: OK ({len(SELFTEST_CASES)} fixtures)")
+    return 0
+
+
 def main(command_arguments: list[str] | None = None) -> int:
     arguments = parse_arguments(command_arguments or sys.argv[1:])
+    if arguments.selftest:
+        return run_selftest()
     repository_root, runtimec_root = locate_runtimec(arguments.source_root)
     if not runtimec_root.is_dir():
         print(f"{runtimec_root}:1: [missing-runtimec] runtimec source directory does not exist")
