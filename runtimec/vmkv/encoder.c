@@ -686,33 +686,82 @@ typedef struct vmkv_encoder_operation {
     runtimec_string_view_t logical_program_counter;
 } vmkv_encoder_operation_t;
 
+/*
+ * 这条能力行是否**需要**把操作数分类才能算出结果。
+ *
+ * 分类只在需要计算的地方才必要：结果类型由操作数推出（SAME_FIRST / WIDEN…），
+ * 或者要判操作数之间的兼容（SAME_CLASS / NUMERIC_COMPATIBLE / NUMERIC_COMPARE）。
+ * IDENTITY + NONE 的行（time·now、time/duration·as_nanos 等）类型只是跟着走，
+ * 不需要进类别表——为不需要的东西付失败封闭的代价是错的。
+ */
+static bool vmkv_encoder_requires_classification(
+    const vmkv_rwir_capability_t *capability) {
+    switch (capability->constraint) {
+        case RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS:
+        case RUNTIMEC_RWIR_CONSTRAINT_NUMERIC_COMPATIBLE:
+        case RUNTIMEC_RWIR_CONSTRAINT_NUMERIC_COMPARE:
+            return true;
+        default:
+            break;
+    }
+    switch (capability->result_rule) {
+        case RUNTIMEC_RWIR_RESULT_SAME_FIRST:
+        case RUNTIMEC_RWIR_RESULT_SAME_SECOND:
+        case RUNTIMEC_RWIR_RESULT_WIDEN:
+        case RUNTIMEC_RWIR_RESULT_WIDEN_INTEGER:
+        case RUNTIMEC_RWIR_RESULT_BOOLEAN:
+        case RUNTIMEC_RWIR_RESULT_FLOAT64:
+        case RUNTIMEC_RWIR_RESULT_CHARACTER_UTF8:
+        case RUNTIMEC_RWIR_RESULT_TARGET_TYPE:
+            return true;
+        default:
+            return false;
+    }
+}
+
 static runtimec_status_t vmkv_encoder_classify_read_arguments(
     vmkv_encoder_t *encoder, vmkv_encoder_operation_t *operation,
     bool function_target, runtimec_error_t *error) {
     const vmkv_rwir_instruction_view_t *source = operation->source;
+    const bool needs_classification =
+        vmkv_encoder_requires_classification(operation->capability);
     for (size_t ordinal = 0U; ordinal < source->read_argument_count; ++ordinal) {
         if (function_target && ordinal == 0U) {
             /* `call` 的第一个读参是函数名，不是值操作数，没有 langtype 可收敛。 */
             encoder->parameter_type_sets[ordinal] = VMKV_RWIR_TYPE_SET_NONE;
             continue;
         }
+        const runtimec_string_view_t declared =
+            source->read_arguments[ordinal].parameter_type_name;
         uint32_t type_set = VMKV_RWIR_TYPE_SET_NONE;
         const vmkv_parameter_type_result_t result =
-            vmkv_parameter_type_classify(
-                source->read_arguments[ordinal].parameter_type_name, &type_set);
+            vmkv_parameter_type_classify(declared, &type_set);
+        /* 并集与空类型在任何位置都不接受：那不是「不分类」，是「没有类型」。 */
         if (result == VMKV_PARAMETER_TYPE_RESULT_UNION) {
-            /* 声明是并集、槽上又没有具体类型：真动态，不猜一个精度。 */
             return vmkv_encoder_fail(
                 error, RUNTIMEC_STATUS_UNSUPPORTED,
                 VMKV_ENCODER_DIAG_UNION_PARAMETER,
                 "vmkv encoder: parameter has no concrete langtype",
                 operation->logical_program_counter);
         }
+        if (!needs_classification) {
+            /* 透传位置：只要具体即可，不要求落进类别表。 */
+            if (result == VMKV_PARAMETER_TYPE_RESULT_NONE) {
+                return vmkv_encoder_fail(
+                    error, RUNTIMEC_STATUS_ERROR,
+                    VMKV_ENCODER_DIAG_INVALID_PARAMETER_TYPE,
+                    "vmkv encoder: parameter has no langtype at all",
+                    operation->logical_program_counter);
+            }
+            encoder->parameter_type_sets[ordinal] = VMKV_RWIR_TYPE_SET_NONE;
+            continue;
+        }
         if (result == VMKV_PARAMETER_TYPE_RESULT_UNMAPPED) {
             return vmkv_encoder_fail(
                 error, RUNTIMEC_STATUS_UNSUPPORTED,
                 VMKV_ENCODER_DIAG_UNMAPPED_PARAMETER_TYPE,
-                "vmkv encoder: parameter type is outside the category set",
+                "vmkv encoder: parameter type is outside the category set and "
+                "this operation needs it to compute a result",
                 operation->logical_program_counter);
         }
         if (result != VMKV_PARAMETER_TYPE_RESULT_SINGLE) {
@@ -811,13 +860,17 @@ static runtimec_status_t vmkv_encoder_resolve_write_types(
         }
         return RUNTIMEC_STATUS_SUCCESS;
     }
+    /*
+     * 结果类型不由操作数推出（IDENTITY / NONE）时，写参类型就是槽上写的那个。
+     * 这里只要求它**是一个具体类型文本**，不要求落进 19 位类别表——与读参侧的
+     * 分层同一原则：不参与计算的位置，类型只是跟着走。
+     */
     for (size_t ordinal = 0U; ordinal < source->write_argument_count;
          ++ordinal) {
         const runtimec_string_view_t declared =
             source->write_arguments[ordinal].parameter_type_name;
-        uint32_t type_set = VMKV_RWIR_TYPE_SET_NONE;
-        if (vmkv_parameter_type_classify(declared, &type_set) !=
-            VMKV_PARAMETER_TYPE_RESULT_SINGLE) {
+        if (declared.size == 0U || declared.data == NULL ||
+            memchr(declared.data, '|', declared.size) != NULL) {
             return vmkv_encoder_fail(
                 error, RUNTIMEC_STATUS_UNSUPPORTED,
                 VMKV_ENCODER_DIAG_INVALID_PARAMETER_TYPE,

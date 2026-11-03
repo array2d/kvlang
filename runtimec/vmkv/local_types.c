@@ -119,17 +119,47 @@ static vmkv_local_type_record_t *vmkv_local_types_record(
     return record;
 }
 
+/*
+ * 一个写位置槽携带的 langtype 是否是一个**类型**。
+ *
+ * 不是所有 langtype 串都是类型：`rwir` / `rwfunc` 是槽的**引用形态标记**——slot 的
+ * langtype 为它们时，body 存的是表达式或函数名，不是一个值的类型。把它们当成
+ * 局部类型登记进符号池，route 会拿着 "rwir" 去查宽度表，必然查不到；更糟的是
+ * 那看起来像「有类型」，会掩盖 layout 本该给出类型却没给的事实。
+ *
+ * 其余判定（非空、非并集）在这里一并做。**不做类别判定**：本层只回答「这个局部
+ * 被写成了哪一个类型」，不回答「我认不认识这个类型」——后者是宿主的宽度问题。
+ * 编码器不知道 time 有几个字节，硬让它判断只会得到一个假的确定。
+ */
+static bool vmkv_local_types_is_concrete(runtimec_string_view_t langtype) {
+    if (langtype.size == 0U || langtype.data == NULL ||
+        memchr(langtype.data, '|', langtype.size) != NULL) {
+        return false;
+    }
+    static const char rwir_kind[] = "rwir";
+    static const char rwfunc_kind[] = "rwfunc";
+    if (langtype.size == sizeof(rwir_kind) - 1U &&
+        memcmp(langtype.data, rwir_kind, sizeof(rwir_kind) - 1U) == 0) {
+        return false;
+    }
+    if (langtype.size == sizeof(rwfunc_kind) - 1U &&
+        memcmp(langtype.data, rwfunc_kind, sizeof(rwfunc_kind) - 1U) == 0) {
+        return false;
+    }
+    return true;
+}
+
 /* 写位置：类型必须具体；同一名字的第二个不同类型即失败。 */
 static runtimec_status_t vmkv_local_types_note_write(
     vmkv_local_types_t *local_types, runtimec_string_view_t name,
     runtimec_string_view_t langtype, bool *output_usable,
     runtimec_string_view_t logical_program_counter, runtimec_error_t *error) {
-    uint32_t type_set = 0U;
-    if (vmkv_parameter_type_classify(langtype, &type_set) !=
-        VMKV_PARAMETER_TYPE_RESULT_SINGLE) {
+    if (!vmkv_local_types_is_concrete(langtype)) {
         (void)snprintf(local_types->message, sizeof(local_types->message),
-                       "vmkv local types: local '%.*s' has no concrete langtype",
-                       (int)name.size, name.data);
+                       "vmkv local types: local '%.*s' is written with a "
+                       "non-concrete langtype ('%.*s')",
+                       (int)name.size, name.data, (int)langtype.size,
+                       langtype.data != NULL ? langtype.data : "");
         *output_usable = false;
         return vmkv_local_types_fail(
             error, RUNTIMEC_STATUS_UNSUPPORTED,

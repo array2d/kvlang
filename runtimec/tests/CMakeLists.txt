@@ -75,9 +75,34 @@ target_link_libraries(runtimec_host_kvspace_backend_test PRIVATE
 runtimec_test_warnings(runtimec_host_kvspace_backend_test)
 add_test(NAME runtimec.host.kvspace_backend
     COMMAND runtimec_host_kvspace_backend_test)
+
+# head 布局探针：先判**库**，再判代码。
+#
+# 为什么它是 backend 组的前置：`lib/` 里可能同时存在新旧两份产物，装错位置或加载
+# 到旧的那份时，后端用例会红，但**红的原因不是代码错**。2026-11-03 就发生过——
+# 新前端 + 旧后端，每个写操作都在报 `invalid XValue`，看着像 layout 写错。
+# 探针先造一个值看字节，把「库装错版本」在跑用例之前就分离出来。
+#
+# CMake 的 `DEPENDS` 只能表达「先跑」不能表达「失败则跳过」，所以这里：
+#   1. 把它注册成独立用例（可单独 `ctest -R head_layout` 跑）；
+#   2. 给 backend 用例挂 FIXTURES_REQUIRED，让 ctest 保证顺序，
+#      且探针失败时 backend 用例被标成 **Not Run** 而不是「也失败」。
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+# 探针必须探**本项目实际链接的那一份**（RUNTIMEC_KVSPACE_LIBRARY_PATH），
+# 不能让它用自己猜的默认路径——否则库装错位置时探针探的是另一份，给出「16 字节，
+# 没问题」的假结论，正是它要防的事。
+add_test(NAME runtimec.architecture.head_layout
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tools/architecture/check_kvspace_head_layout.py"
+            --frontend "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+set_tests_properties(runtimec.architecture.head_layout PROPERTIES
+    LABELS "runtimec;scaffold;architecture"
+    FIXTURES_SETUP runtimec_kvspace_head)
+
 set_tests_properties(runtimec.host.kvspace_backend PROPERTIES
     SKIP_RETURN_CODE 77
-    LABELS "runtimec;scaffold;host;backend")
+    LABELS "runtimec;scaffold;host;backend"
+    FIXTURES_REQUIRED runtimec_kvspace_head)
 
 
 # 替身与真库的 wire 金标准比对：验「替身不漂移」。
@@ -168,6 +193,38 @@ runtimec_test_warnings(runtimec_vmkv_encoder_test)
 add_test(NAME runtimec.vmkv.encoder COMMAND runtimec_vmkv_encoder_test)
 set_tests_properties(runtimec.vmkv.encoder PROPERTIES
     LABELS "runtimec;scaffold;vmkv;encoder")
+
+# 端到端里程碑：真 .kv → 真 layout 库 → 真 kvspace → vmkv 编码。
+#
+# 与其它 encoder 用例的区别：它们的输入是手搭的 fake store，只能证明「假输入
+# 下成立」；本用例走真链路，才能回答「真实 layout 产出的槽形状与假树有没有差异」。
+#
+# 两个外部依赖都靠 dlopen 在运行期加载，缺失时用例自身返回 77 跳过（并打印
+# 原因），不伪装通过：
+#   - layout 库：仓库 lib/ 下的 libkvlanglayout（先 make layout）
+#   - kvspace 库：RUNTIMEC_KVSPACE_LIBRARY_PATH（配置期已解析）
+# 路径经 CMake 写死进用例，避免运行期再猜目录。
+find_library(RUNTIMEC_TEST_LAYOUT_LIBRARY
+    NAMES kvlanglayout
+    PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../../lib"
+    NO_DEFAULT_PATH)
+add_executable(runtimec_vmkv_end_to_end_test vmkv_end_to_end_test.c)
+target_compile_features(runtimec_vmkv_end_to_end_test PRIVATE c_std_11)
+target_include_directories(runtimec_vmkv_end_to_end_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_vmkv_end_to_end_test PRIVATE
+    runtimec_contract runtimec_host runtimec_binrwir runtimec_vmkv
+    "${CMAKE_DL_LIBS}")
+runtimec_test_warnings(runtimec_vmkv_end_to_end_test)
+add_test(NAME runtimec.vmkv.end_to_end
+    COMMAND runtimec_vmkv_end_to_end_test
+            "${RUNTIMEC_TEST_LAYOUT_LIBRARY}"
+            "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+set_tests_properties(runtimec.vmkv.end_to_end PROPERTIES
+    SKIP_RETURN_CODE 77
+    LABELS "runtimec;scaffold;vmkv;end_to_end")
 
 add_executable(runtimec_binrwir_frame_bindings_test
     binrwir_frame_bindings_test.c)
