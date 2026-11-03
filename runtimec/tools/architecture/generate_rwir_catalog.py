@@ -40,6 +40,7 @@ MANIFEST = SPEC / "rwir_catalog.def"
 ALIAS_TABLE = SPEC / "rwir_alias_table.def"
 GAPS = SPEC / "rwir_catalog_gaps.md"
 MATRIX = SPEC / "five-language-behavior-matrix.md"
+INSTRUCTION_HEADER = Path("runtimec/binrwir/instruction.h")
 
 MIDDLE_DOT = "·"
 
@@ -472,6 +473,28 @@ def preprocess_registry(root: Path) -> list[str]:
     return opcodes
 
 
+IDENTIFIER_CONSTANT_PATTERN = re.compile(
+    r"#define\s+BINRWIR_OPERATION_IDENTIFIER_(\w+)\s+UINT32_C\(\s*(0x[0-9A-Fa-f]+)\s*\)")
+
+
+def reserved_identifier_base(root: Path) -> int:
+    """Read the reserved-band base from the binary instruction header.
+
+    The header owns the value; the generator must not keep a second copy. A missing
+    constant or a non-hexadecimal spelling is a hard error: without the boundary the
+    guard cannot run, and a guard that silently degrades is not a guard.
+    """
+    path = root / INSTRUCTION_HEADER
+    if not path.is_file():
+        raise SystemExit(f"cannot read {INSTRUCTION_HEADER}")
+    constants = {name: int(value, 16) for name, value in
+                 IDENTIFIER_CONSTANT_PATTERN.findall(path.read_text(encoding="utf-8"))}
+    if "RESERVED_BASE" not in constants:
+        raise SystemExit(
+            f"{INSTRUCTION_HEADER}: BINRWIR_OPERATION_IDENTIFIER_RESERVED_BASE is required")
+    return constants["RESERVED_BASE"]
+
+
 def matrix_decisions(root: Path) -> set[str]:
     text = (root / MATRIX).read_text(encoding="utf-8")
     return set(re.findall(r"^\| ([a-z][a-z0-9-]+) \|", text, re.M))
@@ -541,7 +564,8 @@ def build_alias_table(opcodes: list[str], rows: list[Row],
 
 
 def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]],
-             decisions: set[str], gaps: list[tuple[str, str]]) -> list[str]:
+             decisions: set[str], gaps: list[tuple[str, str]],
+             reserved_base: int) -> list[str]:
     findings: list[str] = []
     identifiers = [row.identifier for row in rows]
     opids = [row.opid for row in rows]
@@ -549,6 +573,13 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
         duplicates = {value for value in values if values.count(value) > 1}
         if duplicates:
             findings.append(f"duplicate {label}: {sorted(duplicates)[:5]}")
+    # 保留区（>= RESERVED_BASE）留给 FOREIGN 这类结构标记，能力行不得占用。
+    # 判据是白名单：opid 必须严格落在 (0, reserved_base)，不是「不许等于某个值」。
+    for row in rows:
+        if not 0 < row.opid < reserved_base:
+            findings.append(
+                f"{row.identifier}: opid 0x{row.opid:08X} is outside the capability "
+                f"band (0, 0x{reserved_base:08X})")
     for row in rows:
         if row.constraint not in CONSTRAINTS:
             findings.append(f"{row.identifier}: unknown constraint {row.constraint}")
@@ -751,7 +782,8 @@ def main() -> int:
     decisions = matrix_decisions(root)
     rows = build_rows()
     aliases, gaps = build_alias_table(opcodes, rows)
-    findings = validate(rows, opcodes, aliases, decisions, gaps)
+    reserved_base = reserved_identifier_base(root)
+    findings = validate(rows, opcodes, aliases, decisions, gaps, reserved_base)
     expected = {
         MANIFEST: render_catalog(rows, aliases, opcodes, gaps),
         ALIAS_TABLE: render_alias_table(aliases, opcodes),
