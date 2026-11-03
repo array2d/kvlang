@@ -383,7 +383,11 @@ static void test_canonical_copy(test_canonical_t *target,
     const size_t write_count = source->write_arguments.count;
     const size_t capacity = TEST_CANONICAL_ARGUMENT_CAPACITY;
     EXPECT(read_count + write_count <= capacity);
-    if (read_count + write_count > capacity) {
+    EXPECT((read_count == 0U || source->read_arguments.data != NULL) &&
+           (write_count == 0U || source->write_arguments.data != NULL));
+    if (read_count + write_count > capacity ||
+        (read_count != 0U && source->read_arguments.data == NULL) ||
+        (write_count != 0U && source->write_arguments.data == NULL)) {
         return;
     }
     for (size_t ordinal = 0U; ordinal < read_count + write_count; ++ordinal) {
@@ -965,13 +969,17 @@ static void test_framed_slot_expression_is_unsupported(void) {
     store_free(&store);
 }
 
-static void test_unknown_operation_is_rejected(void) {
+/*
+ * 能力外的 opcode 不再报错：它被编成 FOREIGN 结构标记，只携带 source pc，
+ * 零读参零写参。它既不做类型收敛，也不登符号池或消耗 argidx。
+ */
+static void test_unknown_operation_becomes_foreign(void) {
     fake_store_t store;
     memset(&store, 0, sizeof(store));
     add_function(&store, "/lib/code", 1U, 1U);
     add_parameter(&store, "/lib/code", -1, "a", "int64");
     add_parameter(&store, "/lib/code", 1, "R", "int64");
-    add_opcode(&store, "/lib/code", 1, 1U, 1U, "nosuchoperation");
+    add_opcode(&store, "/lib/code", 1, 1U, 1U, "println");
     add_reference(&store, "/lib/code", 1, -1, "*[0,-1]", "int64");
     add_reference(&store, "/lib/code", 1, 1, "*[0,1]", "int64");
     runtimec_host_services_t host = make_host_services(&store);
@@ -984,10 +992,63 @@ static void test_unknown_operation_is_rejected(void) {
     vmkv_encode_function_t function = {.read_parameter_count = 1U,
                                        .write_parameter_count = 1U};
     test_canonical_t instruction;
-    EXPECT(encode_instruction_at(
-        encoder, &request, 0U, function, &instruction,
-                                    &error) == RUNTIMEC_STATUS_ERROR);
-    EXPECT(error.code == 22);
+    EXPECT(encode_instruction_at(encoder, &request, 0U, function, &instruction,
+                                 &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(instruction.instruction.operation_identifier ==
+           BINRWIR_OPERATION_IDENTIFIER_FOREIGN);
+    EXPECT(instruction.instruction.read_arguments.count == 0U);
+    EXPECT(instruction.instruction.write_arguments.count == 0U);
+    EXPECT(instruction.instruction.logical_program_counter == 1U);
+
+    /* 整份 Program 里它仍是一条合法指令，且 Program 校验通过。 */
+    binrwir_program_t *program = NULL;
+    EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    if (program != NULL) {
+        EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
+        binrwir_instruction_view_t view;
+        EXPECT(binrwir_program_get_instruction(program, 0U, &view) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(view.instruction->operation_identifier ==
+               BINRWIR_OPERATION_IDENTIFIER_FOREIGN);
+        EXPECT(view.source_logical_program_counter == 1U);
+        EXPECT(view.read_arguments.count == 0U);
+        EXPECT(view.write_arguments.count == 0U);
+        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+    }
+    EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    store_free(&store);
+}
+
+/*
+ * 覆盖完整性：`[1..N]` 每个 source pc 必须恰好归属一条指令，这一条由读取器
+ * 保证（从 1 起逐行递增，任何一行缺 opcode 槽即 MISSING_OPCODE）。编码器不再
+ * 重复判——这里钉住「洞在读取层就失败」，让「编码器不需要第二份判据」这个
+ * 结论有可执行的依据。
+ */
+static void test_missing_source_program_counter_fails_in_reader(void) {
+    fake_store_t store;
+    memset(&store, 0, sizeof(store));
+    add_function(&store, "/lib/gap", 1U, 1U);
+    add_parameter(&store, "/lib/gap", -1, "a", "int64");
+    add_parameter(&store, "/lib/gap", 1, "R", "int64");
+    /* 第 1 行缺席，只有第 2 行。 */
+    add_opcode(&store, "/lib/gap", 2, 1U, 1U, "=");
+    add_reference(&store, "/lib/gap", 2, -1, "*[0,-1]", "int64");
+    add_reference(&store, "/lib/gap", 2, 1, "*[0,1]", "int64");
+    runtimec_host_services_t host = make_host_services(&store);
+    vmkv_encode_request_t request = make_request(&host, "/lib/gap");
+    vmkv_encoder_t *encoder = NULL;
+    runtimec_error_t error;
+    runtimec_error_reset(&error);
+    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    binrwir_program_t *program = NULL;
+    EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
+           RUNTIMEC_STATUS_ERROR);
+    /* 8 = vmkv/source 的 MISSING_OPCODE：洞在读层就被挡住。 */
+    EXPECT(error.code == 8);
+    EXPECT(program == NULL);
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
     store_free(&store);
 }
@@ -1335,7 +1396,8 @@ int main(void) {
     test_static_path_derives_body_address();
     test_named_frame_slot_becomes_local_symbol();
     test_framed_slot_expression_is_unsupported();
-    test_unknown_operation_is_rejected();
+    test_unknown_operation_becomes_foreign();
+    test_missing_source_program_counter_fails_in_reader();
     test_program_encoding_matches_canonical_instruction();
     test_stale_snapshot_is_rejected();
     test_symbol_pool_normalization_remaps_every_reference();

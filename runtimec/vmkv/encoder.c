@@ -22,7 +22,7 @@
 enum {
     VMKV_ENCODER_DIAG_INVALID_REQUEST = 20,
     VMKV_ENCODER_DIAG_HOST_CAPABILITY_MISSING = 21,
-    VMKV_ENCODER_DIAG_UNKNOWN_OPERATION = 22,
+    VMKV_ENCODER_DIAG_UNKNOWN_OPERATION = 22, /* 保留：仅供已删除的失败路径追溯 */
     VMKV_ENCODER_DIAG_INVALID_PARAMETER_TYPE = 23,
     VMKV_ENCODER_DIAG_UNION_PARAMETER = 24,
     VMKV_ENCODER_DIAG_UNMAPPED_PARAMETER_TYPE = 25,
@@ -864,11 +864,22 @@ runtimec_status_t vmkv_encode_instruction(
     const vmkv_rwir_capability_t *capability =
         vmkv_rwir_manifest_find_operation(source_instruction->operation_name);
     if (capability == NULL) {
-        return vmkv_encoder_fail(
-            error, RUNTIMEC_STATUS_ERROR,
-            VMKV_ENCODER_DIAG_UNKNOWN_OPERATION,
-            "vmkv encoder: operation name is not registered in the alias table",
-            logical_program_counter);
+        /*
+         * 不在 alias 表里 = 本 runtime 不提供的能力（外部 runtime 就地实现，例如
+         * println）。照常留在 Program 里，编成 FOREIGN 结构标记：只携带 source pc，
+         * 零读写参数、不进签名、不做类型收敛，因此它的操作数既不登符号池也不
+         * 消耗 argidx——这条指令一个字节都不由本 runtime 执行。
+         */
+        output_instruction->operation_identifier =
+            BINRWIR_OPERATION_IDENTIFIER_FOREIGN;
+        output_instruction->logical_program_counter =
+            source_instruction->logical_program_counter;
+        output_instruction->read_arguments = (binrwir_argument_span_t){0};
+        output_instruction->write_arguments = (binrwir_argument_span_t){0};
+        output_instruction->read_parameter_types = NULL;
+        output_instruction->write_parameter_types = NULL;
+        output_instruction->aliasing_declared = false;
+        return RUNTIMEC_STATUS_SUCCESS;
     }
     /* 指针性与扩展类别不在 langtype 文本里（指针性在 XValue head 的 ptr 位），
      * 本阶段一律不猜。 */
@@ -1228,6 +1239,12 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
     }
     vmkv_rwir_read_result_t read_result = VMKV_RWIR_READ_RESULT_INVALID;
     vmkv_rwir_instruction_view_t instruction;
+    /*
+     * 覆盖完整性由读取器保证，编码器不重复判：`vmkv_rwir_reader_next` 从 1 起逐行
+     * 递增，`instruction_line_count` 是最大行号，任何一行缺 opcode 槽都直接
+     * MISSING_OPCODE 失败。因此这里收到的 source pc 恒为无洞升序序列，FOREIGN 也
+     * 照此逐条占位。在这一层再加一遍判据就是为不存在的分支写代码。
+     */
     while (status == RUNTIMEC_STATUS_SUCCESS) {
         status = vmkv_rwir_reader_next(reader, &read_result, &instruction, error);
         if (status != RUNTIMEC_STATUS_SUCCESS ||
