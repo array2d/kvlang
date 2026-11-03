@@ -347,11 +347,11 @@ RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BRANCH, "branch", 0x0027,
                         "control-flow-primitives")  /* no value -> no value */
 /* behavior-decision: map-literal-replaces-members */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_OBJECT_LITERAL, "object", 0x0028,
-                        0x00008000, 0x00008000,
+                        0x00000000, 0x00008000,
                         RUNTIMEC_RWIR_CONSTRAINT_NONE,
-                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_RESULT_NONE,
                         RUNTIMEC_RWIR_ALIAS_DECLARED,
-                        "map-literal-replaces-members")  /* stringkeymap -> stringkeymap */
+                        "map-literal-replaces-members")  /* install signature -> stringkeymap */
 /* behavior-decision: array-copy-result-kind */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_COPY, "compactarray·copy", 0x0100,
                         0x00000000, 0x00000000,
@@ -949,18 +949,18 @@ RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_RANDOM_BELOW, "random·intn", 0x0192,
                         "random-source-and-range")  /* install signature -> install signature */
 /* behavior-decision: map-literal-replaces-members */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_MAP_NEW, "map·new", 0x01A0,
-                        0x00008000, 0x00008000,
+                        0x00000000, 0x00008000,
                         RUNTIMEC_RWIR_CONSTRAINT_NONE,
                         RUNTIMEC_RWIR_RESULT_IDENTITY,
                         RUNTIMEC_RWIR_ALIAS_DECLARED,
-                        "map-literal-replaces-members")  /* stringkeymap -> stringkeymap */
+                        "map-literal-replaces-members")  /* install signature -> stringkeymap */
 /* behavior-decision: struct-new-from-prototype */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRUCT_NEW, "struct·new", 0x01A1,
-                        0x00010000, 0x00010000,
+                        0x00000000, 0x00010000,
                         RUNTIMEC_RWIR_CONSTRAINT_NONE,
                         RUNTIMEC_RWIR_RESULT_IDENTITY,
                         RUNTIMEC_RWIR_ALIAS_DECLARED,
-                        "struct-new-from-prototype")  /* structref -> structref */
+                        "struct-new-from-prototype")  /* install signature -> structref */
 /* behavior-decision: address-of-yields-pointer */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVLANG_ADDRESS_OF, "kvlang·abs", 0x01A2,
                         0x00000000, 0x00040000,

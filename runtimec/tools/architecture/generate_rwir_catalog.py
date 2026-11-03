@@ -29,8 +29,10 @@ from __future__ import annotations
 
 import argparse
 import re
+import os
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -92,9 +94,14 @@ STRUCT_REF = type_set("structref")
 POINTER = type_set("pointer")
 FLOAT64 = type_set("float64")
 
-# 签名表允许出现的名字型 langtype。取自 layout/src/langtype.rs 的 known_kind：
-# 列在这里的是**校验集**，不是事实源——写少了会误报，写多了会让生成器放过 layout
-# 认不出的名字。time 族今天只用 time、time/duration、int64、bool，扩展时同步。
+# 签名表允许出现的名字型 langtype。
+#
+# 签名表扩出 time 族时，**不要往这个元组里加名字**；改为从 layout 的类型表投影生成
+# （单一事实源 = `layout` 的 known_kind）。此元组仅作为 time 族的临时投影存在。
+#
+# 理由：这份清单已经是一份「类型表」。往这里加名字，等于在 layout 之外再养一份会漂移的
+# 类型事实源——今天已经在多处栽过同一个坑（两份 head 实现、两份签名表、两份 wire 常量）。
+# 加名字看起来是一行，实质是给漂移开一个新落点。
 SIGNATURE_LANGTYPES = ("time", "time/duration", "int64", "bool")
 # 类型串直接嵌进声明文本：逗号会切断参数表、竖线与引号会改变语义。这些字符一出现，
 # 生成物就会被 layout 解析成另一件事，而肉眼看着仍然像一条合法声明。
@@ -245,7 +252,10 @@ VALUE_ROWS = (
      ("control-flow-primitives",), "control"),
     ("BRANCH", "branch", 0x0027, 0, 0, "NONE", "NONE", "FORBIDDEN",
      ("control-flow-primitives",), "control"),
-    ("OBJECT_LITERAL", "object", 0x0028, STRING_KEY_MAP, STRING_KEY_MAP, "NONE", "IDENTITY",
+    # 实测 nr=0：成员名与值都在写槽，它没有读参，结果类型也由写槽的 map langtype 给出，
+    # 不来自读参。所以结果规则是 `NONE` 而不是 `IDENTITY`（后者要求有读参）。
+    # 这一行即将随 `obj` 类型取消而删除（见 RETIRED_ROWS）。
+    ("OBJECT_LITERAL", "object", 0x0028, 0, STRING_KEY_MAP, "NONE", "NONE",
      "DECLARED", ("map-literal-replaces-members",), "value"),
 )
 
@@ -403,10 +413,15 @@ FAMILY_ROWS = (
     FamilyRow("random", "int63", 0x0191, "random-source-and-range"),
     FamilyRow("random", "intn", 0x0192, "random-source-and-range"),
     # map / struct / kvlang
+    # 构造类算子：读参是**初值**，类型由各自槽的 langtype 决定，不由掩码收敛。
+    # 掩码 0 = 不约束（编码器对 0 跳过校验，见 encoder.c 的 `!= TYPE_SET_NONE`）。
+    # 给它写窄掩码就是把「值的类型」和「结果容器的类型」混为一谈——本表在这条上错过两次。
     FamilyRow("map", "new", 0x01A0, "map-literal-replaces-members",
-              STRING_KEY_MAP, STRING_KEY_MAP),
+              0, STRING_KEY_MAP),
+    # 读参是「路径 + (成员名, 值) 对」，值是任意类型（实测 5 个：`/lib/Point`,
+    # `x`, 3, `y`, 4）。同属构造类：初值不约束。
     FamilyRow("struct", "new", 0x01A1, "struct-new-from-prototype",
-              STRUCT_REF, STRUCT_REF),
+              0, STRUCT_REF),
     FamilyRow("kvlang", "abs", 0x01A2, "address-of-yields-pointer", 0, POINTER),
 )
 
@@ -649,7 +664,10 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
                 findings.append(f"{row.identifier}: value row has no write mask")
         if row.channel == "control" and (row.read_mask or row.write_mask):
             findings.append(f"{row.identifier}: control row carries a value mask")
-        if row.result_rule == "IDENTITY" and row.channel == "value" and row.read_mask == 0:
+        # IDENTITY 说「结果类型取自读参」。没有读参就没有来源——除非它本来就不走
+        # union 通道（掩码全开表示不约束或写侧定型），那类由安装签名或写槽给出类型。
+        if (row.result_rule == "IDENTITY" and row.channel == "value"
+                and row.read_mask == 0):
             findings.append(f"{row.identifier}: identity row states no source mask")
     registered = set(opcodes)
     alias_names = [name for name, _ in aliases]
@@ -681,7 +699,7 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
         for langtype in row.read_langtypes + row.write_langtypes:
             if langtype not in SIGNATURE_LANGTYPES:
                 findings.append(
-                    f"{row.identifier}: {langtype!r} is not a langtype layout accepts")
+                    f"{row.identifier}: {bare!r} is not a langtype layout accepts")
             for character in FORBIDDEN_LANGTYPE_CHARACTERS:
                 if character in langtype:
                     findings.append(
@@ -693,9 +711,9 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
     else:
         expected_shapes = [
             (row.operator,
-             [f"{SIGNATURE_PARAMETER_NAME}{index}: {langtype}"
+             [f"*{langtype} ${SIGNATURE_PARAMETER_NAME}{index}"
               for index, langtype in enumerate(row.read_langtypes)],
-             [f"{SIGNATURE_RESULT_NAME}{index}: {langtype}"
+             [f"*{langtype} ${SIGNATURE_RESULT_NAME}{index}"
               for index, langtype in enumerate(row.write_langtypes)])
             for row in declared]
         recovered = read_back_signature_table(render_signature_table(rows))
@@ -744,11 +762,13 @@ def render_signature_table(rows: list[Row]) -> str:
         "",
     ]
     for row in declared:
+        # 与 rwfunc 同形：类型在前、`$name` 在后。返回值是写参，必须有可写的 key，
+        # 所以恒为指针形态 `*T`；`T $name`（值复制）只描述读参里被拷贝的标量。
         parameters = ", ".join(
-            f"{SIGNATURE_PARAMETER_NAME}{index}: {langtype}"
+            f"*{langtype} ${SIGNATURE_PARAMETER_NAME}{index}"
             for index, langtype in enumerate(row.read_langtypes))
         returns = ", ".join(
-            f"{SIGNATURE_RESULT_NAME}{index}: {langtype}"
+            f"*{langtype} ${SIGNATURE_RESULT_NAME}{index}"
             for index, langtype in enumerate(row.write_langtypes))
         lines.append(f"rwir {row.operator}({parameters}) -> ({returns})")
     lines.append("")
@@ -762,14 +782,37 @@ SIGNATURE_RESULT_NAME = "result"
 
 SIGNATURE_LINE_PATTERN = re.compile(
     r"^rwir (\S+)\(([^)]*)\) -> \(([^)]*)\)$")
+# 形参 = `*T $name` 或空 kindexpr 的 `$name`。旧写法 `name: T` 必须被拒——否则
+# 「把整串当类型也照样通过」，那是一条不会失败的校验。
+SIGNATURE_PARAMETER_PATTERN = re.compile(
+    r"^(\*{0,2})(\S(?:.*?))?\s*\$([A-Za-z0-9_]+)$")
+
+
+def parse_signature_parameter(text: str) -> tuple[str, str]:
+    """Return (type_text, name_text) for one formal parameter.
+
+    `*T $name` -> ("*T", "$name"); a bare `$name` (empty kindexpr) -> ("", "$name").
+    Anything that is not that shape is a hard error: a reader that accepts whatever
+    the writer emits proves nothing about the writer.
+    """
+    match = SIGNATURE_PARAMETER_PATTERN.match(text.strip())
+    if match is None:
+        raise SystemExit(
+            f"formal parameter {text!r} does not match `*T $name` or `$name`")
+    stars, type_text, name_text = match.groups()
+    if len(stars) > 1:
+        raise SystemExit(
+            f"formal parameter {text!r} has more than one '*' prefix")
+    type_text = (type_text or "").strip()
+    return (stars + type_text, "$" + name_text)
 
 
 def read_back_signature_table(text: str) -> list[tuple[str, list[str], list[str]]]:
-    """Parse the emitted declarations the way layout's `rwir` reader would.
+    """Parse the emitted declarations back into (surface, parameters, returns).
 
     独立于渲染器：渲染器把行拼成字符串，这里把它读回来。两边同时写错才会互相抵消，
-    而那种情形由 layout 自己的 `vet` 兜底——本函数只保证生成物**结构**没坏
-    （括号、箭头、参数名与类型能对上）。
+    而那种情形由 layout 自己的 `vet` 兜底——本函数保证生成物**结构**与**语法形态**
+    都对（括号、箭头、`*T $name` 形态），并把读回结果交给调用方逐字比对。
     """
     recovered: list[tuple[str, list[str], list[str]]] = []
     for line in text.splitlines():
@@ -779,9 +822,20 @@ def read_back_signature_table(text: str) -> list[tuple[str, list[str], list[str]
         if match is None:
             raise SystemExit(f"generated declaration is malformed: {line!r}")
         surface, raw_parameters, raw_returns = match.groups()
-        parameters = [item.strip() for item in raw_parameters.split(",") if item.strip()]
-        returns = [item.strip() for item in raw_returns.split(",") if item.strip()]
-        recovered.append((surface, parameters, returns))
+        parameters = [parse_signature_parameter(item) for item in
+                      raw_parameters.split(",") if item.strip()]
+        returns = [parse_signature_parameter(item) for item in
+                   raw_returns.split(",") if item.strip()]
+        for type_text, name_text in parameters + returns:
+            if name_text[1:] and not name_text[1:].replace("_", "").isalnum():
+                raise SystemExit(
+                    f"{surface}: formal name {name_text!r} is not an identifier")
+            if type_text.endswith("$") or "$" in type_text:
+                raise SystemExit(
+                    f"{surface}: '\u0024' must precede the name, not sit in the type")
+        recovered.append((surface,
+                          [f"{t} {n}".strip() for t, n in parameters],
+                          [f"{t} {n}".strip() for t, n in returns]))
     return recovered
 
 
@@ -943,14 +997,31 @@ def main() -> int:
     }
 
     if not arguments.check:
+        # 校验失败时不写盘：写盘会让「错的生成器」把一个同源的畸形产物留进树，
+        # 而下一轮 --check 因为同源而变绿——错误就此被固化。
+        if findings:
+            for finding in findings:
+                print(f"[drift] {finding}")
+            print(f"generate_rwir_catalog: refusing to write "
+                  f"({len(findings)} finding(s) in the generated tables)")
+            return 1
         for path, text in expected.items():
-            (root / path).write_text(text, encoding="utf-8")
+            # 原子替换：先写同目录临时文件再 rename。直接 write_text 会先截断再写，
+            # 别人在那一刻读到的是半截文件——layout 与检查器都 include/读取这些产物。
+            destination = root / path
+            descriptor, temporary = tempfile.mkstemp(
+                dir=destination.parent, prefix=destination.name + ".", suffix=".tmp")
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    stream.write(text)
+                os.replace(temporary, destination)
+            except BaseException:
+                Path(temporary).unlink(missing_ok=True)
+                raise
         print(f"generate_rwir_catalog: wrote {len(rows)} capability rows, "
               f"{len(aliases)} alias mappings, {len(gaps)} gaps "
               f"of {len(opcodes)} registered surface names")
-        for finding in findings:
-            print(f"[drift] {finding}")
-        return 1 if findings else 0
+        return 0
 
     drift = list(findings)
     for path, text in expected.items():
