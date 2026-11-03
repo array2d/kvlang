@@ -52,7 +52,7 @@ static runtimec_status_t runtimec_session_fail(runtimec_error_t *error,
                                                const char *message) {
     runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, code,
                        runtimec_string_view_from_c_string(message),
-                       runtimec_string_view_make(NULL, 0U));
+                       RUNTIMEC_PROGRAM_COUNTER_NONE);
     return status;
 }
 
@@ -73,7 +73,7 @@ static runtimec_status_t runtimec_session_forward(
     message[length] = '\0';
     runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, 0,
                        runtimec_string_view_from_c_string(message),
-                       runtimec_string_view_make(NULL, 0U));
+                       RUNTIMEC_PROGRAM_COUNTER_NONE);
     return status;
 }
 

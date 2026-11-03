@@ -88,6 +88,54 @@ static runtimec_status_t collect_list_key(void *context,
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+
+/* 写入序列记录：用一层 set_value 包住替身，记录每一次写的 key 与 body。
+ * 这不是为了测替身，而是为了观察「两次写之间的中间态」——终态自洽，看不出过程。 */
+typedef struct write_record {
+    char key[128];
+    uint8_t body[64];
+    size_t body_size;
+} write_record_t;
+
+typedef struct write_log {
+    write_record_t records[32];
+    size_t count;
+    /* 任何 SetPart 都被记为「出现了不该出现的分支」。 */
+    size_t part_count;
+    runtimec_kvspace_binary_interface_t *inner;
+} write_log_t;
+
+static write_log_t write_log;
+
+static int logging_set_part(void *handle, const char *key, uint32_t offset,
+                            const uint8_t *value, uint32_t value_size,
+                            char *error_text, uint32_t error_text_capacity) {
+    write_log.part_count += 1U;
+    return write_log.inner->set_part(handle, key, offset, value, value_size,
+                                     error_text, error_text_capacity);
+}
+
+static int logging_set_value(void *handle, const char *key,
+                             const uint8_t *wire, uint32_t wire_size,
+                             char *error_text, uint32_t error_text_capacity) {
+    if (write_log.count < 32U) {
+        write_record_t *record = &write_log.records[write_log.count++];
+        snprintf(record->key, sizeof(record->key), "%s", key);
+        if (wire_size >= KVSPACE_XVALUE_HEAD_LEN) {
+            kvspaceXvalueHead head;
+            memcpy(&head, wire, sizeof(head));
+            const uint64_t body_length = kvspaceXvalueHeadLen(&head);
+            if (body_length <= sizeof(record->body)) {
+                record->body_size = (size_t)body_length;
+                memcpy(record->body, wire + KVSPACE_XVALUE_HEAD_LEN,
+                       record->body_size);
+            }
+        }
+    }
+    return write_log.inner->set_value(handle, key, wire, wire_size, error_text,
+                                      error_text_capacity);
+}
+
 /* 读一条 slack 值的 body 文本（去掉 head 与 attr）。 */
 static void read_body_text(fake_kvspace_store_t *store, const char *key,
                            char *output, size_t capacity) {
@@ -448,18 +496,145 @@ int main(void) {
         checkpoint.vthread_identifier =
             runtimec_string_view_from_c_string("v7");
         checkpoint.logical_program_counter =
-            runtimec_string_view_from_c_string("/lib/sum/[2,0]");
+            (runtimec_program_counter_t){1, 2};
         checkpoint.persistent_status =
             runtimec_string_view_from_c_string("running");
         EXPECT(services.checkpoint(services.context, &checkpoint, &error) ==
                RUNTIMEC_STATUS_SUCCESS);
+        /*
+         * pc 是单 key 整值：body = [stackid:i32 LE][s0:i32 LE]，共 8 字节。
+         * 一次写完整位置——「改 stackid 必改 s0」由形态保证，不靠顺序或哨兵。
+         */
+        {
+            uint8_t *wire = fake_kvspace_address(&store,
+                                                 "/vthread/v7/\xE2\x80\xA5pc");
+            EXPECT(wire != NULL);
+            if (wire != NULL) {
+                kvspaceXvalueHead head;
+                memcpy(&head, wire, sizeof(head));
+                EXPECT(kvspaceXvalueHeadLen(&head) == 8U);
+                int32_t stack_identifier = 0;
+                int32_t ordinal = 0;
+                memcpy(&stack_identifier, wire + KVSPACE_XVALUE_HEAD_LEN, 4U);
+                memcpy(&ordinal, wire + KVSPACE_XVALUE_HEAD_LEN + 4U, 4U);
+                EXPECT(stack_identifier == 1);
+                EXPECT(ordinal == 2);
+            }
+        }
         char text[64];
-        read_body_text(&store, "/vthread/v7/\xE2\x80\xA5" "pc", text,
-                       sizeof(text));
-        EXPECT(strcmp(text, "/lib/sum/[2,0]") == 0);
         read_body_text(&store, "/vthread/v7/\xE2\x80\xA5status", text,
                        sizeof(text));
         EXPECT(strcmp(text, "running") == 0);
+    }
+
+
+    /*
+     * 12b. `‥pc` 的三步哨兵协议。
+     *
+     * 没有原子多键写，所以「两个字段整体生效」靠**让中间态可被发现**：
+     * 改 stackid 时先写 s0 = -1，再写 stackid，最后写新 s0。中间态**必然**含
+     * 负数，与新旧指令范围是否恰好错开无关。
+     *
+     * 做法：把 set_value 包一层，记录每次写的 key 与值，事后核对调用序列——
+     * 这是唯一能观察到「中间态」的方式，因为最终态是自洽的，看不出过程。
+     */
+    {
+        runtimec_checkpoint_t checkpoint;
+        runtimec_checkpoint_reset(&checkpoint);
+        checkpoint.vthread_identifier =
+            runtimec_string_view_from_c_string("v8");
+        checkpoint.logical_program_counter =
+            (runtimec_program_counter_t){5, 9};
+        checkpoint.persistent_status =
+            runtimec_string_view_from_c_string("running");
+        EXPECT(services.checkpoint(services.context, &checkpoint, &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+
+        /*
+         * 写入序列：必须**恰好一次** SetValue 写 ‥pc，body 8 字节；
+         * 且**不得出现 SetPart**——一旦出现就是有人提前加了「只改 s0」的热路径分支。
+         * 只看终态测不出「整值写」与「两次部分写」的区别，所以这里断言过程。
+         */
+        {
+            runtimec_kvspace_binary_interface_t tapped = binary_interface;
+            write_log.count = 0U;
+            write_log.part_count = 0U;
+            write_log.inner = &binary_interface;
+            tapped.set_value = logging_set_value;
+            tapped.set_part = logging_set_part;
+            runtimec_host_services_t traced;
+            EXPECT(runtimec_kvspace_adapter_create_services(
+                       &request, &tapped, &traced, &error) ==
+                   RUNTIMEC_STATUS_SUCCESS);
+
+            runtimec_checkpoint_t second;
+            runtimec_checkpoint_reset(&second);
+            second.vthread_identifier =
+                runtimec_string_view_from_c_string("v10");
+            second.logical_program_counter =
+                (runtimec_program_counter_t){5, 9};
+            second.persistent_status =
+                runtimec_string_view_from_c_string("running");
+            EXPECT(traced.checkpoint(traced.context, &second, &error) ==
+                   RUNTIMEC_STATUS_SUCCESS);
+
+            const char *pc_key = "/vthread/v10/\xE2\x80\xA5pc";
+            size_t pc_writes = 0U;
+            for (size_t index = 0U; index < write_log.count; ++index) {
+                const write_record_t *record = &write_log.records[index];
+                if (strcmp(record->key, pc_key) != 0) {
+                    continue;
+                }
+                pc_writes += 1U;
+                EXPECT(record->body_size == 8U);
+                if (record->body_size == 8U) {
+                    int32_t stack_identifier = 0;
+                    int32_t ordinal = 0;
+                    memcpy(&stack_identifier, record->body, 4U);
+                    memcpy(&ordinal, record->body + 4U, 4U);
+                    EXPECT(stack_identifier == 5);
+                    EXPECT(ordinal == 9);
+                }
+            }
+            EXPECT(pc_writes == 1U);
+            EXPECT(write_log.part_count == 0U);
+        }
+
+        /* 终态正确：单 key 里是 [2]int32。 */
+        {
+            uint8_t *wire =
+                fake_kvspace_address(&store, "/vthread/v8/\xE2\x80\xA5pc");
+            EXPECT(wire != NULL);
+            if (wire != NULL) {
+                kvspaceXvalueHead head;
+                memcpy(&head, wire, sizeof(head));
+                EXPECT(kvspaceXvalueHeadLen(&head) == 8U);
+                int32_t stack_identifier = 0;
+                int32_t ordinal = 0;
+                memcpy(&stack_identifier, wire + KVSPACE_XVALUE_HEAD_LEN, 4U);
+                memcpy(&ordinal, wire + KVSPACE_XVALUE_HEAD_LEN + 4U, 4U);
+                EXPECT(stack_identifier == 5);
+                EXPECT(ordinal == 9);
+                /*
+                 * langtype 必须带精确长度 `[2]int32`——`[]int32` 会丢掉
+                 * 「恰好 2 个元素」，body 8 字节与 langtype 的一致性就没人能校验。
+                 */
+                const uint8_t *langtype = NULL;
+                const uint16_t langtype_size = kvspaceXvalueHeadLangtypeBounded(
+                    wire, kvspaceXvalueHeadTotalLen(&head), &langtype);
+                const char *expected_langtype = "[2]int32";
+                const size_t expected_size = strlen(expected_langtype);
+                EXPECT((size_t)langtype_size == expected_size);
+                EXPECT(langtype != NULL && (size_t)langtype_size == expected_size &&
+                       memcmp(langtype, expected_langtype, expected_size) == 0);
+            }
+        }
+
+        /* 负数 s0 是非法输入：入口必须拒绝，不把哨兵当合法位置写出去。 */
+        checkpoint.logical_program_counter =
+            (runtimec_program_counter_t){5, RUNTIMEC_PROGRAM_COUNTER_ORDINAL_NONE};
+        EXPECT(services.checkpoint(services.context, &checkpoint, &error) ==
+               RUNTIMEC_STATUS_INVALID);
     }
 
     /* 12. source_revision：读不到 ctime 必须失败，不伪造 revision。 */

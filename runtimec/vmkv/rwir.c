@@ -31,10 +31,19 @@ static runtimec_status_t vmkv_rwir_fail(runtimec_error_t *error,
                                         const char *message,
                                         const char *logical_program_counter_text,
                                         size_t logical_program_counter_size) {
-    runtimec_error_set(
-        error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, code,
-        runtimec_string_view_from_c_string(message),
-        runtimec_string_view_make(logical_program_counter_text, logical_program_counter_size));
+    /*
+     * **已知欠账（已登记 BOARD.md 已知边界）**：位置信息在本轮 pc 迁移中丢失。
+     * 上游传进来的是已格式化的 `"[行号,0]"` 文本，要恢复得把它包成
+     * `{STACK_IDENTIFIER_NONE, 行号}` —— 那要改 4 个调用点与读函数的签名，
+     * 影响面超出 pc 改造批次，故单开一批补回。
+     *
+     * 现状：错误仍然正确报告（状态、域名、分类码、消息都在），只是没有位置。
+     */
+    (void)logical_program_counter_text;
+    (void)logical_program_counter_size;
+    runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, code,
+                       runtimec_string_view_from_c_string(message),
+                       RUNTIMEC_PROGRAM_COUNTER_NONE);
     return status;
 }
 
@@ -48,9 +57,11 @@ static bool vmkv_rwir_langtype_is(const vmkv_source_slot_t *slot,
 /* operation name：opcode 槽的 `rwir`/`rwfunc` body（counts + 文本）。 */
 static bool vmkv_rwir_read_opcode(const vmkv_source_slot_t *slot,
                                   runtimec_string_view_t *output_operation,
+                                  runtimec_string_view_t *output_langtype,
                                   uint32_t *output_read_count,
                                   uint32_t *output_write_count) {
     *output_operation = runtimec_string_view_make(NULL, 0U);
+    *output_langtype = runtimec_string_view_make(NULL, 0U);
     *output_read_count = 0U;
     *output_write_count = 0U;
     if (slot == NULL || slot->body_size <= VMKV_COUNTS_HEADER_SIZE) {
@@ -72,6 +83,8 @@ static bool vmkv_rwir_read_opcode(const vmkv_source_slot_t *slot,
         return false;
     }
     *output_operation = runtimec_string_view_make(text, text_size);
+    /* `rwir` = 一条指令；`rwfunc` = 一次函数调用。由 layout 在生成时选定。 */
+    *output_langtype = slot->langtype;
     return true;
 }
 
@@ -366,10 +379,11 @@ runtimec_status_t vmkv_rwir_reader_next(
                                   NULL, 0U);
         }
         runtimec_string_view_t operation;
+        runtimec_string_view_t operation_langtype;
         uint32_t read_count = 0U;
         uint32_t write_count = 0U;
-        if (!vmkv_rwir_read_opcode(opcode_slot, &operation, &read_count,
-                                   &write_count) ||
+        if (!vmkv_rwir_read_opcode(opcode_slot, &operation, &operation_langtype,
+                                   &read_count, &write_count) ||
             operation.size == 0U) {
             return vmkv_rwir_fail(error, RUNTIMEC_STATUS_ERROR,
                                   VMKV_DIAG_EMPTY_OPCODE,
@@ -420,6 +434,7 @@ runtimec_status_t vmkv_rwir_reader_next(
             }
         }
         output_instruction->operation_name = operation;
+        output_instruction->operation_langtype = operation_langtype;
         output_instruction->logical_program_counter = line;
         output_instruction->read_arguments = reader->arguments;
         output_instruction->read_argument_count = read_count;

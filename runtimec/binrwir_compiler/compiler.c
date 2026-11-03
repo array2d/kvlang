@@ -36,7 +36,7 @@ static runtimec_status_t binrwir_compiler_fail(runtimec_error_t *error,
                                                const char *message) {
     runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, code,
                        runtimec_string_view_from_c_string(message),
-                       runtimec_string_view_make(NULL, 0U));
+                       RUNTIMEC_PROGRAM_COUNTER_NONE);
     return status;
 }
 

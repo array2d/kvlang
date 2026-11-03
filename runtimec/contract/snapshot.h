@@ -44,12 +44,20 @@ typedef struct runtimec_source_revision {
     uint32_t instruction_set_version;
 } runtimec_source_revision_t;
 
-/* 一次编译/执行的权威身份；逻辑位置与函数键均为借用视图。 */
+/* 一次编译/执行的权威身份；函数键与源码位置文本均为借用视图。 */
 typedef struct runtimec_snapshot {
     runtimec_version_t contract_version;
     runtimec_source_revision_t source_revision;
     runtimec_key_view_t function_key;
-    runtimec_string_view_t logical_program_counter;
+    /*
+     * **编译缓存键的源码位置文本**，与 `runtimec_program_counter_t`（执行位置）
+     * 不是同一个概念：前者是「这份 compilation 对应源码的哪一处」，用于比对缓存
+     * 是否过期；后者是「现在执行到哪个帧的第几条指令」。
+     *
+     * 刻意保持字符串、不改结构体：编译结果跨帧复用，若把帧号并进缓存键，
+     * 同一函数在不同帧下就会被判成不同的 compilation。
+     */
+    runtimec_string_view_t source_position_text;
 } runtimec_snapshot_t;
 
 runtimec_version_t runtimec_contract_version(void);

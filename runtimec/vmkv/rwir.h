@@ -58,6 +58,13 @@ typedef struct vmkv_rwir_argument_view_t {
 /* 一条 RWIR 指令及其两个方向分区。 */
 typedef struct vmkv_rwir_instruction_view_t {
     runtimec_string_view_t operation_name;
+    /*
+     * opcode 槽自己的 langtype：`rwir` = 一条 rwir 指令；`rwfunc` = 一次 rwfunc
+     * 调用（body 里是目标函数路径）。layout 在生成时就按目标选定了它，所以这是
+     * 「这条是不是调用」的**唯一权威判据**——不得用「名字以 `/lib/` 开头」之类
+     * 的字符串特判去猜，那会把拼错的名字也当成调用。
+     */
+    runtimec_string_view_t operation_langtype;
     uint32_t logical_program_counter;
     const vmkv_rwir_argument_view_t *read_arguments;
     size_t read_argument_count;

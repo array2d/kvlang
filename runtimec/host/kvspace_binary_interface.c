@@ -104,7 +104,7 @@ runtimec_status_t runtimec_kvspace_binary_interface_bind(
                 RUNTIMEC_ERROR_DOMAIN_HOST, 1,
                 runtimec_string_view_from_c_string(
                     runtimec_kvspace_missing_symbol_text),
-                runtimec_string_view_make(NULL, 0U));
+                RUNTIMEC_PROGRAM_COUNTER_NONE);
             return RUNTIMEC_STATUS_UNSUPPORTED;
         }
     }

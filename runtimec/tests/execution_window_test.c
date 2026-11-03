@@ -6,6 +6,14 @@
  * 命中的那条路径由测试自己预置 compilation：Program 用 builder 构造、经
  * BinRWIR Compiler 编译、按执行窗口会算出的同一把 key 入仓。未命中的那条路径
  * 走真实 vmkv 编码，host 的读能力给的是失败封闭的替身，因此不产生 Program。
+ *
+ * **夹具约定（测世代路径时必读）**：不得复用已缓存的 compilation。
+ * 缓存命中时不查 `source_revision`，于是覆盖快照世代的夹具不会被调用，
+ * 断言读到的是**上一次**的快照。世代路径的用例要换函数路径，或显式清缓存。
+ *
+ * 这是**夹具的坑，不是产品的洞**：缓存命中本身意味着 source revision 没变
+ * （世代变了 → 缓存键变 → 必然 miss），所以「命中后仍校验世代」在语义上恒真。
+ * 不要在产品代码里为它加校验。
  */
 
 #include <stdbool.h>
@@ -50,8 +58,10 @@ static int failures;
 #define TEST_TARGET "/lib/route"
 #define TEST_DONE_TARGET "/lib/route-done"
 #define TEST_MISSING_TARGET "/lib/missing"
+#define TEST_ZERO_ARGUMENT_TARGET "/lib/zero"
 #define TEST_VTHREAD "vthread-1"
-#define TEST_FRAME_PATH "/vthread/vthread-1"
+#define TEST_FRAME_PATH "/vthread/vthread-1/[1]"
+#define TEST_STACK_IDENTIFIER 1
 #define TEST_READ_KEY "/vthread/vthread-1/[0,0]"
 #define TEST_WRITE_KEY "/vthread/vthread-1/[0,-1]"
 /* 第一条 Program：COPY(3) CALL(4) COPY(5)，CALL 的后继是 source pc 5。 */
@@ -80,10 +90,13 @@ typedef struct test_context {
     char ensured_frame_path[64];
     char ensured_function_key[64];
     runtimec_status_t ensure_frame_status;
+    bool snapshot_generation_override_active;
+    uint64_t snapshot_generation_override;
     size_t checkpoint_count;
     uint64_t checkpoint_sequence;
     runtimec_status_t checkpoint_outcome;
-    char checkpoint_program_counter[64];
+    int32_t checkpoint_stack_identifier;
+    int32_t checkpoint_ordinal;
     char checkpoint_status[16];
     char checkpoint_vthread[32];
 } test_context_t;
@@ -116,7 +129,7 @@ static runtimec_status_t test_fail(runtimec_error_t *error,
                                    const char *message) {
     runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_HOST, 0,
                        runtimec_string_view_from_c_string(message),
-                       runtimec_string_view_make(NULL, 0U));
+                       RUNTIMEC_PROGRAM_COUNTER_NONE);
     return status;
 }
 
@@ -139,9 +152,13 @@ static runtimec_status_t test_source_revision(
     (void)context;
     (void)function_key;
     (void)error;
+    test_context_t *test = context;
+
     runtimec_source_revision_reset(revision);
     revision->instance_identifier = TEST_INSTANCE;
-    revision->generation = TEST_GENERATION;
+    revision->generation = test->snapshot_generation_override_active
+                               ? test->snapshot_generation_override
+                               : TEST_GENERATION;
     revision->schema_version = 1U;
     revision->instruction_set_version = 1U;
     return RUNTIMEC_STATUS_SUCCESS;
@@ -241,9 +258,10 @@ static runtimec_status_t test_checkpoint(
     test->checkpoint_count += 1U;
     test->checkpoint_sequence = checkpoint->sequence;
     test->checkpoint_outcome = checkpoint->outcome;
-    test_copy_text(test->checkpoint_program_counter,
-                   sizeof(test->checkpoint_program_counter),
-                   checkpoint->logical_program_counter);
+    test->checkpoint_stack_identifier =
+        checkpoint->logical_program_counter.stack_identifier;
+    test->checkpoint_ordinal =
+        checkpoint->logical_program_counter.source_instruction_ordinal;
     test_copy_text(test->checkpoint_status, sizeof(test->checkpoint_status),
                    checkpoint->persistent_status);
     test_copy_text(test->checkpoint_vthread, sizeof(test->checkpoint_vthread),
@@ -286,6 +304,62 @@ static runtimec_status_t test_program_add_instruction(
     request.write_arguments.count = write_count;
     return binrwir_program_builder_add_instruction(builder, &request,
                                                    &instruction_identifier);
+}
+
+
+/*
+ * 零参数、零指令以外的程序：`rwfunc test() -> ()` 的形状。
+ * 一条 RETURN 就够——它让执行窗口能跑到结构化退出。
+ */
+static runtimec_status_t test_program_build_zero_argument(
+    const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
+    binrwir_program_t **output_program) {
+    binrwir_program_identity_t identity;
+    binrwir_program_builder_t *builder = NULL;
+    binrwir_argument_t arguments[1];
+    uint16_t symbol_index = 0U;
+    runtimec_status_t status;
+
+    *output_program = NULL;
+    memset(&identity, 0, sizeof(identity));
+    identity.snapshot_generation = TEST_GENERATION;
+    identity.program_generation = TEST_PROGRAM_GENERATION;
+    identity.schema_version = 1U;
+    identity.rwir_manifest_version = VMKV_RWIR_MANIFEST_VERSION;
+    identity.binrwir_binary_interface_generation =
+        BINRWIR_BINARY_INTERFACE_GENERATION;
+    identity.canonical_encoding_revision = canonical_encoding_revision;
+
+    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    /* 无参数；一条 RETURN，source pc 取 1。 */
+    if (binrwir_argument_create(0U, BINRWIR_REFERENCE_FUNCTION, 0U, 0U,
+                                &arguments[0]) != RUNTIMEC_STATUS_SUCCESS) {
+        (void)binrwir_program_builder_destroy(builder);
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    (void)symbol_index;
+    (void)arguments;
+    {
+        binrwir_instruction_build_request_t request;
+        uint32_t identifier = BINRWIR_IDENTIFIER_NONE;
+
+        request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
+        request.operation_identifier = VMBIN_OPERATION_IDENTIFIER_RETURN;
+        request.read_arguments.data = NULL;
+        request.read_arguments.count = 0U;
+        request.write_arguments.data = NULL;
+        request.write_arguments.count = 0U;
+        status = binrwir_program_builder_add_instruction(builder, &request,
+                                                         &identifier);
+    }
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = binrwir_program_builder_finalize(builder, output_program);
+    }
+    (void)binrwir_program_builder_destroy(builder);
+    return status;
 }
 
 /* 建一份带一个读参、一个写参、一个函数名符号的 builder 骨架。 */
@@ -537,11 +611,18 @@ int main(void) {
     EXPECT(test_compile_and_insert(&components, TEST_DONE_TARGET,
                                    canonical_encoding_revision, program,
                                    &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_program_build_zero_argument(&allocator,
+                                            canonical_encoding_revision,
+                                            &program) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_compile_and_insert(&components, TEST_ZERO_ARGUMENT_TARGET,
+                                   canonical_encoding_revision, program,
+                                   &error) == RUNTIMEC_STATUS_SUCCESS);
 
     arguments[0] = runtimec_string_view_from_c_string(TEST_READ_KEY);
     arguments[1] = runtimec_string_view_from_c_string(TEST_WRITE_KEY);
     memset(&request, 0, sizeof(request));
     request.frame_path = runtimec_string_view_from_c_string(TEST_FRAME_PATH);
+    request.stack_identifier = TEST_STACK_IDENTIFIER;
     request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
     request.function_path = runtimec_string_view_from_c_string(TEST_TARGET);
     request.vthread_identifier =
@@ -560,8 +641,9 @@ int main(void) {
     EXPECT(test.resolve_count == 2U);
     EXPECT(test.checkpoint_count == 1U);
     EXPECT(test.checkpoint_outcome == RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(strcmp(test.checkpoint_program_counter,
-                  "/lib/route/[5,0]") == 0);
+    /* pc 是 struct：stackid 取自请求，s0 是可恢复位置。 */
+    EXPECT(test.checkpoint_stack_identifier == TEST_STACK_IDENTIFIER);
+    EXPECT(test.checkpoint_ordinal == (int32_t)TEST_RESUME_SOURCE_COUNTER);
     EXPECT(strcmp(test.checkpoint_status, "running") == 0);
     EXPECT(strcmp(test.checkpoint_vthread, TEST_VTHREAD) == 0);
     /* 建帧先于绑定：帧路径与函数 key 都必须按请求原样交给 host。 */
@@ -578,8 +660,8 @@ int main(void) {
     EXPECT(result.execution_exit.logical_program_counter ==
            TEST_RETURN_SOURCE_COUNTER);
     EXPECT(test.checkpoint_count == 2U);
-    EXPECT(strcmp(test.checkpoint_program_counter,
-                  "/lib/route-done/[10,0]") == 0);
+    EXPECT(test.checkpoint_stack_identifier == TEST_STACK_IDENTIFIER);
+    EXPECT(test.checkpoint_ordinal == (int32_t)TEST_RETURN_SOURCE_COUNTER);
     EXPECT(strcmp(test.checkpoint_status, "done") == 0);
 
     /* 2.5 建帧失败：一条指令都不执行，不提交 checkpoint。 */
@@ -598,6 +680,54 @@ int main(void) {
         test.ensure_frame_status = RUNTIMEC_STATUS_SUCCESS;
     }
 
+    /*
+     * 2.9 零参数函数：`rwfunc test() -> ()` 是每条用例的入口形状。
+     * 「空绑定也是一次绑定」——generation 来自快照的 source revision，
+     * 与参数个数无关。修之前这条会被判成「frame binding has no storage
+     * generation」而拒绝。
+     */
+    {
+        runtimec_execution_window_request_t zero_request = request;
+        zero_request.function_path =
+            runtimec_string_view_from_c_string(TEST_ZERO_ARGUMENT_TARGET);
+        zero_request.arguments = NULL;
+        zero_request.argument_count = 0U;
+        zero_request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
+        const size_t checkpoints_before = test.checkpoint_count;
+
+        EXPECT(runtimec_execution_window_execute(session, &zero_request,
+                                                 &result, &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_DONE);
+        /* 执行到了，且提交了 checkpoint。 */
+        EXPECT(test.checkpoint_count == checkpoints_before + 1U);
+    }
+
+
+    /*
+     * 2.95 反向：快照世代为 0（host 没给出可用的存储世代）时，**零参数帧同样被拒**。
+     *
+     * 这条守的不是绑定门，而是快照门：它在 `source revision is not addressable`
+     * 处就失败，走不到建绑定。「空绑定也是一次绑定」不等于「没有世代也算绑定」。
+     */
+    {
+        runtimec_execution_window_request_t zero_request = request;
+        zero_request.function_path =
+            runtimec_string_view_from_c_string(TEST_ZERO_ARGUMENT_TARGET);
+        zero_request.arguments = NULL;
+        zero_request.argument_count = 0U;
+        zero_request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
+        test.snapshot_generation_override_active = true;
+        test.snapshot_generation_override = 0U;
+
+        EXPECT(runtimec_execution_window_execute(session, &zero_request,
+                                                 &result, &error) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+        /* 诊断码 3 = SNAPSHOT_FAILED：证明它死在快照门而不是绑定门。 */
+        EXPECT(result.execution_exit.detail_code == 3U);
+        test.snapshot_generation_override_active = false;
+    }
+
     /* 3. 未命中：走真实编码，读能力失败 → 窗口失败封闭且不提交。 */
     request.function_path =
         runtimec_string_view_from_c_string(TEST_MISSING_TARGET);
@@ -605,7 +735,7 @@ int main(void) {
            RUNTIMEC_STATUS_SUCCESS);
     /* 诊断码 5 = ENCODE_FAILED：证明真的走进了编码分支。 */
     EXPECT(result.execution_exit.detail_code == 5U);
-    EXPECT(test.checkpoint_count == 2U);
+    EXPECT(test.checkpoint_count == 3U);
 
     /* 4. 起始 source pc 不属于这份 Program：失败封闭，不执行、不提交。 */
     request.function_path = runtimec_string_view_from_c_string(TEST_TARGET);
@@ -613,7 +743,7 @@ int main(void) {
     EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
            RUNTIMEC_STATUS_INVALID);
     EXPECT(result.execution_exit.detail_code == 12U);
-    EXPECT(test.checkpoint_count == 2U);
+    EXPECT(test.checkpoint_count == 3U);
 
     /* 5. 空 vthread：checkpoint 没有落点。 */
     request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;

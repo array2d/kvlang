@@ -29,7 +29,7 @@ static runtimec_status_t vmbin_value_access_fail(
     runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT,
                        (int64_t)code,
                        runtimec_string_view_from_c_string(message),
-                       runtimec_string_view_make(NULL, 0U));
+                       RUNTIMEC_PROGRAM_COUNTER_NONE);
     return status;
 }
 

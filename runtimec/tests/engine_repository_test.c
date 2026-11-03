@@ -51,7 +51,7 @@ static runtimec_compilation_repository_key_t make_key(uint64_t generation,
     key.snapshot.source_revision.schema_version = 1U;
     key.snapshot.source_revision.instruction_set_version = 2U;
     key.snapshot.function_key = runtimec_key_view_from_c_string("/lib/sum");
-    key.snapshot.logical_program_counter =
+    key.snapshot.source_position_text =
         runtimec_string_view_from_c_string("/lib/sum/[1,0]");
     key.rwir_manifest_version = 3U;
     key.canonical_encoding_revision = 4U;

@@ -19,6 +19,7 @@
 #include <stdint.h>
 
 #include "contract/error.h"
+#include "contract/program_counter.h"
 #include "contract/snapshot.h"
 #include "contract/status.h"
 #include "contract/view.h"
@@ -27,6 +28,7 @@
 extern "C" {
 #endif
 
+
 typedef struct runtimec_checkpoint {
     runtimec_version_t contract_version;
     runtimec_source_revision_t source_revision; /* 提交所对应的 source 世代 */
@@ -34,7 +36,7 @@ typedef struct runtimec_checkpoint {
     runtimec_string_view_t runtime_identifier;
     runtimec_string_view_t vthread_identifier;
     runtimec_string_view_t frame_identifier;
-    runtimec_string_view_t logical_program_counter;
+    runtimec_program_counter_t logical_program_counter;
     runtimec_string_view_t persistent_status;   /* running/paused/waiting/done/error */
     runtimec_status_t outcome;                  /* 本次提交的组件结果 */
     runtimec_error_t error;                     /* 失败时的错误详情 */

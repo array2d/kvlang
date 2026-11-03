@@ -30,11 +30,6 @@
 #include "vmkv/encoder.h"
 #include "vmkv/rwir_manifest.h"
 
-/* `‥pc` 的文本形状：函数绝对路径 + `[<source pc>,0]`（同 kvcpu 的写回串）。 */
-#define RUNTIMEC_EXECUTION_WINDOW_PROGRAM_COUNTER_PREFIX "/["
-#define RUNTIMEC_EXECUTION_WINDOW_PROGRAM_COUNTER_SUFFIX ",0]"
-#define RUNTIMEC_EXECUTION_WINDOW_UNSIGNED_DECIMAL_CAPACITY 11U
-
 typedef enum runtimec_execution_window_diagnostic_t {
     RUNTIMEC_EXECUTION_WINDOW_DIAG_INVALID_REQUEST = 1,
     RUNTIMEC_EXECUTION_WINDOW_DIAG_MISSING_HOST_CAPABILITY = 2,
@@ -76,53 +71,28 @@ static runtimec_status_t runtimec_execution_window_fail(runtimec_execution_windo
     runtimec_execution_window_reset_result(result, status, (uint32_t)detail);
     runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, detail,
                        runtimec_string_view_from_c_string(message),
-                       runtimec_string_view_make(NULL, 0U));
+                       RUNTIMEC_PROGRAM_COUNTER_NONE);
     return status;
 }
 
 /*
- * `‥pc` 文本由执行窗口组装：函数绝对路径 + `[<source pc>,0]`。这是 kvspace
- * 帧计数器的既有形状（kvcpu 写回同一个串），不是新的键空间。
- * output_text 由调用方用同一 allocator 释放。
+ * `‥pc` 现在是两个整数，不是路径文本：`{stack_identifier, s0}`。
+ * 线程身份由存放路径给出（`/vthread/{vid}/‥pc·*`），函数身份由该帧的 `‥lib`
+ * 给出——三样各归其位，pc 里不再编码任何文本。
+ *
+ * 本阶段执行窗口一次调用只跑一个窗口，没有跨调用的帧栈，所以 stackid 由请求
+ * 给出（`frame_path` 里的帧坐标即其数值来源由调用方负责，本层不解析文本）。
  */
-static runtimec_status_t runtimec_execution_window_make_program_counter(
-    const runtimec_allocator_t *allocator, runtimec_string_view_t function_path,
-    uint32_t source_program_counter, char **output_text) {
-    const size_t capacity = function_path.size +
-                            sizeof(RUNTIMEC_EXECUTION_WINDOW_PROGRAM_COUNTER_PREFIX) +
-                            RUNTIMEC_EXECUTION_WINDOW_UNSIGNED_DECIMAL_CAPACITY +
-                            sizeof(RUNTIMEC_EXECUTION_WINDOW_PROGRAM_COUNTER_SUFFIX);
-    char *text;
-    int written;
-    char counter_text[RUNTIMEC_EXECUTION_WINDOW_UNSIGNED_DECIMAL_CAPACITY];
+static runtimec_program_counter_t runtimec_execution_window_make_program_counter(
+    int32_t stack_identifier, uint32_t source_program_counter) {
+    runtimec_program_counter_t counter;
 
-    *output_text = NULL;
-    if (function_path.size == 0U) {
-        return RUNTIMEC_STATUS_INVALID;
-    }
-    text = (char *)runtimec_allocator_allocate(allocator, capacity, 1U);
-    if (text == NULL) {
-        return RUNTIMEC_STATUS_OUT_OF_MEMORY;
-    }
-    written = snprintf(counter_text, sizeof(counter_text), "%u",
-                       source_program_counter);
-    if (written <= 0 || (size_t)written >= sizeof(counter_text)) {
-        (void)runtimec_allocator_deallocate(allocator, text, capacity, 1U);
-        return RUNTIMEC_STATUS_INVALID;
-    }
-    memcpy(text, function_path.data, function_path.size);
-    size_t length = function_path.size;
-    const size_t prefix_size = sizeof(RUNTIMEC_EXECUTION_WINDOW_PROGRAM_COUNTER_PREFIX) - 1U;
-    memcpy(text + length, RUNTIMEC_EXECUTION_WINDOW_PROGRAM_COUNTER_PREFIX, prefix_size);
-    length += prefix_size;
-    memcpy(text + length, counter_text, (size_t)written);
-    length += (size_t)written;
-    const size_t suffix_size = sizeof(RUNTIMEC_EXECUTION_WINDOW_PROGRAM_COUNTER_SUFFIX) - 1U;
-    memcpy(text + length, RUNTIMEC_EXECUTION_WINDOW_PROGRAM_COUNTER_SUFFIX, suffix_size);
-    length += suffix_size;
-    text[length] = '\0';
-    *output_text = text;
-    return RUNTIMEC_STATUS_SUCCESS;
+    counter.stack_identifier = stack_identifier;
+    counter.source_instruction_ordinal =
+        source_program_counter > (uint32_t)INT32_MAX
+            ? RUNTIMEC_PROGRAM_COUNTER_ORDINAL_NONE
+            : (int32_t)source_program_counter;
+    return counter;
 }
 
 /* 解析一个绝对槽键并写进绑定表；代数必须与本次快照一致且非零。 */
@@ -180,7 +150,17 @@ static runtimec_status_t runtimec_execution_window_bind_parameters(
     size_t write_count;
     size_t ordinal;
 
-    *output_generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
+    /*
+     * 「这一帧的绑定已建立」与参数个数无关：**空绑定也是一次绑定**。
+     *
+     * generation 的事实源是快照的 source revision —— 它回答「这一帧依据哪份存储」，
+     * 而不是「从哪个实参解析出来的」。零参数函数没有任何实参可解析，若因此就让
+     * generation 留在 NONE，检查点会把「绑定已建立」误判成「没建绑定」，
+     * `rwfunc test() -> ()` 这种每条用例的入口形状就永远执行不了。
+     *
+     * 先记快照世代；有实参时下面会被解析到的世代覆盖（并校验一致）。
+     */
+    *output_generation = snapshot->source_revision.generation;
     if (binrwir_program_get_view(program, &program_view) !=
         RUNTIMEC_STATUS_SUCCESS) {
         *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED;
@@ -257,7 +237,6 @@ static runtimec_status_t runtimec_execution_window_commit_checkpoint(
     const runtimec_execution_window_request_t *request,
     const binrwir_execution_exit_t *execution_exit, runtimec_error_t *error) {
     runtimec_checkpoint_t checkpoint;
-    char *program_counter_text = NULL;
     uint32_t source_program_counter;
     runtimec_status_t status;
 
@@ -286,17 +265,8 @@ static runtimec_status_t runtimec_execution_window_commit_checkpoint(
                            runtimec_string_view_from_c_string(
                                "completed exit carries no source "
                                "program counter"),
-                           runtimec_string_view_make(NULL, 0U));
+                           RUNTIMEC_PROGRAM_COUNTER_NONE);
         return RUNTIMEC_STATUS_INVALID;
-    }
-    /* prefix 只来自快照里的函数键：route 只格式化，不推导路径。 */
-    status = runtimec_execution_window_make_program_counter(
-        &host->allocator,
-        runtimec_string_view_make(snapshot->function_key.data,
-                                  snapshot->function_key.size),
-        source_program_counter, &program_counter_text);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return status;
     }
     runtimec_checkpoint_reset(&checkpoint);
     checkpoint.contract_version = snapshot->contract_version;
@@ -304,23 +274,17 @@ static runtimec_status_t runtimec_execution_window_commit_checkpoint(
     status = runtimec_session_take_checkpoint_sequence(session,
                                                        &checkpoint.sequence);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        (void)runtimec_allocator_deallocate(&host->allocator,
-                                            program_counter_text,
-                                            strlen(program_counter_text) + 1U,
-                                            1U);
         return status;
     }
     /* runtime/frame 标识本阶段留空：适配层不读，填一个编出来的值是第二事实。 */
     checkpoint.vthread_identifier = request->vthread_identifier;
     checkpoint.logical_program_counter =
-        runtimec_string_view_from_c_string(program_counter_text);
+        runtimec_execution_window_make_program_counter(
+            request->stack_identifier, source_program_counter);
     checkpoint.persistent_status =
         runtimec_execution_window_persistent_status(execution_exit->kind);
     checkpoint.outcome = execution_exit->status;
-    status = host->checkpoint(host->context, &checkpoint, error);
-    (void)runtimec_allocator_deallocate(&host->allocator, program_counter_text,
-                                        strlen(program_counter_text) + 1U, 1U);
-    return status;
+    return host->checkpoint(host->context, &checkpoint, error);
 }
 
 /*

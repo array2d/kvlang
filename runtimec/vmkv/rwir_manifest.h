@@ -140,11 +140,46 @@ const vmkv_rwir_capability_t *vmkv_rwir_manifest_capability(
     vmkv_rwir_capability_identifier_t identifier);
 
 /*
- * 该 operation 是否是 `call`：`call` 的第一个读参是函数名而不是值操作数，
- * 因此它既不参与类型收敛，也不算局部变量。判据只此一处，encoder 与
- * local_types 共用。
+ * opid → 算子名。未登记返回 false，不做任何猜测与归一化。
+ *
+ * 存在的理由：BinRWIR 要能打印成文本以检查编译结果，打印时按 opid 显示算子名。
+ * 名字解析放在这一层，是因为 `binrwir` 不得依赖 `vmkv`（否则编码层与指令层成环），
+ * 由调用方把本函数作为回调传给 `binrwir_program_format`。
+ *
+ * 数据只来自 `rwir_catalog.def` 展开的那张能力表——**不建第二张 opid 表**。
+ * `FOREIGN`（0xFFFFFFFE）与保留区不是算子，不在表里，返回 false，由调用方自行
+ * 打印 `foreign` 或数值。
+ *
+ * 所有权：输出的字符串指向能力表里的静态文本，**生存期与进程同长**，调用方不拥有、
+ * 不得释放；需要持有或修改时必须自己拷贝。
+ */
+bool vmkv_rwir_manifest_find_operation_by_identifier(
+    uint32_t operation_identifier, runtimec_string_view_t *output_name);
+
+/*
+ * 该 surface 名是否解析到 `call` 这条能力行。
+ *
+ * 注意两件事：
+ *  1. 这里只回答「这个名字是不是 call」。**判断一条 RWIR 指令是不是函数调用，
+ *     要看 opcode 槽的 langtype**（`vmkv_rwir_manifest_is_rwfunc_call`），不能靠
+ *     名字形状——拼错的裸名也可能以 `/lib/` 开头。
+ *  2. 调用指令的读参分区**不是**「第一个是函数名」。目标函数路径在 opcode 槽的
+ *     body 里，编码器会**额外追加**一个 FUNCTION 读参放在分区最前，其后才是真实
+ *     实参。按「读参 0 = 函数名」实现会静默错位：写参区随读参区增长而右移，
+ *     任何漏加该偏移的指针都会落到类型串上，拷出一个 kind=INVALID 的参数项——
+ *     不报错，只是数据错了。
  */
 bool vmkv_rwir_manifest_is_call(runtimec_string_view_t operation_name);
+
+/*
+ * opcode 槽的 langtype 是否表示「一次 rwfunc 调用」。
+ *
+ * layout 在生成时就按目标选定了槽类型：调用槽是 `rwfunc`，算子槽是 `rwir`。
+ * 这是「这条指令是不是调用」的唯一权威判据——不用名字是否以 `/lib/` 开头之类的
+ * 字符串特判，那会把拼错的裸名也当成合法调用。
+ */
+bool vmkv_rwir_manifest_is_rwfunc_call(
+    runtimec_string_view_t operation_langtype);
 
 /* 按 .def 声明顺序求第一条匹配的改选规则。 */
 vmkv_rwir_specialization_result_t vmkv_rwir_manifest_find_specialization(

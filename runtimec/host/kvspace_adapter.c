@@ -60,7 +60,7 @@ static runtimec_status_t runtimec_kvspace_adapter_fail(
     const char *message) {
     runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_STORAGE, code,
                        runtimec_string_view_from_c_string(message),
-                       runtimec_string_view_make(NULL, 0U));
+                       RUNTIMEC_PROGRAM_COUNTER_NONE);
     return status;
 }
 
@@ -1010,6 +1010,84 @@ static runtimec_status_t runtimec_kvspace_adapter_ensure_zero_value(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+/*
+ * 写 `‥pc`：单 key 整值写，body 是 `[2]int32` —— `[stackid][s0]`，各 4 字节小端。
+ *
+ * 为什么是整值写而不是两个成员 key：「改 stackid 必改 s0」这个约束**由形态保证**，
+ * 不再依赖写入顺序或中间态哨兵——两个字段在同一次写里更新，天然原子。
+ * （两成员 key 的形态需要人为约定顺序，且无原子多键写时只能靠哨兵让中间态可检测；
+ *   单值形态让这套协议根本不需要存在。）
+ *
+ * **offset 语义**：kvspace 的 `SetPart` 的 offset 相对**整条 wire**（含 head），不是
+ * 相对 body。真后端实测：`offset=16/20` 正确，`offset=0/4` 会写进 head，返回 0 且
+ * 值随后消失。将来加「只改 s0」的热路径时，offset 必须是
+ * `KVSPACE_XVALUE_HEAD_LEN + 4`，不是 4。
+ *
+ * 本阶段只实现整值写：当前唯一调用方（checkpoint）总是写完整位置，没有「只推进 s0」
+ * 的调用点。没有调用方的分支不会被任何用例覆盖，等它出现时再和调用方一起验。
+ */
+static runtimec_status_t runtimec_kvspace_adapter_write_program_counter(
+    runtimec_kvspace_adapter_context_t *adapter, runtimec_string_view_t vthread,
+    runtimec_program_counter_t counter, runtimec_error_t *error) {
+    if (counter.source_instruction_ordinal < 0) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_INVALID, 94,
+            "program counter ordinal must not be negative");
+    }
+    char key_text[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    const size_t separator_size =
+        sizeof(RUNTIMEC_KVSPACE_RUNTIME_MEMBER_SEPARATOR) - 1U;
+    if (sizeof("/vthread/") - 1U + vthread.size + 1U + separator_size +
+            strlen(runtimec_kvspace_member_program_counter) + 1U >
+        sizeof(key_text)) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_INVALID, 90, "counter key is too long");
+    }
+    int written = snprintf(key_text, sizeof(key_text), "/vthread/%.*s/%s%s",
+                           (int)vthread.size, vthread.data,
+                           RUNTIMEC_KVSPACE_RUNTIME_MEMBER_SEPARATOR,
+                           runtimec_kvspace_member_program_counter);
+    if (written <= 0 || (size_t)written >= sizeof(key_text)) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_INVALID, 91,
+            "counter key formatting failed");
+    }
+
+    /* body = [stackid:i32 LE][s0:i32 LE]，一次写完整位置。 */
+    uint8_t body[8];
+    const uint32_t stack_bits = (uint32_t)counter.stack_identifier;
+    const uint32_t ordinal_bits = (uint32_t)counter.source_instruction_ordinal;
+    for (size_t index = 0U; index < 4U; ++index) {
+        body[index] = (uint8_t)((stack_bits >> (8U * index)) & 0xFFU);
+        body[4U + index] = (uint8_t)((ordinal_bits >> (8U * index)) & 0xFFU);
+    }
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    /*
+     * 落盘 langtype 带精确长度 `[2]int32`，不是源码写法 `[]int32`
+     * （`03-类型系统/10-compact形态.kv`：源级 `[]T`，落盘 `[N]T`）。
+     * 丢了「恰好 2 个元素」这个事实，读方就无从校验 body 8 字节与 langtype 一致。
+     */
+    if (adapter->binary_interface.new_slack(body, sizeof(body), sizeof(body),
+                                            "[2]int32", &wire, &wire_size) != 0 ||
+        wire == NULL || wire_size > UINT32_MAX) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_ERROR, 92, "counter value encoding failed");
+    }
+    char error_text[256];
+    error_text[0] = '\0';
+    int set_status = adapter->binary_interface.set_value(
+        adapter->handle, key_text, wire, (uint32_t)wire_size, error_text,
+        (uint32_t)sizeof(error_text));
+    free(wire);
+    if (set_status != 0) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_ERROR, 93,
+            error_text[0] != '\0' ? error_text : "kvspace write failed");
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 static runtimec_status_t runtimec_kvspace_adapter_checkpoint(
     void *context, const runtimec_checkpoint_t *checkpoint,
     runtimec_error_t *error) {
@@ -1025,9 +1103,8 @@ static runtimec_status_t runtimec_kvspace_adapter_checkpoint(
             error, RUNTIMEC_STATUS_INVALID, 51,
             "checkpoint has no vthread identifier");
     }
-    runtimec_status_t status = runtimec_kvspace_adapter_write_system_member(
+    runtimec_status_t status = runtimec_kvspace_adapter_write_program_counter(
         adapter, checkpoint->vthread_identifier,
-        runtimec_kvspace_member_program_counter,
         checkpoint->logical_program_counter, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
@@ -1084,18 +1161,31 @@ static runtimec_status_t runtimec_kvspace_adapter_handoff(
         return runtimec_kvspace_adapter_fail(
             error, RUNTIMEC_STATUS_INVALID, 54, "handoff key formatting failed");
     }
+    /*
+     * 队列值携带 pc。pc 现在是两个 int32，但**队列外部消费方所需的形态没有
+     * 事实源**：旧 runtime 写 `<函数路径>/[<s0>,0]` 文本，新的外部执行器尚未
+     * 实现。本阶段保留文本形态，把 struct 格式化成同一个串——这不是把 pc 变回
+     * 字符串，是 handoff 协议尚未随 pc 改造迁移。
+     */
+    char target_text[96];
+    const int target_size = snprintf(
+        target_text, sizeof(target_text), "[%d,%d]",
+        (int)request->checkpoint.logical_program_counter.stack_identifier,
+        (int)request->checkpoint.logical_program_counter
+            .source_instruction_ordinal);
+    if (target_size <= 0 || (size_t)target_size >= sizeof(target_text)) {
+        return runtimec_kvspace_adapter_fail(
+            error, RUNTIMEC_STATUS_INVALID, 55,
+            "handoff program counter formatting failed");
+    }
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
-    const runtimec_string_view_t target =
-        request->checkpoint.logical_program_counter;
-    if (!runtimec_string_view_is_valid(target) || target.size > UINT32_MAX ||
-        adapter->binary_interface.new_slack((const uint8_t *)target.data,
-                                            target.size, target.size,
-                                            "char/utf8", &wire,
-                                            &wire_size) != 0 ||
+    if (adapter->binary_interface.new_slack(
+            (const uint8_t *)target_text, (uint64_t)target_size,
+            (uint64_t)target_size, "char/utf8", &wire, &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         return runtimec_kvspace_adapter_fail(
-            error, RUNTIMEC_STATUS_ERROR, 55, "handoff value encoding failed");
+            error, RUNTIMEC_STATUS_ERROR, 56, "handoff value encoding failed");
     }
     char error_text[256];
     error_text[0] = '\0';

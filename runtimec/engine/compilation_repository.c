@@ -19,7 +19,7 @@
 typedef struct runtimec_compilation_repository_entry {
     runtimec_compilation_repository_key_t key;
     char *function_key_text;
-    char *logical_program_counter_text;
+    char *source_position_text;
     binrwir_compilation_t *compilation;
     size_t lease_count;
     bool invalidated;
@@ -46,7 +46,7 @@ static runtimec_status_t runtimec_compilation_repository_fail(
     const char *message) {
     runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, code,
                        runtimec_string_view_from_c_string(message),
-                       runtimec_string_view_make(NULL, 0U));
+                       RUNTIMEC_PROGRAM_COUNTER_NONE);
     return status;
 }
 
@@ -107,12 +107,12 @@ static bool runtimec_compilation_repository_key_matches(
                 left_snapshot->function_key.size) != 0)) {
         return false;
     }
-    return left_snapshot->logical_program_counter.size ==
-               right_snapshot->logical_program_counter.size &&
-           (left_snapshot->logical_program_counter.size == 0U ||
-            memcmp(left_snapshot->logical_program_counter.data,
-                   right_snapshot->logical_program_counter.data,
-                   left_snapshot->logical_program_counter.size) == 0);
+    return left_snapshot->source_position_text.size ==
+               right_snapshot->source_position_text.size &&
+           (left_snapshot->source_position_text.size == 0U ||
+            memcmp(left_snapshot->source_position_text.data,
+                   right_snapshot->source_position_text.data,
+                   left_snapshot->source_position_text.size) == 0);
 }
 
 static bool runtimec_compilation_repository_key_is_valid(
@@ -126,8 +126,8 @@ static void runtimec_compilation_repository_entry_reset_views(
     runtimec_compilation_repository_entry_t *entry) {
     entry->key.snapshot.function_key = runtimec_key_view_from_c_string(
         entry->function_key_text);
-    entry->key.snapshot.logical_program_counter =
-        runtimec_string_view_from_c_string(entry->logical_program_counter_text);
+    entry->key.snapshot.source_position_text =
+        runtimec_string_view_from_c_string(entry->source_position_text);
 }
 
 /* 释放一个条目持有的全部资源；调用方负责清 occupied。 */
@@ -146,11 +146,11 @@ static void runtimec_compilation_repository_release_entry(
             strlen(entry->function_key_text) + 1U, 1U);
         entry->function_key_text = NULL;
     }
-    if (entry->logical_program_counter_text != NULL) {
+    if (entry->source_position_text != NULL) {
         (void)runtimec_allocator_deallocate(
-            &repository->allocator, entry->logical_program_counter_text,
-            strlen(entry->logical_program_counter_text) + 1U, 1U);
-        entry->logical_program_counter_text = NULL;
+            &repository->allocator, entry->source_position_text,
+            strlen(entry->source_position_text) + 1U, 1U);
+        entry->source_position_text = NULL;
     }
     memset(entry, 0, sizeof(*entry));
 }
@@ -361,13 +361,13 @@ runtimec_status_t runtimec_compilation_repository_insert(
             error, RUNTIMEC_STATUS_OUT_OF_MEMORY, 9,
             "function key copy failed");
     }
-    char *logical_program_counter_text =
+    char *source_position_text =
         runtimec_compilation_repository_copy_text(
             &repository->allocator,
-            key->snapshot.logical_program_counter.data,
-            key->snapshot.logical_program_counter.size);
-    if (key->snapshot.logical_program_counter.size != 0U &&
-        logical_program_counter_text == NULL) {
+            key->snapshot.source_position_text.data,
+            key->snapshot.source_position_text.size);
+    if (key->snapshot.source_position_text.size != 0U &&
+        source_position_text == NULL) {
         if (function_key_text != NULL) {
             (void)runtimec_allocator_deallocate(
                 &repository->allocator, function_key_text,
@@ -380,7 +380,7 @@ runtimec_status_t runtimec_compilation_repository_insert(
     memset(entry, 0, sizeof(*entry));
     entry->key = *key;
     entry->function_key_text = function_key_text;
-    entry->logical_program_counter_text = logical_program_counter_text;
+    entry->source_position_text = source_position_text;
     runtimec_compilation_repository_entry_reset_views(entry);
     entry->compilation = compilation;
     entry->lease_count = 1U;

@@ -254,7 +254,7 @@ static bool encode_and_report(test_environment_t *environment,
     runtimec_snapshot_reset(&snapshot);
     snapshot.contract_version = runtimec_contract_version();
     snapshot.function_key = runtimec_key_view_from_c_string(function_path);
-    snapshot.logical_program_counter =
+    snapshot.source_position_text =
         runtimec_string_view_from_c_string("[1,0]");
     if (environment->services.source_revision(
             environment->services.context, runtimec_key_view_from_c_string(
@@ -381,7 +381,7 @@ static bool foreign_program_counters_match(test_environment_t *environment,
     runtimec_snapshot_reset(&snapshot);
     snapshot.contract_version = runtimec_contract_version();
     snapshot.function_key = runtimec_key_view_from_c_string(function_path);
-    snapshot.logical_program_counter =
+    snapshot.source_position_text =
         runtimec_string_view_from_c_string("[1,0]");
     if (environment->services.source_revision(
             environment->services.context,

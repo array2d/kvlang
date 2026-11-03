@@ -220,6 +220,9 @@ fn analyze_func(
     collect_insts(&fn_.body, &mut seq, &mut labels)
         .map_err(|e| format!("{}: {e}", fn_.sig.name))?;
     check_jumps(&seq, &labels).map_err(|e| format!("{}: {e}", fn_.sig.name))?;
+    /* lower 之后补写槽类型：A/B/D 三类缺口共用这一个入口。必须在 write_func 之前、
+     * 在 seq 定稿之后——早于 lower 时临时槽还没展开。 */
+    annotate_slot_types(&mut seq, &declared, sigs);
     // Validate instruction arity before touching kvspace (shared by `vet` and `compile`).
     for inst in &seq {
         let (op, reads) = inst.flat();
@@ -1192,6 +1195,116 @@ fn read_slot_type(
     slot_static_type(name, param_langtype, declared, type_sets, stable)
 }
 
+/// 给线性化后的指令补写槽类型（lower 之后、写 kvspace 之前）。
+///
+/// 为什么需要这一趟：`lower_func` 会把复合表达式展开成临时槽（`_1`、`_2`…），
+/// 这些槽既不在 `declared` 也不在类型集合里，于是 body 只有名字、没有 `\0类型`，
+/// 编码器报「local '_N' is written with a non-concrete langtype」——类型缺失被
+/// 报成编码器缺陷。
+///
+/// **三类缺口共用这一个入口**，不各写一遍：
+///   A. 调用结果：`f(x)` 的写槽类型 = callee 的返回类型（`sigs`）；
+///   B. mapexpr 成员读：`m·k` 的结果类型 = langtype 里 `·` 之后那段；
+///   D. 指针解引用：`*p` 的结果类型 = `declared[p]` 去掉前导 `*`。
+///
+/// 空 kindexpr（`rwfunc f(x:)`）**不在此补**：spec 说它合法（「不约束」），
+/// 替它编一个具体类型就是发明语义。那条由 runtimec 明确拒绝（见 BOARD）。
+fn annotate_slot_types(
+    seq: &mut [Instruction],
+    declared: &HashMap<String, String>,
+    sigs: &lower::SigTable,
+) {
+    for inst in seq.iter_mut() {
+        if inst.writes.is_empty() {
+            continue;
+        }
+        let Some(expr) = inst.expr.as_ref() else {
+            continue;
+        };
+        if expr.is_leaf() {
+            continue;
+        }
+        let ty = expr_slot_type(expr, declared, sigs);
+        let Some(ty) = ty else { continue };
+        if ty.is_empty() {
+            continue;
+        }
+        if inst.write_types.len() < inst.writes.len() {
+            inst.write_types.resize(inst.writes.len(), String::new());
+        }
+        if inst.write_types[0].is_empty() {
+            inst.write_types[0] = ty;
+        }
+    }
+}
+
+/// 一个写槽表达式的结果类型；None = 不归本入口管（由常规链路处理或本就未知）。
+fn expr_slot_type(
+    expr: &ast::Expr,
+    declared: &HashMap<String, String>,
+    sigs: &lower::SigTable,
+) -> Option<String> {
+    /* D：指针解引用 `*p` → declared[p] 去掉前导 `*`。 */
+    if expr.op == ast::DEREF_OP {
+        let base = expr.args.first()?;
+        let ty = declared.get(&base.val)?;
+        return Some(ty.strip_prefix('*').unwrap_or(ty).to_string());
+    }
+    /* B：成员读 `base·seg…` → 容器 value 类型（`·` 之后那段）。 */
+    if expr.op == ast::MEMBER_READ_OP {
+        let base = expr.args.first()?;
+        let mut ty = declared.get(&base.val)?.clone();
+        for _ in expr.args.iter().skip(1) {
+            ty = lower::container_value(&ty)?;
+        }
+        return Some(ty);
+    }
+    /* A：调用 `f(…)` → callee 的返回类型。 */
+    let sig = sigs.get(&expr.op)?;
+    let first = sig.returns.first()?;
+    if first.ty.is_empty() || first.ty.contains('|') {
+        /* 空 kindexpr 不补；union 交给常规链路（那里已有 union 收敛规则）。 */
+        return None;
+    }
+    Some(first.ty.clone())
+}
+
+/// 成员读 `base·field` 的结果类型：基座是 structref 时，字段类型在 struct 原型里。
+///
+/// 为什么不能靠常规链路：`a·b -> _1` 的写目标是 lower 展开的临时槽，它既不在
+/// `declared` 也不在类型集合里，于是 body 只有名字、没有 `\0类型`，编码器报
+/// 「local '_1' is written with a non-concrete langtype」——类型缺失被报成
+/// 编码器缺陷。
+///
+/// 类型事实**已经在指令里**：基座的名字在 `declared`（或形参表）里有 structref，
+/// 字段名是第二个读参。从已有事实取，不另建表。
+fn member_read_type(
+    s: &Instruction,
+    declared: &HashMap<String, String>,
+    structs: &lower::StructTable,
+) -> Option<String> {
+    let e = s.expr.as_ref()?;
+    if e.is_leaf() || e.op != ast::MEMBER_READ_OP {
+        return None;
+    }
+    let base = e.args.first()?;
+    let base_type = declared
+        .get(&base.val)
+        .or_else(|| declared.get(base.val.trim_start_matches('*')))?;
+    let field = e.args.get(1)?;
+    let name = base_type
+        .trim_start_matches('*')
+        .strip_prefix("/lib/")
+        .unwrap_or(base_type.trim_start_matches('*'));
+    structs
+        .get(name)?
+        .fields
+        .iter()
+        .find(|f| f.name == field.val)
+        .map(|f| f.ty.clone())
+        .filter(|t| !t.is_empty())
+}
+
 /// 写槽类型：本条注解（含 call 返回）→ 形参/返回 → 声明可解析类型 → 类型集合。
 fn write_slot_type(
     s: &Instruction,
@@ -1205,6 +1318,9 @@ fn write_slot_type(
 ) -> String {
     if let Some(t) = s.write_types.get(j).filter(|t| !t.is_empty()) {
         return t.clone();
+    }
+    if let Some(t) = member_read_type(s, declared, structs) {
+        return t;
     }
     if let Some(t) = param_langtype.get(orig).filter(|t| !t.is_empty()) {
         return t.clone();
@@ -1592,6 +1708,28 @@ fn clip(s: String) -> String {
     out
 }
 
+/// 读 `‥pc`（`[2]int32`，body 8 字节 = `[stackid:i32 LE][s0:i32 LE]`）。
+///
+/// **缺失或 body 不是 8 字节一律报错，不返回 (0,0)**：`(0,0)` 是合法位置
+/// （第 0 帧第 0 条指令），把「取不到」折成它，就等于让「没有 pc」和「pc 在原点」
+/// 说同一句话——printstack 会安静地渲染出一个不存在的位置。
+fn pc_of(kv: &mut Kv, key: &str) -> Result<(i32, i32), String> {
+    let d = kv.get_one(key);
+    if d.is_empty() {
+        return Err(format!("{key}: pc 缺失"));
+    }
+    let body = crate::ffi::xh_body_slice(&d);
+    if body.len() != 8 {
+        return Err(format!(
+            "{key}: pc body 应为 8 字节（[2]int32），实际 {}",
+            body.len()
+        ));
+    }
+    let stackid = i32::from_le_bytes([body[0], body[1], body[2], body[3]]);
+    let s0 = i32::from_le_bytes([body[4], body[5], body[6], body[7]]);
+    Ok((stackid, s0))
+}
+
 /// 字符串键的纯值（char 类给内容，其余给 kind:value / 空串）。
 fn plain_of(kv: &mut Kv, key: &str) -> String {
     let d = kv.get_one(key);
@@ -1621,7 +1759,9 @@ pub fn printstack(kv: &mut Kv, vid: &str) -> String {
     let root = format!("/vthread/{vid}");
     // 头部字段都是字符串值：给纯值（不带 kind 前缀）；槽位值才用 kind:value（类型有意义）。
     let status = plain_of(kv, &format!("{root}/‥status"));
-    let pc = plain_of(kv, &format!("{root}/‥pc"));
+    /* pc 是**单个 key** `/vthread/{vid}/‥pc`，langtype `[2]int32`，
+     * body 8 字节 = [stackid:i32 LE][s0:i32 LE]。不是两个成员 key。 */
+    let pc = pc_of(kv, &format!("{root}/‥pc"));
     let emsg = plain_of(kv, &format!("{root}/‥msg"));
     let frames = frame_dirs(kv, &root);
     let mut out = String::new();
@@ -1632,17 +1772,25 @@ pub fn printstack(kv: &mut Kv, vid: &str) -> String {
     if !emsg.is_empty() {
         out.push_str(&format!("error: {emsg}\n"));
     }
-    if !pc.is_empty() {
-        out.push_str(&format!("pc: {pc}\n"));
+    match &pc {
+        Ok((stackid, s0)) => out.push_str(&format!("pc: stackid={stackid} s0={s0}\n")),
+        Err(message) => out.push_str(&format!("pc: error: {message}\n")),
     }
-    // 顶帧 = 其路径是 PC 前缀的那个（帧号最大者优先）。帧内**指令槽不是帧成员**
-    // （帧只存自己的实参/写参），指令经 `‥lib` 软链到函数指令树、由 PC 定位——
-    // 所以当前指令直接读 PC 那个键。
-    let cur = frames
-        .iter()
-        .rev()
-        .find(|f| pc.contains(f.as_str()))
-        .cloned();
+    // 顶帧 = `‥pc[0]`（stackid）指向的那一帧。**不再用「pc 是路径前缀」判定**：
+    // pc 是 `[2]int32` 后不再是可 `contains` 的路径，前缀匹配会静默找不到帧
+    // （不报错，只是 cur 为空、当前指令不打印）。帧目录形如
+    // `/vthread/{vid}/[{stackid}]`，按 `[stackid]` 精确匹配。
+    let cur = match &pc {
+        Ok((stackid, _)) => {
+            let want = format!("[{stackid}]");
+            frames
+                .iter()
+                .rev()
+                .find(|f| f.rsplit('/').next() == Some(want.as_str()))
+                .cloned()
+        }
+        Err(_) => None,
+    };
     for (i, f) in frames.iter().enumerate() {
         let lib = plain_of(kv, &format!("{f}/‥lib"));
         out.push_str(&format!("frame[{i}] {lib}\n"));
@@ -1686,9 +1834,14 @@ pub fn printstack(kv: &mut Kv, vid: &str) -> String {
             let v = kvkind::display(&v, &kv.langtype_of(&cur_key));
             out.push_str(&format!("  {n} = {}\n", clip(v)));
         }
-        if cur.as_deref() == Some(f.as_str()) && !pc.is_empty() {
-            let opcode = kv.get_one(&pc);
-            let lt = kv.langtype_of(&pc);
+        if let (true, Ok((_, pc_s0))) = (cur.as_deref() == Some(f.as_str()), &pc) {
+            /* 当前指令 = **函数指令树**里的 `[s0,0]`，不是帧目录下的：
+             * 帧只存实参/写参，指令经 `‥lib` 软链到 `/lib/<fn>/`。s0 是
+             * layout 的 irseq，直接就是指令树的坐标。 */
+            let lib = plain_of(kv, &format!("{f}/‥lib"));
+            let pc_key = format!("{}/[{pc_s0},0]", lib.trim_end_matches('/'));
+            let opcode = kv.get_one(&pc_key);
+            let lt = kv.langtype_of(&pc_key);
             let kind = kvkind::kind(&opcode, &lt);
             let v = if kind == "rwir" || kind == "rwfunc" {
                 format!("{kind}:{}", kvkind::rwir_sig(&opcode))

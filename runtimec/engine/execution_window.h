@@ -35,10 +35,14 @@ typedef struct runtimec_execution_window_request_t {
     /* checkpoint 的落点：非空。本层不拼路径，只原样交给适配层。 */
     runtimec_string_view_t vthread_identifier;
     /*
-     * 帧的绝对路径 `/vthread/{vid}/[{depth}]`：局部槽的父路径。depth 由调用方
-     * 给出，本层不推导——它没有父帧链的事实源。
+     * 帧的绝对路径 `/vthread/{vid}/[{depth}]`：局部槽的父路径。
+     *
+     * `stack_identifier` 是同一个帧号的**整数形态**，调用方必须两者一致地给出：
+     * pc 是 struct（两个 int32），本层不从路径文本里解析帧号——那会让整数 pc
+     * 又依赖一次字符串解析。
      */
     runtimec_string_view_t frame_path;
+    int32_t stack_identifier;
     /*
      * 起始位置，是 **source logical program counter**（layout 的 irseq），不是
      * 稠密指令标识符：本层用 binrwir_program_find_instruction 换算出执行游标。

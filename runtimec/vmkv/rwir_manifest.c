@@ -83,9 +83,45 @@ const vmkv_rwir_capability_t *vmkv_rwir_manifest_capability(
     return &vmkv_rwir_capabilities[identifier];
 }
 
+bool vmkv_rwir_manifest_find_operation_by_identifier(
+    uint32_t operation_identifier, runtimec_string_view_t *output_name) {
+    if (output_name != NULL) {
+        *output_name = runtimec_string_view_make(NULL, 0U);
+    }
+    if (output_name == NULL) {
+        return false;
+    }
+    /*
+     * 线性扫同一张能力表。表只有 131 行且只在打印路径上调用，不建索引——
+     * 建索引就等于把 opid 到名字的映射存了第二份，而那份会和 .def 漂移。
+     */
+    for (size_t identifier = 0U;
+         identifier < (size_t)VMKV_RWIR_CAPABILITY_IDENTIFIER_LIMIT;
+         ++identifier) {
+        const vmkv_rwir_capability_t *capability =
+            &vmkv_rwir_capabilities[identifier];
+        if (capability->operation_identifier != operation_identifier ||
+            capability->operator_name.size == 0U) {
+            continue;
+        }
+        *output_name = capability->operator_name;
+        return true;
+    }
+    return false;
+}
+
 bool vmkv_rwir_manifest_is_call(runtimec_string_view_t operation_name) {
     return vmkv_rwir_manifest_find_operation(operation_name) ==
            &vmkv_rwir_capabilities[RUNTIMEC_RWIR_CALL];
+}
+
+bool vmkv_rwir_manifest_is_rwfunc_call(
+    runtimec_string_view_t operation_langtype) {
+    static const char rwfunc_kind[] = "rwfunc";
+    return operation_langtype.size == sizeof(rwfunc_kind) - 1U &&
+           operation_langtype.data != NULL &&
+           memcmp(operation_langtype.data, rwfunc_kind,
+                  sizeof(rwfunc_kind) - 1U) == 0;
 }
 
 const vmkv_rwir_capability_t *vmkv_rwir_manifest_find_operation(

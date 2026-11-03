@@ -45,7 +45,7 @@ static runtimec_status_t vmkv_local_types_fail(runtimec_error_t *error,
                                                runtimec_status_t status,
                                                int64_t code,
                                                runtimec_string_view_t message,
-                                               runtimec_string_view_t logical_program_counter) {
+                                               runtimec_program_counter_t logical_program_counter) {
     runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, code,
                        message, logical_program_counter);
     return status;
@@ -77,7 +77,7 @@ static bool vmkv_local_types_name_of(const vmkv_rwir_argument_view_t *argument,
 /* 找到同名记录；没有就追加一条空类型记录。失败返回 NULL 并置 error。 */
 static vmkv_local_type_record_t *vmkv_local_types_record(
     vmkv_local_types_t *local_types, runtimec_string_view_t name,
-    runtimec_string_view_t logical_program_counter, runtimec_error_t *error) {
+    runtimec_program_counter_t logical_program_counter, runtimec_error_t *error) {
     for (size_t ordinal = 0U; ordinal < local_types->count; ++ordinal) {
         if (vmkv_local_types_view_equals(local_types->records[ordinal].name,
                                          name)) {
@@ -153,7 +153,7 @@ static bool vmkv_local_types_is_concrete(runtimec_string_view_t langtype) {
 static runtimec_status_t vmkv_local_types_note_write(
     vmkv_local_types_t *local_types, runtimec_string_view_t name,
     runtimec_string_view_t langtype, bool *output_usable,
-    runtimec_string_view_t logical_program_counter, runtimec_error_t *error) {
+    runtimec_program_counter_t logical_program_counter, runtimec_error_t *error) {
     if (!vmkv_local_types_is_concrete(langtype)) {
         (void)snprintf(local_types->message, sizeof(local_types->message),
                        "vmkv local types: local '%.*s' is written with a "
@@ -194,10 +194,12 @@ static runtimec_status_t vmkv_local_types_note_write(
 }
 
 /* 采集时用一次性文本化的程序计数器：出错时至少指出是哪一条指令。 */
-static runtimec_string_view_t vmkv_local_types_program_counter(
-    char *buffer, size_t capacity, uint32_t line) {
-    (void)snprintf(buffer, capacity, "[%u,0]", (unsigned)line);
-    return runtimec_string_view_from_c_string(buffer);
+/* 源码行号 → 诊断 pc。vmkv 不知道运行时帧号，stack_identifier 取
+ * STACK_IDENTIFIER_NONE（源码侧位置形态）；0 是合法帧号，不能用。 */
+static runtimec_program_counter_t vmkv_local_types_program_counter(
+    uint32_t line) {
+    return (runtimec_program_counter_t){
+        RUNTIMEC_PROGRAM_COUNTER_STACK_IDENTIFIER_NONE, (int32_t)line};
 }
 
 runtimec_status_t vmkv_local_types_collect(
@@ -214,7 +216,7 @@ runtimec_status_t vmkv_local_types_collect(
             VMKV_LOCAL_TYPES_DIAG_INVALID_REQUEST,
             runtimec_string_view_from_c_string(
                 "vmkv local types: invalid collect request"),
-            runtimec_string_view_make(NULL, 0U));
+            RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     vmkv_local_types_t *local_types = runtimec_allocator_allocate(
         &allocator, sizeof(*local_types), _Alignof(vmkv_local_types_t));
@@ -224,7 +226,7 @@ runtimec_status_t vmkv_local_types_collect(
             VMKV_LOCAL_TYPES_DIAG_OUT_OF_MEMORY,
             runtimec_string_view_from_c_string(
                 "vmkv local types: allocation failed"),
-            runtimec_string_view_make(NULL, 0U));
+            RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     memset(local_types, 0, sizeof(*local_types));
     local_types->allocator = allocator;
@@ -233,17 +235,14 @@ runtimec_status_t vmkv_local_types_collect(
     runtimec_status_t status = vmkv_rwir_reader_create(function, &reader, error);
     vmkv_rwir_read_result_t read_result = VMKV_RWIR_READ_RESULT_INVALID;
     vmkv_rwir_instruction_view_t instruction;
-    char counter_buffer[32];
     while (status == RUNTIMEC_STATUS_SUCCESS) {
         status = vmkv_rwir_reader_next(reader, &read_result, &instruction, error);
         if (status != RUNTIMEC_STATUS_SUCCESS ||
             read_result != VMKV_RWIR_READ_RESULT_INSTRUCTION) {
             break;
         }
-        const runtimec_string_view_t logical_program_counter =
-            vmkv_local_types_program_counter(
-                counter_buffer, sizeof(counter_buffer),
-                instruction.logical_program_counter);
+        const runtimec_program_counter_t logical_program_counter =
+            vmkv_local_types_program_counter(instruction.logical_program_counter);
         const bool call_target = vmkv_rwir_manifest_is_call(
             instruction.operation_name);
         for (size_t ordinal = 0U; ordinal < instruction.read_argument_count;
@@ -302,7 +301,7 @@ runtimec_status_t vmkv_local_types_collect(
                 error, RUNTIMEC_STATUS_UNSUPPORTED,
                 VMKV_LOCAL_TYPES_DIAG_NOT_WRITTEN,
                 runtimec_string_view_from_c_string(local_types->message),
-                runtimec_string_view_make(NULL, 0U));
+                RUNTIMEC_PROGRAM_COUNTER_NONE);
             break;
         }
     }

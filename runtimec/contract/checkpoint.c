@@ -16,7 +16,7 @@ void runtimec_checkpoint_reset(runtimec_checkpoint_t *checkpoint) {
         checkpoint->vthread_identifier = runtimec_string_view_make(NULL, 0U);
         checkpoint->frame_identifier = runtimec_string_view_make(NULL, 0U);
         checkpoint->logical_program_counter =
-            runtimec_string_view_make(NULL, 0U);
+            RUNTIMEC_PROGRAM_COUNTER_NONE;
         checkpoint->persistent_status = runtimec_string_view_make(NULL, 0U);
         checkpoint->outcome = RUNTIMEC_STATUS_SUCCESS;
         runtimec_error_reset(&checkpoint->error);
@@ -31,8 +31,8 @@ bool runtimec_checkpoint_is_valid(const runtimec_checkpoint_t *checkpoint) {
            runtimec_string_view_is_valid(checkpoint->runtime_identifier) &&
            runtimec_string_view_is_valid(checkpoint->vthread_identifier) &&
            runtimec_string_view_is_valid(checkpoint->frame_identifier) &&
-           runtimec_string_view_is_valid(
-               checkpoint->logical_program_counter) &&
+           checkpoint->logical_program_counter.source_instruction_ordinal >=
+               RUNTIMEC_PROGRAM_COUNTER_ORDINAL_NONE &&
            runtimec_string_view_is_valid(checkpoint->persistent_status) &&
            runtimec_error_is_valid(&checkpoint->error);
 }

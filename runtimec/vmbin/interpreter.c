@@ -162,7 +162,7 @@ static runtimec_status_t vmbin_interpreter_resolve_target(
                            (int64_t)VMBIN_INTERPRETER_DIAG_UNDECODABLE_TARGET,
                            runtimec_string_view_from_c_string(
                                "branch target is not a 64-bit counter"),
-                           runtimec_string_view_make(NULL, 0U));
+                           RUNTIMEC_PROGRAM_COUNTER_NONE);
         return RUNTIMEC_STATUS_INVALID;
     }
     status = binrwir_program_find_instruction(
@@ -173,7 +173,7 @@ static runtimec_status_t vmbin_interpreter_resolve_target(
                            (int64_t)VMBIN_INTERPRETER_DIAG_UNRESOLVED_TARGET,
                            runtimec_string_view_from_c_string(
                                "branch target is not in the program"),
-                           runtimec_string_view_make(NULL, 0U));
+                           RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     return status;
 }

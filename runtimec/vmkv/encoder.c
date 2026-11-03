@@ -53,7 +53,6 @@ struct vmkv_encoder_t {
     binrwir_alias_rule_t *alias_rules;
     size_t alias_rule_count;
     size_t alias_rule_capacity;
-    char program_counter_text[VMKV_ENCODER_PROGRAM_COUNTER_CAPACITY];
 };
 
 typedef enum vmkv_encoder_operand_class {
@@ -73,32 +72,27 @@ typedef enum vmkv_encoder_operand_class {
 
 static runtimec_status_t vmkv_encoder_fail(
     runtimec_error_t *error, runtimec_status_t status, int64_t code,
-    const char *message, runtimec_string_view_t logical_program_counter) {
+    const char *message, runtimec_program_counter_t logical_program_counter) {
     runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, code,
                        runtimec_string_view_from_c_string(message),
                        logical_program_counter);
     return status;
 }
 
-static runtimec_string_view_t vmkv_encoder_set_program_counter(
+/*
+ * 源码行号 → 诊断用的 pc 结构。vmkv 只知道源码行（layout 的 irseq），不知道运行时
+ * 帧号，所以 stack_identifier 取 STACK_IDENTIFIER_NONE、s0 取行号——这是
+ * 「源码侧位置」形态：知道第几条指令，没有帧。**不能取 0**，0 是合法帧号，
+ * 那等于发明了一个帧（见 program_counter.h 的三种形态）。
+ * 不再格式化成 `[n]` 文本：pc 是结构体，文本投影由展示层做。
+ */
+static runtimec_program_counter_t vmkv_encoder_set_program_counter(
     vmkv_encoder_t *encoder, uint32_t line) {
-    char digits[16];
-    size_t digit_count = 0U;
-    size_t used = 0U;
-    uint32_t value = line;
-    do {
-        digits[digit_count++] = (char)('0' + (value % 10U));
-        value /= 10U;
-    } while (value != 0U);
-    encoder->program_counter_text[used++] = '[';
-    while (digit_count != 0U) {
-        encoder->program_counter_text[used++] = digits[--digit_count];
-    }
-    encoder->program_counter_text[used++] = ',';
-    encoder->program_counter_text[used++] = '0';
-    encoder->program_counter_text[used++] = ']';
-    return runtimec_string_view_make(encoder->program_counter_text, used);
+    (void)encoder;
+    return (runtimec_program_counter_t){
+        RUNTIMEC_PROGRAM_COUNTER_STACK_IDENTIFIER_NONE, (int32_t)line};
 }
+
 
 static bool vmkv_encoder_request_is_valid(const vmkv_encode_request_t *request) {
     return request != NULL &&
@@ -167,7 +161,7 @@ static runtimec_status_t vmkv_encoder_reserve(vmkv_encoder_t *encoder,
         return vmkv_encoder_fail(error, RUNTIMEC_STATUS_OUT_OF_MEMORY,
                                  VMKV_ENCODER_DIAG_OUT_OF_MEMORY,
                                  "vmkv encoder: allocation failed",
-                                 runtimec_string_view_make(NULL, 0U));
+                                 RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     vmkv_encoder_release_buffers(encoder);
     encoder->arguments = arguments;
@@ -433,7 +427,7 @@ runtimec_status_t vmkv_encoder_create(runtimec_allocator_t allocator,
         return vmkv_encoder_fail(error, RUNTIMEC_STATUS_INVALID,
                                  VMKV_ENCODER_DIAG_INVALID_REQUEST,
                                  "vmkv encoder: invalid create request",
-                                 runtimec_string_view_make(NULL, 0U));
+                                 RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     vmkv_encoder_t *encoder = runtimec_allocator_allocate(
         &allocator, sizeof(*encoder), _Alignof(vmkv_encoder_t));
@@ -441,7 +435,7 @@ runtimec_status_t vmkv_encoder_create(runtimec_allocator_t allocator,
         return vmkv_encoder_fail(error, RUNTIMEC_STATUS_OUT_OF_MEMORY,
                                  VMKV_ENCODER_DIAG_OUT_OF_MEMORY,
                                  "vmkv encoder: allocation failed",
-                                 runtimec_string_view_make(NULL, 0U));
+                                 RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     memset(encoder, 0, sizeof(*encoder));
     encoder->allocator = allocator;
@@ -476,10 +470,23 @@ runtimec_status_t vmkv_encoder_get_canonical_encoding_revision(
 }
 
 /* 登记一个符号；失败时带上当前逻辑程序计数器。 */
+/* 剥掉 `/lib/` 前缀（若存在）；返回是否剥过。 */
+static bool vmkv_encoder_strip_library_prefix(runtimec_string_view_t *name) {
+    static const char prefix[] = "/lib/";
+    const size_t prefix_size = sizeof(prefix) - 1U;
+    if (name->size < prefix_size || name->data == NULL ||
+        memcmp(name->data, prefix, prefix_size) != 0) {
+        return false;
+    }
+    name->data += prefix_size;
+    name->size -= prefix_size;
+    return true;
+}
+
 static runtimec_status_t vmkv_encoder_register_symbol(
     binrwir_program_builder_t *builder, runtimec_string_view_t name,
     runtimec_string_view_t langtype, uint16_t *output_symbol_index,
-    runtimec_string_view_t logical_program_counter, runtimec_error_t *error) {
+    runtimec_program_counter_t logical_program_counter, runtimec_error_t *error) {
     const runtimec_status_t status = binrwir_program_builder_add_symbol(
         builder, name, langtype, output_symbol_index);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
@@ -513,20 +520,20 @@ runtimec_status_t vmkv_encode_static_argument(
         return vmkv_encoder_fail(error, RUNTIMEC_STATUS_INVALID,
                                  VMKV_ENCODER_DIAG_INVALID_REQUEST,
                                  "vmkv encoder: invalid static argument request",
-                                 runtimec_string_view_make(NULL, 0U));
+                                 RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     if (source_argument->key_addressability == VMKV_KEY_ADDRESSABILITY_DYNAMIC) {
         return vmkv_encoder_fail(error, RUNTIMEC_STATUS_UNSUPPORTED,
                                  VMKV_ENCODER_DIAG_DYNAMIC_KEY,
                                  "vmkv encoder: dynamic key is unsupported",
-                                 runtimec_string_view_make(NULL, 0U));
+                                 RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     if (request->host_services->resolve_static_xvalue_address == NULL) {
         return vmkv_encoder_fail(
             error, RUNTIMEC_STATUS_NOT_IMPLEMENTED,
             VMKV_ENCODER_DIAG_HOST_CAPABILITY_MISSING,
             "vmkv encoder: host cannot resolve static xvalue addresses",
-            runtimec_string_view_make(NULL, 0U));
+            RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
 
     runtimec_xvalue_address_t xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
@@ -544,14 +551,14 @@ runtimec_status_t vmkv_encode_static_argument(
         return vmkv_encoder_fail(error, RUNTIMEC_STATUS_ERROR,
                                  VMKV_ENCODER_DIAG_ADDRESS_DERIVATION,
                                  "vmkv encoder: xvalue base is not addressable",
-                                 runtimec_string_view_make(NULL, 0U));
+                                 RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
     status = vmkv_encoder_register_symbol(
         builder, runtimec_string_view_make(source_argument->key.data,
                                           source_argument->key.size),
         source_argument->parameter_type_name, &symbol_index,
-        runtimec_string_view_make(NULL, 0U), error);
+        RUNTIMEC_PROGRAM_COUNTER_NONE, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -566,7 +573,7 @@ runtimec_status_t vmkv_encode_static_argument(
 /* 取下一个「非形参引用」的 Program 内唯一 argidx。 */
 static runtimec_status_t vmkv_encoder_take_operand_argument_index(
     vmkv_encode_function_t *function, uint32_t *output,
-    runtimec_string_view_t logical_program_counter, runtimec_error_t *error) {
+    runtimec_program_counter_t logical_program_counter, runtimec_error_t *error) {
     if (function->next_operand_argument_index ==
         BINRWIR_ARGUMENT_INDEX_NONE - 1U) {
         return vmkv_encoder_fail(
@@ -588,7 +595,7 @@ static runtimec_status_t vmkv_encoder_map_argument(
     const vmkv_encode_request_t *request, binrwir_program_builder_t *builder,
     const vmkv_local_types_t *local_types, vmkv_encode_function_t *function,
     const vmkv_rwir_argument_view_t *source_argument, bool function_target,
-    binrwir_argument_t *output, runtimec_string_view_t logical_program_counter,
+    binrwir_argument_t *output, runtimec_program_counter_t logical_program_counter,
     runtimec_error_t *error) {
     *output = (binrwir_argument_t){0};
     uint32_t argument_index = 0U;
@@ -683,7 +690,7 @@ static runtimec_status_t vmkv_encoder_map_argument(
 typedef struct vmkv_encoder_operation {
     const vmkv_rwir_capability_t *capability;
     const vmkv_rwir_instruction_view_t *source;
-    runtimec_string_view_t logical_program_counter;
+    runtimec_program_counter_t logical_program_counter;
 } vmkv_encoder_operation_t;
 
 /*
@@ -723,14 +730,10 @@ static runtimec_status_t vmkv_encoder_classify_read_arguments(
     vmkv_encoder_t *encoder, vmkv_encoder_operation_t *operation,
     bool function_target, runtimec_error_t *error) {
     const vmkv_rwir_instruction_view_t *source = operation->source;
+    (void)function_target;
     const bool needs_classification =
         vmkv_encoder_requires_classification(operation->capability);
     for (size_t ordinal = 0U; ordinal < source->read_argument_count; ++ordinal) {
-        if (function_target && ordinal == 0U) {
-            /* `call` 的第一个读参是函数名，不是值操作数，没有 langtype 可收敛。 */
-            encoder->parameter_type_sets[ordinal] = VMKV_RWIR_TYPE_SET_NONE;
-            continue;
-        }
         const runtimec_string_view_t declared =
             source->read_arguments[ordinal].parameter_type_name;
         uint32_t type_set = VMKV_RWIR_TYPE_SET_NONE;
@@ -899,7 +902,7 @@ runtimec_status_t vmkv_encode_instruction(
         return vmkv_encoder_fail(error, RUNTIMEC_STATUS_INVALID,
                                  VMKV_ENCODER_DIAG_INVALID_REQUEST,
                                  "vmkv encoder: invalid encode request",
-                                 runtimec_string_view_make(NULL, 0U));
+                                 RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     /* 非形参 argidx 必须从形参区间之后开始，否则会和签名编号相撞。 */
     if (function->next_operand_argument_index <
@@ -909,13 +912,26 @@ runtimec_status_t vmkv_encode_instruction(
             VMKV_ENCODER_DIAG_INVALID_REQUEST,
             "vmkv encoder: operand argument index cursor starts below the "
             "parameter range",
-            runtimec_string_view_make(NULL, 0U));
+            RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
-    const runtimec_string_view_t logical_program_counter =
+    const runtimec_program_counter_t logical_program_counter =
         vmkv_encoder_set_program_counter(
             encoder, source_instruction->logical_program_counter);
+    /*
+     * 「这条是不是函数调用」由 **opcode 槽自己的 langtype** 决定：layout 按目标在
+     * 生成时选定——调用槽是 `rwfunc`，算子槽是 `rwir`。不用名字形状猜：拼错的裸名
+     * 也可能以 `/lib/` 开头，那会被误当成合法调用。
+     *
+     * 调用没有 surface 名可查（body 里是目标函数路径，不是算子名），所以直接落到
+     * `call` 这条能力行，第一个读参按 FUNCTION 引用编码。
+     */
+    const bool is_rwfunc_call = vmkv_rwir_manifest_is_rwfunc_call(
+        source_instruction->operation_langtype);
     const vmkv_rwir_capability_t *capability =
-        vmkv_rwir_manifest_find_operation(source_instruction->operation_name);
+        is_rwfunc_call
+            ? vmkv_rwir_manifest_capability(RUNTIMEC_RWIR_CALL)
+            : vmkv_rwir_manifest_find_operation(
+                  source_instruction->operation_name);
     if (capability == NULL) {
         /*
          * 不在 alias 表里 = 本 runtime 不提供的能力（外部 runtime 就地实现，例如
@@ -949,9 +965,23 @@ runtimec_status_t vmkv_encode_instruction(
     }
     const size_t read_count = source_instruction->read_argument_count;
     const size_t write_count = source_instruction->write_argument_count;
-    const size_t total = read_count + write_count;
-    const bool function_target =
-        vmkv_rwir_manifest_is_call(source_instruction->operation_name);
+    /*
+     * `rwfunc` 调用在读参区最前多占一个 FUNCTION 引用（目标函数）。所有「读参之后」
+     * 的偏移都必须带上它，否则写参会落到读参的槽位上——那不会报错，只会把写参
+     * 当成一个类型串拷贝，产生 kind=INVALID 的参数项。
+     */
+    /*
+     * 参数池的分区布局**只在下面这一处算**。
+     *
+     * 读参区在调用时多一个 FUNCTION 引用（目标函数），写参区紧随其后右移一格。
+     * 三处各自加 offset 是错的：漏加的那一处不会报错，只会把类型字符串当成参数项
+     * 拷进去，产出一个 kind=INVALID 的参数——数据错了但流程照走。
+     */
+    const size_t target_arguments = is_rwfunc_call ? 1U : 0U;
+    const size_t read_region_end = target_arguments + read_count;
+    const size_t write_region_begin = read_region_end;
+    const size_t total = read_region_end + write_count;
+    const bool function_target = is_rwfunc_call;
     runtimec_status_t status = vmkv_encoder_reserve(
         encoder, total == 0U ? 1U : total, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -1010,7 +1040,8 @@ runtimec_status_t vmkv_encode_instruction(
         }
     }
 
-    runtimec_string_view_t *write_types = encoder->argument_types + read_count;
+    runtimec_string_view_t *write_types =
+        encoder->argument_types + write_region_begin;
     status = vmkv_encoder_resolve_write_types(encoder, &operation, write_types,
                                               error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -1033,23 +1064,68 @@ runtimec_status_t vmkv_encode_instruction(
         }
     }
 
+    /*
+     * `rwfunc` 调用：目标函数路径在 **opcode 槽的 body** 里（layout 的
+     * `new_rwfunc_call` 把计数头与路径写在一起），不在读参里——读参是这次调用的
+     * 真实实参。所以先追加一个 FUNCTION 引用指向符号池里的目标路径，再映射实参。
+     *
+     * 位置不要求在最前：vmbin 是在读参里**扫描** FUNCTION 引用（`interpreter.c`
+     * 遍历到即取目标），不是固定取第一个。
+     */
+    if (is_rwfunc_call) {
+        /*
+         * 符号池只存**函数名**，不含 `/lib/`（`binrwir/argument.h` 对
+         * BINRWIR_REFERENCE_FUNCTION 的约定；路径前缀由 vmbin 在调用入口拼）。
+         * opcode 槽的 body 是完整路径，这里剥掉 `/lib/`。
+         */
+        runtimec_string_view_t target_name = source_instruction->operation_name;
+        if (vmkv_encoder_strip_library_prefix(&target_name) &&
+            target_name.size == 0U) {
+            return vmkv_encoder_fail(
+                error, RUNTIMEC_STATUS_ERROR,
+                VMKV_ENCODER_DIAG_INVALID_REQUEST,
+                "vmkv encoder: rwfunc call target has an empty function name",
+                logical_program_counter);
+        }
+        uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
+        status = vmkv_encoder_register_symbol(
+            builder, target_name, source_instruction->operation_langtype,
+            &symbol_index, logical_program_counter, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+        uint32_t target_index = 0U;
+        status = vmkv_encoder_take_operand_argument_index(
+            function, &target_index, logical_program_counter, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+        encoder->arguments[0] = (binrwir_argument_t){
+            .argument_index = target_index,
+            .reference_kind = (uint8_t)BINRWIR_REFERENCE_FUNCTION,
+            .slot = symbol_index,
+            .payload = 0U,
+        };
+        /* FUNCTION 引用不参与值类型：签名里没有它，类型表留空视图。 */
+        encoder->argument_types[0] = runtimec_string_view_make(NULL, 0U);
+    }
     for (size_t ordinal = 0U; ordinal < read_count; ++ordinal) {
         status = vmkv_encoder_map_argument(
             request, builder, local_types, function,
-            &source_instruction->read_arguments[ordinal],
-            function_target && ordinal == 0U, &encoder->arguments[ordinal],
+            &source_instruction->read_arguments[ordinal], false,
+            &encoder->arguments[target_arguments + ordinal],
             logical_program_counter, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return status;
         }
-        encoder->argument_types[ordinal] =
+        encoder->argument_types[target_arguments + ordinal] =
             source_instruction->read_arguments[ordinal].parameter_type_name;
     }
     for (size_t ordinal = 0U; ordinal < write_count; ++ordinal) {
         status = vmkv_encoder_map_argument(
             request, builder, local_types, function,
             &source_instruction->write_arguments[ordinal], false,
-            &encoder->arguments[read_count + ordinal],
+            &encoder->arguments[write_region_begin + ordinal],
             logical_program_counter, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return status;
@@ -1061,8 +1137,10 @@ runtimec_status_t vmkv_encode_instruction(
     output_instruction->logical_program_counter =
         source_instruction->logical_program_counter;
     output_instruction->read_arguments.data = encoder->arguments;
-    output_instruction->read_arguments.count = read_count;
-    output_instruction->write_arguments.data = encoder->arguments + read_count;
+    /* 调用多一个 FUNCTION 引用（目标函数），它在分区最前。 */
+    output_instruction->read_arguments.count = read_region_end;
+    output_instruction->write_arguments.data =
+        encoder->arguments + write_region_begin;
     output_instruction->write_arguments.count = write_count;
     output_instruction->read_parameter_types = encoder->argument_types;
     output_instruction->write_parameter_types = encoder->argument_types + read_count;
@@ -1132,7 +1210,7 @@ static runtimec_status_t vmkv_encoder_record_alias_rules(
                         error, RUNTIMEC_STATUS_OUT_OF_MEMORY,
                         VMKV_ENCODER_DIAG_OUT_OF_MEMORY,
                         "vmkv encoder: alias rule allocation failed",
-                        runtimec_string_view_make(NULL, 0U));
+                        RUNTIMEC_PROGRAM_COUNTER_NONE);
                 }
                 if (encoder->alias_rules != NULL) {
                     memcpy(grown, encoder->alias_rules,
@@ -1180,7 +1258,7 @@ static runtimec_status_t vmkv_encoder_register_parameters(
                     ? VMKV_ENCODER_DIAG_UNION_PARAMETER
                     : VMKV_ENCODER_DIAG_INVALID_PARAMETER_TYPE,
                 "vmkv encoder: read parameter declaration has no concrete langtype",
-                runtimec_string_view_make(NULL, 0U));
+                RUNTIMEC_PROGRAM_COUNTER_NONE);
         }
         uint32_t parameter_index = BINRWIR_ARGUMENT_INDEX_NONE;
         const runtimec_status_t status = binrwir_program_builder_add_parameter(
@@ -1206,7 +1284,7 @@ static runtimec_status_t vmkv_encoder_register_parameters(
                     ? VMKV_ENCODER_DIAG_UNION_PARAMETER
                     : VMKV_ENCODER_DIAG_INVALID_PARAMETER_TYPE,
                 "vmkv encoder: write parameter declaration has no concrete langtype",
-                runtimec_string_view_make(NULL, 0U));
+                RUNTIMEC_PROGRAM_COUNTER_NONE);
         }
         uint32_t parameter_index = BINRWIR_ARGUMENT_INDEX_NONE;
         const runtimec_status_t status = binrwir_program_builder_add_parameter(
@@ -1233,7 +1311,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
         return vmkv_encoder_fail(error, RUNTIMEC_STATUS_INVALID,
                                  VMKV_ENCODER_DIAG_INVALID_REQUEST,
                                  "vmkv encoder: invalid program request",
-                                 runtimec_string_view_make(NULL, 0U));
+                                 RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     vmkv_function_source_t *function = NULL;
     runtimec_snapshot_t snapshot;
@@ -1251,7 +1329,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
         return vmkv_encoder_fail(
             error, RUNTIMEC_STATUS_INVALID, VMKV_ENCODER_DIAG_STALE_SNAPSHOT,
             "vmkv encoder: function source revision differs from the request",
-            runtimec_string_view_make(NULL, 0U));
+            RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     vmkv_encode_function_t function_shape = {
         .read_parameter_count = function->read_parameter_count,
@@ -1276,7 +1354,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
         return vmkv_encoder_fail(
             error, status, VMKV_ENCODER_DIAG_PROGRAM_REJECTED,
             "vmkv encoder: program builder rejected the identity",
-            runtimec_string_view_make(NULL, 0U));
+            RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
     encoder->alias_rule_count = 0U;
     status = vmkv_encoder_register_parameters(builder, function, error);
@@ -1328,7 +1406,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
             status = vmkv_encoder_fail(
                 error, status, VMKV_ENCODER_DIAG_PROGRAM_REJECTED,
                 "vmkv encoder: program builder rejected an instruction",
-                runtimec_string_view_make(NULL, 0U));
+                RUNTIMEC_PROGRAM_COUNTER_NONE);
         }
     }
     if (reader != NULL) {
@@ -1346,7 +1424,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
             status = vmkv_encoder_fail(
                 error, status, VMKV_ENCODER_DIAG_PROGRAM_REJECTED,
                 "vmkv encoder: program builder rejected an alias rule",
-                runtimec_string_view_make(NULL, 0U));
+                RUNTIMEC_PROGRAM_COUNTER_NONE);
         }
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
@@ -1355,7 +1433,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
             status = vmkv_encoder_fail(
                 error, status, VMKV_ENCODER_DIAG_PROGRAM_REJECTED,
                 "vmkv encoder: program builder rejected the program",
-                runtimec_string_view_make(NULL, 0U));
+                RUNTIMEC_PROGRAM_COUNTER_NONE);
         }
     }
     binrwir_program_builder_destroy(builder);

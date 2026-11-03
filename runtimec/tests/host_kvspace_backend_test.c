@@ -371,7 +371,7 @@ int main(int argument_count, char **arguments) {
         checkpoint.vthread_identifier =
             runtimec_string_view_from_c_string("v9");
         checkpoint.logical_program_counter =
-            runtimec_string_view_from_c_string("/lib/sum/[2,0]");
+            (runtimec_program_counter_t){1, 2};
         checkpoint.persistent_status =
             runtimec_string_view_from_c_string("running");
         EXPECT(services.checkpoint(services.context, &checkpoint, &error) ==
@@ -490,7 +490,7 @@ int main(int argument_count, char **arguments) {
         handoff.checkpoint.vthread_identifier =
             runtimec_string_view_from_c_string("v9");
         handoff.checkpoint.logical_program_counter =
-            runtimec_string_view_from_c_string("/lib/sum/[2,0]");
+            (runtimec_program_counter_t){1, 2};
         handoff_claimer_t claimer = {
             .binary_interface = &binary_interface,
             .handle = handle,

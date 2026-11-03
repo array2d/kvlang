@@ -32,7 +32,7 @@ void runtimec_snapshot_reset(runtimec_snapshot_t *snapshot) {
         snapshot->contract_version = runtimec_contract_version();
         runtimec_source_revision_reset(&snapshot->source_revision);
         snapshot->function_key = runtimec_key_view_make(NULL, 0U);
-        snapshot->logical_program_counter =
+        snapshot->source_position_text =
             runtimec_string_view_make(NULL, 0U);
     }
 }
@@ -43,5 +43,5 @@ bool runtimec_snapshot_is_valid(const runtimec_snapshot_t *snapshot) {
                RUNTIMEC_CONTRACT_BINARY_INTERFACE_VERSION &&
            runtimec_key_view_is_valid(snapshot->function_key) &&
            runtimec_string_view_is_valid(
-               snapshot->logical_program_counter);
+               snapshot->source_position_text);
 }

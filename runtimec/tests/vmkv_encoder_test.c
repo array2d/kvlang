@@ -76,7 +76,7 @@ static runtimec_status_t fail(runtimec_error_t *error,
                               runtimec_status_t status, const char *message) {
     runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_HOST, 0,
                        runtimec_string_view_from_c_string(message),
-                       runtimec_string_view_make(NULL, 0U));
+                       RUNTIMEC_PROGRAM_COUNTER_NONE);
     return status;
 }
 
@@ -197,15 +197,24 @@ static void add_parameter(fake_store_t *store, const char *path, int column,
               "def langtype");
 }
 
-static void add_opcode(fake_store_t *store, const char *path, int line,
-                       uint16_t reads, uint16_t writes, const char *operation) {
+/* opcode 槽；`langtype` 决定它是普通指令（rwir）还是一次 rwfunc 调用（rwfunc）。 */
+static void add_opcode_with_langtype(fake_store_t *store, const char *path,
+                                     int line, uint16_t reads, uint16_t writes,
+                                     const char *operation,
+                                     const char *langtype) {
     char key[128];
     uint8_t body[128];
     const size_t text_size = strlen(operation);
     counting_header(body, reads, writes, 0U);
     memcpy(body + 5, operation, text_size);
     key_of(key, sizeof(key), path, line, 0);
-    store_add(store, key, body, 5U + text_size, "rwir");
+    store_add(store, key, body, 5U + text_size, langtype);
+}
+
+static void add_opcode(fake_store_t *store, const char *path, int line,
+                       uint16_t reads, uint16_t writes, const char *operation) {
+    add_opcode_with_langtype(store, path, line, reads, writes, operation,
+                             "rwir");
 }
 
 /* 相对指针 / 具名帧槽：参数槽是 `rwir` 值，body = 表达式 NUL 类型串。 */
@@ -355,7 +364,7 @@ static vmkv_encode_request_t make_request(const runtimec_host_services_t *host,
     request.expected_snapshot.source_revision.instruction_set_version = 1U;
     request.expected_snapshot.function_key =
         runtimec_key_view_from_c_string(path);
-    request.expected_snapshot.logical_program_counter =
+    request.expected_snapshot.source_position_text =
         runtimec_string_view_from_c_string("[1,0]");
     return request;
 }
@@ -1180,14 +1189,24 @@ static void test_symbol_pool_normalization_remaps_every_reference(void) {
     store_free(&store);
 }
 
-/* `call` 的第一个读参是函数名：FUNCTION 引用 + 符号池下标，名字不含 /lib/。 */
+/*
+ * rwfunc 调用：opcode 槽的 langtype 是 `rwfunc`，body 是目标函数路径。
+ *
+ * 这是 layout 的真实形态（`new_rwfunc_call` 把计数头与路径写在一起）。调用目标由
+ * **槽类型**判定，不靠名字形状——拼错的裸名也可能以 `/lib/` 开头，靠名字猜会把
+ * 它当成合法调用。
+ *
+ * 编码结果是：一个 FUNCTION 读参（指向符号池里的**函数名**，不含 `/lib/`），
+ * 后面跟这次调用的真实实参。
+ */
 static void test_call_target_becomes_function_symbol(void) {
     fake_store_t store;
     memset(&store, 0, sizeof(store));
     add_function(&store, "/lib/callfn", 1U, 0U);
     add_parameter(&store, "/lib/callfn", -1, "a", "int64");
-    add_opcode(&store, "/lib/callfn", 1, 1U, 0U, "call");
-    add_reference(&store, "/lib/callfn", 1, -1, "other·function", "");
+    add_opcode_with_langtype(&store, "/lib/callfn", 1, 1U, 0U, "/lib/add1",
+                             "rwfunc");
+    add_inline_literal(&store, "/lib/callfn", 1, -1, 41, "int64");
     runtimec_host_services_t host = make_host_services(&store);
     vmkv_encode_request_t request = make_request(&host, "/lib/callfn");
     vmkv_encoder_t *encoder = NULL;
@@ -1200,9 +1219,13 @@ static void test_call_target_becomes_function_symbol(void) {
     test_canonical_t instruction;
     EXPECT(encode_instruction_at(encoder, &request, 0U, function, &instruction,
                                  &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(instruction.instruction.operation_identifier == 0x0024U);
+    EXPECT(instruction.instruction.read_arguments.count == 2U);
     EXPECT(instruction.arguments[0].reference_kind ==
            BINRWIR_REFERENCE_FUNCTION);
     EXPECT(instruction.arguments[0].payload == 0U);
+    EXPECT(instruction.arguments[1].reference_kind == BINRWIR_REFERENCE_LITERAL);
+
     binrwir_program_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
@@ -1213,7 +1236,7 @@ static void test_call_target_becomes_function_symbol(void) {
         EXPECT(binrwir_program_get_symbol(program, instruction.arguments[0].slot,
                                           &symbol, &symbol_type) ==
                RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(symbol.size == strlen("other·function"));
+        EXPECT(view_equals(symbol, "add1"));
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);

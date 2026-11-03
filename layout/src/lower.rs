@@ -2588,7 +2588,7 @@ fn container_elem(ty: &str) -> Option<String> {
 }
 
 /// map value kind：第一个 `·` 之后。
-fn container_value(ty: &str) -> Option<String> {
+pub fn container_value(ty: &str) -> Option<String> {
     let t = ty.trim_start_matches('*');
     let i = t.find(keytree::MEMBER_SEP)?;
     Some(t[i + keytree::MEMBER_SEP.len()..].to_string())
