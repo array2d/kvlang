@@ -170,12 +170,12 @@ int main(int argument_count, char **arguments) {
             const char *body;
         } templates[] = {
             /* 能直接在源码里写的：二元算术、字面量赋值、块内跳转。 */
-            {"add", "1 + 2 -> *r"},
-            {"sub", "5 - 2 -> *r"},
-            {"mul", "3 × 4 -> *r"},
-            {"div", "8 ÷ 2 -> *r"},
-            {"eq", "1 == 1 -> *r"},
-            {"copy", "1 -> *r"},
+            {"add", "1 + 2 -> x"},
+            {"sub", "5 - 2 -> x"},
+            {"mul", "3 × 4 -> x"},
+            {"div", "8 ÷ 2 -> x"},
+            {"eq", "1 == 1 -> x"},
+            {"copy", "1 -> x"},
             {"return", "return"},
         };
         const char *body = NULL;
@@ -193,8 +193,13 @@ int main(int argument_count, char **arguments) {
             printf("%s\tNO_TEMPLATE\t0\tneed source file\n", capability);
             return 0;
         }
+        /*
+         * 模板**不带形参**：探针只回答「这条能力行能不能跑」，带形参就得同时
+         * 提供实参与帧槽，那是另一件事（也未实现），会把「能力未实现」和
+         * 「形参没绑上」混成一个失败。写槽用局部符号，由执行窗口物化。
+         */
         snprintf(template_buffer, sizeof(template_buffer),
-                 "rwfunc probe() -> (*int64 $r) {\n\t%s\n}\n", body);
+                 "rwfunc probe() -> () {\n\tx:int64 = 0\n\t%s\n}\n", body);
     }
     const char *source =
         source_path != NULL ? source_buffer : template_buffer;
@@ -264,6 +269,32 @@ int main(int argument_count, char **arguments) {
         fprintf(stderr, "adapter failed\n");
         return 2;
     }
+    /*
+     * 诊断：直接问一次 source revision，把执行窗口内部那一步的事实摊开。
+     * 它失败会让窗口报 detail=3（SNAPSHOT_FAILED）而不带消息，只能在这里看。
+     */
+    {
+        runtimec_snapshot_t probe_snapshot;
+        runtimec_snapshot_reset(&probe_snapshot);
+        probe_snapshot.contract_version = runtimec_contract_version();
+        probe_snapshot.function_key =
+            runtimec_key_view_from_c_string("/lib/probe");
+        runtimec_error_t probe_error;
+        runtimec_error_reset(&probe_error);
+        const runtimec_status_t probe_status = host_services.source_revision(
+            host_services.context, probe_snapshot.function_key,
+            &probe_snapshot.source_revision, &probe_error);
+        fprintf(stderr,
+                "probe: source_revision status=%d gen=%llu instance=%llu "
+                "code=%lld msg='%.*s'\n",
+                (int)probe_status,
+                (unsigned long long)probe_snapshot.source_revision.generation,
+                (unsigned long long)
+                    probe_snapshot.source_revision.instance_identifier,
+                (long long)probe_error.code, (int)probe_error.message.size,
+                probe_error.message.data != NULL ? probe_error.message.data
+                                                 : "");
+    }
     runtimec_session_options_t options;
     memset(&options, 0, sizeof(options));
     options.structure_size = sizeof(options);
@@ -298,13 +329,42 @@ int main(int argument_count, char **arguments) {
     request.frame_path = runtimec_string_view_from_c_string("/vthread/v1/[1]");
     request.stack_identifier = 1;
     request.source_logical_program_counter = 1U;
+    /* 紧邻窗口调用再问一次：两次结果不同就说明中间有状态变化。 */
+    {
+        const runtimec_host_services_t *session_host = NULL;
+        if (runtimec_session_get_host_services(session, &session_host) ==
+                RUNTIMEC_STATUS_SUCCESS && session_host != NULL) {
+            runtimec_snapshot_t before_snapshot;
+            runtimec_snapshot_reset(&before_snapshot);
+            before_snapshot.contract_version = runtimec_contract_version();
+            before_snapshot.function_key =
+                runtimec_key_view_from_c_string("/lib/probe");
+            runtimec_error_t before_error;
+            runtimec_error_reset(&before_error);
+            const runtimec_status_t before_status = session_host->source_revision(
+                session_host->context, before_snapshot.function_key,
+                &before_snapshot.source_revision, &before_error);
+            fprintf(stderr,
+                    "probe: before-execute source_revision status=%d gen=%llu "
+                    "instance=%llu code=%lld msg='%.*s'\n",
+                    (int)before_status,
+                    (unsigned long long)before_snapshot.source_revision.generation,
+                    (unsigned long long)
+                        before_snapshot.source_revision.instance_identifier,
+                    (long long)before_error.code,
+                    (int)before_error.message.size,
+                    before_error.message.data != NULL
+                        ? before_error.message.data : "");
+        }
+    }
     runtimec_execution_window_result_t result;
     const runtimec_status_t execute_status = runtimec_execution_window_execute(
         session, &request, &result, &error);
-    if (execute_status != RUNTIMEC_STATUS_SUCCESS &&
-        error.message.size != 0U) {
-        fprintf(stderr, "probe: status=%d message=%.*s\n",
-                (int)execute_status, (int)error.message.size,
+    if (execute_status != RUNTIMEC_STATUS_SUCCESS) {
+        fprintf(stderr, "probe: status=%d detail=%u message=%.*s\n",
+                (int)execute_status,
+                (unsigned)result.execution_exit.detail_code,
+                (int)error.message.size,
                 error.message.data != NULL ? error.message.data : "");
     }
 

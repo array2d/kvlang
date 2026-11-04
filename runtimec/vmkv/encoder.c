@@ -927,7 +927,7 @@ static int vmkv_encoder_temp_output_identifier(runtimec_string_view_t name,
  */
 static runtimec_status_t vmkv_encoder_encode_temporary_output(
     vmkv_encoder_t *encoder, const vmkv_encode_request_t *request,
-    binrwir_program_builder_t *builder,
+    binrwir_program_builder_t *builder, const vmkv_local_types_t *local_types,
     vmkv_encode_function_t *function,
     const vmkv_rwir_instruction_view_t *source_instruction,
     uint32_t operation_identifier,
@@ -935,11 +935,18 @@ static runtimec_status_t vmkv_encoder_encode_temporary_output(
     vmkv_canonical_instruction_t *output_instruction,
     runtimec_error_t *error) {
     const size_t read_count = source_instruction->read_argument_count;
-    runtimec_status_t status = vmkv_encoder_reserve(
-        encoder, read_count == 0U ? 1U : read_count, error);
+    runtimec_status_t status;
 
+    /* 计数非零但指针为空是畸形视图：直接失败，不往下解引用。 */
+    if (read_count != 0U && source_instruction->read_arguments == NULL) {
+        return vmkv_encoder_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMKV_ENCODER_DIAG_INVALID_REQUEST,
+            "vmkv encoder: read argument span is null", logical_program_counter);
+    }
+    status = vmkv_encoder_reserve(encoder, read_count == 0U ? 1U : read_count,
+                                  error);
     (void)builder;
-    (void)function;
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -973,8 +980,8 @@ static runtimec_status_t vmkv_encoder_encode_temporary_output(
             continue;
         }
         status = vmkv_encoder_map_argument(
-            request, builder, NULL, function, source_argument, false, target,
-            logical_program_counter, error);
+            request, builder, local_types, function, source_argument, false,
+            target, logical_program_counter, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return status;
         }
@@ -1062,9 +1069,9 @@ runtimec_status_t vmkv_encode_instruction(
                 source_instruction->operation_name, &temporary_identifier)) {
             runtimec_status_t temp_status =
                 vmkv_encoder_encode_temporary_output(
-                    encoder, request, builder, function, source_instruction,
-                    temporary_identifier, logical_program_counter,
-                    output_instruction, error);
+                    encoder, request, builder, local_types, function,
+                    source_instruction, temporary_identifier,
+                    logical_program_counter, output_instruction, error);
             if (temp_status != RUNTIMEC_STATUS_SUCCESS) {
                 return temp_status;
             }

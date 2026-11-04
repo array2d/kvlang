@@ -987,7 +987,12 @@ static void test_unknown_operation_becomes_foreign(void) {
     add_function(&store, "/lib/code", 1U, 1U);
     add_parameter(&store, "/lib/code", -1, "a", "int64");
     add_parameter(&store, "/lib/code", 1, "R", "int64");
-    add_opcode(&store, "/lib/code", 1, 1U, 1U, "println");
+    /*
+     * 用测试自声明的 `ext·probe` 而不是 `println`：`println` 在
+     * `RUNTIMEC_TEMP_PRINTLN=ON` 的构建里是 runtimec 的本地实现、不再 FOREIGN，
+     * 这个测试的期望会随构建变化。`ext·probe` 两个构建都必然是 FOREIGN。
+     */
+    add_opcode(&store, "/lib/code", 1, 1U, 1U, "ext·probe");
     add_reference(&store, "/lib/code", 1, -1, "*[0,-1]", "int64");
     add_reference(&store, "/lib/code", 1, 1, "*[0,1]", "int64");
     runtimec_host_services_t host = make_host_services(&store);
