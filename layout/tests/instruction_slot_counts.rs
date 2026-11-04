@@ -20,18 +20,42 @@ fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
 }
 
-fn temp_dir(tag: &str) -> PathBuf {
+/// 测试用的临时目录，**离开作用域即删**（含 panic 展开时）。
+///
+/// 普通清理语句在断言失败时会被跳过——测试红了反而留下最多垃圾。
+/// 这个守卫挂在 `Drop` 上，成功与失败都清。`/tmp` 曾因这类残留被撑爆。
+struct TempDir(PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+impl TempDir {
+    fn path(&self) -> &PathBuf {
+        &self.0
+    }
+
+    fn join<P: AsRef<std::path::Path>>(&self, p: P) -> PathBuf {
+        self.0.join(p)
+    }
+}
+
+fn temp_dir(tag: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!(
         "kvlanglayout_slotcounts_{}_{}",
         tag,
         std::process::id()
     ));
+    // 先删同名旧目录：上一次异常退出可能留了残骸。
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    TempDir(dir)
 }
 
 /// layout 一段源码到独立 fs store，返回已连接的 Kv。
-fn compile(tag: &str, src: &str) -> (PathBuf, Kv) {
+fn compile(tag: &str, src: &str) -> (TempDir, Kv) {
     let dir = temp_dir(tag);
     let file = dir.join("p.kv");
     std::fs::write(&file, src).unwrap();
@@ -169,11 +193,13 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
         .unwrap()
         .to_path_buf();
     let runtime = repo.join("bin").join("byteseek");
-    if !runtime.exists() {
-        // 没装 runtime 时无法发布能力表，layout 必然失败；这不是布局缺陷。
-        eprintln!("SKIP: {} 不存在，无法 boot /‥isa", runtime.display());
-        return;
-    }
+    // 缺 runtime 时**必须失败**：静默 `return` 会让「没跑」与「通过」在计数上不可区分，
+    // 一次干净树复验因此得出 121 而非 120。没跑就是没跑，不能冒充绿。
+    assert!(
+        runtime.exists(),
+        "缺 {}：无法 boot /‥isa；请先构建 byteseek",
+        runtime.display()
+    );
 
     let mut files = Vec::new();
     let mut stack = vec![repo.join("tutorial")];
@@ -188,25 +214,38 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
         }
     }
     files.sort();
+    // 用户待查清单里的文件跳过：它们是「原始形态 vs 迁移形态」的对照样本，
+    // 迁移期不改，本判据也不该因为它们红。
+    const PENDING_REVIEW: &[&str] = &[
+        "01-basics/strings.kv",
+        "08-leetcode/083_remove_dup_list.kv",
+        "08-leetcode/094_inorder_traversal.kv",
+        "08-leetcode/206_reverse_linked_list.kv",
+        "12-struct/05-graph.kv",
+        "12-struct/06-list-reverse.kv",
+    ];
+    files.retain(|p| {
+        !PENDING_REVIEW
+            .iter()
+            .any(|tail| p.ends_with(format!("tutorial/{tail}")))
+    });
     assert!(!files.is_empty(), "tutorial 下没有找到 .kv");
 
-    // 语料取 **HEAD 版本**，不用工作树：别人正在改某个 tutorial 时工作树可能瞬时
-    // 语法不完整，那是他的活，不该让本判据忽红忽绿。取不到 HEAD 才退回工作树。
-    let snapshot = temp_dir("corpus-head");
+    // 语料取**工作树**：本判据要验的是「当前布局能否吃下当前语料」。
+    // 早先为绕开别人在途的半成品而取 HEAD，那只是权宜——迁移落盘后工作树才是真相，
+    // 取 HEAD 会让已迁移的文件仍按旧语法被拒。
+    //
+    // 但整棵树逐文件拷贝时要**跳过读不了的**：别人可能正写到一半（文件不存在或读失败），
+    // 那不该让本判据红；那份文件本就不在 `files` 里。
+    // 快照**保留相对路径**（`snapshot/tutorial/…/x.kv`），诊断里就能看出是哪个语料文件；
+    // 扁平化成 `caseN.kv` 会让报错指向一个无意义的编号，把定位成本转给下一个人。
+    let snapshot = temp_dir("corpus-worktree");
     let mut materialized = Vec::new();
-    for (index, file) in files.iter().enumerate() {
+    for file in files.iter() {
         let relative = file.strip_prefix(&repo).unwrap();
-        let blob = Command::new("git")
-            .args(["show", &format!("HEAD:{}", relative.display())])
-            .current_dir(&repo)
-            .output()
-            .unwrap();
-        let target = snapshot.join(format!("case{index}.kv"));
-        if blob.status.success() {
-            std::fs::write(&target, &blob.stdout).unwrap();
-        } else {
-            std::fs::copy(file, &target).unwrap();
-        }
+        let target = snapshot.join(relative);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::copy(file, &target).unwrap();
         materialized.push(target);
     }
     let files = materialized;
@@ -252,7 +291,11 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
             assert_counts_match(&mut kv, &dir, &file.display().to_string());
             checked += 1;
         }
+        // 逐个删掉这份 store：250 个 fs 目录留着不删，一天几十轮就把 /tmp 撑爆过。
+        drop(kv);
+        let _ = std::fs::remove_dir_all(root.join(format!("case{index}")));
     }
+    // 语料快照也一并清掉。
     assert!(checked > 0, "tutorial 一个函数目录都没扫到");
     eprintln!(
         "扫描 {checked} 个函数目录；{} 个用例缺能力跳过：{skipped:?}",

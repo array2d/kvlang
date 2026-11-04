@@ -76,12 +76,21 @@ def convert_signature_item(item: str) -> str:
     **值复制不参与迁移**：旧模型里 `a:[]char/utf32` 是引用（调用方传 key 路径），
     改成值复制等于悄悄换掉绑定语义——少了别名、多一次拷贝；而且值复制参数只读，
     体内当累加器写会立刻非法。值复制是给新代码用的能力，不是迁移的落点。
+
+    空 kindexpr（`a:`）的唯一合法新形态是**显式指针** `* $name`：值复制没有类型
+    就没有值可拷贝，`$name` 是未定义形态（spec 03-类型系统/07-文法与合法性:61）。
+
+    并集要加括号：`*` 作用于**整个类型表达式**，`*A|B` 会被读成 `(*A)|B`。
+    逐成员写 `*A|*B` 非法（同一参数两种传递方式），所以 union 一律产出 `*(A|B)`。
     """
     name, ty, _ = parse_item(item)
     if not ty:
-        return f"${name}"
+        return f"* ${name}"
     if ty.startswith(("*", "@")):
         return f"{ty} ${name}"
+    # `|` 在类型表达式里优先级最低，`*` 加在串首只约束第一个成员，必须加括号。
+    if "|" in ty and not (ty.startswith("(") and ty.endswith(")")):
+        return f"*({ty}) ${name}"
     return f"*{ty} ${name}"
 
 
@@ -169,6 +178,10 @@ def rewrite_body(body: str, pointer_names: set[str]) -> str:
         pattern = re.compile(rf"(?<![*\w.$·]){re.escape(name)}\b")
         for m in pattern.finditer(masked):
             tail = masked[m.end():].lstrip()
+            # 判空保持裸名：`p == None` / `p != None` 比的是指针本身，
+            # 是唯一的空指针判定写法（spec 16-ptr），解引用就变成比值了。
+            if tail.startswith(("== None", "!= None")):
+                continue
             bracketed = tail[:1] in ("·", "[")
             replacement = f"(*{name})" if bracketed else f"*{name}"
             edits.append((m.start(), m.end(), replacement))

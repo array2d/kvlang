@@ -67,9 +67,21 @@ pub struct Param {
     /// （spec 04-layout语义/03-函数:17「wire langtype 不含 `*`/`@` 前缀」）。
     /// "" = 空 kindexp（不约束）。
     pub ty: String,
-    /// 声明前缀：`*` 传址、`@` 扩展句柄、`None` 值复制。
-    pub by_ref: Option<char>,
+    /// 声明前缀：`*` 传址、`@` 扩展句柄、空串值复制。存**完整前缀串**——
+    /// `**T`（指向指针的指针）也合法，只存一个字符会丢掉多余的 `*`。
+    pub by_ref: String,
     pub has_ty: bool, // 源码是否写了冒号（区分「空 kindexp」与「缺注解」）
+}
+
+impl Param {
+    /// 形参作为**变量**的类型：`by_ref` 前缀拼回类型表达式。
+    ///
+    /// `ty` 只存类型表达式（wire langtype 不含 `*`/`@`），但推导表 `declared`/`tm`
+    /// 记的是「这个名字是什么」——指针形参就记 `*T`。`p` 得**地址值**、`*p` 得**值**
+    /// （spec 16-ptr），两者必须可区分，否则 `root -> map[*N]` 会被当成值与指针同型。
+    pub fn pointer_type(&self) -> String {
+        format!("{}{}", self.by_ref, self.ty)
+    }
 }
 
 #[derive(Clone)]
@@ -94,13 +106,11 @@ impl FuncSig {
             // `* $name`（`*` 与名字间有空格，与 `*T` 区分），这样 format/printlib 的
             // 输出能被 parser 重新读回（往返幂等）。
             // 传递方式（`by_ref`）与类型分开存，输出时拼回前缀。
-            let (by_ref, ty) = (p.by_ref, p.ty.as_str());
-            if let Some(prefix) = by_ref {
-                sb.push(prefix);
-            }
+            let (by_ref, ty) = (p.by_ref.as_str(), p.ty.as_str());
+            sb.push_str(by_ref);
             sb.push_str(ty);
             // 前缀后、有类型或有名字时要分隔：`*int64 $a` / `* $a`。
-            if by_ref.is_some() || !ty.is_empty() {
+            if !by_ref.is_empty() || !ty.is_empty() {
                 sb.push(' ');
             }
             sb.push('$');
@@ -111,12 +121,10 @@ impl FuncSig {
             if i > 0 {
                 sb.push_str(", ");
             }
-            let (by_ref, ty) = (p.by_ref, p.ty.as_str());
-            if let Some(prefix) = by_ref {
-                sb.push(prefix);
-            }
+            let (by_ref, ty) = (p.by_ref.as_str(), p.ty.as_str());
+            sb.push_str(by_ref);
             sb.push_str(ty);
-            if by_ref.is_some() || !ty.is_empty() {
+            if !by_ref.is_empty() || !ty.is_empty() {
                 sb.push(' ');
             }
             sb.push('$');

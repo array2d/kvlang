@@ -14,32 +14,28 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
         tag,
         std::process::id()
     ));
+    // 写前删同名：异常退出会留下残骸，反复跑会累积。
+    let _ = std::fs::remove_file(&path);
     std::fs::write(&path, src).unwrap();
     path
 }
 
 fn dsn(tag: &str) -> String {
     format!(
-        "fs:///tmp/kvlanglayout_unionmsg_{}_{}_{}",
+        "fs:///tmp/kvlanglayout_unionmsg_{}_{}",
         tag,
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
     )
 }
 
 fn fresh_kv(tag: &str) -> Kv {
     let dsn = format!(
-        "fs:///tmp/kvlanglayout_union_{}_{}_{}",
+        "fs:///tmp/kvlanglayout_union_{}_{}",
         tag,
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        std::process::id()
     );
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
     kv

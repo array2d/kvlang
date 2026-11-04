@@ -687,6 +687,11 @@ mod tests {
     }
 
     #[test]
+    fn dbg_deref_paren_tokens() {
+        eprintln!("TOKENS {:?}", toks("(*r)[*i]"));
+    }
+
+    #[test]
     fn only_c2_b7_is_member_delimiter() {
         // U+00B0 `°` and U+00B5 `µ` start with 0xC2 but are identifier chars, not delimiters.
         assert_eq!(toks("温度°C"), vec!["I:温度°C"]);

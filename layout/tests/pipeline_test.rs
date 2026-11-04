@@ -14,10 +14,11 @@ fn fresh_kv() -> Kv {
     // Isolate each parallel test in its own `fs://` directory to avoid concurrent backend races.
     static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dsn = format!(
-        "fs:///tmp/kvlanglayout_test_{}_{}",
-        std::process::id(),
+        "fs:///tmp/kvlanglayout_test_{}",
         SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     );
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
     kv

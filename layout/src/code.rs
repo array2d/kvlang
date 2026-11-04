@@ -529,7 +529,7 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
     let blank = || Param {
         name: String::new(),
         ty: String::new(),
-        by_ref: None,
+        by_ref: String::new(),
         has_ty: false,
     };
     let mut params: Vec<Param> = (0..nr).map(|_| blank()).collect();
@@ -542,7 +542,7 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
             params[(k - 1) as usize] = Param {
                 name: pname,
                 ty: pty,
-                by_ref: None,
+                by_ref: String::new(),
                 has_ty: true,
             };
         }
@@ -553,7 +553,7 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
             returns[(k - 1) as usize] = Param {
                 name: rname,
                 ty: rty,
-                by_ref: None,
+                by_ref: String::new(),
                 has_ty: true,
             };
         }
@@ -1204,25 +1204,27 @@ fn slot_static_type(
     type_sets: &HashMap<String, Vec<String>>,
     stable: &HashMap<String, String>,
 ) -> String {
-    // `*p` 的槽类型是**解引用后的值类型**：形参 `p` 声明为 `*T`，读槽 `*[0,-k]`
-    // 承载的是 `T`。判据与 `lower::deref_value_type` 同一条——`*` 是传递方式，
-    // 不是类型的一部分。不剥这一层，读槽会落到空类型、编码器退回 `rwir`，
-    // 于是「操作数槽 langtype」里出现声明层面的 kind，与具体类型串味。
+    // 两张表的键与值形态不同，不能混用：
+    // - `param_langtype`：键 = 形参名，值 = **wire langtype**（已剥 `*`/`@`）；
+    // - `declared`：键 = 形参名，值 = **变量类型**（`pointer_type()`，带前缀）。
+    //
+    // `*p` 的槽类型是解引用**一层**的结果：从 `declared` 取值剥一层最直接；
+    // 从 `param_langtype` 取值时那一层已经在入表时剥掉了，不能再剥。
     let lookup_name = name.strip_prefix('*').unwrap_or(name);
     let is_deref = lookup_name.len() != name.len();
-    // 只在**声明侧含并集**时才用 stable 覆盖：单一具体声明已经是最强约束，
-    // 用推断结果覆盖它会改变既有产物的 langtype。
-    let declared_any = param_langtype
-        .get(lookup_name)
-        .or_else(|| declared.get(lookup_name))
-        .filter(|t| !t.is_empty());
+    let declared_any = declared.get(lookup_name).filter(|t| !t.is_empty());
     if let Some(t) = declared_any {
         let value = if is_deref {
             lower::deref_value_type(t)
         } else {
             t.as_str()
         };
-        return narrow_union(value.to_string(), lookup_name, stable);
+        if !value.is_empty() {
+            return narrow_union(value.to_string(), lookup_name, stable);
+        }
+    }
+    if let Some(t) = param_langtype.get(lookup_name).filter(|t| !t.is_empty()) {
+        return narrow_union(t.clone(), lookup_name, stable);
     }
     lower::type_set_slot_type(type_sets, lookup_name).unwrap_or_default()
 }

@@ -17,19 +17,17 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
         tag,
         std::process::id()
     ));
+    // 写前删同名：异常退出会留下残骸，反复跑会累积。
+    let _ = std::fs::remove_file(&path);
     std::fs::write(&path, src).unwrap();
     path
 }
 
 fn dsn(tag: &str) -> String {
     format!(
-        "fs:///tmp/kvlanglayout_semop_{}_{}_{}",
+        "fs:///tmp/kvlanglayout_semop_{}_{}",
         tag,
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
     )
 }
 

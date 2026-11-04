@@ -17,21 +17,40 @@ use kvlanglayout::{init_dirs, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
+
+/// 测试用的临时目录，**离开作用域即删**（含 panic 展开时）。
+/// 普通清理语句在断言失败时会被跳过——测试红了反而留下最多垃圾。
+struct TempDir(PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+impl TempDir {
+    fn join<P: AsRef<std::path::Path>>(&self, p: P) -> PathBuf {
+        self.0.join(p)
+    }
+}
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
 }
 
-fn temp_dir(tag: &str) -> PathBuf {
+fn temp_dir(tag: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!(
         "kvlanglayout_container_literal_{}_{}",
         tag,
         std::process::id()
     ));
+    // 先删同名旧目录：测试在同一 pod 反复跑会累积，/tmp 曾因此 OOM。
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    TempDir(dir)
 }
 
-fn layout(tag: &str, src: &str) -> (PathBuf, Result<std::process::Output, String>) {
+fn layout(tag: &str, src: &str) -> (TempDir, Result<std::process::Output, String>) {
     let dir = temp_dir(tag);
     let file = dir.join("p.kv");
     std::fs::write(&file, src).unwrap();
@@ -65,7 +84,7 @@ fn write_type(kv: &mut Kv, dir: &str, instruction: usize) -> String {
         .unwrap_or_default()
 }
 
-fn connect(dir: &PathBuf) -> Kv {
+fn connect(dir: &TempDir) -> Kv {
     let mut kv = Kv::conn(&format!("fs://{}", dir.join("db").display()));
     init_dirs(&mut kv).unwrap();
     kv

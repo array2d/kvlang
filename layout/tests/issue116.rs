@@ -26,15 +26,29 @@ fn slot_text(data: &[u8], lt: &str) -> String {
     }
 }
 
-fn fresh_kv() -> Kv {
-    let dsn = format!(
-        "fs:///tmp/kvlanglayout_i116_{}_{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    );
+/// 测试用 store：离开作用域时删掉目录（含 panic 展开）。
+///
+/// `Kv` 持有 store 句柄，不 drop 就删不掉目录；而用例结束时 `kv` 通常还在作用域里。
+/// 这个守卫让删除发生在 `Kv` 之后（声明顺序 -> drop 顺序相反）。
+struct TempStore {
+    dir: String,
+}
+
+impl Drop for TempStore {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+fn fresh_kv() -> (TempStore, Kv) {
+    // 路径必须**每个用例唯一**：`cargo test` 默认多线程并行，同 pid 同路径会互相冲掉。
+    // 用进程内自增序号代替原来的 `as_nanos()`——同样唯一，但目录名不含时间戳，
+    // 便于清理时按前缀批量删。
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let dsn = format!("fs:///tmp/kvlanglayout_i116_{}_{seq}", std::process::id());
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
     // 裸名必须有声明来源：运行时 boot 会发布这些内建的 /lib/<op> def rwir，
@@ -47,7 +61,10 @@ fn fresh_kv() -> Kv {
         )])
         .unwrap();
     }
-    kv
+    let store = TempStore {
+        dir: dsn.trim_start_matches("fs://").to_string(),
+    };
+    (store, kv)
 }
 
 fn children_of(kv: &mut Kv, dir: &str) -> Vec<String> {
@@ -260,14 +277,14 @@ fn assert_no_scope_opcode(p: &BTreeMap<i32, Inst>, fn_: &str) {
 }
 
 fn compile_fn(src: &str) -> Kv {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     compile(&mut kv, src).unwrap();
     kv
 }
 
 #[test]
 fn lib_plane_has_no_scope_flat_keys() {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     let src = std::fs::read_to_string("../tutorial/03-control/while.kv").unwrap();
     compile(&mut kv, &src).unwrap();
     for fn_ in ["sum_to", "first_div7", "sum_odds"] {
@@ -300,7 +317,7 @@ fn lib_plane_has_no_scope_flat_keys() {
 
 #[test]
 fn labeled_irseq_is_not_fallen_into() {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     let src = std::fs::read_to_string("../tutorial/03-control/guess.kv").unwrap();
     compile(&mut kv, &src).unwrap();
     let fn_ = "guess_number";
@@ -352,7 +369,7 @@ fn labeled_irseq_is_not_fallen_into() {
 
 #[test]
 fn br_true_false_are_int64() {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     compile(
         &mut kv,
         "rwfunc f(*int64 $X) -> (*int64 $Y) {\n    if (*X > 0) { *X -> *Y } else { 0 -> *Y }\n}\n",
@@ -589,7 +606,7 @@ fn tutorial_control_files_single_plane() {
         ("../tutorial/03-control/classify.kv", &["classify"][..]),
         ("../tutorial/03-control/for.kv", &["test"][..]),
     ] {
-        let mut kv = fresh_kv();
+        let (_store, mut kv) = fresh_kv();
         let src = std::fs::read_to_string(file).unwrap();
         compile(&mut kv, &src).unwrap();
         for fn_ in fns {

@@ -248,8 +248,13 @@ fn check_map_body(body: &[Stmt], defined: &HashSet<String>, diags: &mut Vec<Diag
 }
 
 fn check_map_base(base: &str, defined: &HashSet<String>, pos: Pos, diags: &mut Vec<Diagnostic>) {
+    // 基座可以是 `(*p)`：解引用后做成员写，声明的名字在括号里。剥掉括号再查。
+    let base_name = base
+        .strip_prefix("(*")
+        .and_then(|r| r.strip_suffix(')'))
+        .unwrap_or(base);
     // 绝对路径容器（/tmp/... 等）全局可见，不需本函数声明；/lib 是结构域。
-    if base.is_empty() || base.starts_with('/') || defined.contains(base) {
+    if base_name.is_empty() || base_name.starts_with('/') || defined.contains(base_name) {
         return;
     }
     diags.push(Diagnostic {
@@ -1198,7 +1203,7 @@ pub fn declared_types(fn_: &Func) -> HashMap<String, String> {
     let mut d = HashMap::new();
     for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
         if !p.ty.is_empty() {
-            d.insert(p.name.clone(), p.ty.clone());
+            d.insert(p.name.clone(), p.pointer_type());
         }
     }
     collect_declared(&fn_.body, &mut d);
@@ -1209,12 +1214,12 @@ pub fn infer_types(fn_: &Func) -> HashMap<String, String> {
     let mut tm = HashMap::new();
     for p in &fn_.sig.params {
         if !p.ty.is_empty() {
-            tm.insert(p.name.clone(), p.ty.clone());
+            tm.insert(p.name.clone(), p.pointer_type());
         }
     }
     for p in &fn_.sig.returns {
         if !p.ty.is_empty() {
-            tm.insert(p.name.clone(), p.ty.clone());
+            tm.insert(p.name.clone(), p.pointer_type());
         }
     }
     infer_body(&fn_.body, &mut tm);
@@ -1762,9 +1767,12 @@ fn arg_type(e: &Expr, tm: &HashMap<String, String>) -> String {
         LitKind::LitBool => "bool".to_string(),
         _ => {
             if e.op == ast::MEMBER_READ_OP {
-                // 成员读 `base·seg…`：按 tm 的基座类型逐段取 value 类型。
-                let mut ty = tm.get(&e.args.first().map(|a| a.val.clone()).unwrap_or_default())
-                    .cloned()
+                // 成员读 `base·seg…`：按基座类型逐段取 value 类型。
+                // 基座可以是复合表达式（`(*p)·x` 的基座是解引用），不能只查 `val`。
+                let mut ty = e
+                    .args
+                    .first()
+                    .map(|a| arg_type(a, tm))
                     .unwrap_or_default();
                 for _ in e.args.iter().skip(1) {
                     ty = container_value(&ty).unwrap_or_default();
@@ -1785,6 +1793,12 @@ fn arg_type(e: &Expr, tm: &HashMap<String, String>) -> String {
 fn slot_type(name: &str, tm: &HashMap<String, String>) -> String {
     if name.is_empty() {
         return String::new();
+    }
+    // `*p` 的值类型：查 `p` 的声明再剥一层（`p` 记作 `*T`，`*p` 是 `T`）。
+    if let Some(inner) = name.strip_prefix('*') {
+        if let Some(t) = tm.get(inner) {
+            return deref_value_type(t).to_string();
+        }
     }
     if let Some(t) = tm.get(name) {
         return t.clone();
@@ -1859,8 +1873,12 @@ fn validate_num_op(
         let members = type_members(&t);
         let all_num = !members.is_empty() && members.iter().all(|m| builtin::is_num_kind(m));
         let all_str = !members.is_empty() && members.iter().all(|m| is_string_kind(m));
-        let all_cmp_ok = !members.is_empty()
-            && members.iter().all(|m| *m == "bool" || m.starts_with('*'));
+        // 可与 None 比较的类型：bool、指针、以及 **key 空间组织**（structref `/lib/X`
+        // 与 mapexpr `k·v`）——后者判的是「这个成员目录存在与否」，运行时做值检查。
+        let nullable = |m: &str| {
+            m == "bool" || m.starts_with('*') || m.starts_with('/') || m.contains('\u{b7}')
+        };
+        let all_cmp_ok = !members.is_empty() && members.iter().all(|m| nullable(m));
         if is_string_kind(&t) || all_str {
             saw_char = true;
         } else if builtin::is_num_kind(&t) || all_num {
@@ -2639,6 +2657,20 @@ pub fn resolve_slot_type(
     if slot_is_plain_name(w) {
         return declared.get(w).cloned();
     }
+    // `(*p)·seg…`：先解引用得值的类型，再逐段下钻成员。
+    // 写成 `(*p)` 是因为 `*T` 的成员访问必须显式解引用（spec 16-ptr），
+    // 不加括号会读成 `*(p·seg)`。基座解引用后是**值**，`·` 才是成员。
+    if let Some(rest) = w.strip_prefix("(*") {
+        if let Some((base, tail)) = rest.split_once(keytree::MEMBER_SEP) {
+            let inner = base.strip_suffix(')')?;
+            let t = declared.get(inner)?;
+            return Some(member_chain_type(deref_value_type(t), tail, structs)?);
+        }
+        // 纯解引用 `(*p)`（无成员段）。
+        let inner = rest.strip_suffix(')')?;
+        let t = declared.get(inner)?;
+        return Some(deref_value_type(t).to_string());
+    }
     if let Some(rest) = w.strip_prefix('*') {
         let t = declared.get(rest)?;
         return Some(deref_value_type(t).to_string());
@@ -2650,8 +2682,18 @@ pub fn resolve_slot_type(
     }
     let mut it = w.split(keytree::MEMBER_SEP);
     let base = it.next()?;
-    let mut ty = declared.get(base)?.clone();
-    for part in it {
+    let ty = declared.get(base)?.clone();
+    let tail: Vec<&str> = it.collect();
+    member_chain_type(&ty, &tail.join(&keytree::MEMBER_SEP.to_string()), structs)
+}
+
+/// 沿 `·` 逐段取成员类型：mapexpr 取 value、数组取元素、struct 取字段声明。
+fn member_chain_type(start: &str, tail: &str, structs: &StructTable) -> Option<String> {
+    let mut ty = start.to_string();
+    if tail.is_empty() {
+        return Some(ty);
+    }
+    for part in tail.split(keytree::MEMBER_SEP) {
         if let Some(v) = container_value(&ty) {
             ty = v;
         } else if ty.starts_with('[') {
@@ -2854,6 +2896,8 @@ fn check_assignable(target: &str, rhs: &str, diags: &mut Vec<Diagnostic>) {
         return;
     }
     if target.starts_with('[') || target.contains(keytree::MEMBER_SEP) || target.starts_with('/') {
+        // **指针与值不同型**：`p`（`*T`）得地址值、`*p` 得值（spec 16-ptr）。
+        // 不能剥掉 `*` 再比——那会让「值写进指针槽」也通过，类型检查形同虚设。
         if rhs != target {
             push_write_diag(diags, format!("TypeError: cannot assign {rhs} to {target}"));
         }
@@ -2934,6 +2978,17 @@ fn check_container_literal(target: &str, e: &Expr, diags: &mut Vec<Diagnostic>) 
 fn expr_result_type(e: &Expr, tm: &HashMap<String, String>, annotated: &str) -> String {
     if e.is_leaf() {
         return arg_type(e, tm);
+    }
+    // `*p` 的结果类型 = 指针指向的值类型（`p` 记作 `*T`，剥一层得 `T`）。
+    // 这一支缺失时 `*root` 的 rhs 为空，`check_assignable` 因 rhs 空直接放行，
+    // 「值写进指针槽」就漏过去了。
+    if e.op == ast::DEREF_OP {
+        let inner = e
+            .args
+            .first()
+            .map(|a| arg_type(a, tm))
+            .unwrap_or_default();
+        return deref_value_type(&inner).to_string();
     }
     if matches!(e.op.as_str(), "compactarray·new" | "map·new") {
         return annotated.to_string();
@@ -3236,13 +3291,10 @@ pub fn validate_writes(
     sigs: &SigTable,
 ) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
-    let mut declared: HashMap<String, String> = HashMap::new();
-    for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
-        if !p.ty.is_empty() {
-            declared.insert(p.name.clone(), p.ty.clone());
-        }
-    }
-    collect_declared(&fn_.body, &mut declared);
+    // 用 `pointer_type()`（带传递方式前缀），与 `declared_types()` 同一来源——
+    // 这里曾用 `p.ty.clone()`（剥过前缀），于是 `**N $h` 的 `h` 记成 `/lib/N`，
+    // 写侧 `*h` 就比读侧少一层 `*`。**同一事实不能有两份构造**。
+    let declared = declared_types(fn_);
     walk_writes(&fn_.body, sigs, tm, structs, &declared, &mut diags);
     diags
 }

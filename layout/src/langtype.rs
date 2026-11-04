@@ -185,6 +185,10 @@ fn valid_atom(s: &str) -> bool {
 /// 类型表达式语法校验（装载期）。空串 = 空 kindexp（不约束，合法）；变参 `...` 是签名层
 /// arity、不入 langtype 串，此处永不见。`any` 不是类型名。
 pub fn valid_langtype(expr: &str) -> bool {
+    // 括号分组 `(A|B)`：括号内是一个完整的类型表达式，整体当一个 atom 校验。
+    if let Some(inner) = expr.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
+        return valid_langtype(inner);
+    }
     expr.is_empty() || expr.split('|').all(valid_atom)
 }
 
@@ -205,6 +209,13 @@ pub fn is_plain_kind(ty: &str) -> bool {
 /// `/lib/<name>`，使 kv 源可写 `x:Node` / `[int64]·Node`，runtime 恒收到完整 `/lib/…` 路径。
 /// 已 `/` 开头或 known kind 原样返回。mapexpr 只对 value 递归展开（key 恒 `[…]` 非 struct）。
 pub fn expand_struct_refs(s: &str) -> String {
+    // 括号分组内的 `|` 不属于外层的并集切分：`*(int64|float64)` 是一个 atom，
+    // 先在 `depth == 0` 处切，括号内递归展开。
+    if let Some(inner) = s.strip_prefix('*').and_then(|r| r.strip_prefix('(')) {
+        if let Some(inner) = inner.strip_suffix(')') {
+            return format!("*({})", expand_struct_refs(inner));
+        }
+    }
     s.split('|').map(expand_atom).collect::<Vec<_>>().join("|")
 }
 
@@ -228,6 +239,11 @@ fn expand_atom(s: &str) -> String {
     }
     if s.starts_with('[') {
         return s.to_string();
+    }
+    // 括号分组 `*(int64|float64)`：括号内是完整的类型表达式，逐成员展开，
+    // 整串当裸名包成 `/lib/(…)` 是错的（`*` 已在上层剥掉）。
+    if let Some(inner) = s.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
+        return format!("({})", expand_struct_refs(inner));
     }
     if s.is_empty() || known_kind(s) {
         return s.to_string();

@@ -8,14 +8,12 @@ use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 
 fn fresh_kv(tag: &str) -> Kv {
     let dsn = format!(
-        "fs:///tmp/kvlanglayout_uintlit_{}_{}_{}",
+        "fs:///tmp/kvlanglayout_uintlit_{}_{}",
         tag,
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        std::process::id()
     );
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
     kv

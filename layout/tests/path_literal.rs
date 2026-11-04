@@ -8,14 +8,12 @@ use std::process::Command;
 
 fn fresh_kv(tag: &str) -> Kv {
     let dsn = format!(
-        "fs:///tmp/kvlanglayout_pathlit_{}_{}_{}",
+        "fs:///tmp/kvlanglayout_pathlit_{}_{}",
         tag,
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        std::process::id()
     );
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
     kv
@@ -54,12 +52,8 @@ fn quoted_path_in_write_slot_is_rejected() {
     )
     .unwrap();
     let dsn = format!(
-        "fs:///tmp/kvlanglayout_pathlit_cli_{}_{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        "fs:///tmp/kvlanglayout_pathlit_cli_{}",
+        std::process::id()
     );
     let out = Command::new(bin)
         .arg(&file)
@@ -138,12 +132,8 @@ fn raw_quoted_path_in_write_slot_is_rejected() {
     )
     .unwrap();
     let dsn = format!(
-        "fs:///tmp/kvlanglayout_pathlit_raw_{}_{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        "fs:///tmp/kvlanglayout_pathlit_raw_{}",
+        std::process::id()
     );
     let out = Command::new(bin)
         .arg(&file)

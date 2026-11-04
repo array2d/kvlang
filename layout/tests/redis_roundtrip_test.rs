@@ -18,6 +18,8 @@ fn redis_dsn() -> Option<String> {
 #[test]
 fn redis_roundtrip() {
     let Some(dsn) = redis_dsn() else { return };
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
 
@@ -39,6 +41,8 @@ fn redis_roundtrip() {
 #[test]
 fn redis_compile() {
     let Some(dsn) = redis_dsn() else { return };
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
 

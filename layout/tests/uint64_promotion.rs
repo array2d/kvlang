@@ -12,6 +12,23 @@ use kvlanglayout::{init_dirs, kvkind, Kv};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+
+/// 测试用的临时目录，**离开作用域即删**（含 panic 展开时）。
+/// 普通清理语句在断言失败时会被跳过——测试红了反而留下最多垃圾。
+struct TempDir(PathBuf);
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+impl TempDir {
+    fn join<P: AsRef<std::path::Path>>(&self, p: P) -> PathBuf {
+        self.0.join(p)
+    }
+}
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
 }
@@ -23,14 +40,16 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn temp_dir(tag: &str) -> PathBuf {
+fn temp_dir(tag: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!(
         "kvlanglayout_uint64_{}_{}",
         tag,
         std::process::id()
     ));
+    // 先删同名旧目录：测试在同一 pod 反复跑会累积，/tmp 曾因此 OOM。
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir
+    TempDir(dir)
 }
 
 fn slot_text(kv: &mut Kv, key: &str) -> String {
@@ -147,7 +166,7 @@ fn literal_and_result_slots_use_promoted_kind() {
         write_kinds.iter().any(|t| t == "uint64"),
         "max 的写槽应推断为 uint64：{write_kinds:?}"
     );
-    std::fs::remove_dir_all(&dir).ok();
+
 }
 
 /// 执行层：真跑一遍，断言值。缺 `byteseek` 或运行时库时跳过。
@@ -232,7 +251,7 @@ fn uint64_comparison_and_max_yield_unsigned_values() {
     let out = run.output().unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-    std::fs::remove_dir_all(&dir).ok();
+
     assert!(out.status.success(), "run failed: {stderr}\nstdout:\n{stdout}");
 
     // 值断言：无符号比较为 true、max 取大者、÷2 得 2^63-1、动态槽不得打出 -1。

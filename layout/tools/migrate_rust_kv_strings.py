@@ -153,24 +153,13 @@ def already_migrated(params: str, returns: str) -> bool:
     return all("$" in item for item in items)
 
 
-def has_empty_kindexpr(params: str, returns: str) -> bool:
-    """是否有空 kindexpr 形参（`f(a:)`）——新写法未定义，跳过不猜。"""
-    from migrate_param_syntax import parse_item, split_params
-
-    for item in split_params(params) + split_params(returns):
-        if "$" in item:
-            continue
-        if ":" in item:
-            _, ty = item.split(":", 1)
-            if not ty.strip():
-                return True
-    return False
-
-
 def migrate_kv(kv: str) -> tuple[str, list[str], list[str]]:
     """迁移一段 kv 源码。返回 (结果, 跳过清单, 冲突清单)。
 
-    逐函数判定：已新形态 / 空 kindexpr 的函数整块原样保留（含函数体）。
+    逐函数判定：已是新形态的整块原样保留（含函数体）。
+
+    空 kindexpr（`a:`）现在**参与迁移**，产出 `* $a`——那是它唯一的合法新形态
+    （值复制没有类型就没有值可拷贝）。
     """
     migrated, conflicts = convert_text(kv)
     skipped: list[str] = []
@@ -178,8 +167,6 @@ def migrate_kv(kv: str) -> tuple[str, list[str], list[str]]:
         name, params, returns = match.group(2), match.group(3), match.group(4)
         if already_migrated(params, returns):
             skipped.append(f"{name}: 已是新形态")
-        elif has_empty_kindexpr(params, returns):
-            skipped.append(f"{name}: 空 kindexpr 未定义")
     if not skipped:
         return migrated, skipped, conflicts
     return _assemble(kv, migrated, skipped), skipped, conflicts
