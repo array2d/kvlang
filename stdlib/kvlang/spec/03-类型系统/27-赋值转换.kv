@@ -12,7 +12,7 @@ lib kvlang/spec/类型系统/赋值转换 {
 
 - 带注解的局部变量（`x:int8 = …`）；
 - 函数读参、写参与返回值槽；
-- 指针目标的标量 kind（`*int8` 指向的槽）；
+- kvlang 指针目标的标量 kind（`*int8` 指向的槽）；
 - typed 容器的标量元素（`[]int8` 元素、`[k]·int8` 的 value）；
 - struct 的标量字段；
 - 能解析出声明类型的全局变量。
@@ -77,13 +77,13 @@ Ptr/空 kindexp 槽，写入其它 typed 槽才 TypeError。**不得**引入第�
 只有**字面量 token** 参与该检查；非字面量常量表达式按动态值处理（常量折叠是后续
 独立扩展，不改变本规则）。
 
-动态值（空 kindexp 槽、调用实参、容器/指针读、外部写入）按转换表的 cast 语义转换；
+动态值（空 kindexp 槽、调用实参、容器/kvlang 指针读、外部写入）按转换表的 cast 语义转换；
 不可转换（非数值、None 写入非 Ptr/空 kindexp 槽）→ 运行时 `TypeError`。
 
 容器元素与 struct 字段写：按元素/字段声明 kind 转换后再编码容器。
 整个容器赋值要求两边 langtype 完全一致；整值替换**不做**逐元素转换。
 
-指针写（`*p = v`）：目标槽按 `p` 的 kindexpr 视为 typed 槽，适用上述全部规则。
+kvlang 指针写（`*p = v`）：目标槽按 `p` 的 kindexpr 视为 typed 槽，适用上述全部规则。
 
 动态 `kvspace·set`/`kv·set` 没有静态目标类型，不适用本章：值按原 kind 写入。
 

@@ -20,7 +20,7 @@ opcode 形态与数值 promotion 规则（语言可见）。
 - native rwir_runtimecimpl 不感知委托、def rwir、调用与 yield。
 
 layout 的 target selection 在 layout 期完成（Rwir/User）；runtime 的
-rwir_runtimecimpl 选定与派发模型不因 `/‥isa` 改变；不做 Code/字节码下译。
+rwir_runtimecimpl 选定与派发模型不因 `/lib` 下的 def rwir 改变；不做 Code/字节码下译。
 
 ## opcode 形态与类型标注（normative）
 
@@ -115,7 +115,7 @@ layout 的 `specialize`（定槽上 kind 标注）与 binircompiler 的按实参
   结果类型；槽由本 vthread 写入，故 `ro=0`、`vid=0`（所有权守卫涵盖，无需回读）；
 - 指令只有一个写参。
 
-写槽被任何整值写/删除命中（含 array/map 删键、cp/cpTree）时，缓存的 body 指针
+写槽被任何整值写/删除命中（含 array/map 删键、cp/cpTree）时，缓存的 body 二进制指针
 **必须**立即失效；捕获失败后只在对应 key 再次被写时重试。不满足条件时**必须**
 回退整值写，不得截断、不得跳过 NextPc。
 

@@ -31,7 +31,7 @@ kvspace 的 `/lib/` 子树，供 runtime 解释执行。layout 是 **o0 编译�
 `no executable code found`。compile 返回本次写入的 init 函数名列表（供消费方按 lib 声明驱动 init，非
 文件系统路径推导）。
 
-compile 前把 native 作者清单写成/刷新 `/‥isa/<folded-op>` 的
+compile 前把 native 作者清单写成/刷新 `/lib/<op>` 的
 `def rwir` 并读回；未知 opcode 硬失败，不 layout、不 fallback。
 
 ## write_func 步骤

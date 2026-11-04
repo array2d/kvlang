@@ -20,7 +20,7 @@ durable 单句柄相干、后端装载。
    `kvspaceXvalueHeadLen`，标准标量构造器 `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`；
    langtype 落值内 attr 区（随单 key 一次写整体落下）。runtimec2 的 `xvalue.c` 只是其薄封装。langtype 串是类型的
    唯一真相，怎么拼、怎么解，只此一处。
-3. **指令解码与签名校验**：`rwir_decode.c:RwirDecode`（稠密探查、遇空即停）、`/‥isa/<folded-op>`
+3. **指令解码与签名校验**：`rwir_decode.c:RwirDecode`（稠密探查、遇空即停）、`/lib/<op>`
 签名的读写码规范、
    `LangtypeValid`/`LangtypeMatch` 类型判定。
 
@@ -63,9 +63,9 @@ kvcpu_route.c=外部路由与 handoff）、`runtime.c`（ABI 层）、`rwirext.c
 `notinmyrwircaps`）、`logx.c`、`strutil.c`（一次性字符串工具）、`const.h`。
 myrwircaps 为**静态数组 + 线性查找**。
 
-## ISA 签名存储
+## rwir 签名存储
 
-ISA 签名与程序同处一个数据 store，位置 `/‥isa/<folded-op>`；
+rwir 签名与程序同处一个数据 store，位置 `/lib/<op>`；
 不再派生独立 control DSN、不使用第二个 kvspace 句柄，也不存在
 `KVSPACE_ISA` 等额外环境变量。runtime/layout 只按 `KVSPACE` 连接。
 
@@ -90,7 +90,7 @@ kvspaceResolveRef / GetByRef / SetPartByRef / SetValueByRef
 
 **读写模型**：
 
-- **读**走 `kvspaceGet`——返回后端常驻内存的**借用偏移指针**，调用方只读、**不得** `free`。
+- **读**走 `kvspaceGet`——返回后端常驻内存的**借用偏移二进制指针**，调用方只读、**不得** `free`。
 - **写**走 `kvspaceSetValue`，在调用返回前完成整条 XValue 写入。worker 不能把尚未写完的 body
   保留在进程内，避免进程退出后 PC 已推进而变量仍为空。底层 `WriteInPlace` / `WriteNewPlace`
   为其他 ABI 调用方保留，runtime 不依赖其待填充缓冲。

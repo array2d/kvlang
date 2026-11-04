@@ -4,11 +4,11 @@ lib kvlang/spec/类型系统/种类_代码与特殊值 {
 
 - `rwir`：无 kvlang 实现体，调用槽为 storetype 1，body 为 5 字节计数头加目标名，由 runtime 兑现。
 - `rwfunc`：有 kvlang 实现体。目录值为 storetype 0 空 body；`[0,0]` 签名锚点为 storetype 1、5 字节；调用槽为 storetype 1、计数头加函数名。
-- `def rwir`：位于 `/‥isa/<folded-op>` 的路由头，body 为 5 字节计数头；layout 写 native、runtime
-写扩展，myrwircaps 按名绑定。
+- `def rwir`：位于 `/lib/<op>` 的路由头，body 为 5 字节计数头；layout 写 native、runtime
+写扩展，myrwircaps 按名绑定。**同一 key 不能既是 `rwfunc` 又是 `rwir`**——一个 key 只有一种定义。
 - `None`：storetype 0、空 langtype、空 body。缺值运算报 TypeError。
-- ptr：ptr=1，langtype 为目标真实类型，body 为目标 KV 路径。空指针用 None
-  （判据见下）。
+- ptr：head 的 `ptr` 字段位为 1，langtype 为目标真实类型，body 为目标 KV 路径。空引用用
+  None（判据见下）。
 - `@ext`：storetype 3、ptr=2，langtype 为目标真实类型，body 为 UTF-8 定位串。
 
 ## None 判据（normative）
@@ -16,7 +16,7 @@ lib kvlang/spec/类型系统/种类_代码与特殊值 {
 `is_none(v)` 当且仅当 `body_len == 0` 且满足下列之一：
 
 - head 为 None 形态（storetype 0、空 langtype、空 body）；
-- head 为指针（`ptr=1`）且 body 为空（空指针）。
+- head 的 `ptr` 字段位为 1 且 body 为空（空引用）。
 
 **「langtype 为空」只指 wire 的 None 形态，不是「类型未知」。当前 wire 不
 表达未知；空 langtype 即 None。** 空字符串（langtype `[]char/*`、body 为空）

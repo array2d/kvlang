@@ -8,8 +8,8 @@ camelCase）——kvspace 层前缀 `kvspace`（`kvspaceGet` / `kvspaceWriteInPl
 `kvlang_runtime_connect`），头文件名可用下划线（`kvlang_runtime.h`），导出符号一律无下划线。
 
 访问 kvspace 的唯一 C ABI 由前端 dispatch 静态导出（`kvspace/include/kvspace/kvspace.h`）。读写采用
-**借用指针模型**：读返回指向后端常驻空间的指针，调用方不得释放；寿命到该 key 被写/删或 handle
-close（没有指令边界回收调用）。写返回 body 偏移指针供调用方直接填。
+**借用二进制指针模型**：读返回指向后端常驻空间的二进制指针，调用方不得释放；寿命到该 key 被写/删或
+handle close（没有指令边界回收调用）。写返回 body 偏移的二进制指针供调用方直接填。
 
 **durable 读是 handle 内 per-key 常驻快照（normative）**：同一 key 首次读后直接返回同一缓冲，
 直到**本 handle** 写/删该 key 才失效；其它 handle/进程对该 key 的写不被观测。跨进程等待必须用
@@ -29,7 +29,7 @@ storetype 与规范形状不符或现存槽自身
 不满足规范形状（SLACK/`[n]char/utf8`/content ≤16），必须**硬错返回**，
 不得 realloc、不得截断、不得更换 box。**旧 store 中 headlen 不符或物理容量 <80 的
 status 槽不自动升级**：写入硬错，slot view 返回 `-1`，需重建/重置该 store。合规槽的
-view 指针在 handle 生命期内稳定；`kvspaceWatch` 仍按后端值轮询，status 变更仍可见。
+view 的二进制指针在 handle 生命期内稳定；`kvspaceWatch` 仍按后端值轮询，status 变更仍可见。
 
 **slot view（shm-only, normative）**：`kvspaceSlotView(handle, ref, key_fallback, view)`
 把已绑定槽在映射内的地址一次性交给调用方，供每步直接读/写。非 shm 后端返回 `-2`
@@ -51,7 +51,7 @@ int kvspaceSlotView(void *h, const kvspaceRef_t *ref,
 **`key_fallback` 必填（normative）**：status 的识别与形状/容量校验依赖它；
 传 NULL 一律返回 `-1`，不得绕过 status 规则。`status` 形状不符、`content_len >16`、
 物理容量 `cap <80` 或旧 store 不合规时同样返回 `-1`（runtime 回退既有 API）。
-指针为借用：寿命到该 key 被写/删、view 失效或 handle close。两种使用模式：
+二进制指针为借用：寿命到该 key 被写/删、view 失效或 handle close。两种使用模式：
 
 - **只读 view**：只读 head/body，不写；用于 status 与 operand 的每步读。
 - **owned view（P1 仅 PC）**：key 由本 vthread 独占写，storetype/headlen 固定。
@@ -120,9 +120,9 @@ box 退役进垃圾环；释放发生在屏障轮（`kvspaceViewSweep` 同步跑
 |------|------|
 | `kvspaceGet` | 借用读：`*out` 指向后端常驻空间；`resolve=1` 穿透 link；不存在/空值 → `*out=NULL`、返回 0 |
 | `kvspaceSlotView` | shm-only slot view：返回映射内 `head/body/cap/body_cap`；只读或 owned 直写；不支持后端返回 `-2` |
-| `kvspaceWriteInPlace` | 就地写：key 已存在、kind 不变、body 长度不变；返回原 box body 偏移指针，违反前置条件即报错，绝不静默重分配 |
-| `kvspaceWriteNewPlace` | 新位置写：按 `(ref, storetype, body_len, body_cap, langtype)` 分配新 box、写好固定 head 与 attr 区 tag 1 langtype 记录，返回 body 偏移指针。用于新建或 kind/尺寸变化。`body_cap` 是 v0.3.0 起的容量下界（预留冗余，减少后续扩容） |
-| `kvspaceSetValue` | 整值写：给定完整 xvalue 字节，由后端编码 head 并写入。runtime 侧的写出口走它，而非上面的偏移指针原语 |
+| `kvspaceWriteInPlace` | 就地写：key 已存在、kind 不变、body 长度不变；返回原 box body 偏移的二进制指针，违反前置条件即报错，绝不静默重分配 |
+| `kvspaceWriteNewPlace` | 新位置写：按 `(ref, storetype, body_len, body_cap, langtype)` 分配新 box、写好固定 head 与 attr 区 tag 1 langtype 记录，返回 body 偏移的二进制指针。用于新建或 kind/尺寸变化。`body_cap` 是 v0.3.0 起的容量下界（预留冗余，减少后续扩容） |
+| `kvspaceSetValue` | 整值写：给定完整 xvalue 字节，由后端编码 head 并写入。runtime 侧的写出口走它，而非上面的偏移二进制指针原语 |
 | `kvspaceListLen` | 返回前缀下直接子项计数 |
 | `kvspaceListAt` | 取前缀下第 `idx` 个子项名，写入调用方自备缓冲；配合 `kvspaceListLen` 遍历 |
 | `kvspaceDel` | 批量删除给定 key 数组 |
@@ -141,20 +141,20 @@ attr 区（tag 1 记录），随单 key 一次写整体落下。标准标量构�
 目标 key）、`kvspaceNewChar` / `kvspaceNewBool` / `kvspaceNewInt64` / `kvspaceNewFloat64`（签名各增
 langtype 参数，写入 attr 区）。
 
-读写各带 `resolve` 参数：`resolve=1` 时透明穿透 ref=1 指针（link）；`kvspaceListLen`/`kvspaceListAt`
+读写各带 `resolve` 参数：`resolve=1` 时透明穿透 ref=1 的 kvlang 指针（link）；`kvspaceListLen`/`kvspaceListAt`
 另有 `expand_ext` 参数控制是否展开 extindex 子项。head 线格式与 langtype 编码见 [[键系统与数组访
 问]]。
 
 **写侧不穿透整键（normative）**：`kvspaceWriteInPlace` / `kvspaceWriteNewPlace` / `kvspaceDel` /
 `kvspaceDelTree` 对**最终组件**不解析 link——写/删 Ptr 键只作用该键本体，不重定向到 target
-（`Del`/`DelTree` 为 POSIX rm 式：删指针本身，不删被指向者）。解引用由 runtime 显式 `*` 掌控（见
+（`Del`/`DelTree` 为 POSIX rm 式：删该 kvlang 指针本身，不删被指向者）。解引用由 runtime 显式 `*` 掌控（见
 [[ptr]]）。否则「写实参地址 Ptr 到帧槽」会被重定向到 target，导致丢参 / 写坏被指向的值。
 
-**写侧落盘时机（normative）**：`kvspaceWriteInPlace` / `kvspaceWriteNewPlace` 返回 body 偏移指针
+**写侧落盘时机（normative）**：`kvspaceWriteInPlace` / `kvspaceWriteNewPlace` 返回 body 偏移的二进制指针
 给调用方**在返回后**填，故本笔写不可能在返回前落盘——写在下一次 `kvspace*` 调用（读也算：每个 op
 开头先落盘上一笔）或 `kvspaceClose` 时落盘；前者失败以返回码 + err 报出，后者失败写 stderr。
 进程正常退出（`exit` / main 返回）时，前端（dispatch）对所有未 `Close` 句柄兜底关闭即落盘：
-**漏调 Close 不丢数据，真丢也绝不静默**。shm 后端写即落盘（body 指针即最终位置），两后端在
+**漏调 Close 不丢数据，真丢也绝不静默**。shm 后端写即落盘（body 的二进制指针即最终位置），两后端在
 「下一次调用前可见」上一致。
 
 ## kvspace C ABI 导出符号（快照）

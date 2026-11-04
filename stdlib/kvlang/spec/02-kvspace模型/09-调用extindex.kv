@@ -4,11 +4,11 @@ lib kvlang/spec/kvspace模型/调用extindex {
 
 runtime 为每次调用创建帧子树，帧根通过 storetype 3 扩展定位指向 `/lib/{pkg}·{name}/` 的只读指令目录。指令树不复制，参数绑定、局部变量、PC 和返回地址都写入 KVSpace。
 
-`/lib/{pkg}·{name}.[0,±k]` 是静态参数定义键，类型为 `def langtype`，body 为参数名、NUL、匹配类型串。它与帧根的 `/[0,±k]` 坐标不同名，因而帧内可以保存本次调用的参数指针。
+`/lib/{pkg}·{name}.[0,±k]` 是静态参数定义键，类型为 `def langtype`，body 为参数名、NUL、匹配类型串。它与帧根的 `/[0,±k]` 坐标不同名，因而帧内可以保存本次调用的参数 kvlang 指针。
 
-每个调用点参数先存为指向目标值 key 的 `*T`；帧槽 `[0,±k]` 再存指向该参数指针的 `**T`。layout 将体内形参名替换为 `*[0,±k]`。runtime 从帧槽自动取出参数指针，普通 rwir 再取目标值。写参沿链直接写到调用方 key，读参由 layout 保证只读。字面量先在 KVSpace 中物化，再通过相同的指针链传入。
+每个调用点参数先存为指向目标值 key 的 `*T`；帧槽 `[0,±k]` 再存指向该参数 kvlang 指针的 `**T`。layout 将体内形参名替换为 `*[0,±k]`。runtime 从帧槽取出参数 kvlang 指针，普通 rwir 再取目标值。写参沿链直接写到调用方 key，读参由 layout 保证只读。字面量先在 KVSpace 中物化，再通过相同的 kvlang 指针链传入。
 
-KVSpace 的 Set/Del 不自动穿透指针整键；runtime 显式解析目标路径后再写。这样绑定帧槽不会改写实参。
+KVSpace 的 Set/Del 不自动穿透 kvlang 指针整键；runtime 显式解析目标路径后再写。这样绑定帧槽不会改写实参。
 
 PC 位于 `/vthread/<vid>/‥pc`，返回地址位于帧的 `‥returnpc`。worker 重启后从 KVSpace 恢复执行。
 "#### -> /lib/kvlang/spec/kvspace模型/调用extindex

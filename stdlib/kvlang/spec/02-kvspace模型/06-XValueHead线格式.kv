@@ -19,11 +19,11 @@ head 固定 8 字节，body 偏移恒为 8，容量 2^48。类型（langtype）*
 | storetype | 含义 | body |
 |-----------|------|------|
 | 0（短定长） | None、标量、目录、map 头等的定长内容；rwfunc 目录值为空 | 定长 |
-| 1（变长） | 字符/字节数组、代码槽、指针路径；`[0,0]` rwfunc 锚点 | 有效字节（len 字节） |
+| 1（变长） | 字符/字节数组、代码槽、kvlang 指针路径；`[0,0]` rwfunc 锚点 | 有效字节（len 字节） |
 | 2（大定长） | 张量 | 元素按行主序连续存储 |
 | 3（扩展定位） | `@ext` | UTF-8 定位串 |
 
-指针（`ptr=1`）body 为目标 KV 路径；`@ext`（`ptr=2`）body 为 UTF-8 定位串。UTF-8 字符数组的 `len` 是**字节数**，langtype 里的长度是 Unicode 码点数；两者独立校验。
+kvlang 指针（`ptr` 字段位 =1）body 为目标 KV 路径；`@ext`（`ptr=2`）body 为 UTF-8 定位串。UTF-8 字符数组的 `len` 是**字节数**，langtype 里的长度是 Unicode 码点数；两者独立校验。
 
 **值内 attr 区**：每个 XValue 在 body 之后携带 attr 区，存完整 langtype 串（含 `[N,M]` 形状段），不含源码 `*`/`@` 前缀。只有创建（T·new）与 **reinterpret** 写它；其余读写只碰主键。**单 key 一次写（head+body+attr 整体）→ 天然原子**——无 attr key、无顺写裁决、无孤儿清理。
 

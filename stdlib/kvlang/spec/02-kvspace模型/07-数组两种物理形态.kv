@@ -65,8 +65,8 @@ stringkeymap 元素的成员名是坐标段，物理 key 形如 `m·[i]`（一�
 
 | head 形态 | 语义 | body |
 |-----------|------|------|
-| 指针位 0、storetype 2 | 内联 tensor | 数据本体 |
-| 指针位 1、storetype 1 | kvspace 内指针 | 目标 key 路径 |
+| `ptr` 字段位 0、storetype 2 | 内联 tensor | 数据本体 |
+| `ptr` 字段位 1、storetype 1 | kvspace 内 kvlang 指针 | 目标 key 路径 |
 | storetype 3 | @ext 扩展存储句柄 | 元存外位置描述符 |
 
 storetype 3 表示值本体在扩展世界（SHM/GPU/文件），head 中 langtype 记录形态（如 `[256,256]uint8`），body

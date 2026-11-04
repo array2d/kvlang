@@ -1,11 +1,11 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/类型系统/ref存储位置 {
-	r####"# 值、指针与扩展定位
+	r####"# 值、kvlang 指针与扩展定位
 
 wire 的 storetype 为存储形态（0 短定长 / 1 变长 / 2 长定长 / 3 扩展世界），ptr 独立一字节
-（0=inline、1=ptr、2=@ext）。普通值按 storetype 0/1/2 存 body；指针（ptr=1）body 是目标
-KV key 的 UTF-8 路径。目标 key 若也是指针，沿路径再次读取即可表示多层间接；每格只保存一层。
-空指针用 None。
+（0=inline、1=ptr、2=@ext）。普通值按 storetype 0/1/2 存 body；kvlang 指针（ptr=1）
+body 是目标 KV key 的 UTF-8 路径。目标 key 若也是 kvlang 指针，沿路径再次读取即可表示
+多层间接；每格只保存一层。空引用用 None。
 
 `@T` 使用 storetype 3、ptr=2：langtype 是真实目标类型，body 是扩展定位串。核心 runtimec2
 不兑现扩展存储；声明支持它的 rwir 按定位串读写实际内容。源码中的 `*`/`@` 类型前缀不进入

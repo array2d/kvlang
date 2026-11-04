@@ -44,8 +44,8 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
 扩展宿主（op-gpu、numpy、Go json）**自己** `kvspaceConnect(dsn)` 拿句柄，rwir 移交只用
 `kvlangRwirext*` 的 runtime 语义（`kvlangDefRwir`/`Params`/`ResolveRead`/`ResolveReadPath`/`ResolveWrite`
 /`NextPc`）。tensor 类大 buffer **应**走 shm 后端零拷贝：`ResolveReadPath` 拿容器路径 → `kvspaceGet`
-取 XValue 指针 → memcpy `kvspaceXvalueHead` struct + `kvspaceXvalueHeadLen` 定位 body（head 固定 8 字节，body
-偏移恒 8）→ 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；
+取 XValue 的二进制指针 → memcpy `kvspaceXvalueHead` struct + `kvspaceXvalueHeadLen` 定位 body（head 固定
+16 字节，body 偏移恒 16）→ 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；
 写走 `kvspaceXvalueHeadNew*` + `WriteInPlace`/`WriteNewPlace`。锚例：`tutorial/14-numpy/`（shm 全流程）、
 `tutorial/14-networld/`（fs/proc）。
 ## slot view 的使用（runtimec2, normative）
@@ -64,7 +64,7 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
   外部改变长度/kind 导致 box 移动**不可检测**（无世代号，读旧 head 即 UAF）；
   外部写必须同 key/同类型/同尺寸，否则属契约外（debug 构建断言）。runtime
   只在本进程自身写该 key 后按 `kvlangBodyInvalidate*` 重取。
-- 每步不得为判定 view 归属或 kind 而查 `/‥isa` 声明或 `strcmp`；定性全部在
+- 每步不得为判定 view 归属或 kind 而查 `/lib` 下的 def rwir 签名或 `strcmp`；定性全部在
   行装载/绑定期完成。
 
 	"#### -> /lib/kvlang/spec/runtime语义/cruntime与后端abi_续

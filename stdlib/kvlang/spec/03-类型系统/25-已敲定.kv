@@ -9,7 +9,7 @@ lib kvlang/spec/类型系统/已敲定 {
 - rwfunc 目录值为 storetype 0、body 空；`[0,0]` 锚点为 storetype 1、5 字节计数头。def rwir 路由头为 storetype 0、5 字节。调用槽由 layout 判定为 rwir 或 rwfunc，均使用 storetype 1，body 为计数头加目标名。
 - 字符串（`[n]char/utf8` 等）使用 storetype 1；UTF-8 的 len 是字节数，langtype 的形状记录码点数，解码同时校验。
 - 语言层面的 `[]uint8` / `[N]uint8`（`ndim ≥ 1`）是定长张量，使用 storetype 2。
-- 指针（ptr=1）body 是目标 KV 路径；@ext（ptr=2、storetype 3）body 是扩展定位串，langtype 为实际目标类型。
+- kvlang 指针（`ptr` 字段位 =1）body 是目标 KV 路径；@ext（ptr=2、storetype 3）body 是扩展定位串，langtype 为实际目标类型。
 - **attr 区**：值内 attr 区编码为 `attr = [attr_len:u16 LE][records...]`——`attr_len = 2 + Σ records`（空 attr = `[2]`，恒存在）；`record = [tag:u8][len:u16 LE][data]`，tag 1 = langtype（UTF-8 明文串，含形状段，record len 自描述，无 NUL），tag 2+ 预留扩展。`total = 8 + len + attr_len`，自描述；无 pad。
 - langtype 随单 key 一次写（head+body+attr 整体）落下，**天然原子**；无 attr key、无顺写裁决、无孤儿清理。
 - runtime 每次从 kvspace 读取变量和 PC，完成指令后写回；进程内不保留其私有状态副本。

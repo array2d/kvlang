@@ -17,11 +17,12 @@ lib kvlang/spec/类型系统/langtype语义类型 {
 | `def struct`、`lib`、`rwfunc` 目录 | 0 | 空 body 目录值，成员为物理 `/` key |
 | `rwfunc` 的 `[0,0]` 锚点、`def langtype` | 1 | 5 字节计数头或类型定义文本 |
 
-指针为 ptr=1；@ext 使用 storetype 3、ptr=2，langtype 仍为目标真实类型。
+head 的 `ptr` 字段位为 1 即 kvlang 指针；@ext 使用 storetype 3、ptr=2，langtype 仍为目标
+真实类型。
 
 **def 族的来源**（`def` 不是 kvlang 关键字、不在 kv 源码书写）：`def struct`（源码 `struct Name{}`，
 layout 落原型定义节点）、`def langtype`（源码参数标注 `x:int64`，layout 铺签名行时逐参生成）由
-**layout** 产生；`def rwir`（`/‥isa/<folded-op>` 路由头）由 layout
+**layout** 产生；`def rwir`（`/lib/<op>` 路由头）由 layout
 按 native 作者清单写入、runtime 为扩展注册；kv 源码不声明 rwir
 （见 [[rwfunc布局与def_rwir]]）。
 
