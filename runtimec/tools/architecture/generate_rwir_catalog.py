@@ -544,7 +544,7 @@ def preprocess_registry(root: Path) -> list[str]:
 
 
 IDENTIFIER_CONSTANT_PATTERN = re.compile(
-    r"#define\s+BINRWIR_OPERATION_IDENTIFIER_(\w+)\s+UINT32_C\(\s*(0x[0-9A-Fa-f]+)\s*\)")
+    r"#define\s+BINRWIR_OPERATION_IDENTIFIER_(\w+)\s+UINT16_C\(\s*(0x[0-9A-Fa-f]+)\s*\)")
 
 
 REGISTRY_ENTRY_LIMIT_PATTERN = re.compile(

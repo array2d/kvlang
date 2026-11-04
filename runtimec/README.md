@@ -221,7 +221,7 @@ opid
 `V.body`。operation name、参数类型、参数名、key 文本、XValue 和 body 均不复制进热
 instruction。
 
-公共二进制布局固定为：4 字节 instruction header 仅含 `opid`；每个参数记录在偏移 0
+公共二进制布局固定为：2 字节 instruction header 仅含 `opid`；每个参数记录在偏移 0
 保存 32 位 `argidx`，偏移 4 是必须清零的 32 位地址对齐填充，偏移 8 保存 64 位
 `argaddr`。对齐填充没有语义。可变参数的 Read/Write span、source mapping 与存储 framing
 只存在于 Program 的私有实现和非二进制只读 view 中，不得重新进入 instruction 字段。

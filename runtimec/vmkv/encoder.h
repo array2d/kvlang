@@ -78,7 +78,7 @@ typedef struct vmkv_encode_function {
  * 由调用方自己深拷贝，Program 物化在 finalize 时深拷贝。
  */
 typedef struct vmkv_canonical_instruction {
-    uint32_t operation_identifier;
+    binrwir_operation_identifier_t operation_identifier;
     uint32_t logical_program_counter;
     binrwir_argument_span_t read_arguments;
     binrwir_argument_span_t write_arguments;

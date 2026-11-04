@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "binrwir/instruction.h"
 #include "contract/view.h"
 
 #ifdef __cplusplus
@@ -98,7 +99,7 @@ typedef enum vmkv_rwir_capability_identifier {
 typedef struct vmkv_rwir_capability {
     runtimec_string_view_t operator_name;
     runtimec_string_view_t behavior_decisions;
-    uint32_t operation_identifier;
+    binrwir_operation_identifier_t operation_identifier;
     uint32_t read_parameter_type_set;
     uint32_t write_parameter_type_set;
     runtimec_rwir_constraint_t constraint;
@@ -147,14 +148,14 @@ const vmkv_rwir_capability_t *vmkv_rwir_manifest_capability(
  * 由调用方把本函数作为回调传给 `binrwir_program_format`。
  *
  * 数据只来自 `rwir_catalog.def` 展开的那张能力表——**不建第二张 opid 表**。
- * `FOREIGN`（0xFFFFFFFE）与保留区不是算子，不在表里，返回 false，由调用方自行
+ * `FOREIGN`（0xFFFE）与保留区不是算子，不在表里，返回 false，由调用方自行
  * 打印 `foreign` 或数值。
  *
  * 所有权：输出的字符串指向能力表里的静态文本，**生存期与进程同长**，调用方不拥有、
  * 不得释放；需要持有或修改时必须自己拷贝。
  */
 bool vmkv_rwir_manifest_find_operation_by_identifier(
-    uint32_t operation_identifier, runtimec_string_view_t *output_name);
+    binrwir_operation_identifier_t operation_identifier, runtimec_string_view_t *output_name);
 
 /*
  * 该 surface 名是否解析到 `call` 这条能力行。

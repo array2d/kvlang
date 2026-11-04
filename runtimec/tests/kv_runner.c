@@ -245,7 +245,7 @@ static bool declare_external_capabilities(runner_environment_t *environment) {
 
 /* 从 RWIR 源槽取算子名：`/lib/<fn>/[pc,0]` 的 body 是 5 字节 counts + 文本。
  *
- * 为什么不用 operation_identifier 反查：FOREIGN（0xFFFFFFFE）本来就不在能力表里，
+ * 为什么不用 operation_identifier 反查：FOREIGN（0xFFFE）本来就不在能力表里，
  * 表里没有它就等于没有名字。源槽里才是 layout 实际写下的那个名字，也正是
  * blocked 报告要给人看的东西。读不到就写 "?"，不编。
  */
@@ -559,7 +559,7 @@ int main(int argument_count, char **arguments) {
             }
             /* Program 是不透明类型：条数经 get_view，逐条经 get_instruction。
              * 算子名暂缺——operation_identifier 只能回到能力表，而 FOREIGN
-             * （0xFFFFFFFE）本来就不在表里。下一步从 RWIR 源槽取名字。 */
+             * （0xFFFE）本来就不在表里。下一步从 RWIR 源槽取名字。 */
             binrwir_program_view_t program_view;
             unsigned foreign = 0U;
             if (binrwir_program_get_view(program, &program_view) !=

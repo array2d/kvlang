@@ -49,12 +49,12 @@ _Static_assert(offsetof(binrwir_argument_t, slot) == 6U,
                "BinRWIR slot offset changed");
 _Static_assert(offsetof(binrwir_argument_t, payload) == 8U,
                "BinRWIR payload offset changed");
-_Static_assert(BINRWIR_BINARY_INTERFACE_GENERATION == 4U,
-               "BinRWIR binary interface generation must be 4");
+_Static_assert(BINRWIR_BINARY_INTERFACE_GENERATION == 5U,
+               "BinRWIR binary interface generation must be 5");
 _Static_assert(sizeof(binrwir_alias_rule_t) == 12U,
                "alias rules must remain twelve bytes");
-_Static_assert(sizeof(binrwir_instruction_t) == 4U,
-               "BinRWIR instruction heads must contain only opid");
+_Static_assert(sizeof(binrwir_instruction_t) == 2U,
+               "BinRWIR instruction heads must contain only a 16-bit opid");
 _Static_assert(offsetof(binrwir_instruction_t, operation_identifier) == 0U,
                "BinRWIR opid offset changed");
 _Static_assert(sizeof(binrwir_program_identity_t) == 32U,

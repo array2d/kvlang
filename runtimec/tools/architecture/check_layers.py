@@ -431,8 +431,8 @@ def audit_addressed_binrwir_model(
         ),
         binrwir_root / "instruction.h": (
             "binrwir_instruction", "binrwir_instruction_t",
-            ("uint32_t operation_identifier",),
-            "sizeof(binrwir_instruction_t) == 4U",
+            ("binrwir_operation_identifier_t operation_identifier",),
+            "sizeof(binrwir_instruction_t) == 2U",
         ),
     }
     for path, (tag, alias, expected_fields, size_assertion) in expected_structs.items():
@@ -873,9 +873,9 @@ static_assert(offsetof(binrwir_argument_t, payload) == 8U, "payload");
 
 SELFTEST_INSTRUCTION_HEADER = """\
 typedef struct binrwir_instruction {
-    uint32_t operation_identifier;
+    binrwir_operation_identifier_t operation_identifier;
 } binrwir_instruction_t;
-static_assert(sizeof(binrwir_instruction_t) == 4U, "size");
+static_assert(sizeof(binrwir_instruction_t) == 2U, "size");
 static_assert(offsetof(binrwir_instruction_t, operation_identifier) == 0U, "op");
 """
 

@@ -84,7 +84,8 @@ const vmkv_rwir_capability_t *vmkv_rwir_manifest_capability(
 }
 
 bool vmkv_rwir_manifest_find_operation_by_identifier(
-    uint32_t operation_identifier, runtimec_string_view_t *output_name) {
+    binrwir_operation_identifier_t operation_identifier,
+    runtimec_string_view_t *output_name) {
     if (output_name != NULL) {
         *output_name = runtimec_string_view_make(NULL, 0U);
     }

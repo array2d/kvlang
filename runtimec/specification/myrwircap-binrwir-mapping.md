@@ -83,7 +83,7 @@ opid
 - BinRWIR 不保存 operation name、参数类型、参数名、key 文本、xvalue 或 body 副本。
 - RWIR 参数数量可以不固定；一次具体调用必须编码全部参数对，不能截断或拆分。
 
-公共二进制布局固定为：instruction header 共 4 字节且只含 `opid`；parameter record
+公共二进制布局固定为：instruction header 共 2 字节且只含 `opid`；parameter record
 在偏移 0 保存 32 位 `argidx`，偏移 4 是必须为零的 32 位地址对齐填充，偏移 8 保存
 64 位 `argaddr`。填充不是语义字段。Read/Write span、source logical program counter 与
 可变记录 framing 是 Program 私有元数据，只通过非二进制 view 暴露，不得成为

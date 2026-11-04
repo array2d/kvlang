@@ -890,17 +890,18 @@ static runtimec_status_t vmkv_encoder_resolve_write_types(
  * **临时**：三个输出算子的名字 → 保留区 opid。名单只在这里出现一次；
  * 开关关闭时整段不参与编译，`println` 回到 FOREIGN 原行为。
  *
- * opid 取 0xFFFF0001..0xFFFF0003——不是能力表编号，与 FOREIGN(0xFFFFFFFE) 不撞。
+ * opid 取 0xFF01..0xFF03（16 位保留区，见 binrwir/instruction.h 的占用记账）——
+ * 不是能力表编号，与 FOREIGN(0xFFFE) 不撞。
  */
 static int vmkv_encoder_temp_output_identifier(runtimec_string_view_t name,
-                                               uint32_t *output_identifier) {
+                                               binrwir_operation_identifier_t *output_identifier) {
     static const struct {
         const char *name;
-        uint32_t identifier;
+        binrwir_operation_identifier_t identifier;
     } table[] = {
-        {"println", UINT32_C(0xFFFF0001)},
-        {"print", UINT32_C(0xFFFF0002)},
-        {"cerr", UINT32_C(0xFFFF0003)},
+        {"println", UINT16_C(0xFF01)},
+        {"print", UINT16_C(0xFF02)},
+        {"cerr", UINT16_C(0xFF03)},
     };
 
     *output_identifier = 0U;
@@ -1064,7 +1065,7 @@ runtimec_status_t vmkv_encode_instruction(
          * 非形参引用取一个并单调递增；帧槽容量只由签名与符号池决定，实参照常走
          * 符号池/字面量池，不进帧槽。
          */
-        uint32_t temporary_identifier = 0U;
+        binrwir_operation_identifier_t temporary_identifier = 0U;
         if (vmkv_encoder_temp_output_identifier(
                 source_instruction->operation_name, &temporary_identifier)) {
             runtimec_status_t temp_status =

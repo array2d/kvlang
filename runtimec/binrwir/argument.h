@@ -36,7 +36,7 @@ extern "C" {
  *       payload 是 Program 字面量池下标；
  *   4 = 符号池条目从「名字」扩展为「名字 + 语言类型」（当前）。
  */
-#define BINRWIR_BINARY_INTERFACE_GENERATION 4U
+#define BINRWIR_BINARY_INTERFACE_GENERATION 5U
 
 typedef enum binrwir_reference_kind {
     BINRWIR_REFERENCE_INVALID = 0,
