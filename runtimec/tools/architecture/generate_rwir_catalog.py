@@ -49,6 +49,7 @@ SIGNATURE_TABLE = SPEC / "native_rwir_decls.kv"
 ARTIFACTS = (MANIFEST, ALIAS_TABLE, GAPS, SIGNATURE_TABLE)
 MATRIX = SPEC / "five-language-behavior-matrix.md"
 INSTRUCTION_HEADER = Path("runtimec/binrwir/instruction.h")
+REGISTRY_HEADER = Path("runtimec/binrwir/registry.h")
 
 MIDDLE_DOT = "·"
 
@@ -546,6 +547,27 @@ IDENTIFIER_CONSTANT_PATTERN = re.compile(
     r"#define\s+BINRWIR_OPERATION_IDENTIFIER_(\w+)\s+UINT32_C\(\s*(0x[0-9A-Fa-f]+)\s*\)")
 
 
+REGISTRY_ENTRY_LIMIT_PATTERN = re.compile(
+    r"#define\s+BINRWIR_REGISTRY_ENTRY_LIMIT\s+(\d+)U?")
+
+
+def registry_entry_limit(root: Path) -> int:
+    """Read `BINRWIR_REGISTRY_ENTRY_LIMIT` from the builtin registry header.
+
+    The header owns the value. Keeping a second copy here and comparing them is the
+    second-best option (both sides still have to be edited correctly); reading it
+    outright means a table that outgrows the limit fails here, at generation time,
+    instead of in some session at run time.
+    """
+    path = root / REGISTRY_HEADER
+    if not path.is_file():
+        raise SystemExit(f"cannot read {REGISTRY_HEADER}")
+    match = REGISTRY_ENTRY_LIMIT_PATTERN.search(path.read_text(encoding="utf-8"))
+    if match is None:
+        raise SystemExit(f"{REGISTRY_HEADER}: BINRWIR_REGISTRY_ENTRY_LIMIT is required")
+    return int(match.group(1))
+
+
 def reserved_identifier_base(root: Path) -> int:
     """Read the reserved-band base from the binary instruction header.
 
@@ -643,7 +665,7 @@ def build_alias_table(opcodes: list[str], rows: list[Row],
 
 def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]],
              decisions: set[str], gaps: list[tuple[str, str]],
-             reserved_base: int) -> list[str]:
+             reserved_base: int, entry_limit: int) -> list[str]:
     findings: list[str] = []
     identifiers = [row.identifier for row in rows]
     opids = [row.opid for row in rows]
@@ -651,6 +673,13 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
         duplicates = {value for value in values if values.count(value) > 1}
         if duplicates:
             findings.append(f"duplicate {label}: {sorted(duplicates)[:5]}")
+    # 能力行总数必须留在 builtin 注册表的定长容量内。这是第一道闸：超了就在生成期
+    # 失败，而不是等到某个 session 创建时才撞上运行期的 INSUFFICIENT_CAPACITY。
+    if len(rows) + len(RETIRED_ROWS) > entry_limit:
+        findings.append(
+            f"{len(rows)} capability rows + {len(RETIRED_ROWS)} retired rows exceed "
+            f"BINRWIR_REGISTRY_ENTRY_LIMIT ({entry_limit}) in {REGISTRY_HEADER}")
+
     # 保留区（>= RESERVED_BASE）留给 FOREIGN 这类结构标记，能力行不得占用。
     # 判据是白名单：opid 必须严格落在 (0, reserved_base)，不是「不许等于某个值」。
     for row in rows:
@@ -1021,7 +1050,9 @@ def main() -> int:
     rows = build_rows()
     aliases, gaps = build_alias_table(opcodes, rows)
     reserved_base = reserved_identifier_base(root)
-    findings = validate(rows, opcodes, aliases, decisions, gaps, reserved_base)
+    entry_limit = registry_entry_limit(root)
+    findings = validate(rows, opcodes, aliases, decisions, gaps, reserved_base,
+                        entry_limit)
     expected = {
         MANIFEST: render_catalog(rows, aliases, opcodes, gaps),
         ALIAS_TABLE: render_alias_table(aliases, opcodes),

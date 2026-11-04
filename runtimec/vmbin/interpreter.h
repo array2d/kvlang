@@ -22,7 +22,7 @@
 #include "binrwir/execution_frame.h"
 #include "binrwir/execution_plan.h"
 #include "binrwir/program.h"
-#include "builtin/registry.h"
+#include "binrwir/registry.h"
 #include "contract/status.h"
 #include "profile.h"
 
@@ -30,12 +30,36 @@
 extern "C" {
 #endif
 
+/*
+ * 结构化退出的 detail_code：告诉调用方「为什么失败」。
+ *
+ * 放头文件而不是 .c：测试必须能引用具体码值做断言。只断言 `detail_code != 0`
+ * 时，两种失败共用同一个码，测试照样绿——那就等于没测。
+ *
+ * 编号只增不改：已发布的码值会出现在 exit.detail_code 里，插中间或复用一个
+ * 编号都会让下游的判据错位。
+ */
+typedef enum vmbin_interpreter_diagnostic {
+    VMBIN_INTERPRETER_DIAG_INVALID_REQUEST = 1,
+    VMBIN_INTERPRETER_DIAG_INVALID_CURSOR = 2,
+    VMBIN_INTERPRETER_DIAG_INVALID_INSTRUCTION = 3,
+    VMBIN_INTERPRETER_DIAG_WRONG_ARITY = 4,
+    VMBIN_INTERPRETER_DIAG_UNDECODABLE_TARGET = 5,
+    VMBIN_INTERPRETER_DIAG_UNRESOLVED_TARGET = 6,
+    VMBIN_INTERPRETER_DIAG_VALUE_ACCESS = 7,
+    VMBIN_INTERPRETER_DIAG_HANDLER_FAILED = 8,
+    VMBIN_INTERPRETER_DIAG_OUT_OF_MEMORY = 9,
+    /* 表被绕过 append 写坏（条目 handler 为空）。与 INVALID_INSTRUCTION
+     * （表里没有这个 opid）必须分开：前者是 bug，后者是编译期与执行期的表不一致。 */
+    VMBIN_INTERPRETER_DIAG_CORRUPT_REGISTRY = 10
+} vmbin_interpreter_diagnostic_t;
+
 /* 从 Frame 的当前逻辑程序计数器开始执行，直到产生结构化退出。 */
 runtimec_status_t
 vmbin_execute(const binrwir_program_t *program,
               const binrwir_execution_plan_t *execution_plan,
               binrwir_execution_frame_t *frame,
-              const vmbin_builtin_registry_t *builtin_registry,
+              const binrwir_registry_t *builtin_registry,
               vmbin_profile_t *profile,
               binrwir_execution_exit_t *output_exit);
 

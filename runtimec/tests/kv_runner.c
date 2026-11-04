@@ -13,7 +13,7 @@
  *   blocked  执行停在 FOREIGN 标记处——runtimec 没有该能力。
  *            **必须打印 文件名 + pc + 算子名**，否则它就退化成「这条没过」。
  *
- * `println` 替身放在执行循环**外面**，不进 vmbin_builtin_registry：能力表是
+ * `println` 替身放在执行循环**外面**，不进 binrwir_registry：能力表是
  * 「runtimec 能执行什么」的事实源，把只存在于测试的处理器写进去，等于让能力表
  * 说一句不成立的话（routing/README.md §四之二：println 属 byteseek）。
  *

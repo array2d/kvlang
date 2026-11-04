@@ -15,7 +15,7 @@
 #include "binrwir/frame_bindings.h"
 #include "binrwir/program.h"
 #include "kvspace/xvalue_head.h"
-#include "vmbin/builtin/registry.h"
+#include "binrwir/registry.h"
 #include "vmbin/core_operations.h"
 #include "vmbin/interpreter.h"
 #include "vmbin/profile.h"
@@ -306,7 +306,7 @@ static void test_copy_writes_into_body(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     uint8_t literal[8];
     binrwir_argument_t read_argument;
     binrwir_argument_t write_argument;
@@ -344,7 +344,7 @@ static void test_copy_writes_into_body(void) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
@@ -371,7 +371,7 @@ static void test_parameter_read_uses_binding_address(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     binrwir_argument_t read_argument;
     binrwir_argument_t write_argument;
     test_parameter_t parameters[1];
@@ -417,7 +417,7 @@ static void test_parameter_read_uses_binding_address(void) {
                         runtimec_key_view_from_c_string("/t/parameter"),
                         test_value_xvalue_address(&parameter_value), 1U) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
@@ -442,7 +442,7 @@ static void test_goto_skips_instruction(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     uint8_t target_literal[8];
     uint8_t value_literal[8];
     binrwir_argument_t target_argument;
@@ -506,7 +506,7 @@ static void test_goto_skips_instruction(void) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
@@ -536,7 +536,7 @@ static void test_branch_selects_target(int64_t condition) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     uint8_t literal_bytes[5][8];
     binrwir_argument_t reads[3];
     binrwir_argument_t then_write;
@@ -613,7 +613,7 @@ static void test_branch_selects_target(int64_t condition) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
@@ -643,7 +643,7 @@ static void test_call_reports_target_symbol(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     binrwir_argument_t function_argument;
     test_instruction_t instruction;
     test_program_source_t source;
@@ -667,7 +667,7 @@ static void test_call_reports_target_symbol(void) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
@@ -702,7 +702,7 @@ static void test_return_completes_frame(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     test_instruction_t instruction;
     test_program_source_t source;
 
@@ -718,7 +718,7 @@ static void test_return_completes_frame(void) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
@@ -782,8 +782,8 @@ static void test_add_builtin_handler(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
-    vmbin_builtin_entry_t entry;
+    binrwir_registry_t registry;
+    binrwir_registry_entry_t entry;
     uint8_t left_literal[8];
     uint8_t right_literal[8];
     binrwir_argument_t reads[2];
@@ -829,10 +829,13 @@ static void test_add_builtin_handler(void) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    entry.builtin_identifier = instruction.operation_identifier;
-    entry.flags = VMBIN_BUILTIN_FLAG_NONE;
-    entry.rwir_runtimecimpl = test_add_handler;
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, &entry, 1U) ==
+    entry.operation_identifier = instruction.operation_identifier;
+    entry.flags = BINRWIR_REGISTRY_FLAG_NONE;
+    entry.handler = test_add_handler;
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_registry_append(&registry, "test", &entry,
+                                                  1U, NULL) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
@@ -859,7 +862,7 @@ static void test_unknown_operation_is_internal_inconsistency(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     test_instruction_t instruction;
     test_program_source_t source;
 
@@ -875,7 +878,7 @@ static void test_unknown_operation_is_internal_inconsistency(void) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_INVALID);
@@ -902,7 +905,7 @@ static void test_foreign_marker_hands_off(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     uint8_t literal[8];
     binrwir_argument_t write_argument;
     test_instruction_t instructions[3];
@@ -949,7 +952,7 @@ static void test_foreign_marker_hands_off(void) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
@@ -980,7 +983,7 @@ static void test_zero_operation_identifier_is_invalid(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     test_instruction_t instruction;
     test_program_source_t source;
 
@@ -996,7 +999,7 @@ static void test_zero_operation_identifier_is_invalid(void) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_INVALID);
@@ -1020,7 +1023,7 @@ static void test_unbound_parameter_is_invalid(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     binrwir_argument_t read_argument;
     binrwir_argument_t write_argument;
     test_parameter_t parameters[2];
@@ -1057,7 +1060,7 @@ static void test_unbound_parameter_is_invalid(void) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_INVALID);
@@ -1082,7 +1085,7 @@ static void test_literal_is_not_writable(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     uint8_t literal[8];
     binrwir_argument_t read_argument;
     binrwir_argument_t write_argument;
@@ -1116,7 +1119,7 @@ static void test_literal_is_not_writable(void) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_INVALID);
@@ -1144,7 +1147,7 @@ static void test_size_mismatch_is_error(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     uint8_t wide_literal[16];
     binrwir_argument_t read_argument;
     binrwir_argument_t write_argument;
@@ -1182,7 +1185,7 @@ static void test_size_mismatch_is_error(void) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_ERROR);
@@ -1230,8 +1233,8 @@ static void test_handler_failure_keeps_cursor(void) {
     binrwir_execution_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
-    vmbin_builtin_entry_t entry;
+    binrwir_registry_t registry;
+    binrwir_registry_entry_t entry;
     binrwir_argument_t write_argument;
     test_instruction_t instruction;
     test_program_source_t source;
@@ -1257,10 +1260,13 @@ static void test_handler_failure_keeps_cursor(void) {
     RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
                                           &allocator) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    entry.builtin_identifier = instruction.operation_identifier;
-    entry.flags = VMBIN_BUILTIN_FLAG_EFFECT;
-    entry.rwir_runtimecimpl = test_failing_handler;
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, &entry, 1U) ==
+    entry.operation_identifier = instruction.operation_identifier;
+    entry.flags = BINRWIR_REGISTRY_FLAG_EFFECT;
+    entry.handler = test_failing_handler;
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_registry_append(&registry, "test", &entry,
+                                                  1U, NULL) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_ERROR);
@@ -1282,9 +1288,9 @@ static void test_handler_failure_keeps_cursor(void) {
 
 static void test_execute_rejects_invalid_requests(void) {
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
 
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(NULL, NULL, NULL, &registry, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_INVALID);

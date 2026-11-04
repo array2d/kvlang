@@ -374,16 +374,16 @@ static runtimec_status_t runtimec_temp_cerr_handler(
 }
 
 /* 三条条目的唯一定义点；开关关闭时整个文件不参与编译。 */
-static const vmbin_builtin_entry_t runtimec_temp_println_entry_table[] = {
-    {RUNTIMEC_TEMP_PRINTLN_OPERATION_IDENTIFIER, VMBIN_BUILTIN_FLAG_EFFECT,
+static const binrwir_registry_entry_t runtimec_temp_println_entry_table[] = {
+    {RUNTIMEC_TEMP_PRINTLN_OPERATION_IDENTIFIER, BINRWIR_REGISTRY_FLAG_EFFECT,
      runtimec_temp_println_handler},
-    {RUNTIMEC_TEMP_PRINT_OPERATION_IDENTIFIER, VMBIN_BUILTIN_FLAG_EFFECT,
+    {RUNTIMEC_TEMP_PRINT_OPERATION_IDENTIFIER, BINRWIR_REGISTRY_FLAG_EFFECT,
      runtimec_temp_print_handler},
-    {RUNTIMEC_TEMP_CERR_OPERATION_IDENTIFIER, VMBIN_BUILTIN_FLAG_EFFECT,
+    {RUNTIMEC_TEMP_CERR_OPERATION_IDENTIFIER, BINRWIR_REGISTRY_FLAG_EFFECT,
      runtimec_temp_cerr_handler},
 };
 
-const vmbin_builtin_entry_t *runtimec_temp_println_entries(
+const binrwir_registry_entry_t *runtimec_temp_println_entries(
     size_t *output_count) {
     if (output_count != NULL) {
         *output_count = sizeof(runtimec_temp_println_entry_table) /

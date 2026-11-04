@@ -58,13 +58,13 @@ typedef struct vmkv_encoder_t vmkv_encoder_t;
 typedef struct binrwir_compiler_t binrwir_compiler_t;
 typedef struct runtimec_compilation_repository_t
     runtimec_compilation_repository_t;
-typedef struct vmbin_builtin_registry vmbin_builtin_registry_t;
+typedef struct binrwir_registry binrwir_registry_t;
 
 typedef struct runtimec_session_runtime_components_t {
     vmkv_encoder_t *vmkv_encoder;
     binrwir_compiler_t *binrwir_compiler;
     runtimec_compilation_repository_t *compilation_repository;
-    const vmbin_builtin_registry_t *builtin_registry;
+    const binrwir_registry_t *builtin_registry;
 } runtimec_session_runtime_components_t;
 
 runtimec_status_t runtimec_session_get_runtime_components(

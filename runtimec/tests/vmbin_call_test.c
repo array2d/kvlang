@@ -15,7 +15,7 @@
 #include "binrwir/program.h"
 #include "contract/status.h"
 #include "kvspace/xvalue_head.h"
-#include "vmbin/builtin/registry.h"
+#include "binrwir/registry.h"
 #include "vmbin/call.h"
 #include "vmbin/frame_slot.h"
 #include "vmbin/interpreter.h"
@@ -367,7 +367,7 @@ static void test_enter_binds_and_return_releases(void) {
     binrwir_execution_frame_t caller;
     binrwir_execution_frame_t callee;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     vmbin_call_control_t *control = NULL;
     vmbin_call_request_t request = {0U, 2U};
     binrwir_argument_t read_actual;
@@ -449,7 +449,7 @@ static void test_enter_binds_and_return_releases(void) {
     RUNTIMEC_EXPECT(callee.parent == &caller);
 
     /* 被调体执行：读形参（= 调用方实参存储）写进写形参（= 调用方另一块存储）。 */
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(callee_program, NULL, &callee, &registry,
                                   NULL, &exit_state) ==
@@ -619,7 +619,7 @@ static void test_may_alias_shares_storage(void) {
     binrwir_argument_t read_actual;
     binrwir_argument_t write_actual;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     test_parameter_t caller_parameters[2];
     test_parameter_t callee_parameters[2];
     test_alias_rule_t alias_rules[1];
@@ -698,8 +698,7 @@ static void test_may_alias_shares_storage(void) {
         RUNTIMEC_EXPECT(vmbin_call_enter(&fixture.caller, &fixture.callee,
                                          fixture.control, &exit_state) ==
                         RUNTIMEC_STATUS_SUCCESS);
-        RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL,
-                                                          0U) ==
+        RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                         RUNTIMEC_STATUS_SUCCESS);
         RUNTIMEC_EXPECT(vmbin_execute(fixture.callee_program, NULL,
                                       &fixture.callee, &registry, NULL,
@@ -723,7 +722,7 @@ static void test_nested_calls_keep_outer_addresses(void) {
     binrwir_argument_t read_actual;
     binrwir_argument_t write_actual;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     test_parameter_t middle_parameters[2];
     test_parameter_t inner_parameters[2];
     test_parameter_t caller_parameters[2];
@@ -828,7 +827,7 @@ static void test_nested_calls_keep_outer_addresses(void) {
                                      &exit_state) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(inner_program, NULL, &inner_frame, &registry,
                                   NULL, &exit_state) ==
@@ -863,7 +862,7 @@ static void test_literal_actual_is_inline(void) {
     binrwir_argument_t read_actual;
     binrwir_argument_t write_actual;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     test_parameter_t caller_parameters[2];
     test_parameter_t callee_parameters[2];
     test_instruction_t caller_instruction;
@@ -915,7 +914,7 @@ static void test_literal_actual_is_inline(void) {
     RUNTIMEC_EXPECT(vmbin_call_enter(&fixture.caller, &fixture.callee,
                                      fixture.control, &exit_state) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(fixture.callee_program, NULL, &fixture.callee,
                                   &registry, NULL, &exit_state) ==
@@ -938,7 +937,7 @@ static void test_static_actual_is_bound_by_inverse(void) {
     binrwir_argument_t read_actual;
     binrwir_argument_t write_actual;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     test_parameter_t caller_parameters[2];
     test_parameter_t callee_parameters[2];
     test_instruction_t caller_instruction;
@@ -989,7 +988,7 @@ static void test_static_actual_is_bound_by_inverse(void) {
     RUNTIMEC_EXPECT(vmbin_call_enter(&fixture.caller, &fixture.callee,
                                      fixture.control, &exit_state) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(fixture.callee_program, NULL, &fixture.callee,
                                   &registry, NULL, &exit_state) ==
@@ -1134,7 +1133,7 @@ static void test_call_exit_reports_resume_position(void) {
     binrwir_argument_t read_actual;
     binrwir_argument_t write_actual;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     test_parameter_t caller_parameters[2];
     test_parameter_t callee_parameters[2];
     test_instruction_t caller_instructions[2];
@@ -1199,7 +1198,7 @@ static void test_call_exit_reports_resume_position(void) {
     RUNTIMEC_EXPECT(call_fixture_build(&allocator, &callee_source, &read_value,
                                        &write_value, &caller_source,
                                        &fixture) == RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     /* 执行调用方自己的 Program：第一条就是 call。 */
     RUNTIMEC_EXPECT(vmbin_execute(fixture.caller_program, NULL, &fixture.caller,
@@ -1227,7 +1226,7 @@ static void test_repeated_calls_on_same_frame(void) {
     binrwir_argument_t read_actual;
     binrwir_argument_t write_actual;
     binrwir_execution_exit_t exit_state;
-    vmbin_builtin_registry_t registry;
+    binrwir_registry_t registry;
     test_parameter_t caller_parameters[2];
     test_parameter_t callee_parameters[2];
     test_instruction_t caller_instruction;
@@ -1278,7 +1277,7 @@ static void test_repeated_calls_on_same_frame(void) {
                                        &read_values[0], &write_values[0],
                                        &caller_source, &fixture) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_builtin_registry_initialize(&registry, NULL, 0U) ==
+    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
     for (round = 0; round < TEST_ROUNDS; ++round) {

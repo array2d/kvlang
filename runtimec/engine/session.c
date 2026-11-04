@@ -13,7 +13,7 @@
 
 #include "binrwir_compiler/compiler.h"
 #include "engine/compilation_repository.h"
-#include "vmbin/builtin/registry.h"
+#include "binrwir/registry.h"
 #ifdef RUNTIMEC_TEMP_PRINTLN
 #include "vmbin/temp_println.h"
 #endif
@@ -44,7 +44,7 @@ struct runtimec_session_t {
     binrwir_compiler_t *binrwir_compiler;
     runtimec_compilation_repository_t *compilation_repository;
     /* builtin 注册表本阶段零条目：没有实现，所以没有条目。 */
-    vmbin_builtin_registry_t builtin_registry;
+    binrwir_registry_t builtin_registry;
     /* checkpoint 的单调提交序号，route 经访问器取号。 */
     uint64_t checkpoint_sequence;
 };
@@ -111,21 +111,30 @@ runtimec_status_t runtimec_session_create(
     session->options = *options;
 
     /*
-     * builtin 注册表：本阶段正常为零条目——没有 builtin 实现。开启临时 println
-     * 开关时装入那三条（见 vmbin/temp_println.h）：它们只为让 tutorial 的 runtimec
-     * 分组能跑，正式实现归 byteseek 扩展 runtime（issue #622 决策 D）。
+     * builtin 注册表：置空后按模块追加。零条目是合法状态——不装任何 builtin 的
+     * session 依赖它。每个模块在自己的文件里提供静态条目表，本函数只负责追加；
+     * 装载期校验（重复 opid、空 handler、超限）都在 append 里。
      */
-    const vmbin_builtin_entry_t *builtin_entries = NULL;
-    size_t builtin_entry_count = 0U;
-#ifdef RUNTIMEC_TEMP_PRINTLN
-    builtin_entries = runtimec_temp_println_entries(&builtin_entry_count);
-#endif
-    runtimec_status_t status = vmbin_builtin_registry_initialize(
-        &session->builtin_registry, builtin_entries, builtin_entry_count);
+    runtimec_status_t status = binrwir_registry_initialize(
+        &session->builtin_registry);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         status = runtimec_session_forward(error, status, "builtin registry");
         goto fail;
     }
+#ifdef RUNTIMEC_TEMP_PRINTLN
+    {
+        size_t temp_println_entry_count = 0U;
+        const binrwir_registry_entry_t *temp_println_entries =
+            runtimec_temp_println_entries(&temp_println_entry_count);
+        status = binrwir_registry_append(
+            &session->builtin_registry, "temp_println", temp_println_entries,
+            temp_println_entry_count, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            status = runtimec_session_forward(error, status, "builtin registry");
+            goto fail;
+        }
+    }
+#endif
 
     status = vmkv_encoder_create(allocator, &session->vmkv_encoder, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {

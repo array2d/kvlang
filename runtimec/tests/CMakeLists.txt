@@ -323,6 +323,22 @@ add_test(NAME runtimec.vmbin.call COMMAND runtimec_vmbin_call_test)
 set_tests_properties(runtimec.vmbin.call PROPERTIES
     LABELS "runtimec;scaffold;vmbin;call")
 
+# builtin 注册表契约：坏表（条目 handler 为空）与「好表但没这个 opid」必须是
+# **两种可区分的失败**（INVALID vs UNSUPPORTED），不能共用一个信号。
+# 纯内存、不连 kvspace、不建 session。
+add_executable(runtimec_binrwir_registry_corrupt_test binrwir_registry_corrupt_test.c)
+target_compile_features(runtimec_binrwir_registry_corrupt_test PRIVATE c_std_11)
+target_include_directories(runtimec_binrwir_registry_corrupt_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_binrwir_registry_corrupt_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmbin)
+runtimec_test_warnings(runtimec_binrwir_registry_corrupt_test)
+add_test(NAME runtimec.binrwir.registry_corrupt
+    COMMAND runtimec_binrwir_registry_corrupt_test)
+set_tests_properties(runtimec.binrwir.registry_corrupt PROPERTIES
+    LABELS "runtimec;scaffold;binrwir;registry")
+
 add_executable(runtimec_engine_repository_test engine_repository_test.c)
 target_compile_features(runtimec_engine_repository_test PRIVATE c_std_11)
 target_include_directories(runtimec_engine_repository_test PRIVATE

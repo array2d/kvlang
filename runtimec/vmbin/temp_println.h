@@ -25,7 +25,7 @@
 #include <stdint.h>
 
 #include "contract/status.h"
-#include "vmbin/builtin/registry.h"
+#include "binrwir/registry.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,9 +41,9 @@ extern "C" {
 
 /*
  * 栈上的 builtin 条目表。调用方（session）在开启开关时把这张表交给
- * `vmbin_builtin_registry_initialize`；关闭时整块不存在。
+ * `binrwir_registry_initialize`；关闭时整块不存在。
  */
-const vmbin_builtin_entry_t *runtimec_temp_println_entries(size_t *output_count);
+const binrwir_registry_entry_t *runtimec_temp_println_entries(size_t *output_count);
 
 #ifdef __cplusplus
 }

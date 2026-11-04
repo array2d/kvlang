@@ -21,21 +21,9 @@
 
 #define VMBIN_SCRATCH_INITIAL_CAPACITY 32U
 
-typedef enum vmbin_interpreter_diagnostic {
-    VMBIN_INTERPRETER_DIAG_INVALID_REQUEST = 1,
-    VMBIN_INTERPRETER_DIAG_INVALID_CURSOR = 2,
-    VMBIN_INTERPRETER_DIAG_INVALID_INSTRUCTION = 3,
-    VMBIN_INTERPRETER_DIAG_WRONG_ARITY = 4,
-    VMBIN_INTERPRETER_DIAG_UNDECODABLE_TARGET = 5,
-    VMBIN_INTERPRETER_DIAG_UNRESOLVED_TARGET = 6,
-    VMBIN_INTERPRETER_DIAG_VALUE_ACCESS = 7,
-    VMBIN_INTERPRETER_DIAG_HANDLER_FAILED = 8,
-    VMBIN_INTERPRETER_DIAG_OUT_OF_MEMORY = 9
-} vmbin_interpreter_diagnostic_t;
-
 typedef struct vmbin_execution {
     const binrwir_program_t *program;
-    const vmbin_builtin_registry_t *builtin_registry;
+    const binrwir_registry_t *builtin_registry;
     vmbin_profile_t *profile;
     binrwir_execution_frame_t *frame;
     size_t instruction_count;
@@ -356,22 +344,30 @@ static runtimec_status_t vmbin_interpreter_dispatch_builtin(
     vmbin_execution_t *execution,
     const binrwir_instruction_view_t *instruction, uint32_t identifier,
     binrwir_execution_exit_t *output_exit) {
-    const vmbin_builtin_entry_t *entry = NULL;
-    runtimec_status_t status = vmbin_builtin_registry_find(
+    const binrwir_registry_entry_t *entry = NULL;
+    runtimec_status_t status = binrwir_registry_find(
         execution->builtin_registry,
         instruction->instruction->operation_identifier, &entry);
 
     /* registry 是 session 自己装的表：Program 里出现表里没有的 opid，说明编译期
      * 与执行期的表不一致，是内部不一致，报 INVALID。外部能力走 FOREIGN 标记，
      * 不从这里出去——两者不要混。registry 未命中返回 UNSUPPORTED，这里把它
-     * 折成 INVALID：本层没有「不支持」这种外部语义。 */
+     * 折成 INVALID：本层没有「不支持」这种外部语义。
+     *
+     * 但「表被写坏」是另一回事：条目存在而 handler 为空，说明表被绕过 append
+     * 构造过。它与「表里没有这个 opid」成因不同、修法不同，必须分开诊断。 */
+    if (status == RUNTIMEC_STATUS_INVALID) {
+        return vmbin_interpreter_fail(
+            execution, instruction, RUNTIMEC_STATUS_INVALID,
+            VMBIN_INTERPRETER_DIAG_CORRUPT_REGISTRY, output_exit);
+    }
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return vmbin_interpreter_fail(
             execution, instruction, RUNTIMEC_STATUS_INVALID,
             VMBIN_INTERPRETER_DIAG_INVALID_INSTRUCTION, output_exit);
     }
     *output_exit = (binrwir_execution_exit_t){0};
-    status = entry->rwir_runtimecimpl(execution->frame, instruction,
+    status = entry->handler(execution->frame, instruction,
                                       output_exit);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         vmbin_interpreter_error_exit(
@@ -451,7 +447,7 @@ runtimec_status_t
 vmbin_execute(const binrwir_program_t *program,
               const binrwir_execution_plan_t *execution_plan,
               binrwir_execution_frame_t *frame,
-              const vmbin_builtin_registry_t *builtin_registry,
+              const binrwir_registry_t *builtin_registry,
               vmbin_profile_t *profile,
               binrwir_execution_exit_t *output_exit) {
     vmbin_execution_t execution;
