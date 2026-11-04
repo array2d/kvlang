@@ -3,6 +3,12 @@ use std::collections::{BTreeMap, HashMap};
 
 use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 
+/// 读 tutorial 语料：找不到就红并指名，不静默跳过。
+fn read_tutorial(path: &str) -> String {
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("读不到语料 {path:?}（tutorial 分组可能变了）: {e}"))
+}
+
 fn body(data: &[u8]) -> &[u8] {
     let h = kvkind::head(data);
     kvkind::body(data, &h)
@@ -276,16 +282,18 @@ fn assert_no_scope_opcode(p: &BTreeMap<i32, Inst>, fn_: &str) {
     }
 }
 
-fn compile_fn(src: &str) -> Kv {
-    let (_store, mut kv) = fresh_kv();
+fn compile_fn(src: &str) -> (TempStore, Kv) {
+    let (store, mut kv) = fresh_kv();
     compile(&mut kv, src).unwrap();
-    kv
+    (store, kv)
 }
+
+
 
 #[test]
 fn lib_plane_has_no_scope_flat_keys() {
     let (_store, mut kv) = fresh_kv();
-    let src = std::fs::read_to_string("../tutorial/03-control/while.kv").unwrap();
+    let src = read_tutorial("../tutorial/runtimec/03-control/while.kv");
     compile(&mut kv, &src).unwrap();
     for fn_ in ["sum_to", "first_div7", "sum_odds"] {
         let prefix = format!("/lib/{fn_}/");
@@ -318,7 +326,7 @@ fn lib_plane_has_no_scope_flat_keys() {
 #[test]
 fn labeled_irseq_is_not_fallen_into() {
     let (_store, mut kv) = fresh_kv();
-    let src = std::fs::read_to_string("../tutorial/03-control/guess.kv").unwrap();
+    let src = read_tutorial("../tutorial/runtimec/03-control/guess.kv");
     compile(&mut kv, &src).unwrap();
     let fn_ = "guess_number";
     let prefix = format!("/lib/{fn_}/");
@@ -405,7 +413,7 @@ fn br_true_false_are_int64() {
 
 #[test]
 fn abs_if_is_numbered_jumps() {
-    let mut kv = compile_fn(
+    let (_store, mut kv) = compile_fn(
         "rwfunc abs(*int64 $x) -> (*int64 $r) {\n    if (*x < 0) {\n        0 - *x -> *r\n    } else {\n        *x -> *r\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "abs");
@@ -450,7 +458,7 @@ fn abs_if_is_numbered_jumps() {
 
 #[test]
 fn while_back_edge_is_goto_int64() {
-    let mut kv = compile_fn(
+    let (_store, mut kv) = compile_fn(
         "rwfunc sum_to(*int64 $n) -> (*int64 $acc) {\n    0 -> *acc\n    1 -> i\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "sum_to");
@@ -486,7 +494,7 @@ fn while_back_edge_is_goto_int64() {
 
 #[test]
 fn break_is_goto_exit() {
-    let mut kv = compile_fn(
+    let (_store, mut kv) = compile_fn(
         "rwfunc f() -> (*int64 $i) {\n    0 -> *i\n    while (*i < 10) {\n        if (*i == 5) {\n            break\n        }\n        *i = *i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
@@ -520,7 +528,7 @@ fn break_is_goto_exit() {
 
 #[test]
 fn continue_is_goto_cond() {
-    let mut kv = compile_fn(
+    let (_store, mut kv) = compile_fn(
         "rwfunc f() -> (*int64 $acc) {\n    0 -> *acc\n    1 -> i\n    while (i <= 5) {\n        if (i == 3) {\n            i = i + 1\n            continue\n        }\n        *acc = *acc + i\n        i = i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
@@ -551,7 +559,7 @@ fn continue_is_goto_cond() {
 
 #[test]
 fn for_is_br_goto_single_plane() {
-    let mut kv = compile_fn(
+    let (_store, mut kv) = compile_fn(
         // Declare container before member writes (`lower::check_map_defined`).
         "rwfunc f() -> () {\n    data:[int64]·int64 = {}\n    data·0 = 0\n    data·1 = 1\n    for (x in data) {\n        x -> _\n    }\n}\n",
     );
@@ -579,7 +587,7 @@ fn for_is_br_goto_single_plane() {
 
 #[test]
 fn nested_if_while_single_plane() {
-    let mut kv = compile_fn(
+    let (_store, mut kv) = compile_fn(
         "rwfunc f() -> (*int64 $acc) {\n    0 -> *acc\n    1 -> i\n    while (i <= 3) {\n        if (i == 2) {\n            *acc = *acc + i\n        } else {\n            *acc = *acc + 1\n        }\n        i = i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
@@ -597,17 +605,20 @@ fn nested_if_while_single_plane() {
 #[test]
 fn tutorial_control_files_single_plane() {
     for (file, fns) in [
-        ("../tutorial/03-control/if.kv", &["my·abs"][..]),
+        ("../tutorial/runtimec/03-control/if.kv", &["my·abs"][..]),
         (
-            "../tutorial/03-control/while.kv",
+            "../tutorial/runtimec/03-control/while.kv",
             &["sum_to", "first_div7", "sum_odds"][..],
         ),
-        ("../tutorial/03-control/guess.kv", &["guess_number"][..]),
-        ("../tutorial/03-control/classify.kv", &["classify"][..]),
-        ("../tutorial/03-control/for.kv", &["test"][..]),
+        ("../tutorial/runtimec/03-control/guess.kv", &["guess_number"][..]),
+        ("../tutorial/runtimec/03-control/classify.kv", &["classify"][..]),
+        ("../tutorial/runtimec/03-control/for.kv", &["test"][..]),
     ] {
         let (_store, mut kv) = fresh_kv();
-        let src = std::fs::read_to_string(file).unwrap();
+        // 找不到就红并指名——路径会随 tutorial 分组调整而变，
+        // 静默跳过会让这条用例变成空跑。
+        let src = std::fs::read_to_string(file)
+            .unwrap_or_else(|e| panic!("读不到语料 {file:?}（tutorial 分组可能变了）: {e}"));
         compile(&mut kv, &src).unwrap();
         for fn_ in fns {
             assert_single_plane(&mut kv, fn_);

@@ -90,6 +90,8 @@ fn plane(kv: &mut Kv, func: &str) -> BTreeMap<i32, (String, Vec<String>)> {
     out
 }
 
+
+
 #[test]
 fn break_continue_outside_loop_is_positioned_error() {
     let src = "rwfunc test() -> () {\n\tprintln(\"before\")\n\tbreak\n}\n";
@@ -328,8 +330,9 @@ fn deref_of_expression_does_not_panic() {
     let mut s = store();
     compile(&mut s.kv, src).unwrap();
     // `*a` 先展开成第 1 条拷贝指令（`_1 = *a`），`add` 因此落在第 2 条。
+    // 形参名在槽里替换成帧坐标（`param_slot`）：`*a` → `*[0,-1]`，读写两侧同一规则。
     let p = plane(&mut s.kv, "t");
-    assert_eq!(p[&1], ("=".to_string(), vec!["*a".to_string()]));
+    assert_eq!(p[&1], ("=".to_string(), vec!["*[0,-1]".to_string()]));
     assert_eq!(p[&2].0, "add");
     assert_eq!(p[&3], ("=".to_string(), vec!["*_1".to_string()]));
     let src2 = "rwfunc f(*int64 $a) -> (*int64 $r) { *a -> *r }\nrwfunc t(*int64 $a) -> () {\n\tx = *f(*a)\n}\n";

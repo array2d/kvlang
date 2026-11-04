@@ -16,6 +16,8 @@ use kvlanglayout::{init_dirs, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
+
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
 }
@@ -33,9 +35,6 @@ impl Drop for TempDir {
 }
 
 impl TempDir {
-    fn path(&self) -> &PathBuf {
-        &self.0
-    }
 
     fn join<P: AsRef<std::path::Path>>(&self, p: P) -> PathBuf {
         self.0.join(p)
@@ -214,21 +213,6 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
         }
     }
     files.sort();
-    // 用户待查清单里的文件跳过：它们是「原始形态 vs 迁移形态」的对照样本，
-    // 迁移期不改，本判据也不该因为它们红。
-    const PENDING_REVIEW: &[&str] = &[
-        "01-basics/strings.kv",
-        "08-leetcode/083_remove_dup_list.kv",
-        "08-leetcode/094_inorder_traversal.kv",
-        "08-leetcode/206_reverse_linked_list.kv",
-        "12-struct/05-graph.kv",
-        "12-struct/06-list-reverse.kv",
-    ];
-    files.retain(|p| {
-        !PENDING_REVIEW
-            .iter()
-            .any(|tail| p.ends_with(format!("tutorial/{tail}")))
-    });
     assert!(!files.is_empty(), "tutorial 下没有找到 .kv");
 
     // 语料取**工作树**：本判据要验的是「当前布局能否吃下当前语料」。

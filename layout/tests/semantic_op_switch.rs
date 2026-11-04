@@ -7,6 +7,8 @@ use kvlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
+
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
 }
@@ -69,6 +71,10 @@ fn dump_ops(tag: &str, src: &str) -> (String, Vec<String>) {
             operands.push(text);
         }
     }
+    // 用完即清：`.kv` 与 fs store 都删，反复跑不留残骸。
+    drop(kv);
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
     (opcode, operands)
 }
 
@@ -119,4 +125,7 @@ fn semantic_operator_never_resolves_as_call() {
         kvkind::kind(&fn_alloc, &kv.langtype_of(fn_key)),
         "rwfunc"
     );
+    drop(kv);
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
 }

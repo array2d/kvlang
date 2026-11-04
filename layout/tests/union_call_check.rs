@@ -4,6 +4,8 @@ use kvlanglayout::{compile, init_dirs, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
+
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
 }
@@ -28,22 +30,33 @@ fn dsn(tag: &str) -> String {
     )
 }
 
-fn fresh_kv(tag: &str) -> Kv {
+/// store 守卫：离开作用域时删目录。必须**先于 `Kv` 声明**，
+/// 这样它后 drop（drop 顺序与声明顺序相反），删目录时句柄已释放。
+struct TempStore(String);
+
+impl Drop for TempStore {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(self.0.trim_start_matches("fs://"));
+    }
+}
+
+fn fresh_kv(tag: &str) -> (TempStore, Kv) {
     let dsn = format!(
         "fs:///tmp/kvlanglayout_union_{}_{}",
         tag,
         std::process::id()
     );
+    let store = TempStore(dsn.clone());
     let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
 
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
-    kv
+    (store, kv)
 }
 
 #[test]
 fn union_members_accepted() {
-    let mut kv = fresh_kv("ok");
+    let (_store, mut kv) = fresh_kv("ok");
     compile(
         &mut kv,
         "rwfunc f(*int64|float64 $x) -> (*int64 $r) {\n    0 -> *r\n}\n",
@@ -57,7 +70,7 @@ fn union_members_accepted() {
 
 #[test]
 fn union_non_members_rejected() {
-    let mut kv = fresh_kv("bad");
+    let (_store, mut kv) = fresh_kv("bad");
     compile(
         &mut kv,
         "rwfunc f(*int64|float64 $x) -> (*int64 $r) {\n    0 -> *r\n}\n",
@@ -82,7 +95,7 @@ fn union_non_members_rejected() {
 
 #[test]
 fn union_pointer_and_string_members() {
-    let mut kv = fresh_kv("ptr");
+    let (_store, mut kv) = fresh_kv("ptr");
     compile(
         &mut kv,
         "struct P {\n\tx:int64 = 0\n}\nrwfunc f(*P|int64 $p) -> () {\n}\n",

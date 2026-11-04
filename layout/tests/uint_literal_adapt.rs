@@ -67,6 +67,8 @@ fn write_kind(kv: &mut Kv, key: &str) -> String {
     text.rsplit('\0').next().unwrap_or("").to_string()
 }
 
+
+
 #[test]
 fn cast_plus_literal_adapts_to_unsigned() {
     for src in [

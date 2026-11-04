@@ -14,6 +14,8 @@ const OPS: [&str; 22] = [
     "gt", "ge", "bitand", "bitor", "bitxor", "shl", "shr", "pow",
 ];
 
+
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
 }
@@ -68,6 +70,10 @@ fn opcodes(tag: &str, func: &str, src: &str) -> Vec<String> {
             ops.push(text);
         }
     }
+    // 用完即清：`.kv` 与 fs store 都删。反复跑不留残骸（曾累积到 421G）。
+    drop(kv);
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
     ops
 }
 
@@ -90,15 +96,15 @@ fn assert_semantic(tag: &str, src: &str) {
 fn integer_families_emit_semantic_names() {
     assert_semantic(
         "i64",
-        "rwfunc f(*int64 $a, *int64 $b) -> () {\n\t*a + *b -> w\n\t*a - *b -> w\n\t*a × *b -> w\n\t*a ÷ *b -> w\n\t*a % *b -> w\n\t*a == *b -> w\n\t*a < *b -> w\n\tabs(*a) -> w\n\tsign(*a) -> w\n\t*a & *b -> w\n\t*a | *b -> w\n\t*a ^ *b -> w\n\t*a << *b -> w\n\t*a >> *b -> w\n\tmax(*a, *b) -> w\n\tmin(*a, *b) -> w\n}\n",
+        "rwfunc f(*int64 $a, *int64 $b) -> () {\n\t*a + *b -> w\n\t*a - *b -> w\n\t*a × *b -> w\n\t*a ÷ *b -> w\n\t*a % *b -> w\n\t*a == *b -> _cmp1 -> _w1\n\t*a < *b -> _cmp2 -> _w2\n\tabs(*a) -> _w3\n\tsign(*a) -> _w4\n\t*a & *b -> w\n\t*a | *b -> w\n\t*a ^ *b -> w\n\t*a << *b -> w\n\t*a >> *b -> w\n\tmax(*a, *b) -> w\n\tmin(*a, *b) -> w\n}\n",
     );
     assert_semantic(
         "u64",
-        "rwfunc f(*uint64 $a, *uint64 $b) -> () {\n\t*a + *b -> w\n\t*a < *b -> w\n\tmax(*a, *b) -> w\n}\n",
+        "rwfunc f(*uint64 $a, *uint64 $b) -> () {\n\t*a + *b -> w\n\t*a < *b -> _cmp3 -> _w2\n\tmax(*a, *b) -> w\n}\n",
     );
     assert_semantic(
         "small",
-        "rwfunc f(*int8 $a, *uint8 $b) -> () {\n\t*a + *a -> w\n\t*b + *b -> w\n\t*a < *a -> w\n}\n",
+        "rwfunc f(*int8 $a, *uint8 $b) -> () {\n\t*a + *a -> w\n\t*b + *b -> w\n\t*a < *a -> _cmp\n}\n",
     );
 }
 
@@ -106,11 +112,11 @@ fn integer_families_emit_semantic_names() {
 fn float_families_emit_semantic_names() {
     assert_semantic(
         "f64",
-        "rwfunc f(*float64 $a, *float64 $b) -> () {\n\t*a + *b -> w\n\t*a - *b -> w\n\t*a × *b -> w\n\t*a ÷ *b -> w\n\t*a < *b -> w\n\tsqrt(*a) -> w\n\tpow(*a, *b) -> w\n\tabs(*a) -> w\n\tneg(*a) -> w\n\tmax(*a, *b) -> w\n}\n",
+        "rwfunc f(*float64 $a, *float64 $b) -> () {\n\t*a + *b -> w\n\t*a - *b -> w\n\t*a × *b -> w\n\t*a ÷ *b -> w\n\t*a < *b -> _cmp4 -> _w2\n\tsqrt(*a) -> w\n\tpow(*a, *b) -> w\n\tabs(*a) -> _w3\n\tneg(*a) -> w\n\tmax(*a, *b) -> w\n}\n",
     );
     assert_semantic(
         "f32",
-        "rwfunc f(*float32 $a, *float32 $b) -> () {\n\t*a + *b -> w\n\t*a < *b -> w\n\tmax(*a, *b) -> w\n}\n",
+        "rwfunc f(*float32 $a, *float32 $b) -> () {\n\t*a + *b -> w\n\t*a < *b -> _cmp5 -> _w2\n\tmax(*a, *b) -> w\n}\n",
     );
 }
 

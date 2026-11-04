@@ -5,6 +5,8 @@ use kvlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
+
+
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
 }
@@ -29,7 +31,22 @@ fn dsn(tag: &str) -> String {
     )
 }
 
-fn layout(tag: &str, src: &str, envs: &[(&str, &str)]) -> (String, std::process::Output) {
+/// 一次 layout 的产物：`.kv` 路径 + fs store DSN + 输出。
+/// `Drop` 时把两者删掉——测试红了也不会留残骸，反复跑不累积。
+struct Fixture {
+    file: std::path::PathBuf,
+    db: String,
+    out: std::process::Output,
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.file);
+        let _ = std::fs::remove_dir_all(self.db.trim_start_matches("fs://"));
+    }
+}
+
+fn layout(tag: &str, src: &str, envs: &[(&str, &str)]) -> Fixture {
     let file = temp_file(tag, src);
     let db = dsn(tag);
     let mut cmd = Command::new(bin());
@@ -38,7 +55,7 @@ fn layout(tag: &str, src: &str, envs: &[(&str, &str)]) -> (String, std::process:
         cmd.env(k, v);
     }
     let out = cmd.output().unwrap();
-    (db, out)
+    Fixture { file, db, out }
 }
 
 fn op_texts(db: &str) -> Vec<(String, String)> {
@@ -64,7 +81,8 @@ const SRC: &str = "rwfunc t() -> (*char/utf32 $r) {\n    a = \"hello\"\n    b = 
 
 #[test]
 fn string_plus_becomes_concat() {
-    let (db, out) = layout("on", SRC, &[]);
+    let fx = layout("on", SRC, &[]);
+    let (db, out) = (&fx.db, &fx.out);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let ops = op_texts(&db);
     assert!(
@@ -76,7 +94,8 @@ fn string_plus_becomes_concat() {
 #[test]
 fn mixed_string_and_number_is_layout_error() {
     let src = "rwfunc t() -> (*char/utf32 $r) {\n    a = \"x\"\n    b = a + 1\n    b -> *r\n}\n";
-    let (_, out) = layout("mix", src, &[]);
+    let fx = layout("mix", src, &[]);
+    let out = &fx.out;
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(

@@ -1388,6 +1388,24 @@ fn narrow_union(ty: String, name: &str, stable: &HashMap<String, String>) -> Str
 }
 
 #[allow(clippy::too_many_arguments)]
+/// 槽文本 → 形参坐标（`*[0,±k]`）。
+///
+/// 形参名在指令槽里有两种写法：裸名（`println(s)`）与前导 `*`（`*a + 1`、`-> *r`）。
+/// `param_coord` 的键是裸名，所以先按原文查，未命中再剥**一层**前导 `*` 查；两者语义
+/// 相同——body 的 `*a` 就是「解引用形参槽」，正是 `*[0,-1]`。剥完仍不在表里就回落原文：
+/// 非形参的指针表达式（`*[0,-1]` 自身、`*p` 局部指针）不能因为形似而被改写。
+fn param_slot<'a>(params: &'a HashMap<String, String>, text: &'a str) -> &'a str {
+    if let Some(value) = params.get(text) {
+        return value.as_str();
+    }
+    if let Some(bare) = text.strip_prefix('*') {
+        if let Some(value) = params.get(bare) {
+            return value.as_str();
+        }
+    }
+    text
+}
+
 fn write_linear_inst(
     kv: &mut Kv,
     prefix: &str,
@@ -1438,10 +1456,7 @@ fn write_linear_inst(
         pairs.push((format!("{prefix}/[{n},0]"), lt, wire));
     }
     for (j, r) in reads.iter().enumerate() {
-        let rv = params
-            .get(r.as_str())
-            .map(String::as_str)
-            .unwrap_or(r.as_str());
+        let rv = param_slot(params, r);
         // 未定型整数字面量适配（spec 03-类型系统/01 第 10 条）：算子操作数的字面量
         // 按 promotion 结果 kind 落槽（`uint64_var > 1` 的 `1` 落成 uint64）。
         if let Some((wire, lt)) = adapted_literal_slot(rv, &s.operand_kind)? {
@@ -1454,7 +1469,7 @@ fn write_linear_inst(
     }
     for (j, w) in s.writes.iter().enumerate() {
         let orig = w.as_str();
-        let wv = params.get(orig).map(String::as_str).unwrap_or(orig);
+        let wv = param_slot(params, orig);
         let ty = write_slot_type(s, j, orig, param_langtype, declared, type_sets, structs, stable);
         let (wire, lt) = typed_slot_value(wv, &ty, "")?;
         pairs.push((format!("{prefix}/[{n},{}]", j + 1), lt, wire));

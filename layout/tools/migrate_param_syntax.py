@@ -82,11 +82,18 @@ def convert_signature_item(item: str) -> str:
 
     并集要加括号：`*` 作用于**整个类型表达式**，`*A|B` 会被读成 `(*A)|B`。
     逐成员写 `*A|*B` 非法（同一参数两种传递方式），所以 union 一律产出 `*(A|B)`。
+
+    **第三种旧形态** `name:*T`（`*` 写在冒号后）：旧模型里它是「按引用绑定的、
+    值类型本身是 `*T` 的参数」。新写法的传递方式是 `*`、值类型是 `*T`，合起来
+    必须写 `**T $name`——**不是** `*T $name`。少写一层，写侧就会把指针当值。
     """
     name, ty, _ = parse_item(item)
     if not ty:
         return f"* ${name}"
-    if ty.startswith(("*", "@")):
+    # 旧形态 `name:*T`：`*` 属于**值类型**，不是传递方式；再叠一层传递方式 `*`。
+    if ty.startswith("*"):
+        return f"*{ty} ${name}"
+    if ty.startswith("@"):
         return f"{ty} ${name}"
     # `|` 在类型表达式里优先级最低，`*` 加在串首只约束第一个成员，必须加括号。
     if "|" in ty and not (ty.startswith("(") and ty.endswith(")")):

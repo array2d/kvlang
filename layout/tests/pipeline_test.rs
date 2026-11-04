@@ -24,6 +24,8 @@ fn fresh_kv() -> Kv {
     kv
 }
 
+
+
 #[test]
 fn refuse_rwir_and_rwfunc() {
     let mut kv = fresh_kv();
@@ -69,12 +71,12 @@ fn compile_simple_func() {
     assert_eq!(sig(&op), "add");
     assert_eq!(sig(&kv.get_one("/lib/sum/[3,-1]")), "_1\0int64");
     assert_eq!(sig(&kv.get_one("/lib/sum/[3,-2]")), "_2\0int64");
-    // 写槽用**参数名** `*C`，不是帧坐标 `*[0,1]`：两者是同一约定（见 ast.rs 的 DEREF_OP
-    // 注释），runtime 按名字沿参数指针链解析到调用方目标。
-    assert_eq!(sig(&kv.get_one("/lib/sum/[3,1]")), "*C\0int64");
+    // 形参引用一律编成**帧坐标** `*[0,±k]`（spec 04-layout语义/03-函数）：参数名只是
+    // 签名元数据，不是寻址路径。runtime 的 vmkv 读入时按坐标回填参数名与声明类型。
+    assert_eq!(sig(&kv.get_one("/lib/sum/[3,1]")), "*[0,1]\0int64");
     // 解引用各自的读槽：`*A` 落 `[1,-1]`、`*B` 落 `[2,-1]`。
-    assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "*A\0int64");
-    assert_eq!(sig(&kv.get_one("/lib/sum/[2,-1]")), "*B\0int64");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "*[0,-1]\0int64");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[2,-1]")), "*[0,-2]\0int64");
     assert_eq!(sig(&kv.get_one("/lib/sum/[4,0]")), "return");
 
     // 源码副本

@@ -16,6 +16,8 @@ fn fresh_kv(tag: &str) -> Kv {
     kv
 }
 
+
+
 #[test]
 fn same_package_bare_call_is_rejected() {
     let mut kv = fresh_kv("bare");

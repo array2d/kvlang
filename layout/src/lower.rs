@@ -454,7 +454,11 @@ fn annotate_returns_inst(inst: &mut Instruction, sigs: &SigTable) {
         // 返回类型上的 `*` 是**传递方式**（写目标必须可引用），不是表达式的类型：
         // 调用 `t·f(*p) -> x` 的结果值就是 `int64`，不是 `*int64`。不剥这一层，
         // 后续 `x + 1` 会报「add expects numeric operand, got "*int64"」。
-        let value_type = deref_value_type(&ret.ty);
+        //
+        // 必须先拼回 `by_ref`：`**N $h` 的 `ret.ty` 只是 `/lib/N`（传递方式单独存），
+        // 直接剥它得 `/lib/N`，而正确结果是 `*N`——调用点的 `eh` 于是被判成值。
+        let full = ret.pointer_type();
+        let value_type = deref_value_type(&full);
         if inst.write_types[j].is_empty() && !value_type.is_empty() {
             inst.write_types[j] = value_type.to_string();
         }
@@ -1543,11 +1547,18 @@ fn infer_op_type(
             }
             return ty;
         }
-        // 单读参拷贝：`*a` 的值类型是指针指向的类型——形参名在 tm 里记作 `*T`，
-        // 剥掉前导 `*` 再查。不剥会让 `x` 拿不到类型，后续 `x + y` 推不出字符串。
+        // 单读参拷贝，两种情形必须分开：
+        // - `*a`（显式解引用）：值类型 = 指针指向的类型，剥一层；
+        // - `cur`（普通变量拷贝）：值类型就是变量本身的类型，**不剥**。
+        //
+        // 早先这里无条件 `trim_start_matches('*')` 再剥，于是 `prev = cur`（`cur` 是
+        // `*Node`）被推成 `Node`，后续 `prev -> *new_head` 就报「值与指针不符」。
         return if let Some(first) = reads.first() {
-            let ty = slot_type(first.trim_start_matches('*'), tm);
-            deref_value_type(&ty).to_string()
+            if let Some(inner) = first.strip_prefix('*') {
+                deref_value_type(&slot_type(inner, tm)).to_string()
+            } else {
+                slot_type(first, tm)
+            }
         } else {
             String::new()
         };
@@ -1968,7 +1979,11 @@ fn exact_kind(
         return Some(deref_value_type(&inner).to_string());
     }
     if op == "kvlang·abs" {
-        return None;
+        // `&x` 产 kvlang 指针：结果类型 = `*` + 目标类型（与 `infer_op_type` 同一规则）。
+        // 旧实现返回 None，于是 `&x -> eh` 的 `eh` 推不出类型，
+        // 再传给 `**T` 形参时判成值与指针不符。
+        let inner = e.args.first().and_then(|a| exact_kind(a, declared, stable))?;
+        return Some(format!("*{inner}"));
     }
     let entry = symbol::lookup(op);
     let mut word = entry.word.to_string();
@@ -2904,7 +2919,13 @@ fn check_assignable(target: &str, rhs: &str, diags: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_rhs(target: &str, e: &Expr, rhs: &str, diags: &mut Vec<Diagnostic>) {
+fn check_rhs(
+    target: &str,
+    e: &Expr,
+    rhs: &str,
+    nullable: bool,
+    diags: &mut Vec<Diagnostic>,
+) {
     if e.is_leaf() {
         if check_literal(target, e, diags) {
             return;
@@ -2927,7 +2948,11 @@ fn check_rhs(target: &str, e: &Expr, rhs: &str, diags: &mut Vec<Diagnostic>) {
             }
             _ => {
                 if is_none_lit(e) {
-                    if !target.starts_with('*') && !target.is_empty() {
+                    // `None` 是**唯一**的空指针字面量（spec 16-ptr「空指针即 None」），
+                    // 凡声明为 `*T` 的槽都接受它。但 `target` 已被剥掉 `*`（那是传递
+                    // 方式，不是类型的一部分），所以不能靠 `target.starts_with('*')`
+                    // 判断——由调用方按**声明**给出 `nullable`。
+                    if !nullable && !target.is_empty() {
                         push_write_diag(
                             diags,
                             format!("TypeError: None cannot be assigned to {target}"),
@@ -3129,7 +3154,14 @@ fn check_call_args(
         } else {
             break;
         };
-        let raw = param.ty.trim_end_matches("...").trim().to_string();
+        // 用 `pointer_type()` 拼回 `*`/`@` 前缀：`**Node $head` 的 `param.ty` 只有
+        // `Node`，传递方式单独存在 `by_ref` 里。只读 `ty` 会让实参要求少一层指针。
+        // `...` 是签名层变参标记，仍在拼回后剥掉。
+        let raw = param
+            .pointer_type()
+            .trim_end_matches("...")
+            .trim()
+            .to_string();
         if raw.is_empty() || raw.starts_with('@') {
             continue;
         }
@@ -3232,6 +3264,7 @@ fn walk_inst(
 ) {
     let Some(e) = &s.expr else { return };
     check_call_args(e, sigs, declared, diags);
+    check_implicit_deref_member(e, tm, declared, diags);
     if e.op == format!("struct{}new", keytree::MEMBER_SEP) {
         check_struct_literal(e, structs, diags);
     }
@@ -3264,7 +3297,13 @@ fn walk_inst(
         let ty = if !ann.is_empty() {
             ann.to_string()
         } else {
-            match resolve_slot_type(w, tm, structs, declared) {
+            // 无标注的局部变量（`prev = None` 起手、循环里再赋指针）不在 `declared` 里，
+            // 只有 `tm` 记录了它的推断类型。`resolve_slot_type` 只查 `declared`，
+            // 这里再回退一层 `tm`——否则 `prev = cur` 那条根本不参与校验，
+            // 下游 `prev -> *new_head` 才报「值与指针不符」。
+            match resolve_slot_type(w, tm, structs, declared)
+                .or_else(|| tm.get(w).filter(|t| !t.is_empty()).cloned())
+            {
                 Some(t) => t,
                 None => continue,
             }
@@ -3278,7 +3317,12 @@ fn walk_inst(
         {
             check_container_literal(&ty, e, diags);
         } else {
-            check_rhs(&ty, e, &rhs, diags);
+            // nullable：这个槽的**声明**带 `*`（`ty` 里已剥、要看原始表）。
+            let nullable = declared
+                .get(w.as_str())
+                .or_else(|| tm.get(w.as_str()))
+                .is_some_and(|t| t.starts_with('*'));
+            check_rhs(&ty, e, &rhs, nullable, diags);
         }
     }
 }
@@ -3324,4 +3368,53 @@ mod union_match_tests {
         assert!(value_matches("stringkeymap|int64", "stringkeymap"));
         assert!(value_matches("/lib/P|int64", "/lib/P"));
     }
+}
+
+/// 成员访问的基座是 kvlang 指针时，必须显式解引用（spec 05-runtime语义/03-成员访问）。
+///
+/// parser 只按**形参**判（`ptr_params`），局部变量的类型要到推断之后才知道：
+/// `h -> cur` 让 `cur` 是 `*Node`，`cur·val` 就是隐式解引用。这里用 `tm`（推断表）
+/// 与 `declared`（声明表）两张表判基座类型，覆盖局部变量。
+fn check_implicit_deref_member(
+    e: &Expr,
+    tm: &HashMap<String, String>,
+    declared: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    if e.op != ast::MEMBER_READ_OP {
+        return;
+    }
+    let Some(base) = e.args.first() else { return };
+    // 只认裸名基座：`(*p)·k` 已显式解引用，基座是解引用表达式，不在此列。
+    if !base.is_leaf() || base.quote != 0 || base.val.is_empty() {
+        return;
+    }
+    // `*p` 形式的基座同样已显式解引用（parser 已处理形参那条）。
+    if base.val.starts_with('*') {
+        return;
+    }
+    // `_N` 是 lower 为复合表达式展开的临时槽：它的来源已由生成它的那条指令判过。
+    // 再判一次会把 `(*cur)·val`（展开成 `_1 = *cur; _1·val`）误报成隐式解引用。
+    if base.val.starts_with('_') && base.val[1..].chars().all(|c| c.is_ascii_digit()) {
+        return;
+    }
+    let ty = declared
+        .get(&base.val)
+        .or_else(|| tm.get(&base.val))
+        .filter(|t| t.starts_with('*'));
+    let Some(ty) = ty else { return };
+    // `**T` 的裸名基座本身是 `*T` 值，`·` 作用其上仍是隐式解引用。
+    let _ = ty;
+    diags.push(Diagnostic {
+        pos: Pos { line: 0, col: 0 },
+        warn: false,
+        info: false,
+        message: format!(
+            "对指针类型的成员访问必须显式解引用：写 `(*{})·name`",
+            base.val
+        ),
+        source: String::new(),
+        src_file: String::new(),
+        src_name: String::new(),
+    });
 }
