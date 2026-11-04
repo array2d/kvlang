@@ -1108,7 +1108,7 @@ impl Parser {
                     p.errors.push(Diagnostic {
                         pos: Pos { line: 1, col: 1 },
                         message: format!(
-                            "func {fname}: {base:?} aliases read param {src:?} (`{base} = {src}`); writing its members writes that object — put it on the write side: `-> ({src}:{ty})`"
+                            "func {fname}: {base:?} aliases read param {src:?} (`{base} = {src}`); writing its members writes that value — put it on the write side: `-> ({src}:{ty})`"
                         ),
                         warn: false,
                         info: false,
@@ -1335,20 +1335,19 @@ impl Parser {
         })
     }
 
-    /// 具名字面量 `{k=v, …}` 按写槽 langtype 分派，两条路径都是合法的：
+    /// structref 写目标上的容器字面量改写成 `struct·new(原型路径, …)`。
     ///
-    /// - structref（`/lib/Name`）→ `struct·new(path, k, v, …)`：成员名来自原型，
-    ///   实例化即克隆原型子树再覆盖字段（见 spec [[struct]]）；
-    /// - 其它（mapexpr）→ 保持 `map·named`：成员落 `base·name`，键就是写的名字
-    ///   （见 spec [[map容器]] 的 `{n=42} -> m`）。
+    /// 容器字面量只有 `map·new` 一种算子（groupkv 的构造），struct 实例化**不是**另一种
+    /// 构造算子——它是同一个字面量在不同写目标下的落地方式，需要原型路径作为首参：
+    /// 成员名来自原型，实例化即克隆原型子树再覆盖字段（见 spec [[struct]]）。
     ///
-    /// 位置型 `{v0, v1, …}` 走 `map·new`，不经这里——它的成员键由键侧 formatter 产出。
-    fn dispatch_named_literal(&mut self, inst: &mut Instruction) {
-        let is_named = inst
-            .expr
-            .as_ref()
-            .is_some_and(|e| e.op == ast::NAMED_LITERAL_OP);
-        if !is_named {
+    /// 判具名用「首参是字符串字面量」：`{k=v …}` 的键由 parser 包成 `str_lit`，
+    /// 位置型 `{v0, v1 …}` 的首参是值本身。这是解析期就确定的事实，不靠算子名区分。
+    fn dispatch_struct_literal(&mut self, inst: &mut Instruction) {
+        let is_named_map = inst.expr.as_ref().is_some_and(|e| {
+            e.op == "map·new" && e.args.first().is_some_and(|a| a.quote != 0)
+        });
+        if !is_named_map {
             return;
         }
         let ty = inst.write_types.first().map(String::as_str).unwrap_or("");
@@ -1446,7 +1445,7 @@ impl Parser {
                     inst.writes = writes;
                     inst.write_types = wtypes;
                     inst.expr = reads.into_iter().next().flatten();
-                    self.dispatch_named_literal(&mut inst);
+                    self.dispatch_struct_literal(&mut inst);
                     self.lower_array_fill(&mut inst);
                     self.desugar_subscript_write(&mut inst);
                     self.desugar_member_write(&mut inst);
@@ -1462,7 +1461,7 @@ impl Parser {
                     inst.expr = reads.into_iter().next().flatten();
                     inst.writes = writes;
                     inst.write_types = wtypes;
-                    self.dispatch_named_literal(&mut inst);
+                    self.dispatch_struct_literal(&mut inst);
                     self.desugar_subscript_write(&mut inst);
                     self.desugar_member_write(&mut inst);
                 }
@@ -1556,7 +1555,7 @@ impl Parser {
                 operator: false,
                 operand_kind: String::new(),
             };
-            self.dispatch_named_literal(&mut i);
+            self.dispatch_struct_literal(&mut i);
             self.lower_array_fill(&mut i);
             self.desugar_subscript_write(&mut i);
             self.desugar_member_write(&mut i);
@@ -1988,8 +1987,10 @@ impl Parser {
                 }
             }
             self.expect(Kind::RBrace);
-            let op = if named { ast::NAMED_LITERAL_OP } else { "map·new" };
-            return Some(ast::call(op, elems));
+            // 具名成员 `{n=42; x=7}` 与位置成员 `{10, 20}` 都是「键值组」（groupkv）的
+            // 构造，不存在第二种构造算子——一律 `map·new`。字面量**替换**已有成员，
+            // 这一点由 `map·new` 的既有行为决定，写法不因键形态而分叉。
+            return Some(ast::call("map·new", elems));
         }
 
         // 括号分组
@@ -2258,7 +2259,7 @@ impl Parser {
                     && self.peek_at(2).kind != Kind::LBrack);
             if member_chain {
                 let mut w = self.advance().value;
-                // 成员链写槽：整段 p·obj·deep 收成单个 write 槽，`=` 写（成员路径写）
+                // 成员链写槽：整段 p·a·b·c 收成单个 write 槽，`=` 写（成员路径写）
                 // runtime ResolveWriteSlot 拼成员绝对路径。勿在每段 · 处截断
                 // （否则 deep 被当独立写槽）。
                 while self.peek().kind == Kind::Dot {
@@ -2506,7 +2507,7 @@ impl Parser {
                 && self.peek_at(2).kind != Kind::LBrack
             {
                 let mut w = self.advance().value;
-                // 成员链写槽：整段 p·obj·deep 收成单个 write 槽（勿在每段 · 处截断）。
+                // 成员链写槽：整段 p·a·b·c 收成单个 write 槽（勿在每段 · 处截断）。
                 while self.peek().kind == Kind::Dot && self.peek_at(1).kind != Kind::LBrack {
                     self.advance(); // .
                     w.push_str(keytree::MEMBER_SEP);

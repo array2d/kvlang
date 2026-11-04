@@ -292,16 +292,6 @@ pub const DEREF_OP: &str = "*";
 /// 不再经 `kvspace·get`（清理方案：get 死刑）。
 pub const MEMBER_READ_OP: &str = "=";
 
-/// 具名容器字面量 `{k=v, …}` 在 AST 里的算子名。与位置型 `map·new` 是**同一份 key
-/// 目录组织**，区别只在成员键：具名型由名字直接当键，位置型由键侧 formatter 产出。
-/// 写槽是 structref 时改写成 `struct·new`（成员名来自原型）；否则由它落
-/// `base·name` 成员（见 spec [[map容器]] 的 `{n=42} -> m`）。
-///
-/// 名字仍是 `obj`：runtime 的能力表（`runtime/src/mywircaps.c`）按这个名字分派，
-/// 而 `runtime/` 在本阶段冻结。**它不是「容器种类」**——容器语义全由 langtype 的
-/// mapexpr/structref 表达，这里仅是这一个算子行的名字。
-pub const NAMED_LITERAL_OP: &str = "obj";
-
 impl Expr {
     pub fn is_leaf(&self) -> bool {
         self.op.is_empty()

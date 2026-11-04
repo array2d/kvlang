@@ -1497,12 +1497,7 @@ fn check_call_names(
         if !is_bare_identifier(&op) {
             continue;
         }
-        // 具名字面量（`{n=42}`）与位置型（`map·new`）都是算子而非函数调用：
-        // 前者的运行时实现登记在能力表里，但它的**名字**不是可调用的函数。
-        if matches!(
-            op.as_str(),
-            "=" | "return" | "goto" | "br" | "call" | crate::ast::NAMED_LITERAL_OP
-        ) {
+        if matches!(op.as_str(), "=" | "return" | "goto" | "br" | "call") {
             continue;
         }
         // 合法：全局函数（本文件裸定义 / 已布局）或已声明 rwir（def rwir）。

@@ -152,12 +152,14 @@ fn check_container_inst(s: &Instruction, fn_: &Func, diags: &mut Vec<Diagnostic>
     if ann.starts_with('/') {
         return;
     }
+    // 写槽名可以是 `*m`（写穿指针形参）：剥掉 `*` 再按形参名找声明。
+    let target_name = target.strip_prefix('*').unwrap_or(target);
     let declared = if ann.is_empty() {
         fn_.sig
             .params
             .iter()
             .chain(fn_.sig.returns.iter())
-            .find(|p| &p.name == target)
+            .find(|p| &p.name == target_name)
             .map(|p| p.ty.as_str())
             .unwrap_or("")
     } else {
@@ -2907,13 +2909,22 @@ fn check_container_literal(target: &str, e: &Expr, diags: &mut Vec<Diagnostic>) 
             }
         }
         // 位置型 `{v0,v1,…}`：键为隐式整数坐标，只查值。
+        // 键值组构造，两种成员写法共用这一个算子：
+        // - 位置型 `{v0, v1, …}`：每个 arg 都是值，逐个检查；
+        // - 具名型 `{k=v, …}`：args 是 `键(str_lit), 值` 交错，只检查值（跳过奇数位）。
+        // 判据是「首参是字符串字面量」——具名的键由 parser 包成 `str_lit`。
         "map·new" => {
-            if let Some(v) = container_value(target) {
-                if builtin::is_num_kind(&v) {
-                    for a in &e.args {
-                        check_element(&v, a, diags);
-                    }
-                }
+            let Some(v) = container_value(target) else {
+                return;
+            };
+            if !builtin::is_num_kind(&v) {
+                return;
+            }
+            let named = e.args.first().is_some_and(|a| a.quote != 0);
+            let step = if named { 2 } else { 1 };
+            let offset = usize::from(named);
+            for a in e.args.iter().skip(offset).step_by(step) {
+                check_element(&v, a, diags);
             }
         }
         _ => {}
