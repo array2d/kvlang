@@ -46,7 +46,8 @@ typedef enum runtimec_execution_window_diagnostic_t {
     RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_ENSURE_FAILED = 13,
     RUNTIMEC_EXECUTION_WINDOW_DIAG_EXECUTION_FAILED = 14,
     RUNTIMEC_EXECUTION_WINDOW_DIAG_CHECKPOINT_FAILED = 15,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY = 16
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED = 16,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY = 17
 } runtimec_execution_window_diagnostic_t;
 
 static void runtimec_execution_window_reset_result(runtimec_execution_window_result_t *result,
@@ -288,6 +289,146 @@ static runtimec_status_t runtimec_execution_window_commit_checkpoint(
 }
 
 /*
+ * 把函数用到的局部变量物化成**真实存在的零值 key**，逐个落在帧目录下：
+ *
+ *     /vthread/{vid}/{stackid}/{name}
+ *
+ * **不加 `local/` 前缀**：旧 runtime 与 runtimec2 都没有这一层，帧目录下就是
+ * 局部名本身。
+ *
+ * 为什么要物化：执行器只接受「与当前 body 等长」的写入，而不存在的 key 连地址
+ * 都解析不出来。所以局部必须先以正确宽度存在，宽度由符号池里的 langtype 给出。
+ *
+ * 符号池不记 kind（条目只有 name + langtype），所以「哪些是局部」只能从指令
+ * 推导：扫读参与写参、收集 `REFERENCE_LOCAL` 的符号下标去重。**不为此给符号池
+ * 加 kind 字段**——为一次查询改数据模型，代价大于收益。
+ *
+ * 幂等交给 host：同宽已存在即成功，不重复写。失败即整体失败，一条指令都不执行。
+ */
+static runtimec_status_t runtimec_execution_window_materialize_locals(
+    const runtimec_host_services_t *host, const runtimec_snapshot_t *snapshot,
+    const binrwir_program_t *program,
+    const runtimec_execution_window_request_t *request,
+    runtimec_execution_window_diagnostic_t *output_detail,
+    runtimec_error_t *error) {
+    binrwir_program_view_t program_view;
+    size_t symbol_count = 0U;
+    bool *is_local = NULL;
+    size_t instruction_ordinal;
+    size_t symbol_ordinal;
+    runtimec_status_t status;
+
+    if (binrwir_program_get_view(program, &program_view) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        binrwir_program_get_symbol_count(program, &symbol_count) !=
+            RUNTIMEC_STATUS_SUCCESS) {
+        *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED;
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    if (symbol_count == 0U) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    is_local = (bool *)runtimec_allocator_allocate(
+        &host->allocator, sizeof(*is_local) * symbol_count,
+        _Alignof(bool));
+    if (is_local == NULL) {
+        *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY;
+        return RUNTIMEC_STATUS_OUT_OF_MEMORY;
+    }
+    memset(is_local, 0, sizeof(*is_local) * symbol_count);
+
+    /* 1. 扫全部指令的两个参数区，标记哪些符号被当作 LOCAL 引用过。 */
+    for (instruction_ordinal = 0U;
+         instruction_ordinal < program_view.instruction_count;
+         ++instruction_ordinal) {
+        binrwir_instruction_view_t instruction;
+        binrwir_argument_span_t spans[2];
+        size_t span_ordinal;
+
+        if (binrwir_program_get_instruction(program,
+                                            (uint32_t)instruction_ordinal,
+                                            &instruction) !=
+            RUNTIMEC_STATUS_SUCCESS) {
+            (void)runtimec_allocator_deallocate(
+                &host->allocator, is_local, sizeof(*is_local) * symbol_count,
+                _Alignof(bool));
+            *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED;
+            return RUNTIMEC_STATUS_INVALID;
+        }
+        spans[0] = instruction.read_arguments;
+        spans[1] = instruction.write_arguments;
+        for (span_ordinal = 0U; span_ordinal < 2U; ++span_ordinal) {
+            size_t argument_ordinal;
+
+            for (argument_ordinal = 0U;
+                 argument_ordinal < spans[span_ordinal].count;
+                 ++argument_ordinal) {
+                const binrwir_argument_t *argument =
+                    &spans[span_ordinal].data[argument_ordinal];
+
+                if (argument->reference_kind == BINRWIR_REFERENCE_LOCAL &&
+                    (size_t)argument->slot < symbol_count) {
+                    is_local[argument->slot] = true;
+                }
+            }
+        }
+    }
+
+    /* 2. 逐个物化：key = frame_path + "/" + name。 */
+    for (symbol_ordinal = 0U; symbol_ordinal < symbol_count;
+         ++symbol_ordinal) {
+        runtimec_string_view_t name;
+        runtimec_string_view_t langtype;
+        char *key_text;
+        size_t key_size;
+
+        if (!is_local[symbol_ordinal]) {
+            continue;
+        }
+        if (binrwir_program_get_symbol(program, (uint16_t)symbol_ordinal, &name,
+                                       &langtype) != RUNTIMEC_STATUS_SUCCESS ||
+            name.size == 0U || langtype.size == 0U) {
+            (void)runtimec_allocator_deallocate(
+                &host->allocator, is_local, sizeof(*is_local) * symbol_count,
+                _Alignof(bool));
+            *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED;
+            return RUNTIMEC_STATUS_INVALID;
+        }
+        key_size = request->frame_path.size + 1U + name.size;
+        key_text = (char *)runtimec_allocator_allocate(
+            &host->allocator, key_size + 1U, 1U);
+        if (key_text == NULL) {
+            (void)runtimec_allocator_deallocate(
+                &host->allocator, is_local, sizeof(*is_local) * symbol_count,
+                _Alignof(bool));
+            *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY;
+            return RUNTIMEC_STATUS_OUT_OF_MEMORY;
+        }
+        memcpy(key_text, request->frame_path.data, request->frame_path.size);
+        key_text[request->frame_path.size] = '/';
+        memcpy(key_text + request->frame_path.size + 1U, name.data, name.size);
+        key_text[key_size] = '\0';
+
+        status = host->ensure_zero_value(
+            host->context, snapshot,
+            runtimec_key_view_make(key_text, key_size), langtype, error);
+        (void)runtimec_allocator_deallocate(&host->allocator, key_text,
+                                            key_size + 1U, 1U);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            (void)runtimec_allocator_deallocate(
+                &host->allocator, is_local, sizeof(*is_local) * symbol_count,
+                _Alignof(bool));
+            *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED;
+            return status;
+        }
+    }
+    (void)runtimec_allocator_deallocate(&host->allocator, is_local,
+                                        sizeof(*is_local) * symbol_count,
+                                        _Alignof(bool));
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
  * 起始位置换算：调用方给的是 source logical program counter（layout 的 irseq），
  * 执行游标是稠密的指令标识符，两者唯一的映射就是 binrwir_program_find_instruction。
  */
@@ -399,6 +540,7 @@ runtimec_status_t runtimec_execution_window_execute(
         host->source_revision == NULL ||
         host->resolve_frame_xvalue_address == NULL ||
         host->ensure_frame == NULL ||
+        host->ensure_zero_value == NULL ||
         host->checkpoint == NULL ||
         !runtimec_allocator_is_valid(&host->allocator)) {
         return runtimec_execution_window_fail(
@@ -527,6 +669,15 @@ runtimec_status_t runtimec_execution_window_execute(
             output_result, error, status,
             RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_ENSURE_FAILED,
             "frame could not be established");
+        goto release_bindings;
+    }
+    status = runtimec_execution_window_materialize_locals(
+        host, &snapshot, compilation_view.canonical_program, request, &detail,
+        error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        status = runtimec_execution_window_fail(
+            output_result, error, status, detail,
+            "local variables could not be materialized");
         goto release_bindings;
     }
     status = runtimec_execution_window_bind_parameters(

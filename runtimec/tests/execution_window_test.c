@@ -59,6 +59,7 @@ static int failures;
 #define TEST_DONE_TARGET "/lib/route-done"
 #define TEST_MISSING_TARGET "/lib/missing"
 #define TEST_ZERO_ARGUMENT_TARGET "/lib/zero"
+#define TEST_LOCALS_TARGET "/lib/locals"
 #define TEST_VTHREAD "vthread-1"
 #define TEST_FRAME_PATH "/vthread/vthread-1/[1]"
 #define TEST_STACK_IDENTIFIER 1
@@ -91,6 +92,11 @@ typedef struct test_context {
     char ensured_function_key[64];
     runtimec_status_t ensure_frame_status;
     bool snapshot_generation_override_active;
+    /* 局部物化记录：key 顺序、以及按类型回读到的 body 宽度。 */
+    char materialized_keys[8][128];
+    size_t materialized_key_count;
+    uint64_t materialized_int64_width;
+    uint64_t materialized_bool_width;
     uint64_t snapshot_generation_override;
     size_t checkpoint_count;
     uint64_t checkpoint_sequence;
@@ -249,6 +255,38 @@ static runtimec_status_t test_ensure_frame(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+/*
+ * 局部物化的替身：记录被要求建槽的 key，并按 langtype 回填约定的宽度。
+ * 宽度按规范取值（int64 = 8、bool = 1），不是从别处抄来的表——
+ * 这张小表只服务断言，不参与产品逻辑。
+ */
+static runtimec_status_t test_ensure_zero_value(
+    void *context, const runtimec_snapshot_t *snapshot, runtimec_key_view_t key,
+    runtimec_string_view_t langtype, runtimec_error_t *error) {
+    test_context_t *test = context;
+    uint64_t width = 0U;
+
+    (void)snapshot;
+    if (test->materialized_key_count < 8U && key.size < 128U) {
+        memcpy(test->materialized_keys[test->materialized_key_count], key.data,
+               key.size);
+        test->materialized_keys[test->materialized_key_count][key.size] = '\0';
+        test->materialized_key_count += 1U;
+    }
+    if (langtype.size == 5U && memcmp(langtype.data, "int64", 5U) == 0) {
+        width = 8U;
+        test->materialized_int64_width = 8U;
+    } else if (langtype.size == 4U && memcmp(langtype.data, "bool", 4U) == 0) {
+        width = 1U;
+        test->materialized_bool_width = 1U;
+    } else {
+        return test_fail(error, RUNTIMEC_STATUS_UNSUPPORTED,
+                         "test ensure-zero-value: unsupported langtype");
+    }
+    (void)width;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 static runtimec_status_t test_checkpoint(
     void *context, const runtimec_checkpoint_t *checkpoint,
     runtimec_error_t *error) {
@@ -350,6 +388,75 @@ static runtimec_status_t test_program_build_zero_argument(
         request.operation_identifier = VMBIN_OPERATION_IDENTIFIER_RETURN;
         request.read_arguments.data = NULL;
         request.read_arguments.count = 0U;
+        request.write_arguments.data = NULL;
+        request.write_arguments.count = 0U;
+        status = binrwir_program_builder_add_instruction(builder, &request,
+                                                         &identifier);
+    }
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = binrwir_program_builder_finalize(builder, output_program);
+    }
+    (void)binrwir_program_builder_destroy(builder);
+    return status;
+}
+
+
+/*
+ * 带局部变量的零参数函数：`rwfunc f() -> () { y:int64 = 0; flag:bool = false }`。
+ * 两条 LOCAL 分别在写位出现，符号池里带各自的 langtype——执行窗口靠这个物化槽。
+ */
+static runtimec_status_t test_program_build_with_locals(
+    const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
+    binrwir_program_t **output_program) {
+    binrwir_program_identity_t identity;
+    binrwir_program_builder_t *builder = NULL;
+    binrwir_argument_t counter_argument;
+    binrwir_argument_t flag_argument;
+    uint16_t counter_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+    uint16_t flag_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+    runtimec_status_t status;
+
+    *output_program = NULL;
+    memset(&identity, 0, sizeof(identity));
+    identity.snapshot_generation = TEST_GENERATION;
+    identity.program_generation = TEST_PROGRAM_GENERATION;
+    identity.schema_version = 1U;
+    identity.rwir_manifest_version = VMKV_RWIR_MANIFEST_VERSION;
+    identity.binrwir_binary_interface_generation =
+        BINRWIR_BINARY_INTERFACE_GENERATION;
+    identity.canonical_encoding_revision = canonical_encoding_revision;
+
+    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    if (binrwir_program_builder_add_symbol(
+            builder, runtimec_string_view_from_c_string("x"),
+            runtimec_string_view_from_c_string("int64"),
+            &counter_symbol) != RUNTIMEC_STATUS_SUCCESS ||
+        binrwir_program_builder_add_symbol(
+            builder, runtimec_string_view_from_c_string("flag"),
+            runtimec_string_view_from_c_string("bool"), &flag_symbol) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        binrwir_argument_create(0U, BINRWIR_REFERENCE_LOCAL, counter_symbol, 0U,
+                                &counter_argument) != RUNTIMEC_STATUS_SUCCESS ||
+        binrwir_argument_create(1U, BINRWIR_REFERENCE_LOCAL, flag_symbol, 0U,
+                                &flag_argument) != RUNTIMEC_STATUS_SUCCESS) {
+        (void)binrwir_program_builder_destroy(builder);
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    {
+        binrwir_instruction_build_request_t request;
+        uint32_t identifier = BINRWIR_IDENTIFIER_NONE;
+        binrwir_argument_t both[2];
+
+        both[0] = counter_argument;
+        both[1] = flag_argument;
+        request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
+        request.operation_identifier = VMBIN_OPERATION_IDENTIFIER_RETURN;
+        /* 两个局部都在读位出现：执行窗口必须把它们物化出来。 */
+        request.read_arguments.data = both;
+        request.read_arguments.count = 2U;
         request.write_arguments.data = NULL;
         request.write_arguments.count = 0U;
         status = binrwir_program_builder_add_instruction(builder, &request,
@@ -580,6 +687,7 @@ int main(void) {
     host_services.resolve_frame_xvalue_address =
         test_resolve_frame_xvalue_address;
     host_services.ensure_frame = test_ensure_frame;
+    host_services.ensure_zero_value = test_ensure_zero_value;
     host_services.checkpoint = test_checkpoint;
     EXPECT(runtimec_host_services_is_valid(&host_services));
 
@@ -615,6 +723,12 @@ int main(void) {
                                             canonical_encoding_revision,
                                             &program) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(test_compile_and_insert(&components, TEST_ZERO_ARGUMENT_TARGET,
+                                   canonical_encoding_revision, program,
+                                   &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_program_build_with_locals(&allocator,
+                                          canonical_encoding_revision,
+                                          &program) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_compile_and_insert(&components, TEST_LOCALS_TARGET,
                                    canonical_encoding_revision, program,
                                    &error) == RUNTIMEC_STATUS_SUCCESS);
 
@@ -705,6 +819,42 @@ int main(void) {
 
 
     /*
+     * 2.92 局部变量物化：进入帧之后、执行之前，每个局部必须是**真实存在的零值 key**，
+     * 且落在帧目录下（`/vthread/{vid}/{stackid}/{name}`，**不带 `local/` 前缀**）。
+     * 宽度来自符号池里的 langtype：int64 → 8 字节、bool → 1 字节。
+     */
+    {
+        runtimec_execution_window_request_t locals_request = request;
+        locals_request.function_path =
+            runtimec_string_view_from_c_string(TEST_LOCALS_TARGET);
+        locals_request.arguments = NULL;
+        locals_request.argument_count = 0U;
+        locals_request.source_logical_program_counter =
+            TEST_FIRST_SOURCE_COUNTER;
+        test.materialized_key_count = 0U;
+
+        EXPECT(runtimec_execution_window_execute(session, &locals_request,
+                                                 &result, &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_DONE);
+        /* 两个局部都被物化，且 key 不带 local/ 前缀。 */
+        EXPECT(test.materialized_key_count == 2U);
+        EXPECT(strcmp(test.materialized_keys[0], TEST_FRAME_PATH "/flag") == 0 ||
+               strcmp(test.materialized_keys[1], TEST_FRAME_PATH "/flag") == 0);
+        EXPECT(strcmp(test.materialized_keys[0], TEST_FRAME_PATH "/x") == 0 ||
+               strcmp(test.materialized_keys[1], TEST_FRAME_PATH "/x") == 0);
+        EXPECT(test.materialized_int64_width == 8U);
+        EXPECT(test.materialized_bool_width == 1U);
+
+        /* 幂等：同一帧再执行一次，不报重复。 */
+        test.materialized_key_count = 0U;
+        EXPECT(runtimec_execution_window_execute(session, &locals_request,
+                                                 &result, &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(test.materialized_key_count == 2U);
+    }
+
+    /*
      * 2.95 反向：快照世代为 0（host 没给出可用的存储世代）时，**零参数帧同样被拒**。
      *
      * 这条守的不是绑定门，而是快照门：它在 `source revision is not addressable`
@@ -735,7 +885,7 @@ int main(void) {
            RUNTIMEC_STATUS_SUCCESS);
     /* 诊断码 5 = ENCODE_FAILED：证明真的走进了编码分支。 */
     EXPECT(result.execution_exit.detail_code == 5U);
-    EXPECT(test.checkpoint_count == 3U);
+    EXPECT(test.checkpoint_count == 5U);
 
     /* 4. 起始 source pc 不属于这份 Program：失败封闭，不执行、不提交。 */
     request.function_path = runtimec_string_view_from_c_string(TEST_TARGET);
@@ -743,7 +893,7 @@ int main(void) {
     EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
            RUNTIMEC_STATUS_INVALID);
     EXPECT(result.execution_exit.detail_code == 12U);
-    EXPECT(test.checkpoint_count == 3U);
+    EXPECT(test.checkpoint_count == 5U);
 
     /* 5. 空 vthread：checkpoint 没有落点。 */
     request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;

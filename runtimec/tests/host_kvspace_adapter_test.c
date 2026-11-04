@@ -221,14 +221,14 @@ int main(void) {
      */
     {
         const runtimec_key_view_t slot =
-            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/local/x");
+            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/x");
 
         /* time：建槽后 body 长度必须是 8。 */
         EXPECT(services.ensure_zero_value(
                    services.context, &snapshot, slot,
                    runtimec_string_view_from_c_string("time"), &error) ==
                RUNTIMEC_STATUS_SUCCESS);
-        uint8_t *wire = fake_kvspace_address(&store, "/vthread/v1/[0]/local/x");
+        uint8_t *wire = fake_kvspace_address(&store, "/vthread/v1/[0]/x");
         EXPECT(wire != NULL);
         if (wire != NULL) {
             kvspaceXvalueHead head;
@@ -246,19 +246,19 @@ int main(void) {
                    services.context, &snapshot, slot,
                    runtimec_string_view_from_c_string("time"), &error) ==
                RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(fake_kvspace_address(&store, "/vthread/v1/[0]/local/x") ==
+        EXPECT(fake_kvspace_address(&store, "/vthread/v1/[0]/x") ==
                before);
     }
 
     {
         /* time/duration 同样是 8 字节。时长 kind 的规范名带 lib 前缀。 */
         const runtimec_key_view_t slot =
-            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/local/d");
+            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/d");
         EXPECT(services.ensure_zero_value(
                    services.context, &snapshot, slot,
                    runtimec_string_view_from_c_string("time/duration"), &error) ==
                RUNTIMEC_STATUS_SUCCESS);
-        uint8_t *wire = fake_kvspace_address(&store, "/vthread/v1/[0]/local/d");
+        uint8_t *wire = fake_kvspace_address(&store, "/vthread/v1/[0]/d");
         EXPECT(wire != NULL);
         if (wire != NULL) {
             kvspaceXvalueHead head;
@@ -274,12 +274,12 @@ int main(void) {
          * body 等长，零长 body 永远写不进真实值。
          */
         const runtimec_key_view_t slot =
-            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/local/s");
+            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/s");
         EXPECT(services.ensure_zero_value(
                    services.context, &snapshot, slot,
                    runtimec_string_view_from_c_string("[]char/utf8"), &error) ==
                RUNTIMEC_STATUS_UNSUPPORTED);
-        EXPECT(fake_kvspace_address(&store, "/vthread/v1/[0]/local/s") == NULL);
+        EXPECT(fake_kvspace_address(&store, "/vthread/v1/[0]/s") == NULL);
     }
 
     {
@@ -288,30 +288,30 @@ int main(void) {
          * 不能因为「曾经叫这个名字」就静默建出 8 字节槽。不留别名。
          */
         const runtimec_key_view_t slot =
-            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/local/old");
+            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/old");
         EXPECT(services.ensure_zero_value(
                    services.context, &snapshot, slot,
                    runtimec_string_view_from_c_string("duration"), &error) ==
                RUNTIMEC_STATUS_UNSUPPORTED);
-        EXPECT(fake_kvspace_address(&store, "/vthread/v1/[0]/local/old") ==
+        EXPECT(fake_kvspace_address(&store, "/vthread/v1/[0]/old") ==
                NULL);
     }
 
     {
         /* 宽度表里没有的类型同样 UNSUPPORTED，不猜。 */
         const runtimec_key_view_t slot =
-            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/local/u");
+            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/u");
         EXPECT(services.ensure_zero_value(
                    services.context, &snapshot, slot,
                    runtimec_string_view_from_c_string("stringkeymap"),
                    &error) == RUNTIMEC_STATUS_UNSUPPORTED);
-        EXPECT(fake_kvspace_address(&store, "/vthread/v1/[0]/local/u") == NULL);
+        EXPECT(fake_kvspace_address(&store, "/vthread/v1/[0]/u") == NULL);
     }
 
     {
         /* 已存在但宽度与类型不符：冲突，失败封闭而不是静默覆盖。 */
         const runtimec_key_view_t slot =
-            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/local/y");
+            RUNTIMEC_KEY_VIEW_LITERAL("/vthread/v1/[0]/y");
         EXPECT(services.ensure_zero_value(
                    services.context, &snapshot, slot,
                    runtimec_string_view_from_c_string("int64"), &error) ==
