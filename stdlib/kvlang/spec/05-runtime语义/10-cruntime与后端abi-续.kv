@@ -47,7 +47,7 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
 取 XValue 的二进制指针 → memcpy `kvspaceXvalueHead` struct + `kvspaceXvalueHeadLen` 定位 body（head 固定
 16 字节，body 偏移恒 16）→ 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；
 写走 `kvspaceXvalueHeadNew*` + `WriteInPlace`/`WriteNewPlace`。锚例：`tutorial/14-numpy/`（shm 全流程）、
-`tutorial/14-networld/`（fs/proc）。
+`tutorial/byteseek/14-networld/`（fs/proc）。
 ## slot view 的使用（runtimec2, normative）
 
 - **绑定期取 view**：`kvspaceSlotView` 在绑定/首次使用槽时调用；`-2` 表示后端不支持，

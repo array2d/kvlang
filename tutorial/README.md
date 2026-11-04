@@ -26,9 +26,9 @@ kvlang tutorial/06-while/main.kv
 # ...
 
 # algo showcase — any file is self-contained
-kvlang tutorial/08-algo/fizzbuzz.kv    # FizzBuzz 1-15
-kvlang tutorial/08-algo/gcd.kv         # gcd = 6
-kvlang tutorial/08-algo/collatz.kv     # steps = 111
+kvlang tutorial/runtimec/06-algo/fizzbuzz.kv    # FizzBuzz 1-15
+kvlang tutorial/runtimec/06-algo/gcd.kv         # gcd = 6
+kvlang tutorial/runtimec/06-algo/collatz.kv     # steps = 111
 ```
 
 ## Algorithms in 08-algo

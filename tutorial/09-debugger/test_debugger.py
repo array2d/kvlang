@@ -6,7 +6,7 @@
   python3 tutorial/03-debugger/test_debugger.py
 
   # 或手动分步调试：
-  # 1. kvspace clear && ./kvlang layoutrwir tutorial/03-debugger/breakpoint.kv
+  # 1. kvspace clear && ./kvlang layoutrwir tutorial/runtimec/09-debugger/breakpoint.kv
   # 2. 终端 A: ./kvlang serve --kvspace redis://127.0.0.1:6379
   # 3. 终端 B: kvspace set /vthread/1/.debugger step
   # 4. 终端 B: kvspace set /lib/main '{"entry":"init","reads":[],"writes":[]}'

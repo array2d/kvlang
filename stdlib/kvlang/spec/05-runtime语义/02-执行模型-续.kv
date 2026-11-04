@@ -73,7 +73,7 @@ runtime 核心不含 I/O；与外部世界（进程、文件系统、网络）�
 进程 stdout/stderr）经**扩展世界句柄（storetype 3、ptr=2，@ext）**登记：写槽 storetype=3、langtype 为目标 langtype 串
 （不带 `@` 前缀）、body 为逻辑定位串（如 `/networld/<host>/proc/<pid>-<n>/stdout`），读取时由**支持 `@` 的
 rwir**（如 byteseek 的 networld/proc、networld/fs 一族）按该定位串兑现真实字节。锚例：
-`tutorial/14-networld/`。
+`tutorial/byteseek/14-networld/`。
 
 > **实现现状**（规范外提示）：当前 Rust runtime 以 `bootstrap → run_vid` 循环主导驱动 vthread；尚未
   实现"启动自注册 `/networld/<ip>/proc/<pid>` + watch vthread strkeymap 驱动"的分布式派发。该分布式
@@ -95,6 +95,6 @@ kvlang **没有独立调试器进程，也没有 `--debug` 开关**。调试模�
 - **恢复**：`kvspace set /vthread/<vid>/‥status running` 后
   `byteseek run <vid>` 从持久化 `‥pc` 续跑。
 
-锚例：`tutorial/09-debugger/`（`breakpoint.kv`、`sum_to.kv`、`chain_array.kv`）。
+锚例：`tutorial/runtimec/09-debugger/`（`breakpoint.kv`、`sum_to.kv`、`chain_array.kv`）。
 	"#### -> /lib/kvlang/spec/runtime语义/执行模型_续
 }
