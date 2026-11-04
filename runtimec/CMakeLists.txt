@@ -20,6 +20,14 @@ set(CMAKE_C_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 option(RUNTIMEC_ENABLE_JIT "Enable BinRWIR JIT compilation capability" ON)
+# **临时**：println/print/cerr 的就地实现，只为让 tutorial 的 runtimec 分组能被
+# runtimec 自己跑通。正式实现归 byteseek 扩展 runtime（issue #622 决策 D）。
+# 默认 OFF——尤其 .so 产物必须关闭，关闭后产物里 grep 不到任何 println。
+option(RUNTIMEC_TEMP_PRINTLN
+    "TEMPORARY: in-process println/print/cerr for tutorial grouping tests" OFF)
+if(RUNTIMEC_TEMP_PRINTLN)
+    message(STATUS "runtimec: TEMPORARY println enabled (must be OFF for .so)")
+endif()
 
 set(RUNTIMEC_INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include")
 # kvspace 头只有一个定义点：`kvspace` 仓自己的 include/。kvlang 内的
@@ -58,6 +66,13 @@ find_library(RUNTIMEC_KVSPACE_LIBRARY_PATH
     NAMES kvspace
     PATHS "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}"
     NO_DEFAULT_PATH)
+# layout 产物：临时 println 的端到端测试要调 kvlangLayoutCode 把源码 layout 进
+# 同一个 store。只在这个可选测试里用，缺库时该测试跳过（77）。
+find_library(KVLANG_LAYOUT_LIBRARY
+    NAMES kvlanglayout
+    PATHS "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}"
+    NO_DEFAULT_PATH)
+
 if(NOT RUNTIMEC_KVSPACE_LIBRARY_PATH)
     message(FATAL_ERROR
         "cannot find libkvspace (searched ${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}). "
@@ -130,6 +145,55 @@ runtimec_add_component(runtimec_vmkv vmkv)
 runtimec_add_component(runtimec_binrwir_compiler binrwir_compiler)
 runtimec_add_component(runtimec_vmbin vmbin)
 runtimec_add_component(runtimec_engine engine)
+# 能力行探测工具：分类器，不是测试（不进 ctest，没有期望值）。
+# 位置 tools/capability_probe/，四线作者共用一个口径。
+add_executable(capability_probe
+    tools/capability_probe/capability_probe.c)
+target_compile_features(capability_probe PRIVATE c_std_11)
+# fileno/dup/dup2 是 POSIX：显式打开 _GNU_SOURCE，不靠编译器默认方言。
+target_compile_definitions(capability_probe PRIVATE _GNU_SOURCE)
+target_include_directories(capability_probe PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVLANG_INCLUDE_DIRECTORY}")
+target_link_libraries(capability_probe PRIVATE
+    runtimec_contract runtimec_host runtimec_vmbin runtimec_engine
+    "${CMAKE_DL_LIBS}")
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(capability_probe PRIVATE
+        -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+# 开关只决定宏：temp_println.c 由 GLOB 收进源文件表，关闭时整个文件被
+# `#ifdef RUNTIMEC_TEMP_PRINTLN` 编成空翻译单元，不留任何符号。
+#
+# 三个目标都要这个宏，缺一个就出现「表建得出来但装不进/编不进」：
+#   vmbin  → handler 实现
+#   vmkv   → 按调用点实参个数展开变参
+#   engine → 把三条表交给 session 的 builtin 注册表
+# 少给一个的表现是「执行成功但零输出」——所有断言都过，只有 stdout 是空的。
+if(RUNTIMEC_TEMP_PRINTLN)
+    foreach(temporary_target
+            runtimec_vmbin runtimec_vmkv runtimec_engine)
+        target_compile_definitions(${temporary_target}
+            PRIVATE RUNTIMEC_TEMP_PRINTLN=1)
+    endforeach()
+endif()
+# 开关只决定宏：temp_println.c 由 GLOB 收进源文件表，关闭时整个文件被
+# `#ifdef RUNTIMEC_TEMP_PRINTLN` 编成空翻译单元，不留任何符号。
+#
+# 三个目标都要这个宏，缺一个就出现「表建得出来但装不进/编不进」：
+#   vmbin  → handler 实现
+#   vmkv   → 按调用点实参个数展开变参
+#   engine → 把三条表交给 session 的 builtin 注册表
+# 少给一个的表现是「执行成功但零输出」——所有断言都过，只有 stdout 是空的。
+if(RUNTIMEC_TEMP_PRINTLN)
+    foreach(temporary_target
+            runtimec_vmbin runtimec_vmkv runtimec_engine)
+        target_compile_definitions(${temporary_target}
+            PRIVATE RUNTIMEC_TEMP_PRINTLN=1)
+    endforeach()
+endif()
 
 target_include_directories(runtimec_contract
     PUBLIC

@@ -14,6 +14,9 @@
 #include "binrwir_compiler/compiler.h"
 #include "engine/compilation_repository.h"
 #include "vmbin/builtin/registry.h"
+#ifdef RUNTIMEC_TEMP_PRINTLN
+#include "vmbin/temp_println.h"
+#endif
 #include "vmkv/encoder.h"
 
 /* 编译器修订号：compilation repository 的 key 字段之一，非零且在构建内固定。 */
@@ -107,8 +110,18 @@ runtimec_status_t runtimec_session_create(
     session->host_services = *host_services;
     session->options = *options;
 
+    /*
+     * builtin 注册表：本阶段正常为零条目——没有 builtin 实现。开启临时 println
+     * 开关时装入那三条（见 vmbin/temp_println.h）：它们只为让 tutorial 的 runtimec
+     * 分组能跑，正式实现归 byteseek 扩展 runtime（issue #622 决策 D）。
+     */
+    const vmbin_builtin_entry_t *builtin_entries = NULL;
+    size_t builtin_entry_count = 0U;
+#ifdef RUNTIMEC_TEMP_PRINTLN
+    builtin_entries = runtimec_temp_println_entries(&builtin_entry_count);
+#endif
     runtimec_status_t status = vmbin_builtin_registry_initialize(
-        &session->builtin_registry, NULL, 0U);
+        &session->builtin_registry, builtin_entries, builtin_entry_count);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         status = runtimec_session_forward(error, status, "builtin registry");
         goto fail;

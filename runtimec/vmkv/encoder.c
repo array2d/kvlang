@@ -885,6 +885,113 @@ static runtimec_status_t vmkv_encoder_resolve_write_types(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+#ifdef RUNTIMEC_TEMP_PRINTLN
+/*
+ * **临时**：三个输出算子的名字 → 保留区 opid。名单只在这里出现一次；
+ * 开关关闭时整段不参与编译，`println` 回到 FOREIGN 原行为。
+ *
+ * opid 取 0xFFFF0001..0xFFFF0003——不是能力表编号，与 FOREIGN(0xFFFFFFFE) 不撞。
+ */
+static int vmkv_encoder_temp_output_identifier(runtimec_string_view_t name,
+                                               uint32_t *output_identifier) {
+    static const struct {
+        const char *name;
+        uint32_t identifier;
+    } table[] = {
+        {"println", UINT32_C(0xFFFF0001)},
+        {"print", UINT32_C(0xFFFF0002)},
+        {"cerr", UINT32_C(0xFFFF0003)},
+    };
+
+    *output_identifier = 0U;
+    for (size_t ordinal = 0U; ordinal < sizeof(table) / sizeof(table[0]);
+         ++ordinal) {
+        const size_t size = strlen(table[ordinal].name);
+        if (name.size == size &&
+            memcmp(name.data, table[ordinal].name, size) == 0) {
+            *output_identifier = table[ordinal].identifier;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/*
+ * **临时**：按调用点的实参个数展开成 N 个定长读参槽。
+ *
+ * 每个实参走既有 `vmkv_encoder_map_argument`：独立取 argidx、独立登记
+ * 字面量/符号池、按引用种类（LITERAL / LOCAL / STATIC / 形参）编码。
+ * 因此展开不改变任何布局——帧槽容量只由签名与符号池决定，实参不进帧槽。
+ *
+ * 类型表按「不做类型收敛」处理：输出算子的实参类型由各自值决定，编码期不裁剪。
+ */
+static runtimec_status_t vmkv_encoder_encode_temporary_output(
+    vmkv_encoder_t *encoder, const vmkv_encode_request_t *request,
+    binrwir_program_builder_t *builder,
+    vmkv_encode_function_t *function,
+    const vmkv_rwir_instruction_view_t *source_instruction,
+    uint32_t operation_identifier,
+    runtimec_program_counter_t logical_program_counter,
+    vmkv_canonical_instruction_t *output_instruction,
+    runtimec_error_t *error) {
+    const size_t read_count = source_instruction->read_argument_count;
+    runtimec_status_t status = vmkv_encoder_reserve(
+        encoder, read_count == 0U ? 1U : read_count, error);
+
+    (void)builder;
+    (void)function;
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    for (size_t ordinal = 0U; ordinal < read_count; ++ordinal) {
+        const vmkv_rwir_argument_view_t *source_argument =
+            &source_instruction->read_arguments[ordinal];
+        binrwir_argument_t *target = &encoder->arguments[ordinal];
+
+        if (source_argument->literal.bytes.data != NULL) {
+            uint32_t literal_index = BINRWIR_LITERAL_INDEX_NONE;
+
+            status = binrwir_program_builder_add_literal(
+                builder, source_argument->literal.bytes,
+                source_argument->literal.langtype, &literal_index);
+            if (status != RUNTIMEC_STATUS_SUCCESS) {
+                return vmkv_encoder_fail(
+                    error, status, VMKV_ENCODER_DIAG_PROGRAM_REJECTED,
+                    "vmkv encoder: program builder rejected a literal",
+                    logical_program_counter);
+            }
+            uint32_t argument_index = 0U;
+            status = vmkv_encoder_take_operand_argument_index(
+                function, &argument_index, logical_program_counter, error);
+            if (status != RUNTIMEC_STATUS_SUCCESS) {
+                return status;
+            }
+            *target = (binrwir_argument_t){0};
+            target->argument_index = argument_index;
+            target->reference_kind = (uint8_t)BINRWIR_REFERENCE_LITERAL;
+            target->payload = literal_index;
+            continue;
+        }
+        status = vmkv_encoder_map_argument(
+            request, builder, NULL, function, source_argument, false, target,
+            logical_program_counter, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+    }
+    output_instruction->operation_identifier = operation_identifier;
+    output_instruction->logical_program_counter =
+        source_instruction->logical_program_counter;
+    output_instruction->read_arguments =
+        (binrwir_argument_span_t){encoder->arguments, read_count};
+    output_instruction->write_arguments = (binrwir_argument_span_t){0};
+    output_instruction->read_parameter_types = NULL;
+    output_instruction->write_parameter_types = NULL;
+    output_instruction->aliasing_declared = false;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+#endif /* RUNTIMEC_TEMP_PRINTLN */
+
 runtimec_status_t vmkv_encode_instruction(
     vmkv_encoder_t *encoder, const vmkv_encode_request_t *request,
     binrwir_program_builder_t *builder,
@@ -933,6 +1040,37 @@ runtimec_status_t vmkv_encode_instruction(
             : vmkv_rwir_manifest_find_operation(
                   source_instruction->operation_name);
     if (capability == NULL) {
+#ifdef RUNTIMEC_TEMP_PRINTLN
+        /*
+         * **临时**：`println` / `print` / `cerr` 三个输出算子就地实现，仅为让
+         * tutorial 的 runtimec 分组能被 runtimec 自己跑通。正式实现归 byteseek
+         * 扩展 runtime（issue #622 决策 D），它们的进程内 opcode 刻意不进
+         * myrwircaps 能力表。开关默认 OFF；关闭时本分支不参与编译，三条算子回到
+         * 下面的 FOREIGN 原行为。
+         *
+         * 形状：`def rwir` 声明 nr=1 + dynamic=1（layout 就这么产，别改它），
+         * 编码期按**调用点的实参个数**展开成 N 个定长读参槽——每槽独立取 argidx、
+         * 独立登记字面量/符号，与其它非形参引用走同一条路。运行期看到的永远是
+         * 一条 N 槽的普通指令，不需要知道「变参」这回事。
+         *
+         * 展开 N 槽**不改变任何布局**：next_operand_argument_index 本来就是每个
+         * 非形参引用取一个并单调递增；帧槽容量只由签名与符号池决定，实参照常走
+         * 符号池/字面量池，不进帧槽。
+         */
+        uint32_t temporary_identifier = 0U;
+        if (vmkv_encoder_temp_output_identifier(
+                source_instruction->operation_name, &temporary_identifier)) {
+            runtimec_status_t temp_status =
+                vmkv_encoder_encode_temporary_output(
+                    encoder, request, builder, function, source_instruction,
+                    temporary_identifier, logical_program_counter,
+                    output_instruction, error);
+            if (temp_status != RUNTIMEC_STATUS_SUCCESS) {
+                return temp_status;
+            }
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+#endif
         /*
          * 不在 alias 表里 = 本 runtime 不提供的能力（外部 runtime 就地实现，例如
          * println）。照常留在 Program 里，编成 FOREIGN 结构标记：只携带 source pc，
