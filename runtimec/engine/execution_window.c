@@ -334,6 +334,8 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
     const runtimec_host_services_t *host, const runtimec_snapshot_t *snapshot,
     const binrwir_program_t *program,
     const runtimec_execution_window_request_t *request,
+    binrwir_frame_bindings_t *bindings, size_t binding_capacity,
+    uint64_t *generation_in_out,
     runtimec_execution_window_diagnostic_t *output_detail,
     runtimec_error_t *error) {
     binrwir_program_view_t program_view;
@@ -434,9 +436,64 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
         memcpy(key_text + request->frame_path.size + 1U, name.data, name.size);
         key_text[key_size] = '\0';
 
-        status = host->ensure_zero_value(
-            host->context, snapshot,
-            runtimec_key_view_make(key_text, key_size), langtype, error);
+        const runtimec_key_view_t slot_key =
+            runtimec_key_view_make(key_text, key_size);
+        status = host->ensure_zero_value(host->context, snapshot, slot_key,
+                                         langtype, error);
+        if (status == RUNTIMEC_STATUS_SUCCESS) {
+            /*
+             * 建出值只是「存储里有了」。执行期读它走的是绑定表——不绑就
+             * UNBOUND_SLOT。绑定必须紧接在建值之后：中间若被别的路径插进来，
+             * 就会出现「存储有、表里没有」的半状态。
+             *
+             * 槽号是 frame_slot 的分区：读参 + 写参 + 符号下标。
+             */
+            runtimec_xvalue_address_t xvalue_address =
+                RUNTIMEC_XVALUE_ADDRESS_NONE;
+            uint64_t generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
+            /*
+             * 槽号经 `vmbin/frame_slot` 换算，**不在这里手写加法**：
+             * 同一个换算若出现两处，一处改了另一处忘改就是错位绑定，而错位
+             * 绑定不会当场报错，只会让值写进别的槽。
+             */
+            uint16_t binding_slot = BINRWIR_FRAME_BINDING_SLOT_NONE;
+
+            status = vmbin_frame_slot_of_local_symbol(
+                program, (uint16_t)symbol_ordinal, &binding_slot);
+            if (status != RUNTIMEC_STATUS_SUCCESS) {
+                *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED;
+            }
+            if (status == RUNTIMEC_STATUS_SUCCESS) {
+                status = host->resolve_frame_xvalue_address(
+                    host->context, snapshot, slot_key, &xvalue_address,
+                    &generation, error);
+            }
+            if (status == RUNTIMEC_STATUS_SUCCESS) {
+                if (xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE ||
+                    generation == BINRWIR_FRAME_BINDING_GENERATION_NONE ||
+                    binding_slot >= binding_capacity) {
+                    *output_detail =
+                        RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED;
+                    status = RUNTIMEC_STATUS_INVALID;
+                } else if (*generation_in_out ==
+                           BINRWIR_FRAME_BINDING_GENERATION_NONE) {
+                    *generation_in_out = generation;
+                } else if (*generation_in_out != generation) {
+                    /* 绑到一半存储换代：这一帧的局部不再属于同一份快照。 */
+                    *output_detail =
+                        RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED;
+                    status = RUNTIMEC_STATUS_ERROR;
+                }
+            }
+            if (status == RUNTIMEC_STATUS_SUCCESS &&
+                binrwir_frame_bindings_bind(bindings, binding_slot, slot_key,
+                                            slot_key, xvalue_address,
+                                            generation) !=
+                    RUNTIMEC_STATUS_SUCCESS) {
+                *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED;
+                status = RUNTIMEC_STATUS_INVALID;
+            }
+        }
         (void)runtimec_allocator_deallocate(&host->allocator, key_text,
                                             key_size + 1U, 1U);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -535,6 +592,8 @@ runtimec_status_t runtimec_execution_window_execute(
     uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
     bool lease_held = false;
     bool frame_ready = false;
+    /* 调用方给的 kvspace 句柄，原样透传给执行期；本层不连接、不关闭、不解释。 */
+    void *kvspace_handle = NULL;
     runtimec_status_t status;
 
     if (output_result == NULL) {
@@ -573,6 +632,18 @@ runtimec_status_t runtimec_execution_window_execute(
             output_result, error, RUNTIMEC_STATUS_NOT_IMPLEMENTED,
             RUNTIMEC_EXECUTION_WINDOW_DIAG_MISSING_HOST_CAPABILITY,
             "host services lack a capability this route requires");
+    }
+    /*
+     * kvspace 句柄**可以为 NULL**：不接存储的 session（多数单测）走到底都不碰
+     * 存储，硬要求它非空会让这些用例全部失败。需要存储的 handler 自己在拿到
+     * NULL 时失败封闭——那才是「谁需要谁检查」。
+     */
+    if (runtimec_session_get_kvspace_handle(session, &kvspace_handle) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_execution_window_fail(
+            output_result, error, RUNTIMEC_STATUS_INVALID,
+            RUNTIMEC_EXECUTION_WINDOW_DIAG_INVALID_REQUEST,
+            "cannot read the kvspace handle from the session");
     }
 
     /* 1. 权威快照：source revision 是地址与 compilation 的共同世代。 */
@@ -698,8 +769,8 @@ runtimec_status_t runtimec_execution_window_execute(
         goto release_bindings;
     }
     status = runtimec_execution_window_materialize_locals(
-        host, &snapshot, compilation_view.canonical_program, request, &detail,
-        error);
+        host, &snapshot, compilation_view.canonical_program, request, bindings,
+        binding_capacity, &binding_generation, &detail, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         status = runtimec_execution_window_fail(
             output_result, error, status, detail,
@@ -740,6 +811,13 @@ runtimec_status_t runtimec_execution_window_execute(
                                      "execution frame initialization failed");
         goto release_bindings;
     }
+    /*
+     * 帧路径原样借用——不重新拼接。重新拼就是第二份地址来源，一旦与请求里
+     * 那份不一致，事后无法判断哪一份才是调用方要的。借用视图，不拷贝：
+     * 字节归请求所有，本次调用内有效。
+     */
+    frame.frame_path = runtimec_key_view_make(request->frame_path.data,
+                                              request->frame_path.size);
     frame.bindings = bindings;
     frame_ready = true;
 
@@ -751,7 +829,7 @@ runtimec_status_t runtimec_execution_window_execute(
     } else {
         status = vmbin_execute(compilation_view.canonical_program,
                                compilation_view.execution_plan, &frame,
-                               components.builtin_registry, NULL,
+                               components.builtin_registry, kvspace_handle, NULL,
                                &execution_exit);
     }
     output_result->execution_exit = execution_exit;

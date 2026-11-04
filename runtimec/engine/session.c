@@ -14,6 +14,7 @@
 #include "binrwir_compiler/compiler.h"
 #include "engine/compilation_repository.h"
 #include "binrwir/registry.h"
+#include "vmbin/handlers/host.h"
 #ifdef RUNTIMEC_TEMP_PRINTLN
 #include "vmbin/temp_println.h"
 #endif
@@ -47,6 +48,8 @@ struct runtimec_session_t {
     binrwir_registry_t builtin_registry;
     /* checkpoint 的单调提交序号，route 经访问器取号。 */
     uint64_t checkpoint_sequence;
+    /* kvspace 句柄：调用方的，session 只借用；EventHandler 需要存储时经此取。 */
+    void *kvspace_handle;
 };
 
 static runtimec_status_t runtimec_session_fail(runtimec_error_t *error,
@@ -109,6 +112,8 @@ runtimec_status_t runtimec_session_create(
     memset(session, 0, sizeof(*session));
     session->host_services = *host_services;
     session->options = *options;
+    /* 借用调用方的句柄：session 不连接、不关闭，只透传给执行期。 */
+    session->kvspace_handle = options->kvspace_handle;
 
     /*
      * builtin 注册表：置空后按模块追加。零条目是合法状态——不装任何 builtin 的
@@ -135,6 +140,23 @@ runtimec_status_t runtimec_session_create(
         }
     }
 #endif
+    /*
+     * host 服务模块（C 线）：kvspace / vthread / random 共 21 条。
+     * 每个模块一行，由各自文件提供静态条目表；本函数只负责追加。
+     * 其余三条线（scalar / container / string）交付后各加一行，不批量改。
+     */
+    {
+        size_t host_entry_count = 0U;
+        const binrwir_registry_entry_t *host_entries =
+            runtimec_host_handler_entries(&host_entry_count);
+
+        status = binrwir_registry_append(&session->builtin_registry, "host",
+                                         host_entries, host_entry_count, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            status = runtimec_session_forward(error, status, "builtin registry");
+            goto fail;
+        }
+    }
 
     status = vmkv_encoder_create(allocator, &session->vmkv_encoder, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -238,6 +260,19 @@ runtimec_status_t runtimec_session_get_host_services(
         return RUNTIMEC_STATUS_INVALID;
     }
     *output_host_services = &session->host_services;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+runtimec_status_t runtimec_session_get_kvspace_handle(
+    runtimec_session_t *session, void **output_kvspace_handle) {
+    if (output_kvspace_handle != NULL) {
+        *output_kvspace_handle = NULL;
+    }
+    if (session == NULL || output_kvspace_handle == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    /* NULL 是合法值（不接存储的用例）：成功但句柄为空，不当作失败。 */
+    *output_kvspace_handle = session->kvspace_handle;
     return RUNTIMEC_STATUS_SUCCESS;
 }
 

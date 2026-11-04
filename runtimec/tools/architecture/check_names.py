@@ -202,6 +202,23 @@ def c_code_without_comments_or_literals(text: str) -> str:
     )
 
 
+# 只抹注释、**保留字符串字面量**。调试标记判据要的正是这个区分：注释里写
+# TODO 是正常批注，字符串里写 TODO 才是「把调试标记留进产品」。
+C_COMMENTS_ONLY_PATTERN = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
+
+
+def c_code_without_comments(text: str) -> str:
+    """把注释抹成空白，保留字符串字面量与代码结构。
+
+    抹成**等长空白**而不是删除：行号与列号必须与原文件一致，否则诊断指到
+    别处——这个判据之前就吃过一次亏（匹配在 44 行，却报在 22 行，因为旧实现
+    扫的是原文、正则跨行匹配把起点算在了更早的位置）。
+    """
+    return C_COMMENTS_ONLY_PATTERN.sub(
+        lambda match: re.sub(r"[^\n]", " ", match.group(0)), text,
+    )
+
+
 # 上游 ABI 里的短字段名（如 kvspace 值头的 `ptr`）在我们这里没有命名权：成员访问与
 # `offsetof` 第二参数里的标识符必须与上游同名。缩写规则要守的是「我们自己命名时不用
 # 缩写」，所以这些位置不参与缩写检查。独立出现的同名标识符仍然照报。
@@ -211,7 +228,12 @@ OFFSETOF_FIELD_PATTERN = re.compile(r"\boffsetof\s*\([^,()]*,\s*([A-Za-z_][A-Za-
 
 # 上游 ABI 的宏名同样由上游定义。列出具体名字而不是整体豁免大写标识符的缩写检查：
 # 白名单膨胀是可见的，而「宏名一律放过」会连带放过我们自己造的大写缩写。
-FOREIGN_ABI_IDENTIFIERS = ("KVSPACE_XVALUE_HEAD_LEN", "KVSPACE_XVALUE_PTR_INLINE")
+FOREIGN_ABI_IDENTIFIERS = (
+    "KVSPACE_XVALUE_HEAD_LEN", "KVSPACE_XVALUE_PTR_INLINE",
+    # kvspace C ABI 的存储位置常量：`ref` 是上游的拼写，这里没有命名权。
+    # 调用方要用 `kvspaceWriteNewPlace` 指定 ref 时只能写这个名字。
+    "KVSPACE_REF_INLINE", "KVSPACE_REF_PTR", "KVSPACE_REF_EXT",
+)
 
 
 def mask_foreign_abi_positions(code: str) -> str:
@@ -244,6 +266,7 @@ def audit_output_channels(runtimec_root: Path,
             except (OSError, UnicodeError):
                 continue
             code = c_code_without_comments_or_literals(text)
+            code_without_comments = c_code_without_comments(text)
             for match in STDOUT_WRITE_PATTERN.finditer(code):
                 findings.append(Finding(
                     display, code.count("\n", 0, match.start()) + 1,
@@ -251,10 +274,13 @@ def audit_output_channels(runtimec_root: Path,
                     "the shared library has no stdout; report diagnostics through the "
                     "error object",
                 ))
-            # 标记在字面量里，注释已被抹掉——所以这里直接扫原文。
-            for match in DEBUG_MARKER_PATTERN.finditer(text):
+            # 判据是「字符串字面量里不许有调试标记，注释里写是正常批注」。
+            # 所以先抹注释再扫，而不是扫原文：扫原文会把注释里的 TODO 报成
+            # 违规，与这条判据自己的定义相反。
+            for match in DEBUG_MARKER_PATTERN.finditer(code_without_comments):
                 findings.append(Finding(
-                    display, text.count("\n", 0, match.start()) + 1,
+                    display,
+                    code_without_comments.count("\n", 0, match.start()) + 1,
                     "debug-marker-in-product-source",
                     "a debug marker left in a product string literal",
                 ))
@@ -366,6 +392,27 @@ SELFTEST_CASES = (
      ("debug-marker-in-product-source",)),
     ("todo-in-comment-is-fine", "/* TODO: 稍后处理 */\nstatic int probe(void) { return 0; }\n",
      ()),
+    # 跨行误匹配：`#include "..."` 的引号与几十行后注释里的 TODO 被同一个正则
+    # 从一对引号跨行连起来，于是**误报**、而且行号指到 include 那一行。
+    #
+    # 这条 fixture 必须带上前面的含引号行——只写一个注释块测不出来：正则要求以
+    # `"` 开头，纯注释永远不会匹配，两种实现都绿，缺陷就被藏住了。
+    # （2026-11-04 真实踩到：`vmbin/handlers/host.c` 注释里的 TODO 被报在
+    #  include 行，实际位置在几十行之后。）
+    ("todo-in-comment-across-includes-is-fine",
+     '#include "contract/status.h"\n'
+     '#include "kvspace/kvspace.h"\n'
+     "\n"
+     "/*\n"
+     " * 待补（后续独立能力）：动态 key 的引用解析。TODO 记在这里。\n"
+     " */\n"
+     "static int probe(void) { return 0; }\n",
+     ()),
+    # 反过来：字符串字面量里的标记必须报。否则「注释里的不报」可能被实现成
+    # 「一律不报」，判据就废了。
+    ("todo-in-string-is-reported",
+     'static const char *message = "TODO remove before ship";\n',
+     ("debug-marker-in-product-source",)),
     # 成员访问旁边的独立使用不得被豁免连带放过。
     ("mixed-member-and-local",
      "static int ptr;\n"

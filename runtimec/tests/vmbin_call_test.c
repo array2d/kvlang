@@ -168,6 +168,8 @@ typedef struct test_program_source {
 static runtimec_status_t test_program_build(
     const runtimec_allocator_t *allocator, const test_program_source_t *source,
     binrwir_program_t **output_program) {
+    /* 同 `vmbin_execute_test`：字面量 wire 的落地缓冲要活到 finalize。 */
+    static uint8_t literal_wires[8][KVSPACE_XVALUE_HEAD_LEN + TEST_VALUE_CAPACITY];
     binrwir_program_identity_t identity;
     binrwir_program_builder_t *builder = NULL;
     uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
@@ -233,12 +235,34 @@ static runtimec_status_t test_program_build(
          ++ordinal) {
         uint32_t literal_index = BINRWIR_LITERAL_INDEX_NONE;
 
-        status = binrwir_program_builder_add_literal(
-            builder,
-            runtimec_bytes_view_make(source->literal_bytes[ordinal],
-                                     source->literal_sizes[ordinal]),
-            runtimec_string_view_from_c_string(source->literal_types[ordinal]),
-            &literal_index);
+        /*
+         * `add_literal` 收**完整 wire**，本测试的 `literal_bytes` 是裸 body。
+         * 在登记处补 16 字节头，各用例仍然只写值。
+         */
+        {
+            uint8_t *literal_wire = literal_wires[ordinal];
+            kvspaceXvalueHead head;
+
+            if (source->literal_sizes[ordinal] > TEST_VALUE_CAPACITY) {
+                status = RUNTIMEC_STATUS_INVALID;
+                break;
+            }
+            memset(&head, 0, sizeof(head));
+            kvspaceXvalueHeadSetLen(&head, source->literal_sizes[ordinal]);
+            head.storetype = KVSPACE_XVALUE_ST_SHORT;
+            memcpy(literal_wire, &head, KVSPACE_XVALUE_HEAD_LEN);
+            memcpy(literal_wire + KVSPACE_XVALUE_HEAD_LEN,
+                   source->literal_bytes[ordinal],
+                   source->literal_sizes[ordinal]);
+            status = binrwir_program_builder_add_literal(
+                builder,
+                runtimec_bytes_view_make(
+                    literal_wire,
+                    KVSPACE_XVALUE_HEAD_LEN + source->literal_sizes[ordinal]),
+                runtimec_string_view_from_c_string(
+                    source->literal_types[ordinal]),
+                &literal_index);
+        }
     }
     for (ordinal = 0U; status == RUNTIMEC_STATUS_SUCCESS &&
                         ordinal < source->instruction_count;
@@ -452,7 +476,7 @@ static void test_enter_binds_and_return_releases(void) {
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(callee_program, NULL, &callee, &registry,
-                                  NULL, &exit_state) ==
+                                  NULL, NULL, &exit_state) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_DONE);
     RUNTIMEC_EXPECT(test_value_int64(&write_value) == 11);
@@ -701,7 +725,7 @@ static void test_may_alias_shares_storage(void) {
         RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                         RUNTIMEC_STATUS_SUCCESS);
         RUNTIMEC_EXPECT(vmbin_execute(fixture.callee_program, NULL,
-                                      &fixture.callee, &registry, NULL,
+                                      &fixture.callee, &registry, NULL, NULL,
                                       &exit_state) == RUNTIMEC_STATUS_SUCCESS);
         /* 别名生效：写进去的 5 被随后的读看到了。 */
         RUNTIMEC_EXPECT(test_value_int64(&seen) == 5);
@@ -830,7 +854,7 @@ static void test_nested_calls_keep_outer_addresses(void) {
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(inner_program, NULL, &inner_frame, &registry,
-                                  NULL, &exit_state) ==
+                                  NULL, NULL, &exit_state) ==
                     RUNTIMEC_STATUS_SUCCESS);
     /* 内层写进的是 middle 形参的地址，而 middle 形参指的就是最外层实参存储。 */
     RUNTIMEC_EXPECT(test_value_int64(&sink_value) == 33);
@@ -917,7 +941,7 @@ static void test_literal_actual_is_inline(void) {
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(fixture.callee_program, NULL, &fixture.callee,
-                                  &registry, NULL, &exit_state) ==
+                                  &registry, NULL, NULL, &exit_state) ==
                     RUNTIMEC_STATUS_SUCCESS);
     /* 字面量 64 经内联绑定进了被调形参，又被复制到调用方的写实参存储。 */
     RUNTIMEC_EXPECT(test_value_int64(&write_value) == 64);
@@ -991,7 +1015,7 @@ static void test_static_actual_is_bound_by_inverse(void) {
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_execute(fixture.callee_program, NULL, &fixture.callee,
-                                  &registry, NULL, &exit_state) ==
+                                  &registry, NULL, NULL, &exit_state) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(test_value_int64(&write_value) == 21);
     RUNTIMEC_EXPECT(vmbin_call_return(&fixture.caller, &fixture.callee,
@@ -1202,7 +1226,7 @@ static void test_call_exit_reports_resume_position(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     /* 执行调用方自己的 Program：第一条就是 call。 */
     RUNTIMEC_EXPECT(vmbin_execute(fixture.caller_program, NULL, &fixture.caller,
-                                  &registry, NULL, &exit_state) ==
+                                  &registry, NULL, NULL, &exit_state) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_CALL);
     RUNTIMEC_EXPECT(exit_state.logical_program_counter == 1U);
@@ -1318,7 +1342,7 @@ static void test_repeated_calls_on_same_frame(void) {
                         test_value_xvalue_address(&write_values[round]));
 
         RUNTIMEC_EXPECT(vmbin_execute(fixture.callee_program, NULL,
-                                      &fixture.callee, &registry, NULL,
+                                      &fixture.callee, &registry, NULL, NULL,
                                       &exit_state) == RUNTIMEC_STATUS_SUCCESS);
         RUNTIMEC_EXPECT(test_value_int64(&write_values[round]) ==
                         (int64_t)(round + 1) * 10);

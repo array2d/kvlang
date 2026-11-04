@@ -81,11 +81,22 @@ static runtimec_status_t vmbin_interpreter_fail_with_error(
 }
 
 /* 借出一个参数项的值体位置；读写信都从这里拿地址，不复制。 */
+/*
+ * 本文件的三处调用（copy、branch 条件、goto/branch 目标）**全都只认 body**：
+ * copy 是值对值地搬，另两处把字节解成整数当跳转目标/条件。没有一处要整条 wire。
+ *
+ * 因此这里走 `_body` 版本。此前用的是 wire 版（`vmbin_value_access_locate`），
+ * 对字面量它返回的是**整条 wire**（头 + body + attr），于是 COPY 把 17 字节的
+ * wire 当成值写进 8 字节的 body 槽——写进去的是值头里的 `bodylen`、指令视图
+ * 里的 opid 与 source pc，字面量本身反而不在里面。
+ *
+ * 判据是「这一层要的是值还是整条 XValue」：执行器的算术只吃值。
+ */
 static runtimec_status_t vmbin_interpreter_locate(
     vmbin_execution_t *execution, const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location) {
-    return vmbin_value_access_locate(execution->frame, argument,
-                                     output_location, &execution->error);
+    return vmbin_value_access_locate_body(execution->frame, argument,
+                                          output_location, &execution->error);
 }
 
 /* 1/2/4/8 字节整数按主机字节序解成无符号值；其它宽度不是本阶段的值形状。 */
@@ -193,7 +204,7 @@ static runtimec_status_t vmbin_interpreter_execute_copy(
             execution, instruction, status, VMBIN_INTERPRETER_DIAG_VALUE_ACCESS,
             output_exit);
     }
-    status = vmbin_value_access_write(
+    status = vmbin_value_access_write_body(
         execution->frame, &instruction->write_arguments.data[0],
         runtimec_bytes_view_make(source.read_bytes, source.size),
         &execution->error);
@@ -445,6 +456,7 @@ vmbin_execute(const binrwir_program_t *program,
               const binrwir_execution_plan_t *execution_plan,
               binrwir_execution_frame_t *frame,
               const binrwir_registry_t *builtin_registry,
+              void *kvspace_handle,
               vmbin_profile_t *profile,
               binrwir_execution_exit_t *output_exit) {
     vmbin_execution_t execution;
@@ -474,6 +486,8 @@ vmbin_execute(const binrwir_program_t *program,
     execution.builtin_registry = builtin_registry;
     execution.profile = profile;
     execution.frame = frame;
+    /* 本层不认识存储：只把句柄放进 Frame，由 handler 直接调 kvspace ABI。 */
+    frame->kvspace_handle = kvspace_handle;
     /* call 出口要靠它判断「有没有后继指令」，从而给出可恢复位置。 */
     execution.instruction_count = program_view.instruction_count;
 

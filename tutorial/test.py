@@ -293,10 +293,39 @@ def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
         return False, "timeout"
     if crun.returncode != 0:
         return False, f"term exit {crun.returncode}: {crun.stderr.strip()[:100]}"
-    for pat in expects:
-        if pat not in crun.stdout:
-            return False, f"want {pat!r}"
+    ok, detail = _compare_lines(expects, crun.stdout)
+    if not ok:
+        return False, detail
     return True, crun.stdout[:200]
+
+
+def _normalize_output_lines(text: str) -> list[str]:
+    """按行切分并剥掉行尾空白。
+
+    行尾空白是唯一的归一化：编辑器与不同 printf 实现会在行尾留空格，
+    那不是语义差异。除此之外不做任何宽容——不去空行、不排序、不去重、
+    不折叠内部空白。
+    """
+    if not text:
+        return []
+    return [line.rstrip() for line in text.splitlines()]
+
+
+def _compare_lines(expects: list[str], actual_stdout: str) -> tuple[bool, str]:
+    """逐行完全相同：行数相等且每一行 ==。
+
+    以前这里是 `pat in stdout` 的子串包含，那是个假绿生成器：
+    多打印不管、顺序错不管、期望 `1` 还能匹到 `12`。
+    """
+    expected_lines = [line.rstrip() for line in expects]
+    actual_lines = _normalize_output_lines(actual_stdout)
+    if len(expected_lines) != len(actual_lines):
+        return False, (f"line count {len(actual_lines)} != expected "
+                       f"{len(expected_lines)}")
+    for ordinal, (want, got) in enumerate(zip(expected_lines, actual_lines), 1):
+        if want != got:
+            return False, f"line {ordinal}: want {want!r} got {got!r}"
+    return True, ""
 
 
 def main():

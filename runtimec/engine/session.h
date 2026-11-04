@@ -33,6 +33,14 @@ typedef struct runtimec_session_options_t {
     size_t compilation_cache_capacity;
     size_t machine_code_capacity;
     bool enable_jit;
+    /*
+     * kvspace 句柄（`kvspaceConnect` 的原样返回值）。**调用方 connect 并拥有**，
+     * session 只借用、不关闭——关闭时机属于 connect 的那一方。
+     *
+     * 为什么走 options 而不是 create 参数：session 不发明 DSN，也不该替调用方
+     * 决定后端；这里只收一个已经打开的句柄。可以为 NULL（不接存储的用例）。
+     */
+    void *kvspace_handle;
 } runtimec_session_options_t;
 runtimec_status_t runtimec_session_create(
     const runtimec_host_services_t *host_services,
@@ -43,6 +51,12 @@ runtimec_status_t runtimec_session_destroy(runtimec_session_t *session);
 runtimec_status_t runtimec_session_get_host_services(
     runtimec_session_t *session,
     const runtimec_host_services_t **output_host_services);
+/*
+ * 借出调用方给的 kvspace 句柄（`options.kvspace_handle` 的原样透传）。
+ * 句柄可以为 NULL：表示本 session 不接存储，此时返回 SUCCESS 且输出为 NULL。
+ */
+runtimec_status_t runtimec_session_get_kvspace_handle(
+    runtimec_session_t *session, void **output_kvspace_handle);
 runtimec_status_t runtimec_session_clear_derived_state(
     runtimec_session_t *session);
 

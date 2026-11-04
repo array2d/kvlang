@@ -60,6 +60,7 @@ static int failures;
 #define TEST_MISSING_TARGET "/lib/missing"
 #define TEST_ZERO_ARGUMENT_TARGET "/lib/zero"
 #define TEST_LOCALS_TARGET "/lib/locals"
+#define TEST_ROUND_TRIP_TARGET "/lib/round-trip"
 #define TEST_VTHREAD "2"
 #define TEST_FRAME_PATH "/vthread/2/[1]"
 #define TEST_STACK_IDENTIFIER 1
@@ -94,6 +95,10 @@ typedef struct test_context {
     bool snapshot_generation_override_active;
     /* 局部物化记录：key 顺序、以及按类型回读到的 body 宽度。 */
     char materialized_keys[8][128];
+    /* 物化出来的真实存储：读写往返靠它，不只是记名字。 */
+    test_frame_slot_t materialized_slots[8];
+    test_value_t materialized_storage[8];
+    size_t materialized_slot_count;
     size_t materialized_key_count;
     uint64_t materialized_int64_width;
     uint64_t materialized_bool_width;
@@ -193,6 +198,19 @@ static runtimec_status_t test_resolve_frame_xvalue_address(
             return RUNTIMEC_STATUS_SUCCESS;
         }
     }
+    for (ordinal = 0U; ordinal < test->materialized_slot_count; ++ordinal) {
+        const char *slot_key = test->materialized_slots[ordinal].key;
+        if (strlen(slot_key) == key.size &&
+            memcmp(slot_key, key.data, key.size) == 0) {
+            *output_xvalue_address =
+                (runtimec_xvalue_address_t)(uintptr_t)test
+                    ->materialized_slots[ordinal]
+                    .value->storage;
+            *output_generation = TEST_GENERATION;
+            test->resolve_count += 1U;
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+    }
     return RUNTIMEC_STATUS_UNSUPPORTED;
 }
 
@@ -260,6 +278,13 @@ static runtimec_status_t test_ensure_frame(
  * 宽度按规范取值（int64 = 8、bool = 1），不是从别处抄来的表——
  * 这张小表只服务断言，不参与产品逻辑。
  */
+static void test_value_initialize(test_value_t *value, uint64_t body_value);
+static runtimec_status_t test_program_add_instruction(
+    binrwir_program_builder_t *builder,
+    binrwir_operation_identifier_t operation_identifier,
+    uint32_t source_logical_program_counter, const binrwir_argument_t *read,
+    size_t read_count, const binrwir_argument_t *write, size_t write_count);
+
 static runtimec_status_t test_ensure_zero_value(
     void *context, const runtimec_snapshot_t *snapshot, runtimec_key_view_t key,
     runtimec_string_view_t langtype, runtimec_error_t *error) {
@@ -282,6 +307,20 @@ static runtimec_status_t test_ensure_zero_value(
     } else {
         return test_fail(error, RUNTIMEC_STATUS_UNSUPPORTED,
                          "test ensure-zero-value: unsupported langtype");
+    }
+    /*
+     * 真分配：局部槽必须能被子序列的 resolve_frame_xvalue_address 认出来，
+     * 否则「建了值但解析不到」会被误判成绑定问题。这里按 key 登记进槽表。
+     */
+    if (test->materialized_slot_count < 8U && key.size < 128U) {
+        test_value_t *storage =
+            &test->materialized_storage[test->materialized_slot_count];
+
+        test_value_initialize(storage, 0U);
+        test->materialized_slots[test->materialized_slot_count].key =
+            test->materialized_keys[test->materialized_key_count - 1U];
+        test->materialized_slots[test->materialized_slot_count].value = storage;
+        test->materialized_slot_count += 1U;
     }
     (void)width;
     return RUNTIMEC_STATUS_SUCCESS;
@@ -401,6 +440,122 @@ static runtimec_status_t test_program_build_zero_argument(
     return status;
 }
 
+
+
+/*
+ * 局部变量的**读写往返**程序：`rwfunc probe() -> () { x:int64 = 0  7 -> x  x -> y }`
+ *
+ *   [1,0] copy  7 -> x         字面量写局部 x
+ *   [2,0] copy  x -> y         读局部 x、写另一个局部 y
+ *
+ * 两条都是 COPY：写 x 走一次绑定查找，读 x 再走一次。绑定表没写进去时，
+ * 第二条就会 UNBOUND_SLOT。
+ */
+static runtimec_status_t test_program_build_local_round_trip(
+    const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
+    binrwir_program_t **output_program) {
+    binrwir_program_identity_t identity;
+    binrwir_program_builder_t *builder = NULL;
+    binrwir_argument_t literal_argument;
+    binrwir_argument_t source_argument;
+    binrwir_argument_t target_argument;
+    uint32_t literal_index = BINRWIR_LITERAL_INDEX_NONE;
+    uint16_t source_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+    uint16_t target_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+    /*
+     * `add_literal` 收的是**完整 wire**（16 字节头 + body + attr），不是裸 body。
+     * 这里曾直接传 `&(uint64_t){7U}` 的 8 字节——两处都错：
+     *   1. 那不是 wire，读取端按 wire 剥头，剥完什么都不剩，值读成 0；
+     *   2. `&(uint64_t){7U}` 是复合字面量，生存期只到该表达式结束，而
+     *      `add_literal` 借用至 `finalize`，读到的是栈上残留。
+     * 所以用库自己的构造器产 wire，并存在函数作用域的变量里。
+     */
+    const uint64_t literal_body = 7U;
+    uint8_t literal_wire[KVSPACE_XVALUE_HEAD_LEN + sizeof(uint64_t)];
+    {
+        kvspaceXvalueHead head;
+
+        memset(&head, 0, sizeof(head));
+        head.storetype = KVSPACE_XVALUE_ST_SHORT;
+        head.bodylen = sizeof(literal_body);
+        head.attrslen = 0U;
+        memcpy(literal_wire, &head, KVSPACE_XVALUE_HEAD_LEN);
+        memcpy(literal_wire + KVSPACE_XVALUE_HEAD_LEN, &literal_body,
+               sizeof(literal_body));
+    }
+    runtimec_status_t status;
+
+    *output_program = NULL;
+    memset(&identity, 0, sizeof(identity));
+    identity.snapshot_generation = TEST_GENERATION;
+    identity.program_generation = TEST_PROGRAM_GENERATION;
+    identity.schema_version = 1U;
+    identity.rwir_manifest_version = VMKV_RWIR_MANIFEST_VERSION;
+    identity.binrwir_binary_interface_generation =
+        BINRWIR_BINARY_INTERFACE_GENERATION;
+    identity.canonical_encoding_revision = canonical_encoding_revision;
+
+    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    if (binrwir_program_builder_add_symbol(
+            builder, runtimec_string_view_from_c_string("x"),
+            runtimec_string_view_from_c_string("int64"),
+            &source_symbol) != RUNTIMEC_STATUS_SUCCESS ||
+        binrwir_program_builder_add_symbol(
+            builder, runtimec_string_view_from_c_string("y"),
+            runtimec_string_view_from_c_string("int64"),
+            &target_symbol) != RUNTIMEC_STATUS_SUCCESS ||
+        binrwir_program_builder_add_literal(
+            builder, runtimec_bytes_view_make(literal_wire, sizeof(literal_wire)),
+            runtimec_string_view_from_c_string("int64"),
+            &literal_index) != RUNTIMEC_STATUS_SUCCESS ||
+        binrwir_argument_create(0U, BINRWIR_REFERENCE_LITERAL, 0U,
+                                literal_index, &literal_argument) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        binrwir_argument_create(1U, BINRWIR_REFERENCE_LOCAL, source_symbol, 0U,
+                                &source_argument) != RUNTIMEC_STATUS_SUCCESS ||
+        binrwir_argument_create(2U, BINRWIR_REFERENCE_LOCAL, target_symbol, 0U,
+                                &target_argument) != RUNTIMEC_STATUS_SUCCESS) {
+        (void)binrwir_program_builder_destroy(builder);
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    /* 7 -> x */
+    if (test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_COPY,
+                                     TEST_FIRST_SOURCE_COUNTER,
+                                     &literal_argument, 1U, &source_argument,
+                                     1U) != RUNTIMEC_STATUS_SUCCESS) {
+        (void)binrwir_program_builder_destroy(builder);
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    /* x -> y */
+    if (test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_COPY,
+                                     TEST_FIRST_SOURCE_COUNTER + 1U,
+                                     &source_argument, 1U, &target_argument,
+                                     1U) != RUNTIMEC_STATUS_SUCCESS) {
+        (void)binrwir_program_builder_destroy(builder);
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    /*
+     * RETURN 收尾是**必须的**，不是凑数：DONE 出口提交的是「刚完成那条指令」
+     * 的位置，而游标跑到指令表末尾之外时没有位置可提交，窗口会失败封闭报
+     * 「completed exit carries no source program counter」。
+     *
+     * 别的 Program 构造器（`test_program_build_done` 等）都以 RETURN 结尾，
+     * 这条用例最初漏了它——于是执行失败，而下一条断言只看 `y == 7` 拿不到值，
+     * 报出来像是「往返失败」，实际是「没有收尾指令」。
+     */
+    if (test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_RETURN,
+                                     TEST_FIRST_SOURCE_COUNTER + 2U, NULL, 0U,
+                                     NULL, 0U) != RUNTIMEC_STATUS_SUCCESS) {
+        (void)binrwir_program_builder_destroy(builder);
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    status = binrwir_program_builder_finalize(builder, output_program);
+    (void)binrwir_program_builder_destroy(builder);
+    return status;
+}
 
 /*
  * 带局部变量的零参数函数：`rwfunc f() -> () { y:int64 = 0; flag:bool = false }`。
@@ -695,7 +850,16 @@ int main(void) {
     memset(&options, 0, sizeof(options));
     options.structure_size = sizeof(options);
     options.allocator = allocator;
-    options.compilation_cache_capacity = 4U;
+    /*
+     * 容量必须容得下本用例预置的**全部** compilation，否则 `acquire_slot` 会
+     * 复用槽、把最早插入的那条挤掉，于是它之后的查找变成 NOT_FOUND、回落去
+     * 编码——而编码要读 kvspace 里的签名锚点，单测的假前端没有，最终报的是
+     * 「signature anchor is missing」，与真正的原因（缓存被挤）隔着好几层。
+     *
+     * 预置 5 条：/lib/route、/lib/route-done、/lib/zero、/lib/locals、
+     * /lib/round-trip。留 8 给后续用例，**加用例时同步加这个数**。
+     */
+    options.compilation_cache_capacity = 8U;
     options.machine_code_capacity = 0U;
     options.enable_jit = false;
     EXPECT(runtimec_session_create(&host_services, &options, &session,
@@ -730,6 +894,12 @@ int main(void) {
                                           canonical_encoding_revision,
                                           &program) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(test_compile_and_insert(&components, TEST_LOCALS_TARGET,
+                                   canonical_encoding_revision, program,
+                                   &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_program_build_local_round_trip(
+               &allocator, canonical_encoding_revision,
+               &program) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_compile_and_insert(&components, TEST_ROUND_TRIP_TARGET,
                                    canonical_encoding_revision, program,
                                    &error) == RUNTIMEC_STATUS_SUCCESS);
 
@@ -855,6 +1025,51 @@ int main(void) {
         EXPECT(test.materialized_key_count == 2U);
     }
 
+
+    /*
+     * 2.93 局部变量的**读写往返**：`x:int64 = 0  7 -> x  x -> y`，断言 `y == 7`。
+     *
+     * 判据是「**写入后能读回同一个值**」，不是「存储里出现了这个 key」——只断言
+     * 后者会漏掉绑定表没写进去的情形（UNBOUND_SLOT）：值建出来了，但执行期按槽
+     * 查绑定表查不到，第一条 COPY 就失败。
+     *
+     * 这条用例存在的唯一理由是这个：把 materialize_locals 里的
+     * binrwir_frame_bindings_bind 注释掉，它必须红。
+     */
+    {
+        runtimec_execution_window_request_t round_trip_request = request;
+        round_trip_request.function_path =
+            runtimec_string_view_from_c_string(TEST_ROUND_TRIP_TARGET);
+        round_trip_request.arguments = NULL;
+        round_trip_request.argument_count = 0U;
+        round_trip_request.source_logical_program_counter =
+            TEST_FIRST_SOURCE_COUNTER;
+        test.materialized_key_count = 0U;
+        test.materialized_slot_count = 0U;
+
+        EXPECT(runtimec_execution_window_execute(session, &round_trip_request,
+                                                 &result, &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_DONE);
+
+        /* y 必须拿到 7——读回同一个值，不是「键存在」。 */
+        {
+            uint64_t target_value = 0U;
+            bool found = false;
+            for (size_t ordinal = 0U;
+                 ordinal < test.materialized_slot_count; ++ordinal) {
+                if (strcmp(test.materialized_slots[ordinal].key,
+                           TEST_FRAME_PATH "/y") == 0) {
+                    target_value =
+                        test_value_body(test.materialized_slots[ordinal].value);
+                    found = true;
+                }
+            }
+            EXPECT(found);
+            EXPECT(target_value == 7U);
+        }
+    }
+
     /*
      * 2.95 反向：快照世代为 0（host 没给出可用的存储世代）时，**零参数帧同样被拒**。
      *
@@ -886,7 +1101,12 @@ int main(void) {
            RUNTIMEC_STATUS_SUCCESS);
     /* 诊断码 5 = ENCODE_FAILED：证明真的走进了编码分支。 */
     EXPECT(result.execution_exit.detail_code == 5U);
-    EXPECT(test.checkpoint_count == 5U);
+    /*
+     * 6 = 前面 5 次成功提交（CALL、DONE、zero、locals、round-trip）各一次。
+     * 往返用例修好前它是失败不提交的，所以这里原本是 5；正确值随成功用例数走，
+     * 不是随手写的数字——**再加成功用例时要同步加这个数**。
+     */
+    EXPECT(test.checkpoint_count == 6U);
 
     /* 4. 起始 source pc 不属于这份 Program：失败封闭，不执行、不提交。 */
     request.function_path = runtimec_string_view_from_c_string(TEST_TARGET);
@@ -894,7 +1114,7 @@ int main(void) {
     EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
            RUNTIMEC_STATUS_INVALID);
     EXPECT(result.execution_exit.detail_code == 12U);
-    EXPECT(test.checkpoint_count == 5U);
+    EXPECT(test.checkpoint_count == 6U);
 
     /* 5. 空 vthread：checkpoint 没有落点。 */
     request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;

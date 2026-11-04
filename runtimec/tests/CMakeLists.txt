@@ -298,6 +298,26 @@ add_test(NAME runtimec.vmbin.execute COMMAND runtimec_vmbin_execute_test)
 set_tests_properties(runtimec.vmbin.execute PROPERTIES
     LABELS "runtimec;scaffold;vmbin;execute")
 
+# `kvspace·set` 的 wire 完整性：写出去的必须是完整 wire，不是裸 body。
+# 断言比对**整条 wire**而非值相等——后者在 bug 存在时照样绿（body 字节可能
+# 一字不差，缺的是 head 与 attr）。缺 kvspace 库时用例自身返回 77。
+add_executable(runtimec_host_set_wire_test host_kvspace_set_wire_test.c)
+target_compile_features(runtimec_host_set_wire_test PRIVATE c_std_11)
+target_include_directories(runtimec_host_set_wire_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_host_set_wire_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmbin
+    "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+set_target_properties(runtimec_host_set_wire_test PROPERTIES
+    BUILD_RPATH "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}")
+runtimec_test_warnings(runtimec_host_set_wire_test)
+add_test(NAME runtimec.host.set_wire COMMAND runtimec_host_set_wire_test)
+set_tests_properties(runtimec.host.set_wire PROPERTIES
+    SKIP_RETURN_CODE 77
+    LABELS "runtimec;scaffold;host;wire")
+
 add_executable(runtimec_binrwir_format_test binrwir_format_test.c)
 target_compile_features(runtimec_binrwir_format_test PRIVATE c_std_11)
 target_include_directories(runtimec_binrwir_format_test PRIVATE

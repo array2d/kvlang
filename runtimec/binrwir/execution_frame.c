@@ -23,6 +23,7 @@ runtimec_status_t binrwir_execution_frame_initialize(
     frame->program = program;
     frame->parent = parent;
     frame->bindings = NULL;
+    frame->kvspace_handle = NULL;
     frame->snapshot_generation = snapshot_generation;
     frame->program_generation = program_generation;
     frame->logical_program_counter = logical_program_counter;

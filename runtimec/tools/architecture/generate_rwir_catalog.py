@@ -44,9 +44,13 @@ GAPS = SPEC / "rwir_catalog_gaps.md"
 # 第四份产物：layout 在构建期消费的签名表。layout 不访问 kvspace（用户裁决），
 # 所以 native rwir 的返回类型只能从这份生成表里读，不能运行期查 `/lib/<op>`。
 SIGNATURE_TABLE = SPEC / "native_rwir_decls.kv"
+# opid 常量头：`vmbin` 与 `vmkv` 同层并列，前者不得链后者，所以 handler 无法从
+# manifest 查自己的 opid。这份头由同一真源生成、同一 `--check` 校验，只含常量。
+OPERATION_IDENTIFIERS_HEADER = Path("runtimec/binrwir/operation_identifiers.h")
 # 产物清单是封闭集合：--check 必须逐份比对，少一份就红。否则某份产物可以从校验
 # 里静默消失，而生成器照样打印 OK。
-ARTIFACTS = (MANIFEST, ALIAS_TABLE, GAPS, SIGNATURE_TABLE)
+ARTIFACTS = (MANIFEST, ALIAS_TABLE, GAPS, SIGNATURE_TABLE,
+             OPERATION_IDENTIFIERS_HEADER)
 MATRIX = SPEC / "five-language-behavior-matrix.md"
 INSTRUCTION_HEADER = Path("runtimec/binrwir/instruction.h")
 REGISTRY_HEADER = Path("runtimec/binrwir/registry.h")
@@ -1007,6 +1011,78 @@ def render_alias_table(aliases: list[tuple[str, str]], opcodes: list[str]) -> st
     return "\n".join(lines)
 
 
+def operation_suffix(identifier: str) -> str:
+    """`RUNTIMEC_RWIR_KVSPACE_GET` → `KVSPACE_GET`.
+
+    catalog 的行名自带 `RUNTIMEC_RWIR_` 前缀，而本头的前缀是
+    `BINRWIR_OPERATION_IDENTIFIER_`。照搬行名会得到
+    `BINRWIR_OPERATION_IDENTIFIER_RUNTIMEC_RWIR_KVSPACE_GET`——两段前缀指同一个
+    东西，是多出来的噪声，不是信息。
+    """
+    prefix = "RUNTIMEC_RWIR_"
+    return identifier[len(prefix):] if identifier.startswith(prefix) else identifier
+
+
+def render_operation_identifiers(rows: list[Row], retired: tuple) -> str:
+    """Emit the opid constants as a header both `binrwir` and `vmbin` may include.
+
+    Why a header instead of a table: `vmbin` and `vmkv` are sibling layers and
+    `vmbin` must not link `vmkv`, so a handler cannot ask the manifest for its
+    opid. Without this file the only options were a bare hex literal in the
+    handler (drifts from the catalog, nothing to reconcile against) or linking
+    upward (layer inversion). This header is neither: it is generated from the
+    same source as the catalog and verified by the same `--check`.
+
+    Constraints it satisfies: constants only (no types, no structs), so
+    `binrwir` may host it; every name derives from the catalog row identifier,
+    so there is no second naming scheme to keep in sync.
+    """
+    lines = [
+        "/*",
+        " * 组件：binrwir/operation_identifiers",
+        " * 作用：能力行的 opid 常量，供 `binrwir` 与 `vmbin` 共同 include。",
+        " * 联系：真源是 `specification/rwir_catalog.def`；本文件由",
+        " *       tools/architecture/generate_rwir_catalog.py 生成并由同一脚本校验。",
+        " * 约束：**只含常量**，不含类型、不含表。改 opid 要改真源，不改本文件。",
+        " *",
+        " * 为什么需要它：`vmbin` 与 `vmkv` 是同层兄弟，`vmbin` 不得链 `vmkv`，",
+        " * 于是 handler 无法向 manifest 询问自己的 opid。在此之前的两个选择——",
+        " * 在 handler 里写裸十六进制（与 catalog 漂开且无处对账）、让 vmbin 链 vmkv",
+        " * （分层倒置）——都不可接受。",
+        " */",
+        "",
+        "#ifndef BINRWIR_OPERATION_IDENTIFIERS_H",
+        "#define BINRWIR_OPERATION_IDENTIFIERS_H",
+        "",
+        "#include <stdint.h>",
+        "",
+        "#ifdef __cplusplus",
+        'extern "C" {',
+        "#endif",
+        "",
+    ]
+    for row in rows:
+        lines.append(
+            f"#define BINRWIR_OPERATION_IDENTIFIER_{operation_suffix(row.identifier)} "
+            f"UINT16_C(0x{row.opid:04X})")
+    for identifier, operator, opid, note in retired:
+        lines.append(
+            f"/* 已退役：{operator} — {note}。编号永久保留，不复用。 */")
+        lines.append(
+            f"#define BINRWIR_OPERATION_IDENTIFIER_{operation_suffix(identifier)} "
+            f"UINT16_C(0x{opid:04X})")
+    lines += [
+        "",
+        "#ifdef __cplusplus",
+        "}",
+        "#endif",
+        "",
+        "#endif",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def render_gaps(gaps: list[tuple[str, str]], opcodes: list[str],
                 rows: list[Row]) -> str:
     lines = [
@@ -1058,6 +1134,8 @@ def main() -> int:
         ALIAS_TABLE: render_alias_table(aliases, opcodes),
         GAPS: render_gaps(gaps, opcodes, rows),
         SIGNATURE_TABLE: render_signature_table(rows),
+        OPERATION_IDENTIFIERS_HEADER: render_operation_identifiers(rows,
+                                                                   RETIRED_ROWS),
     }
 
     if not arguments.check:

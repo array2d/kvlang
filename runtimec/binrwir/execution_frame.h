@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include "contract/status.h"
+#include "contract/view.h"
 #include "binrwir/frame_bindings.h"
 #include "binrwir/program.h"
 
@@ -32,6 +33,20 @@ typedef struct binrwir_execution_frame {
     struct binrwir_execution_frame *parent;
     /* 本次调用的地址绑定表；由调用入口建立并拥有，Frame 只借用该指针。 */
     binrwir_frame_bindings_t *bindings;
+    /*
+     * kvspace 句柄（`kvspaceConnect` 的原样返回值），session 拥有，Frame 借用。
+     * 类型刻意是 `void *` 而不是任何一个包装类型：需要存储的 handler 直接
+     * include `kvspace/kvspace.h` 调 ABI，本层不提供窄接口、不做转发。
+     */
+    void *kvspace_handle;
+    /*
+     * 本帧的路径（`/vthread/{vid}/[d]`），由调用入口用 `request->frame_path`
+     * **原样**写入——不重新拼接。拼接就是造第二份地址，一有出入就分不清哪份对。
+     *
+     * 借用视图：字节归调用方，Frame 不拷贝、不释放，只在本次调用内有效。
+     * 尾斜杠只出现一次（由调用方给的路径决定），本层不再补也不再剥。
+     */
+    runtimec_key_view_t frame_path;
     uint64_t snapshot_generation;
     uint64_t program_generation;
     uint32_t logical_program_counter;

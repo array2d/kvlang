@@ -23,6 +23,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "contract/char_codec.h"
+
 #include "binrwir/execution_exit.h"
 #include "binrwir/execution_frame.h"
 #include "binrwir/instruction.h"
@@ -51,63 +53,21 @@ static runtimec_status_t runtimec_temp_println_fail(
 }
 
 /*
- * 参数项的具体 langtype。三个来源按引用种类取，取不到返回空视图：
- *   LITERAL          → 字面量池的 langtype
- *   LOCAL            → 符号池的 langtype（物化局部时用同一份）
- *   PARAMETER_*      → 签名的形参类型表
- *   STATIC           → 符号池（静态 key 也登记在那里）
- * 取不到类型不是「不约束」，是「本临时实现答不出」——调用方据此失败封闭。
+ * 参数项的声明 langtype 走 `vmbin_value_access_langtype`——那是唯一取类型的
+ * 入口，本文件不再留私有副本。取不到就是空视图，调用方据此失败封闭。
  */
 static runtimec_string_view_t runtimec_temp_println_langtype(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument) {
-    runtimec_string_view_t empty = runtimec_string_view_make(NULL, 0U);
+    runtimec_string_view_t langtype = runtimec_string_view_make(NULL, 0U);
+    runtimec_error_t error;
 
-    if (argument->reference_kind == BINRWIR_REFERENCE_LITERAL) {
-        runtimec_bytes_view_t wire;
-        runtimec_string_view_t langtype;
-
-        if (binrwir_program_get_literal(frame->program,
-                                        (uint32_t)argument->payload, &wire,
-                                        &langtype) == RUNTIMEC_STATUS_SUCCESS) {
-            return langtype;
-        }
-        return empty;
+    runtimec_error_reset(&error);
+    if (vmbin_value_access_langtype(frame, argument, &langtype, &error) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_string_view_make(NULL, 0U);
     }
-    if (argument->reference_kind == BINRWIR_REFERENCE_LOCAL ||
-        argument->reference_kind == BINRWIR_REFERENCE_STATIC) {
-        runtimec_string_view_t name;
-        runtimec_string_view_t langtype;
-
-        if (binrwir_program_get_symbol(frame->program, argument->slot, &name,
-                                       &langtype) == RUNTIMEC_STATUS_SUCCESS) {
-            return langtype;
-        }
-        return empty;
-    }
-    if (argument->reference_kind == BINRWIR_REFERENCE_PARAMETER_READ ||
-        argument->reference_kind == BINRWIR_REFERENCE_PARAMETER_WRITE) {
-        binrwir_program_view_t view;
-        const runtimec_string_view_t *types = NULL;
-        size_t count = 0U;
-
-        if (binrwir_program_get_view(frame->program, &view) !=
-            RUNTIMEC_STATUS_SUCCESS) {
-            return empty;
-        }
-        if (argument->reference_kind == BINRWIR_REFERENCE_PARAMETER_READ) {
-            types = view.signature.read_parameter_types;
-            count = view.signature.read_parameter_count;
-        } else {
-            types = view.signature.write_parameter_types;
-            count = view.signature.write_parameter_count;
-        }
-        if (types != NULL && (size_t)argument->slot < count) {
-            return types[argument->slot];
-        }
-        return empty;
-    }
-    return empty;
+    return langtype;
 }
 
 /*
@@ -156,46 +116,11 @@ static int runtimec_temp_println_render(runtimec_string_view_t langtype,
         return 1;
     }
     if (runtimec_temp_println_is(langtype, "char/utf32")) {
-        /* 码点序列（4 字节小端）→ UTF-8。 */
+        /* 码点序列（4 字节小端）→ UTF-8；实现只在 contract/char_codec 一处。 */
         size_t used = 0U;
 
-        if (size % 4U != 0U) {
+        if (!runtimec_char_utf32_to_utf8(body, size, scratch, capacity, &used)) {
             return 0;
-        }
-        for (size_t offset = 0U; offset < size; offset += 4U) {
-            uint32_t codepoint = (uint32_t)body[offset] |
-                                 ((uint32_t)body[offset + 1U] << 8U) |
-                                 ((uint32_t)body[offset + 2U] << 16U) |
-                                 ((uint32_t)body[offset + 3U] << 24U);
-            uint8_t encoded[4];
-            size_t encoded_size;
-
-            if (codepoint <= 0x7FU) {
-                encoded[0] = (uint8_t)codepoint;
-                encoded_size = 1U;
-            } else if (codepoint <= 0x7FFU) {
-                encoded[0] = (uint8_t)(0xC0U | (codepoint >> 6U));
-                encoded[1] = (uint8_t)(0x80U | (codepoint & 0x3FU));
-                encoded_size = 2U;
-            } else if (codepoint <= 0xFFFFU) {
-                encoded[0] = (uint8_t)(0xE0U | (codepoint >> 12U));
-                encoded[1] = (uint8_t)(0x80U | ((codepoint >> 6U) & 0x3FU));
-                encoded[2] = (uint8_t)(0x80U | (codepoint & 0x3FU));
-                encoded_size = 3U;
-            } else if (codepoint <= 0x10FFFFU) {
-                encoded[0] = (uint8_t)(0xF0U | (codepoint >> 18U));
-                encoded[1] = (uint8_t)(0x80U | ((codepoint >> 12U) & 0x3FU));
-                encoded[2] = (uint8_t)(0x80U | ((codepoint >> 6U) & 0x3FU));
-                encoded[3] = (uint8_t)(0x80U | (codepoint & 0x3FU));
-                encoded_size = 4U;
-            } else {
-                return 0;
-            }
-            if (used + encoded_size >= capacity) {
-                return 0;
-            }
-            memcpy(scratch + used, encoded, encoded_size);
-            used += encoded_size;
         }
         *output_length = used;
         return 1;
@@ -298,35 +223,17 @@ static runtimec_status_t runtimec_temp_println_run(
                 output_exit, RUNTIMEC_STATUS_UNSUPPORTED,
                 RUNTIMEC_TEMP_PRINTLN_DIAG_UNSUPPORTED_TYPE, source_counter);
         }
-        runtimec_status_t status = vmbin_value_access_read(frame, argument,
-                                                           &buffer, &error);
+        runtimec_status_t status = vmbin_value_access_read_body(frame, argument,
+                                                                &buffer, &error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return runtimec_temp_println_fail(
                 output_exit, status, RUNTIMEC_TEMP_PRINTLN_DIAG_VALUE_ACCESS,
                 source_counter);
         }
-        /*
-         * 字面量读出来是**完整 wire**（16 字节 head + body + attr），
-         * 而渲染要的是 body。跳过头得经合同的推导函数，不手写偏移。
-         * 其它引用种类读出的已经是值体本身。
-         */
-        const uint8_t *value_body = buffer.data;
-        size_t value_body_size = buffer.size;
-        if (argument->reference_kind == BINRWIR_REFERENCE_LITERAL) {
-            const runtimec_value_body_address_t body_address =
-                runtimec_xvalue_body_address(
-                    (runtimec_xvalue_address_t)(uintptr_t)buffer.data);
-            if (body_address == RUNTIMEC_VALUE_BODY_ADDRESS_NONE) {
-                return runtimec_temp_println_fail(
-                    output_exit, RUNTIMEC_STATUS_INVALID,
-                    RUNTIMEC_TEMP_PRINTLN_DIAG_MALFORMED_VALUE, source_counter);
-            }
-            value_body_size = runtimec_value_body_length(body_address);
-            value_body = (const uint8_t *)(uintptr_t)body_address;
-        }
-        if (!runtimec_temp_println_render(langtype, value_body,
-                                          value_body_size, scratch,
-                                          sizeof(scratch), &text_length)) {
+        /* 渲染要的是 body：`read_body` 已把字面量的 wire 剥好，这里不再判种类。 */
+        if (!runtimec_temp_println_render(langtype, buffer.data, buffer.size,
+                                          scratch, sizeof(scratch),
+                                          &text_length)) {
             /* 支持的类型但形状不符（长度不对、非 UTF-32 边界）也算无法渲染。 */
             return runtimec_temp_println_fail(
                 output_exit,

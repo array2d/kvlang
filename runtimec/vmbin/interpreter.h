@@ -63,12 +63,18 @@ typedef enum vmbin_interpreter_diagnostic {
  */
 #define VMBIN_OPERATION_IDENTIFIER_NONE BINRWIR_OPERATION_IDENTIFIER_NONE
 
-/* 从 Frame 的当前逻辑程序计数器开始执行，直到产生结构化退出。 */
+/*
+ * 从 Frame 的当前逻辑程序计数器开始执行，直到产生结构化退出。
+ *
+ * `kvspace_handle` 是 `kvspaceConnect` 的原样返回值，写进 Frame 供需要存储的
+ * handler 借用。它不在本层被解引用，也不是包装类型——本层不认识存储，只做透传。
+ */
 runtimec_status_t
 vmbin_execute(const binrwir_program_t *program,
               const binrwir_execution_plan_t *execution_plan,
               binrwir_execution_frame_t *frame,
               const binrwir_registry_t *builtin_registry,
+              void *kvspace_handle,
               vmbin_profile_t *profile,
               binrwir_execution_exit_t *output_exit);
 

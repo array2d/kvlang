@@ -165,6 +165,12 @@ typedef struct test_program_source {
 static runtimec_status_t test_program_build(
     const runtimec_allocator_t *allocator, const test_program_source_t *source,
     binrwir_program_t **output_program) {
+    /*
+     * 字面量 wire 的落地缓冲。必须活到 `finalize`——`add_literal` 借用这段
+     * 字节直到那时，用函数内的自动变量会在循环下一轮就被覆盖。
+     * 上限取 source 的容量（8 条）。
+     */
+    static uint8_t literal_wires[8][KVSPACE_XVALUE_HEAD_LEN + TEST_VALUE_CAPACITY];
     binrwir_program_identity_t identity;
     binrwir_program_builder_t *builder = NULL;
     uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
@@ -214,10 +220,33 @@ static runtimec_status_t test_program_build(
     for (ordinal = 0U; status == RUNTIMEC_STATUS_SUCCESS &&
                         ordinal < source->literal_count;
          ++ordinal) {
+        /*
+         * `add_literal` 收的是**完整 wire**（XValue head + body + attr），
+         * 而本测试的 `literal_bytes` 是**裸 body**——过去直接把 body 当 wire
+         * 传，能跑只是因为读取端当时也按原样返回、写入端按等长写，两个错误
+         * 恰好抵消。
+         *
+         * 现在在登记处补头：body 原样搬进 wire，长度按真实 body 长度写进 head。
+         * 这样每个用例的 `literal_bytes` 仍然只写值，不必各自手搓 16 字节头。
+         */
+        uint8_t *literal_wire = literal_wires[ordinal];
+        kvspaceXvalueHead head;
+
+        if (source->literal_sizes[ordinal] > TEST_VALUE_CAPACITY) {
+            status = RUNTIMEC_STATUS_INVALID;
+            break;
+        }
+        memset(&head, 0, sizeof(head));
+        kvspaceXvalueHeadSetLen(&head, source->literal_sizes[ordinal]);
+        head.storetype = KVSPACE_XVALUE_ST_SHORT;
+        memcpy(literal_wire, &head, KVSPACE_XVALUE_HEAD_LEN);
+        memcpy(literal_wire + KVSPACE_XVALUE_HEAD_LEN,
+               source->literal_bytes[ordinal], source->literal_sizes[ordinal]);
         status = binrwir_program_builder_add_literal(
             builder,
-            runtimec_bytes_view_make(source->literal_bytes[ordinal],
-                                     source->literal_sizes[ordinal]),
+            runtimec_bytes_view_make(
+                literal_wire,
+                KVSPACE_XVALUE_HEAD_LEN + source->literal_sizes[ordinal]),
             runtimec_string_view_from_c_string(source->literal_types[ordinal]),
             &literal_index);
     }
@@ -346,7 +375,7 @@ static void test_copy_writes_into_body(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_DONE);
     RUNTIMEC_EXPECT((exit_state.flags & TEST_COMMITTED_FLAG) != 0U);
@@ -419,7 +448,7 @@ static void test_parameter_read_uses_binding_address(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_DONE);
     RUNTIMEC_EXPECT(test_value_int64(&destination) == 7);
@@ -508,7 +537,7 @@ static void test_goto_skips_instruction(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_DONE);
     RUNTIMEC_EXPECT(test_value_int64(&done) == 7);
@@ -615,7 +644,7 @@ static void test_branch_selects_target(int64_t condition) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_DONE);
     RUNTIMEC_EXPECT(exit_state.logical_program_counter == 5U);
@@ -669,7 +698,7 @@ static void test_call_reports_target_symbol(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_CALL);
     RUNTIMEC_EXPECT(exit_state.target_identifier == 0U);
@@ -720,7 +749,7 @@ static void test_return_completes_frame(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_DONE);
     RUNTIMEC_EXPECT(exit_state.logical_program_counter == 4U);
@@ -754,22 +783,29 @@ static runtimec_status_t test_add_handler(
         instruction->write_arguments.count != 1U) {
         return RUNTIMEC_STATUS_INVALID;
     }
+    /*
+     * 算术只吃值（body），不吃整条 XValue：用 `_body` 三条。此前用 wire 版，
+     * 对字面量它会返回整条 wire（16 字节头 + body），于是 `buffer.size` 断言
+     * 依赖了「字面量恰好是裸 8 字节」这个**与契约相反**的形状。
+     */
     buffer = (runtimec_bytes_buffer_t){storage, 0U, sizeof(storage)};
-    if (vmbin_value_access_read(frame, &instruction->read_arguments.data[0],
-                                &buffer, &error) != RUNTIMEC_STATUS_SUCCESS) {
+    if (vmbin_value_access_read_body(
+            frame, &instruction->read_arguments.data[0], &buffer,
+            &error) != RUNTIMEC_STATUS_SUCCESS) {
         return error.status;
     }
     RUNTIMEC_EXPECT(buffer.size == 8U);
     memcpy(&left, storage, sizeof(left));
     buffer = (runtimec_bytes_buffer_t){storage, 0U, sizeof(storage)};
-    if (vmbin_value_access_read(frame, &instruction->read_arguments.data[1],
-                                &buffer, &error) != RUNTIMEC_STATUS_SUCCESS) {
+    if (vmbin_value_access_read_body(
+            frame, &instruction->read_arguments.data[1], &buffer,
+            &error) != RUNTIMEC_STATUS_SUCCESS) {
         return error.status;
     }
     RUNTIMEC_EXPECT(buffer.size == 8U);
     memcpy(&right, storage, sizeof(right));
     sum = left + right;
-    return vmbin_value_access_write(
+    return vmbin_value_access_write_body(
         frame, &instruction->write_arguments.data[0],
         runtimec_bytes_view_make(&sum, sizeof(sum)), &error);
 }
@@ -837,7 +873,7 @@ static void test_add_builtin_handler(void) {
     RUNTIMEC_EXPECT(binrwir_registry_append(&registry, "test", &entry,
                                                   1U, NULL) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_DONE);
     RUNTIMEC_EXPECT(test_value_int64(&destination) == 42);
@@ -880,7 +916,7 @@ static void test_unknown_operation_is_internal_inconsistency(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_ERROR);
     RUNTIMEC_EXPECT(exit_state.status == RUNTIMEC_STATUS_INVALID);
@@ -954,7 +990,7 @@ static void test_foreign_marker_hands_off(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_HANDOFF);
     RUNTIMEC_EXPECT(exit_state.status == RUNTIMEC_STATUS_UNSUPPORTED);
@@ -1050,7 +1086,7 @@ static void test_unbound_parameter_is_invalid(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_ERROR);
     RUNTIMEC_EXPECT(exit_state.status == RUNTIMEC_STATUS_INVALID);
@@ -1109,7 +1145,7 @@ static void test_literal_is_not_writable(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_ERROR);
     RUNTIMEC_EXPECT(frame.logical_program_counter == 0U);
@@ -1175,7 +1211,7 @@ static void test_size_mismatch_is_error(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_ERROR);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_ERROR);
     RUNTIMEC_EXPECT(exit_state.status == RUNTIMEC_STATUS_ERROR);
@@ -1256,7 +1292,7 @@ static void test_handler_failure_keeps_cursor(void) {
     RUNTIMEC_EXPECT(binrwir_registry_append(&registry, "test", &entry,
                                                   1U, NULL) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_ERROR);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_ERROR);
     /* 值体确实被改了，但指令没有完成：游标不推进、不置提交标志。 */
@@ -1280,7 +1316,7 @@ static void test_execute_rejects_invalid_requests(void) {
 
     RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(NULL, NULL, NULL, &registry, NULL,
+    RUNTIMEC_EXPECT(vmbin_execute(NULL, NULL, NULL, &registry, NULL, NULL,
                                   &exit_state) == RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_ERROR);
 }

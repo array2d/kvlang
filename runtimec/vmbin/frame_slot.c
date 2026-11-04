@@ -91,6 +91,32 @@ runtimec_status_t vmbin_frame_slot_of_parameter(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+runtimec_status_t vmbin_frame_slot_of_local_symbol(
+    const binrwir_program_t *program, uint16_t symbol_index,
+    uint16_t *output_slot) {
+    size_t read_count = 0U;
+    size_t write_count = 0U;
+    size_t slot = 0U;
+    runtimec_status_t status;
+
+    if (output_slot != NULL) {
+        *output_slot = BINRWIR_FRAME_BINDING_SLOT_NONE;
+    }
+    if (program == NULL || output_slot == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    status = vmbin_frame_slot_counts(program, &read_count, &write_count);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    slot = read_count + write_count + (size_t)symbol_index;
+    if (slot > UINT16_MAX) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    *output_slot = (uint16_t)slot;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 runtimec_status_t vmbin_frame_slot_of_argument(
     const binrwir_program_t *program, const binrwir_argument_t *argument,
     uint16_t *output_slot) {

@@ -207,8 +207,12 @@ target_link_libraries(runtimec_vmkv
     PRIVATE runtimec_contract runtimec_binrwir)
 target_link_libraries(runtimec_binrwir_compiler
     PRIVATE runtimec_contract runtimec_binrwir)
+# vmbin 的 host handler 直接调 kvspace C ABI（用户裁决：不对 ABI 二次封装），
+# 因此它必须链代理库。**只链前端 `libkvspace`**——kvspace-c / kvspace-durable 是
+# 它的运行时后端，由 DSN scheme 在运行期选择，编译期不出现。
 target_link_libraries(runtimec_vmbin
-    PRIVATE runtimec_contract runtimec_binrwir)
+    PRIVATE runtimec_contract runtimec_binrwir
+            "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
 target_link_libraries(runtimec_engine
     PRIVATE
         runtimec_contract

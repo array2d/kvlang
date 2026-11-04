@@ -39,6 +39,17 @@ runtimec_status_t vmbin_frame_slot_of_parameter(
     const binrwir_program_t *program, binrwir_parameter_direction_t direction,
     uint32_t parameter_index, uint16_t *output_slot);
 
+/*
+ * 局部符号池下标 → 绑定槽号：读参 + 写参 + 符号下标。
+ *
+ * 存在的理由：调用入口物化局部时要给「第 s 个符号」建槽，而它手上只有符号下标、
+ * 没有 argument。此前调用入口自己手写了这个加法，于是同一换算在两处——这正是
+ * 「同一个事实两处实现」。收进来，让全仓只有这一处算槽号。
+ */
+runtimec_status_t vmbin_frame_slot_of_local_symbol(
+    const binrwir_program_t *program, uint16_t symbol_index,
+    uint16_t *output_slot);
+
 #ifdef __cplusplus
 }
 #endif
