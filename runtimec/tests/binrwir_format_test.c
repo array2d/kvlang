@@ -91,7 +91,7 @@ typedef struct test_parameter {
 } test_parameter_t;
 
 typedef struct test_instruction {
-    uint32_t operation_identifier;
+    binrwir_operation_identifier_t operation_identifier;
     uint32_t source_program_counter;
     binrwir_argument_t reads[4];
     size_t read_count;
@@ -231,9 +231,9 @@ static runtimec_string_view_t test_sink_append(void *context,
 }
 
 /* 只认两个算子名：copy` 与 add。其余一律返回 false——打印必须退化成数值。 */
-static bool test_resolve_operation(uint32_t operation_identifier,
-                                  runtimec_string_view_t *output_name,
-                                  void *context) {
+static bool test_resolve_operation(
+    binrwir_operation_identifier_t operation_identifier,
+    runtimec_string_view_t *output_name, void *context) {
     (void)context;
     *output_name = runtimec_string_view_make(NULL, 0U);
     if (operation_identifier == TEST_COPY_OPERATION) {

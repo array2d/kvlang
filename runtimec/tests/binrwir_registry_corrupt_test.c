@@ -9,8 +9,9 @@
  * 若有人把前者改回「跳过并返回 UNSUPPORTED」，两种失败又共用一个信号，
  * 下游再也分不清「注册了没实现」与「没注册」——这里立刻红。
  *
- * 覆盖八组：坏表 find、好表未命中、空 handler 拒装载、重复 opid 拒装载且不覆盖、
- * 模块内自重复、超限不截断、刚好装满、两个诊断码互不相等。
+ * 覆盖十二组：坏表 find、好表未命中、空 handler 拒装载、重复 opid 拒装载且不覆盖、
+ * 模块内自重复、超限不截断、刚好装满、两个诊断码互不相等、结构标记拒装载、
+ * opid 0 在 find 上拒为 INVALID、两层「没有 opid」同值、保留区真算子可装载。
  *
  * 时钟与外部依赖：无。纯内存，不连 kvspace，不建 session。
  */
@@ -171,10 +172,82 @@ int main(void) {
            VMBIN_INTERPRETER_DIAG_INVALID_INSTRUCTION);
     EXPECT(VMBIN_INTERPRETER_DIAG_CORRUPT_REGISTRY == 10);
 
+    /*
+     * ⑨ 结构标记不得注册。FOREIGN 由解释器 switch 直接分派，NONE 表示「没有
+     * opid」；任一注册进来就等于给同一个 opid 造出第二条分派路径。
+     *
+     * 这条是**反向控制的落点**：把 registry.c 里那个守卫删掉，本组立刻红。
+     * 之前的守卫写的是 `== BINRWIR_IDENTIFIER_NONE`（UINT32_MAX），opid 收窄到
+     * 16 位后它恒为假，守卫虽在却从不触发——没有本组就无法发现「守卫死了」。
+     */
+    {
+        const binrwir_operation_identifier_t markers[] = {
+            BINRWIR_OPERATION_IDENTIFIER_NONE,
+            BINRWIR_OPERATION_IDENTIFIER_FOREIGN,
+        };
+
+        for (size_t marker = 0U;
+             marker < sizeof(markers) / sizeof(markers[0]); ++marker) {
+            binrwir_registry_t registry;
+            EXPECT(binrwir_registry_initialize(&registry) ==
+                   RUNTIMEC_STATUS_SUCCESS);
+            binrwir_registry_entry_t entry = {markers[marker],
+                                              BINRWIR_REGISTRY_FLAG_NONE,
+                                              unused_handler};
+            runtimec_error_t error;
+            EXPECT(binrwir_registry_append(&registry, "markers", &entry, 1U,
+                                           &error) == RUNTIMEC_STATUS_INVALID);
+            EXPECT(registry.entry_count == 0U); /* 失败不改写 */
+        }
+    }
+
+    /*
+     * ⑨b opid 0 在 `find` 上也必须是 INVALID，不能退化成 UNSUPPORTED。
+     *
+     * `UNSUPPORTED` 的语义是「本执行器不处理这个能力，交 route handoff」；而 0
+     * 根本不是能力，它是 `memset(0)` 的默认值。若这里返回 UNSUPPORTED，执行期
+     * 就会把「编码期没填 opid」当成「外部能力」交给下游——错误换了个地方出现。
+     */
+    {
+        binrwir_registry_t registry;
+        const binrwir_registry_entry_t *entry = NULL;
+        EXPECT(binrwir_registry_initialize(&registry) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_registry_find(&registry, 0U, &entry) ==
+               RUNTIMEC_STATUS_INVALID);
+        EXPECT(entry == NULL);
+    }
+
+    /*
+     * ⑨c 两层的「没有 opid」必须是同一个值。
+     *
+     * 这里曾是两个数：`binrwir` 侧 0xFFFF、`vmbin` 侧 0，于是写侧校验放行 0、
+     * 读侧执行到才拦。判据在编译期就能比，不必跑到运行期。
+     */
+    EXPECT(VMBIN_OPERATION_IDENTIFIER_NONE ==
+           BINRWIR_OPERATION_IDENTIFIER_NONE);
+
+    /*
+     * ⑩ 保留区里的**真算子**必须能注册：临时 println 就住在 0xFF01–0xFF03。
+     * 判据若写成 `>= RESERVED_BASE`，本组红——它保证「拦结构标记」没有被写成
+     * 「拦整个保留区」。
+     */
+    {
+        binrwir_registry_t registry;
+        EXPECT(binrwir_registry_initialize(&registry) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        binrwir_registry_entry_t reserved_operator = {
+            BINRWIR_OPERATION_IDENTIFIER_RESERVED_BASE,
+            BINRWIR_REGISTRY_FLAG_NONE, unused_handler};
+        EXPECT(binrwir_registry_append(&registry, "reserved", &reserved_operator,
+                                       1U, NULL) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(registry.entry_count == 1U);
+    }
+
     if (failures != 0) {
         printf("binrwir_registry_corrupt_test: %d failure(s)\n", failures);
         return 1;
     }
-    printf("binrwir_registry_corrupt_test: OK (8 groups)\n");
+    printf("binrwir_registry_corrupt_test: OK (12 groups)\n");
     return 0;
 }

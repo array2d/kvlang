@@ -16,9 +16,6 @@
 #include "core_operations.h"
 #include "value_access.h"
 
-/* opid 0 不对应任何能力行：它不是「未知算子」，是非法指令头。 */
-#define VMBIN_OPERATION_IDENTIFIER_NONE UINT32_C(0)
-
 #define VMBIN_SCRATCH_INITIAL_CAPACITY 32U
 
 typedef struct vmbin_execution {

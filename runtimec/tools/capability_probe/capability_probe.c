@@ -325,8 +325,9 @@ int main(int argument_count, char **arguments) {
     runtimec_execution_window_request_t request;
     memset(&request, 0, sizeof(request));
     request.function_path = runtimec_string_view_from_c_string("/lib/probe");
-    request.vthread_identifier = runtimec_string_view_from_c_string("v1");
-    request.frame_path = runtimec_string_view_from_c_string("/vthread/v1/[1]");
+    /* vid 必须是纯数字：执行窗口按整数解析 vthread 身份。 */
+    request.vthread_identifier = runtimec_string_view_from_c_string("2");
+    request.frame_path = runtimec_string_view_from_c_string("/vthread/2/[1]");
     request.stack_identifier = 1;
     request.source_logical_program_counter = 1U;
     /* 紧邻窗口调用再问一次：两次结果不同就说明中间有状态变化。 */
@@ -357,13 +358,27 @@ int main(int argument_count, char **arguments) {
                         ? before_error.message.data : "");
         }
     }
+    fprintf(stderr,
+            "probe: path='%.*s'(%zu) vtid='%.*s'(%zu) frame='%.*s'(%zu) "
+            "args=%zu/%p stack=%d\n",
+            (int)request.function_path.size, request.function_path.data,
+            request.function_path.size,
+            (int)request.vthread_identifier.size,
+            request.vthread_identifier.data,
+            request.vthread_identifier.size,
+            (int)request.frame_path.size, request.frame_path.data,
+            request.frame_path.size, request.argument_count,
+            (const void *)request.arguments, (int)request.stack_identifier);
     runtimec_execution_window_result_t result;
     const runtimec_status_t execute_status = runtimec_execution_window_execute(
         session, &request, &result, &error);
     if (execute_status != RUNTIMEC_STATUS_SUCCESS) {
-        fprintf(stderr, "probe: status=%d detail=%u message=%.*s\n",
-                (int)execute_status,
+        fprintf(stderr,
+                "probe: execute_status=%d result.status=%d detail=%u "
+                "exit_kind=%u message=%.*s\n",
+                (int)execute_status, (int)result.status,
                 (unsigned)result.execution_exit.detail_code,
+                (unsigned)result.execution_exit.kind,
                 (int)error.message.size,
                 error.message.data != NULL ? error.message.data : "");
     }

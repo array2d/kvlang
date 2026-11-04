@@ -19,7 +19,8 @@
  * 关闭时（尤其 .so 产物）本文件不参与编译，三个算子回到「未知算子 → FOREIGN」的
  * 原行为，产物里 grep 不到任何 println 痕迹。
  *
- * opid 取保留区 `0xFFFF0001..0xFFFF0003`——不是能力表编号，专供本临时实现。
+ * opid 在保留区（见 binrwir/instruction.h 的占用记账）——不是能力表编号，
+ * 专供本临时实现。
  */
 
 #include <stdint.h>

@@ -54,6 +54,15 @@ typedef enum vmbin_interpreter_diagnostic {
     VMBIN_INTERPRETER_DIAG_CORRUPT_REGISTRY = 10
 } vmbin_interpreter_diagnostic_t;
 
+/*
+ * 「没有 opid」。值必须与写侧同源——这里曾写成自定字面量 `UINT32_C(0)`，
+ * 而 `binrwir` 侧把同一个概念定义成 `0xFFFF`：同一个概念两个数，于是写侧校验
+ * 放行 0、读侧执行到才拦，错误离出错点很远。
+ *
+ * `BINRWIR_OPERATION_IDENTIFIER_NONE` 是唯一定义点；本层不另立字面量。
+ */
+#define VMBIN_OPERATION_IDENTIFIER_NONE BINRWIR_OPERATION_IDENTIFIER_NONE
+
 /* 从 Frame 的当前逻辑程序计数器开始执行，直到产生结构化退出。 */
 runtimec_status_t
 vmbin_execute(const binrwir_program_t *program,

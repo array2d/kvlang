@@ -36,8 +36,8 @@ extern "C" {
  * 成环）。回调可以是 `vmkv_rwir_manifest_find_operation_by_identifier`。
  */
 typedef bool (*binrwir_operation_name_function)(
-    uint32_t operation_identifier, runtimec_string_view_t *output_name,
-    void *context);
+    binrwir_operation_identifier_t operation_identifier,
+    runtimec_string_view_t *output_name, void *context);
 
 /*
  * 输出回调：每次交付一段文本，返回值是 sink 实际接受的长度。

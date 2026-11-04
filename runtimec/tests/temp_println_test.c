@@ -255,8 +255,8 @@ int main(int argument_count, char **arguments) {
     runtimec_execution_window_request_t request;
     memset(&request, 0, sizeof(request));
     request.function_path = runtimec_string_view_from_c_string("/lib/main");
-    request.vthread_identifier = runtimec_string_view_from_c_string("v1");
-    request.frame_path = runtimec_string_view_from_c_string("/vthread/v1/[1]");
+    request.vthread_identifier = runtimec_string_view_from_c_string("1");
+    request.frame_path = runtimec_string_view_from_c_string("/vthread/1/[1]");
     request.stack_identifier = 1;
     /* layout 的 source pc 从 1 起（[0,0] 是签名行）。 */
     request.source_logical_program_counter = 1U;

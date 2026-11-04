@@ -140,7 +140,7 @@ typedef struct test_alias_rule {
 } test_alias_rule_t;
 
 typedef struct test_instruction {
-    uint32_t operation_identifier;
+    binrwir_operation_identifier_t operation_identifier;
     uint32_t source_program_counter;
     binrwir_argument_t reads[4];
     size_t read_count;

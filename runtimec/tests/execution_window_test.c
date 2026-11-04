@@ -60,11 +60,11 @@ static int failures;
 #define TEST_MISSING_TARGET "/lib/missing"
 #define TEST_ZERO_ARGUMENT_TARGET "/lib/zero"
 #define TEST_LOCALS_TARGET "/lib/locals"
-#define TEST_VTHREAD "vthread-1"
-#define TEST_FRAME_PATH "/vthread/vthread-1/[1]"
+#define TEST_VTHREAD "2"
+#define TEST_FRAME_PATH "/vthread/2/[1]"
 #define TEST_STACK_IDENTIFIER 1
-#define TEST_READ_KEY "/vthread/vthread-1/[0,0]"
-#define TEST_WRITE_KEY "/vthread/vthread-1/[0,-1]"
+#define TEST_READ_KEY "/vthread/2/[0,0]"
+#define TEST_WRITE_KEY "/vthread/2/[0,-1]"
 /* 第一条 Program：COPY(3) CALL(4) COPY(5)，CALL 的后继是 source pc 5。 */
 #define TEST_FIRST_SOURCE_COUNTER 3U
 #define TEST_CALL_SOURCE_COUNTER 4U
@@ -328,7 +328,8 @@ static uint64_t test_value_body(const test_value_t *value) {
 }
 
 static runtimec_status_t test_program_add_instruction(
-    binrwir_program_builder_t *builder, uint32_t operation_identifier,
+    binrwir_program_builder_t *builder,
+    binrwir_operation_identifier_t operation_identifier,
     uint32_t source_logical_program_counter, const binrwir_argument_t *read,
     size_t read_count, const binrwir_argument_t *write, size_t write_count) {
     binrwir_instruction_build_request_t request;
@@ -900,6 +901,44 @@ int main(void) {
     request.vthread_identifier = runtimec_string_view_make(NULL, 0U);
     EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
            RUNTIMEC_STATUS_INVALID);
+
+    /*
+     * 5b. **vid 必须是数字**（spec `02-kvspace模型/02-结构域.kv`）。带前缀的
+     * 名字不是「换个写法」，是另一棵子树：`/vthread/v1/` 与 `/vthread/1/` 在
+     * kvspace 里是两个不同落点。放过去不会当场报错，只会在错误的位置长出一棵
+     * 语法合法、语义不存在的子树。
+     *
+     * 这组是**反向控制的落点**：把 execution_window.c 里
+     * `runtimec_execution_window_vthread_is_numeric` 的调用删掉，本组立刻红。
+     * 注意它测的是**生产代码的校验**，不是把常量写成数字——后者两边引用同一个
+     * 宏，改宏等于两边一起改，恒真，证明不了规则被钉住。
+     */
+    {
+        const char *non_numeric_identifiers[] = {
+            "v1",
+            "vthread-1",
+            "1 ",
+            "+1",
+            "-1",
+            "0x10",
+        };
+
+        request.vthread_identifier =
+            runtimec_string_view_from_c_string(TEST_VTHREAD);
+        request.frame_path = runtimec_string_view_from_c_string(TEST_FRAME_PATH);
+        for (size_t ordinal = 0U;
+             ordinal < sizeof(non_numeric_identifiers) /
+                           sizeof(non_numeric_identifiers[0]);
+             ++ordinal) {
+            request.vthread_identifier = runtimec_string_view_from_c_string(
+                non_numeric_identifiers[ordinal]);
+            EXPECT(runtimec_execution_window_execute(session, &request, &result,
+                                                     &error) ==
+                   RUNTIMEC_STATUS_INVALID);
+            /* 必须是「请求非法」，不是撞到后面某条路径才失败。 */
+            EXPECT(result.execution_exit.detail_code == 1U);
+        }
+    }
 
     /* 6. 空 frame 路径：局部槽没有父路径。 */
     request.vthread_identifier = runtimec_string_view_from_c_string(TEST_VTHREAD);

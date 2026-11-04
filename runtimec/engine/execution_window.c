@@ -14,7 +14,6 @@
 
 #include "engine/execution_window.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #include "binrwir/execution_frame.h"
@@ -74,6 +73,32 @@ static runtimec_status_t runtimec_execution_window_fail(runtimec_execution_windo
                        runtimec_string_view_from_c_string(message),
                        RUNTIMEC_PROGRAM_COUNTER_NONE);
     return status;
+}
+
+/*
+ * `vid` 是**数字**（spec `02-kvspace模型/02-结构域.kv`「`vid` 是数字，如
+ * `/vthread/2`，不是名字」）。这里拦的是「空」和「非数字」，不拦范围——位数由
+ * 调用方定，本层不发明上限。
+ *
+ * 为什么必须在这里拦：`vthread_identifier` 会被原样拼进 checkpoint 的落点，
+ * `"v1"`、`"vthread-1"` 这类串不会当场报错，只会在 kvspace 里长出一棵语法上
+ * 合法但语义上不存在的子树——错的地方离出错的地方太远。
+ */
+static bool runtimec_execution_window_vthread_is_numeric(
+    runtimec_string_view_t vthread_identifier) {
+    size_t ordinal;
+
+    if (vthread_identifier.size == 0U) {
+        return false;
+    }
+    for (ordinal = 0U; ordinal < vthread_identifier.size; ++ordinal) {
+        const char character = vthread_identifier.data[ordinal];
+
+        if (character < '0' || character > '9') {
+            return false;
+        }
+    }
+    return true;
 }
 
 /*
@@ -523,7 +548,8 @@ runtimec_status_t runtimec_execution_window_execute(
     if (!runtimec_string_view_is_valid(request->function_path) ||
         request->function_path.size == 0U ||
         !runtimec_string_view_is_valid(request->vthread_identifier) ||
-        request->vthread_identifier.size == 0U ||
+        !runtimec_execution_window_vthread_is_numeric(
+            request->vthread_identifier) ||
         !runtimec_string_view_is_valid(request->frame_path) ||
         request->frame_path.size == 0U ||
         (request->argument_count != 0U && request->arguments == NULL)) {

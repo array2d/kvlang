@@ -139,7 +139,7 @@ typedef struct test_parameter {
 } test_parameter_t;
 
 typedef struct test_instruction {
-    uint32_t operation_identifier;
+    binrwir_operation_identifier_t operation_identifier;
     uint32_t source_program_counter;
     binrwir_argument_t reads[4];
     size_t read_count;
@@ -975,15 +975,18 @@ static void test_foreign_marker_hands_off(void) {
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
 
-/* opid 0 不是「未知算子」，是非法指令头。 */
+/*
+ * opid 0 不是「未知算子」，是非法指令头——**在写侧就被拒**。
+ *
+ * 这条用例原来断言的是「Program 能建成、执行到它才失败」，那是把「写侧放行、
+ * 读侧才拦」的错误行为钉成了规格。0 是 `memset(0)` 的默认值，漏填就会进来；
+ * 让它通过校验，等于把编码期的 bug 推迟到执行期才暴露，那时已经离开了出错点。
+ * 现在判据在 `binrwir_instruction_validate_build_request`，本用例守它。
+ */
 static void test_zero_operation_identifier_is_invalid(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
     binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
-    binrwir_frame_bindings_t *bindings = NULL;
-    binrwir_execution_exit_t exit_state;
-    binrwir_registry_t registry;
     test_instruction_t instruction;
     test_program_source_t source;
 
@@ -994,24 +997,9 @@ static void test_zero_operation_identifier_is_invalid(void) {
     source.instructions = &instruction;
     source.instruction_count = 1U;
 
+    /* 构建期拒绝：不产生 Program，也不分配任何内存。 */
     RUNTIMEC_EXPECT(test_program_build(&allocator, &source, &program) ==
-                    RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(test_frame_initialize(&frame, &bindings, program,
-                                          &allocator) ==
-                    RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_registry_initialize(&registry) ==
-                    RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(vmbin_execute(program, NULL, &frame, &registry, NULL,
-                                  &exit_state) == RUNTIMEC_STATUS_INVALID);
-    RUNTIMEC_EXPECT(exit_state.kind == BINRWIR_EXECUTION_EXIT_ERROR);
-    RUNTIMEC_EXPECT(exit_state.status == RUNTIMEC_STATUS_INVALID);
-
-    RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
-                    RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
-                    RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
-                    RUNTIMEC_STATUS_SUCCESS);
+                    RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
 

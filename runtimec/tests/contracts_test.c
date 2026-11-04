@@ -158,6 +158,40 @@ static void test_instruction_argument_count_overflow(void) {
                     RUNTIMEC_STATUS_INVALID);
 }
 
+/*
+ * opid 0 必须被拒。catalog 里没有任何一行分配 0，`0x0001` 起才是能力行。
+ *
+ * 为什么单列一条：0 是结构体 `memset(0)` 后的默认值，最容易因漏填被带进
+ * Program；而读侧 `vmbin` 把 0 当非法指令头。写侧不拦、读侧才拦，错误会离
+ * 出错点很远（表现为执行期的 detail=3，而不是编码期的拒绝）。
+ */
+static void test_instruction_rejects_zero_operation_identifier(void) {
+    binrwir_instruction_build_request_t request = {
+        .source_logical_program_counter = 1U,
+        .operation_identifier = 0U,
+        .read_arguments = {.data = NULL, .count = 0U},
+        .write_arguments = {.data = NULL, .count = 0U},
+    };
+
+    RUNTIMEC_EXPECT(binrwir_instruction_validate_build_request(&request) ==
+                    RUNTIMEC_STATUS_INVALID);
+
+    /* 0x0001 起是合法能力行：这条判据不得误伤真实算子。 */
+    request.operation_identifier = UINT16_C(0x0001);
+    RUNTIMEC_EXPECT(binrwir_instruction_validate_build_request(&request) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+
+    /* FOREIGN 仍是合法结构标记（零读写参），不因这条判据被拒。 */
+    request.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_FOREIGN;
+    RUNTIMEC_EXPECT(binrwir_instruction_validate_build_request(&request) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+
+    /* NONE 仍被拒（它本来就在守卫里，这条防止改判据时把它弄丢）。 */
+    request.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_NONE;
+    RUNTIMEC_EXPECT(binrwir_instruction_validate_build_request(&request) ==
+                    RUNTIMEC_STATUS_INVALID);
+}
+
 /* V.body 地址推导是全系统唯一的 +8：零基址与溢出都必须失败，不回绕。 */
 static void test_xvalue_body_address(void) {
     RUNTIMEC_EXPECT(runtimec_xvalue_body_address(RUNTIMEC_XVALUE_ADDRESS_NONE) ==
@@ -301,6 +335,7 @@ int main(void) {
     test_plain_data_copy_round_trip();
     test_reference_argument_failure_shape();
     test_instruction_argument_count_overflow();
+    test_instruction_rejects_zero_operation_identifier();
     test_xvalue_body_address();
     test_value_body_length();
     test_xvalue_address_from_value_body();

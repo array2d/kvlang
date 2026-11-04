@@ -931,7 +931,7 @@ static runtimec_status_t vmkv_encoder_encode_temporary_output(
     binrwir_program_builder_t *builder, const vmkv_local_types_t *local_types,
     vmkv_encode_function_t *function,
     const vmkv_rwir_instruction_view_t *source_instruction,
-    uint32_t operation_identifier,
+    binrwir_operation_identifier_t operation_identifier,
     runtimec_program_counter_t logical_program_counter,
     vmkv_canonical_instruction_t *output_instruction,
     runtimec_error_t *error) {

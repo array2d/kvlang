@@ -185,7 +185,8 @@ static void binrwir_format_write_arguments(binrwir_format_writer_t *writer,
 
 /* 算子名：回调给不出就打印数值，绝不猜。 */
 static void binrwir_format_write_operation(
-    binrwir_format_writer_t *writer, uint32_t operation_identifier,
+    binrwir_format_writer_t *writer,
+    binrwir_operation_identifier_t operation_identifier,
     binrwir_operation_name_function resolve, void *resolve_context) {
     runtimec_string_view_t name = runtimec_string_view_make(NULL, 0U);
     int resolved = 0;

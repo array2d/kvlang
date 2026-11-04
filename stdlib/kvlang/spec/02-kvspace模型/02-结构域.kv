@@ -29,6 +29,7 @@ rwir 签名与程序同处数据 store，位于 `/lib/<op>` 的 `def rwir` 节�
 ### `/vthread`
 
 每个虚线程 `vid` 占一棵子树 `/vthread/{vid}/`，借用 Unix `/proc/<pid>/` 思想：栈帧为其下的 KV 子树，
+**`vid` 是数字**（如 `/vthread/2`），不是名字——不要写 `v1`、`vthread-1` 这类带前缀的串；
 `‥pc`、`‥status` 等系统变量（前缀 `‥`，见 [[系统变量]]）暴露执行状态。PC 为路径字符串、帧根落 KV，故
 进程崩溃后可从 kvspace 续跑。
 

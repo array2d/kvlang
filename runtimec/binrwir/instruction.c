@@ -27,7 +27,8 @@ static int binrwir_argument_span_is_invalid(
 
 /* operation identifier 与 source logical program counter 都是身份字段，绝不接受 NONE。 */
 static runtimec_status_t binrwir_instruction_validate_content(
-    uint32_t source_logical_program_counter, uint32_t operation_identifier,
+    uint32_t source_logical_program_counter,
+    binrwir_operation_identifier_t operation_identifier,
     binrwir_argument_span_t read_arguments,
     binrwir_argument_span_t write_arguments) {
     /* FOREIGN 是结构标记：合法 opid，但必须零读参零写参。 */
@@ -35,7 +36,14 @@ static runtimec_status_t binrwir_instruction_validate_content(
         (read_arguments.count != 0U || write_arguments.count != 0U)) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    if (operation_identifier == BINRWIR_OPERATION_IDENTIFIER_NONE ||
+    /*
+     * 0 不是合法 opid：catalog 里没有任何一行分配 0，`0x0001` 起才是能力行。
+     * 只拦 `NONE` 会放过 0——而 0 恰恰是「结构体没填」的默认值，最容易被漏写
+     * 带进来，且读侧 `vmbin` 会把它当非法指令头报出来：写侧放行、读侧才拦，
+     * 错误离出错点太远。
+     */
+    if (operation_identifier == 0U ||
+        operation_identifier == BINRWIR_OPERATION_IDENTIFIER_NONE ||
         source_logical_program_counter ==
             BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE ||
         read_arguments.count > UINT32_MAX ||

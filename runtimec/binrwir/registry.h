@@ -44,7 +44,7 @@ typedef enum binrwir_registry_flags {
 } binrwir_registry_flags_t;
 
 typedef struct binrwir_registry_entry {
-    uint32_t operation_identifier;
+    binrwir_operation_identifier_t operation_identifier;
     uint32_t flags;
     binrwir_registry_handler_t handler;
 } binrwir_registry_entry_t;
@@ -86,7 +86,8 @@ runtimec_status_t binrwir_registry_destroy(
  * **先全部校验、再一次性写入**：边校验边写会让失败时 registry 停在半装载状态，
  * 那比静默覆盖更难查。失败条件（任一命中即返回，registry 保持不变）：
  *   - 空 handler（`handler == NULL`）；
- *   - `operation_identifier == BINRWIR_IDENTIFIER_NONE`；
+ *   - opid 是 `BINRWIR_OPERATION_IDENTIFIER_NONE` 或 `..._FOREIGN`（结构标记不是
+ *     算子，它们由解释器直接分派，注册进来会造出第二条分派路径）；
  *   - 与本表已有条目重复（**不覆盖**，诊断信息点名模块）；
  *   - 超出 `BINRWIR_REGISTRY_ENTRY_LIMIT`（INSUFFICIENT_CAPACITY，**不截断**）。
  */
@@ -104,7 +105,7 @@ runtimec_status_t binrwir_registry_append(
  */
 runtimec_status_t
 binrwir_registry_find(const binrwir_registry_t *registry,
-                            uint32_t operation_identifier,
+                            binrwir_operation_identifier_t operation_identifier,
                             const binrwir_registry_entry_t **output_entry);
 
 #ifdef __cplusplus
