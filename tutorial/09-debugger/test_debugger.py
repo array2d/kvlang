@@ -3,7 +3,7 @@
 
 用法:
   # 终端 A：启动 serve + agent
-  python3 tutorial/03-debugger/test_debugger.py
+  python3 tutorial/runtimec/09-debugger/test_debugger.py
 
   # 或手动分步调试：
   # 1. kvspace clear && ./kvlang layoutrwir tutorial/runtimec/09-debugger/breakpoint.kv

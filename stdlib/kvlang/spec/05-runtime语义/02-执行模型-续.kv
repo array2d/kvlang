@@ -63,7 +63,7 @@ vthread 是 kvlang 的执行线程，句柄为整数 `vid`，根在 `/vthread/<v
 
 `vthread·create` 与 `vthread·run` 是**两步分离**（对应 `byteseek create <fn>` /
 `byteseek run <vid>` 两个子命令）；`vthread·call` 是同 vid 内的动态调用。
-三者**不得**混同。锚例：`tutorial/15-vthread/`
+三者**不得**混同。锚例：`tutorial/{runtimec,byteseek,byteseek-stdlib}/15-vthread/`
 （`01-call.kv`、`03-create-run.kv`、`04-sleep.kv`、`02-crashrecover.kv`）。
 
 ## networld 与外部世界

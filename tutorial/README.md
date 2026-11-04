@@ -31,6 +31,8 @@ kvlang tutorial/runtimec/06-algo/gcd.kv         # gcd = 6
 kvlang tutorial/runtimec/06-algo/collatz.kv     # steps = 111
 ```
 
+注：上面 `01-hello/`、`06-while/` 两例尚未落地；其余示例见 `tutorial/runtimec/` 等三组目录。
+
 ## Algorithms in 08-algo
 
 | File | Algorithm | Key concepts |
