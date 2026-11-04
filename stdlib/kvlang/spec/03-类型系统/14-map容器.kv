@@ -2,9 +2,31 @@
 lib kvlang/spec/类型系统/map容器 {
 	r####"# map 容器
 
-**map**（种类 `stringkeymap`）是 kvlang 的一等键-值容器。异构命名成员容器 **struct** 是另一种容器语义
-类型，见 [[struct]]（本卷不再涉及）；kvlang **没有** `dict` 种类，也没有 `object`/`scope` 种类（见
-[[总体方案]]）。
+**map** 是 kvlang 的一等键-值容器，groupkv 的三副面孔之一，其种类名为 **`stringkeymap`**。
+异构命名成员容器 **struct** 见 [[struct]]（本卷不再涉及）。kvlang 没有 `dict`、`scope`
+这两种容器种类（见 [[总体方案]]）。
+
+## groupkv：map / struct / scatterarray 是同一物理结构
+
+`map`、`struct`、`scatterarray` **本质是同一样东西：键值组（groupkv）**。它们不是三种
+「类型」，而是同一物理结构的三副面孔——差别只在**成员键怎么来**与**谁定义值类型**：
+
+| 面孔 | 成员键 | 值类型来源 |
+|------|--------|-----------|
+| map | `base·<memitemkey>` | langtype 的 mapexpr 侧 |
+| struct | `base·<field>` | 原型 `/lib/<Name>` 里各字段的 `def langtype` |
+| scatterarray | `base·[i]` 坐标段 | langtype 的 mapexpr 侧（键为坐标元组） |
+
+三者**共用的物理规则**（下文「容器物理结构」展开）：
+
+- base key 是 storetype 0、**body 为空**的 XValue，只承载 langtype；
+- 每个成员是 `base·<成员键>` 的**独立 KV key**，各自一个 XValue；
+- 成员由**物理 key 前缀枚举**，不存任何索引矩阵。
+
+**groupkv 是概念名，不是种类名。** 落库时每个值仍需一个具体 langtype：map 是 mapexpr 或
+`stringkeymap` 标记，struct 是原型路径 `/lib/<Name>`（见 [[langtype语义类型]]）。概念解释
+「为什么三者是同一物理结构」，种类决定「落库时 langtype 的字符形状与 runtime 分派」——
+两者不是替换关系。
 
 ## 标准 map 定义
 
@@ -75,7 +97,10 @@ memitemvalue 可递归嵌套（`[]char/utf8·[]char/utf8·int64` 即 `map[string
 
 ## 容器物理结构
 
-map 的 base key 存 storetype 0、body 为空，langtype 为完整 map 类型（例如 `[]char/utf8·int64`）。每个成员落在 `base·memitemkey` 的独立 KV key，保存该成员自己的 XValue。成员通过物理 key 前缀枚举；不存放 `base·` 索引矩阵。struct 成员遵循同一物理规则。`/lib/{pkg}·{func}` 中的 `·` 是函数命名字符，函数成员则位于 `/` 目录下。
+groupkv 的 base key 存 storetype 0、body 为空，langtype 为完整 map 类型（例如
+`[]char/utf8·int64`）或原型路径（`/lib/Point`）。每个成员落在 `base·<成员键>` 的独立
+KV key，保存该成员自己的 XValue。成员通过物理 key 前缀枚举；不存放 `base·` 索引矩阵。
+`/lib/{pkg}·{func}` 中的 `·` 是函数命名字符，函数成员则位于 `/` 目录下。
 
 ## 容器字面量须带类型标注
 
@@ -86,5 +111,12 @@ map 的 base key 存 storetype 0、body 为空，langtype 为完整 map 类型�
 容器值的 langtype **就是**该 map langtype，kvspace 里**不存在**「langtype = 种类名 `stringkeymap` 的
 值」——runtime 也**不得**在缺类型时退化兜底（无类型即 layout 漏检，直接 fatal）。空字面量 `{}` 尤其无
 法推断：它不含任何成员。
+
+## 具名与位置字面量同一个构造算子
+
+`{n=42; x=7} -> m`（具名）与 `{10, 20} -> m`（位置）走**同一个**构造算子 `map·new`，
+行为一致：**替换已有成员**——先清掉 `m·` 下旧成员，再按字面量写入新成员。
+
+kvlang 没有第三种容器算子：具名 map 字面量不脱糖成任何别的算子，它就是 `map·new`。
 "#### -> /lib/kvlang/spec/类型系统/map容器
 }
