@@ -2,40 +2,40 @@
 //   sum(1..10) = 55
 //   first div7 in [1,20] = 7
 //   sum odds(1..10) = 25
-rwfunc sum_to(n:int64) -> (total:int64) {
-	total = 0
+rwfunc sum_to(*int64 $n) -> (*int64 $total) {
+	*total = 0
 	i = 1
-	while (i <= n) {
-		total + i -> total
+	while (i <= *n) {
+		*total + i -> *total
 		i = i + 1
 	}
 }
 
-rwfunc first_div7(n:int64) -> (result:int64) {
-	result = 0
+rwfunc first_div7(*int64 $n) -> (*int64 $result) {
+	*result = 0
 	1 -> i
-	while (i <= n) {
+	while (i <= *n) {
 		rem = i % 7
 		hit = rem == 0
 
 		if (hit) {
-			i -> result
-			i = n + 1
+			i -> *result
+			i = *n + 1
 		} else {
 			i = i + 1
 		}
 	}
 }
 
-rwfunc sum_odds(n:int64) -> (total:int64) {
-	0 -> total
+rwfunc sum_odds(*int64 $n) -> (*int64 $total) {
+	0 -> *total
 	i = 1
-	while (i <= n) {
+	while (i <= *n) {
 		rem = i % 2
 		rem == 1 -> is_odd
 
 		if (is_odd) {
-			total = total + i
+			*total = *total + i
 		}
 
 		i = i + 1

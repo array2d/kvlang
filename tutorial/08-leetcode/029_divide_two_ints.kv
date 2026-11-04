@@ -3,9 +3,9 @@
 // 期望输出:
 //   3
 //   -2
-rwfunc divide(dividend:int64, divisor:int64) -> (result:int64) {
-	dend = dividend
-	dsor = divisor
+rwfunc divide(*int64 $dividend, *int64 $divisor) -> (*int64 $result) {
+	dend = *dividend
+	dsor = *divisor
 	neg = 0
 	if (dend < 0) {
 		neg = 1 - neg
@@ -15,7 +15,7 @@ rwfunc divide(dividend:int64, divisor:int64) -> (result:int64) {
 		neg = 1 - neg
 		dsor = 0 - dsor
 	}
-	result = 0
+	*result = 0
 	while (dend >= dsor) {
 		temp = dsor
 		multiple = 1
@@ -24,9 +24,9 @@ rwfunc divide(dividend:int64, divisor:int64) -> (result:int64) {
 			multiple = multiple + multiple
 		}
 		dend = dend - temp
-		result = result + multiple
+		*result = *result + multiple
 	}
-	if (neg == 1) { result = 0 - result }
+	if (neg == 1) { *result = 0 - *result }
 }
 
 rwfunc test() -> () {

@@ -2,9 +2,9 @@
 // 来源: LeetCode #441
 // 期望输出:
 //   2
-rwfunc arrange(n:int64) -> () {
+rwfunc arrange(*int64 $n) -> () {
 	lo = 1
-	n -> hi
+	*n -> hi
 	ans = 0
 	while (lo <= hi) {
 		s = lo + hi
@@ -15,8 +15,8 @@ rwfunc arrange(n:int64) -> () {
 		total = m2 + mid
 		total ÷ 2 -> t
 		total ÷ 2 -> t_m
-		ok = t <= n
-		ok_m = t ≤ n
+		ok = t <= *n
+		ok_m = t ≤ *n
 
 		if (ok) {
 			ans = mid

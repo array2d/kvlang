@@ -9,10 +9,10 @@
 //   2
 //   3
 //   4
-rwfunc swap(a_len:int64, lo:int64, hi:int64) -> () {
-	a_len -> a_lenv
-	lo -> lov
-	hi -> hiv
+rwfunc swap(*int64 $a_len, *int64 $lo, *int64 $hi) -> () {
+	*a_len -> a_lenv
+	*lo -> lov
+	*hi -> hiv
 	while (lov < hiv) {
 		a[lov] -> t
 		u = a[hiv]

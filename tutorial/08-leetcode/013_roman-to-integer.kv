@@ -1,12 +1,12 @@
 // 013 Roman to Integer
 // 期望输出: 58, 1994
-rwfunc romanToInt(s:[]char/utf32) -> (val:int64) {
-	0 -> val
+rwfunc romanToInt(*[]char/utf32 $s) -> (*int64 $val) {
+	0 -> *val
 	i = 0
-	n = string·len(s)
+	n = string·len(*s)
 	"" -> prev
 	while (i < n) {
-		c = s[i]
+		c = (*s)[i]
 		isI = c == "I"
 		c == "V" -> isV
 		isX = c == "X"
@@ -19,31 +19,31 @@ rwfunc romanToInt(s:[]char/utf32) -> (val:int64) {
 		pC = prev == "C"
 
 		if (isI) {
-			val = val + 1
+			*val = *val + 1
 		}
 
 		if (isV) {
-			val + 5 -> val
+			*val + 5 -> *val
 		}
 
 		if (isX) {
-			val = val + 10
+			*val = *val + 10
 		}
 
 		if (isL) {
-			val = val + 50
+			*val = *val + 50
 		}
 
 		if (isC) {
-			val + 100 -> val
+			*val + 100 -> *val
 		}
 
 		if (isD) {
-			val = val + 500
+			*val = *val + 500
 		}
 
 		if (isM) {
-			val + 1000 -> val
+			*val + 1000 -> *val
 		}
 
 		subI = pI
@@ -52,37 +52,37 @@ rwfunc romanToInt(s:[]char/utf32) -> (val:int64) {
 
 		if (isV) {
 			if (subI) {
-				val = val - 2
+				*val = *val - 2
 			}
 		}
 
 		if (isX) {
 			if (subI) {
-				val - 2 -> val
+				*val - 2 -> *val
 			}
 		}
 
 		if (isL) {
 			if (subX) {
-				val = val - 20
+				*val = *val - 20
 			}
 		}
 
 		if (isC) {
 			if (subX) {
-				val = val - 20
+				*val = *val - 20
 			}
 		}
 
 		if (isD) {
 			if (subC) {
-				val - 200 -> val
+				*val - 200 -> *val
 			}
 		}
 
 		if (isM) {
 			if (subC) {
-				val = val - 200
+				*val = *val - 200
 			}
 		}
 

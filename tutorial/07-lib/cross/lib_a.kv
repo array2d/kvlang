@@ -1,3 +1,3 @@
 lib math {
-    rwfunc sum(A:int64, B:int64) -> (C:int64) { A + B -> C }
+    rwfunc sum(*int64 $A, *int64 $B) -> (*int64 $C) { *A + *B -> *C }
 }

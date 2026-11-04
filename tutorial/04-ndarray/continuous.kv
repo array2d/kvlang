@@ -5,10 +5,10 @@
 //   [0] = 10
 //   after set: 10 99 30
 //   sum = 179
-rwfunc sum(a:[]int64) -> (total:int64) {
-	total = 0
-	for (x in a) {
-		total = total + x
+rwfunc sum(*[]int64 $a) -> (*int64 $total) {
+	*total = 0
+	for (x in *a) {
+		*total = *total + x
 	}
 }
 

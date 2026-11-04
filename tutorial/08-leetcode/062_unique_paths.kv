@@ -3,17 +3,17 @@
 // 期望输出:
 //   28
 //   3
-rwfunc dp(m:int64, n:int64) -> (result:int64) {
+rwfunc dp(*int64 $m, *int64 $n) -> (*int64 $result) {
 	/tmp/up:[int64]·int64 = {}
 	i = 0
-	while (i < n) {
+	while (i < *n) {
 		1 -> "/tmp/up"·*i
 		i + 1 -> i
 	}
 	j = 1
-	while (j < m) {
+	while (j < *m) {
 		k = 1
-		while (k < n) {
+		while (k < *n) {
 			"/tmp/up"·*k -> v
 			k - 1 -> km1
 			"/tmp/up"·*km1 -> prev
@@ -22,8 +22,8 @@ rwfunc dp(m:int64, n:int64) -> (result:int64) {
 		}
 		j + 1 -> j
 	}
-	n - 1 -> last
-	"/tmp/up"·*last -> result
+	*n - 1 -> last
+	"/tmp/up"·*last -> *result
 }
 
 rwfunc test() -> () {

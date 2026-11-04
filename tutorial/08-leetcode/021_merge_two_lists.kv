@@ -12,9 +12,9 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc merge(a:*Node, b:*Node) -> () {
-	pa = a
-	pb = b
+rwfunc merge(*Node $a, *Node $b) -> () {
+	pa = *a
+	pb = *b
 	while (pa != None) {
 		pa·val -> av
 		pick_a = pb == None

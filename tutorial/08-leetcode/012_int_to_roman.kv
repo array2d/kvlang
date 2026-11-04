@@ -3,9 +3,9 @@
 // 期望输出:
 //   LVIII
 //   MCMXCIV
-rwfunc int_to_roman(n:int64) -> () {
+rwfunc int_to_roman(*int64 $n) -> () {
 	result = ""
-	val = n
+	val = *n
 	while (val >= 1000) { result + "M" -> result ; val = val - 1000 }
 	while (val ≥ 1000) { result + "M" -> result_m ; val = val - 1000 }
 	if (val >= 900) { result + "CM" -> result ; val = val - 900 }

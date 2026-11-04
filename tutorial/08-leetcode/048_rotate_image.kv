@@ -10,17 +10,17 @@
 //   9
 //   6
 //   3
-rwfunc rotate(N:int64) -> () {
+rwfunc rotate(*int64 $N) -> () {
 	mat:[]int64 = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 	// transpose
 	i = 0
-	while (i < N) {
+	while (i < *N) {
 		j = i + 1
-		while (j < N) {
-			ri = i × N + j
-			ri_m = i × N + j
-			rj = j × N + i
-			rj_m = j × N + i
+		while (j < *N) {
+			ri = i × *N + j
+			ri_m = i × *N + j
+			rj = j × *N + i
+			rj_m = j × *N + i
 			mat[ri] -> t
 			mat[rj] -> u
 			mat[ri] = u
@@ -31,10 +31,10 @@ rwfunc rotate(N:int64) -> () {
 	}
 	// reverse each row
 	r = 0
-	while (r < N) {
-		l = r × N
-		l_m = r × N
-		h = l + N - 1
+	while (r < *N) {
+		l = r × *N
+		l_m = r × *N
+		h = l + *N - 1
 		while (l < h) {
 			mat[l] -> v1
 			mat[h] -> v2
@@ -47,11 +47,11 @@ rwfunc rotate(N:int64) -> () {
 	}
 	// print
 	row = 0
-	while (row < N) {
+	while (row < *N) {
 		col = 0
-		while (col < N) {
-			idx = row × N + col
-			idx_m = row × N + col
+		while (col < *N) {
+			idx = row × *N + col
+			idx_m = row × *N + col
 			v = mat[idx]
 			println(v)
 			col + 1 -> col

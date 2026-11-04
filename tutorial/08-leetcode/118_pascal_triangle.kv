@@ -17,15 +17,15 @@
 //   6
 //   4
 //   1
-rwfunc generate(num_rows:int64) -> () {
+rwfunc generate(*int64 $num_rows) -> () {
 	/tmp/cur:[int64]·int64 = {}
 	// store prev row in dict
 	/tmp/pt:[int64]·int64 = {}
 	1 -> "/tmp/pt"·*0
 	println(1)
-	if (num_rows == 1) { }
+	if (*num_rows == 1) { }
 	r = 1
-	while (r < num_rows) {
+	while (r < *num_rows) {
 		println(1)
 		1 -> "/tmp/cur"·*0
 		i = 1

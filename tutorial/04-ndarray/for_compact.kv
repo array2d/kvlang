@@ -5,11 +5,11 @@
 //   20
 //   30
 //   sum = 60
-rwfunc print_sum(a:[]int64) -> (total:int64) {
-	total = 0
-	for (x in a) {
+rwfunc print_sum(*[]int64 $a) -> (*int64 $total) {
+	*total = 0
+	for (x in *a) {
 		println(x)
-		total = total + x
+		*total = *total + x
 	}
 }
 

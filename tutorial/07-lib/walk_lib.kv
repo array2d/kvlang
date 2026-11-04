@@ -18,15 +18,15 @@
 //   [0,0] rwfunc
 //   ‥labels/
 //   _do_9
-rwfunc walk(path:[]char/utf32, indent:[]char/utf32, down:int64) -> () {
+rwfunc walk(*[]char/utf32 $path, *[]char/utf32 $indent, *int64 $down) -> () {
 	ms:[int64]·[]char/utf32 = {}
-	kvspace·members(path) -> (ms, n)
+	kvspace·members(*path) -> (ms, n)
 	0 -> i
 	while (i < n) {
 		kvspace·listat(ms, i) -> mk
 		ms·*mk -> nm8
 		char/utf32(nm8) -> nm
-		path + nm -> full
+		*path + nm -> full
 		"" -> child
 		string·find(nm, "/") -> sl
 		if (sl >= 0) {
@@ -51,16 +51,16 @@ rwfunc walk(path:[]char/utf32, indent:[]char/utf32, down:int64) -> () {
 			kvspace·cp(full, "/tmp/walk_lib_leaf")
 			/tmp/walk_lib_leaf -> v
 			if (v == None) {
-				println(indent, nm)
+				println(*indent, nm)
 			} else {
 				compactarray·langtype(v) -> lt
 				char/utf32(lt) -> lts
-				println(indent, nm, lts)
+				println(*indent, nm, lts)
 			}
 		} else {
-			println(indent, nm)
-			if (down > 0) {
-				walk(child, indent + "  ", down - 1)
+			println(*indent, nm)
+			if (*down > 0) {
+				walk(child, *indent + "  ", *down - 1)
 			}
 		}
 		i + 1 -> i

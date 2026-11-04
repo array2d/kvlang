@@ -2,14 +2,14 @@
 // 来源: LeetCode #171
 // 期望输出:
 //   28
-rwfunc title_to_num(s:[]char/utf32) -> () {
-	string·len(s) -> n
+rwfunc title_to_num(*[]char/utf32 $s) -> () {
+	string·len(*s) -> n
 	result = 0
 	i = 0
 	while (i < n) {
 		result × 26 -> r26
 		result × 26 -> r26_m
-		c = string·char(s, i)
+		c = string·char(*s, i)
 		v = string·ord(c) - 65
 		v + 1 -> d
 		result = r26 + d

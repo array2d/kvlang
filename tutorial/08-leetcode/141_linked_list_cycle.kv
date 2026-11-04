@@ -3,10 +3,10 @@
 // 期望输出:
 //   1
 //   0
-rwfunc has_cycle(head:*Node) -> (result:int64) {
-	result = 0
-	head -> slow
-	fast = head
+rwfunc has_cycle(*Node $head) -> (*int64 $result) {
+	*result = 0
+	*head -> slow
+	fast = *head
 	while (fast != None) {
 		slow = slow·next
 		fast·next -> n1
@@ -19,7 +19,7 @@ rwfunc has_cycle(head:*Node) -> (result:int64) {
 			match = slow == fast
 
 			if (match) {
-				result = 1
+				*result = 1
 				None -> fast
 			}
 		}

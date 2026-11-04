@@ -2,11 +2,11 @@
 // 来源: LeetCode #70
 // 期望输出:
 //   8
-rwfunc climb(n:int64) -> () {
+rwfunc climb(*int64 $n) -> () {
 	a = 1
 	1 -> b
 	i = 2
-	while (i <= n) {
+	while (i <= *n) {
 		c = a + b
 		b -> a
 		b = c

@@ -3,12 +3,12 @@
 // 期望输出:
 //   321
 //   -321
-rwfunc reverse(x:int64) -> (result:int64) {
-	neg = x < 0
-	x -> n
+rwfunc reverse(*int64 $x) -> (*int64 $result) {
+	neg = *x < 0
+	*x -> n
 
 	if (neg) {
-		n = -x
+		n = -*x
 	}
 
 	rev = 0
@@ -22,9 +22,9 @@ rwfunc reverse(x:int64) -> (result:int64) {
 	}
 
 	if (neg) {
-		result = -rev
+		*result = -rev
 	} else {
-		result = rev
+		*result = rev
 	}
 }
 

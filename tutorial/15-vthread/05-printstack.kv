@@ -7,8 +7,8 @@
 //   inner-lib= true
 //   arg= true
 //   cur= true
-rwfunc ps_inner(n:int64) -> (r:int64) {
-	div(n, 0) -> x
+rwfunc ps_inner(*int64 $n) -> (*int64 $r) {
+	div(*n, 0) -> x
 }
 
 rwfunc ps_outer() -> () {

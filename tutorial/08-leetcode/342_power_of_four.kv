@@ -2,16 +2,16 @@
 // 来源: LeetCode #342
 // 期望输出:
 //   1
-rwfunc is_power4(n:int64) -> () {
-	pos = n > 0
+rwfunc is_power4(*int64 $n) -> () {
+	pos = *n > 0
 
 	if (pos) {
 		1 -> t
-		while (t < n) {
+		while (t < *n) {
 			t = t × 4
 			t_m = t × 4
 		}
-		eq = t == n
+		eq = t == *n
 
 		if (eq) {
 			println(1)

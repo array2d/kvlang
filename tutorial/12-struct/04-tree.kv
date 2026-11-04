@@ -11,13 +11,13 @@ struct TNode {
 	right:*TNode=None
 }
 
-rwfunc inorder(node:*TNode) -> () {
+rwfunc inorder(*TNode $node) -> () {
 	if (node != None) {
-		node·left -> l
+		(*node)·left -> l
 		inorder(l)
-		node·val -> v
+		(*node)·val -> v
 		println(v)
-		node·right -> r
+		(*node)·right -> r
 		inorder(r)
 	}
 }

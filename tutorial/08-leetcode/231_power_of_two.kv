@@ -3,24 +3,24 @@
 // 期望输出:
 //   1
 //   0
-rwfunc is_power(n:int64) -> (r:int64) {
+rwfunc is_power(*int64 $n) -> (*int64 $r) {
 	result = 0
-	n > 0 -> pos
+	*n > 0 -> pos
 
 	if (pos) {
 		t = 1
-		while (t < n) {
+		while (t < *n) {
 			t = t × 2
 			t_m = t × 2
 		}
-		t == n -> eq
+		t == *n -> eq
 
 		if (eq) {
 			result = 1
 		}
 	}
 
-	r = result
+	*r = result
 }
 
 rwfunc test() -> () {

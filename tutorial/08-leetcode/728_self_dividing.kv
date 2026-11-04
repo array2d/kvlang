@@ -13,8 +13,8 @@
 //   11
 //   12
 //   15
-rwfunc is_self(n:int64) -> (r:bool) {
-	n -> num
+rwfunc is_self(*int64 $n) -> (*bool $r) {
+	*n -> num
 	ok = true
 	while (num > 0) {
 		d = num % 10
@@ -24,7 +24,7 @@ rwfunc is_self(n:int64) -> (r:bool) {
 			ok = false
 			num = 0
 		} else {
-			n % d -> rem
+			*n % d -> rem
 			div = rem == 0
 
 			if (div) {
@@ -36,7 +36,7 @@ rwfunc is_self(n:int64) -> (r:bool) {
 			}
 		}
 	}
-	r = ok
+	*r = ok
 }
 
 rwfunc test() -> () {

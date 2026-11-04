@@ -3,13 +3,13 @@
 // 期望输出:
 //   true
 //   false
-rwfunc near_dup(nums:[]int64, k:int64) -> () {
-	n = compactarray·numel(nums)
+rwfunc near_dup(*[]int64 $nums, *int64 $k) -> () {
+	n = compactarray·numel(*nums)
 	h:[]char/utf8·int64 = {}
 	found = false
 	0 -> i
 	while (i < n) {
-		nums[i] -> x
+		(*nums)[i] -> x
 		h·*x != None -> exists
 
 		if (exists) {
@@ -17,7 +17,7 @@ rwfunc near_dup(nums:[]int64, k:int64) -> () {
 			if (j > 0) {
 				d = i - j + 1
 
-				if (d <= k) {
+				if (d <= *k) {
 					true -> found
 					n -> i
 				}

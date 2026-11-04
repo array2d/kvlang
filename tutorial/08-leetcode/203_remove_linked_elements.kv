@@ -11,11 +11,11 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc remove(head:*Node, val:int64) -> () {
-	head -> p
+rwfunc remove(*Node $head, *int64 $val) -> () {
+	*head -> p
 	while (p != None) {
 		v = p·val
-		v == val -> skip
+		v == *val -> skip
 
 		if (skip) {
 		} else {

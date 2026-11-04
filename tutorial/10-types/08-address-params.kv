@@ -2,14 +2,14 @@
 //   inc r= 4  v= 3
 //   bump v= 4
 //   own v= 104
-rwfunc inc(x:int64) -> (r:int64) {
-    x + 1 -> r
+rwfunc inc(*int64 $x) -> (*int64 $r) {
+    *x + 1 -> *r
 }
-rwfunc bump() -> (p:int64) {
-    p + 1 -> p
+rwfunc bump() -> (*int64 $p) {
+    *p + 1 -> *p
 }
-rwfunc own() -> (t:int64) {
-    t + 100 -> t
+rwfunc own() -> (*int64 $t) {
+    *t + 100 -> *t
 }
 rwfunc test() -> () {
     3 -> v

@@ -5,10 +5,10 @@
 //   a0 = 0
 //   b12 = 5
 //   sum = 30
-rwfunc sum6(a:[6]int32) -> (total:int64) {
-	total = 0
-	for (x in a) {
-		total = total + x
+rwfunc sum6(*[6]int32 $a) -> (*int64 $total) {
+	*total = 0
+	for (x in *a) {
+		*total = *total + x
 	}
 }
 

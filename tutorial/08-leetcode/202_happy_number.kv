@@ -2,8 +2,8 @@
 // 来源: LeetCode #202
 // 期望输出:
 //   1
-rwfunc is_happy(n:int64) -> (result:int64) {
-	n -> nv
+rwfunc is_happy(*int64 $n) -> (*int64 $result) {
+	*n -> nv
 	0 -> slow
 	fast = nv
 	found = 0
@@ -23,7 +23,7 @@ rwfunc is_happy(n:int64) -> (result:int64) {
 
 		if (done) {
 			found = 1
-			1 -> result
+			1 -> *result
 		}
 	}
 }

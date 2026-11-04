@@ -3,17 +3,17 @@
 // 期望输出:
 //   true
 //   false
-rwfunc can_jump(nums:[]int64) -> (ok:int64) {
-	ok = 1
-	n = compactarray·numel(nums)
+rwfunc can_jump(*[]int64 $nums) -> (*int64 $ok) {
+	*ok = 1
+	n = compactarray·numel(*nums)
 	0 -> reach
 	i = 0
 	while (i < n) {
 		if (i > reach) {
-			0 -> ok
+			0 -> *ok
 			n -> i
 		} else {
-			dist = nums[i] + i
+			dist = (*nums)[i] + i
 			if (dist > reach) { dist -> reach }
 			if (reach >= n - 1) {
 				n -> i

@@ -5,8 +5,8 @@
 //   after_write= true
 //   after_del= false
 // file_exists 封装存在性判定：输入路径，输出 bool
-rwfunc file_exists(p:[]char/utf32) -> (b:bool) {
-	networld/fs·exists(p) -> b
+rwfunc file_exists(*[]char/utf32 $p) -> (*bool $b) {
+	networld/fs·exists(*p) -> *b
 }
 
 rwfunc test() -> () {

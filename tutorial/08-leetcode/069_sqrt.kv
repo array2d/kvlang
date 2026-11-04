@@ -2,9 +2,9 @@
 // 来源: LeetCode #69
 // 期望输出:
 //   2
-rwfunc my_sqrt(x:int64) -> () {
+rwfunc my_sqrt(*int64 $x) -> () {
 	lo = 0
-	hi = x
+	hi = *x
 	0 -> ans
 	while (lo <= hi) {
 		s = lo + hi
@@ -12,8 +12,8 @@ rwfunc my_sqrt(x:int64) -> () {
 		mid_m = s ÷ 2
 		mid × mid -> sq
 		mid × mid -> sq_m
-		ok = sq <= x
-		ok_m = sq ≤ x
+		ok = sq <= *x
+		ok_m = sq ≤ *x
 
 		if (ok) {
 			ans = mid

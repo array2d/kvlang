@@ -2,8 +2,8 @@
 // 来源: LeetCode #292
 // 期望输出:
 //   0
-rwfunc can_win(n:int64) -> () {
-	rem = n % 4
+rwfunc can_win(*int64 $n) -> () {
+	rem = *n % 4
 	rem == 0 -> lose
 
 	if (lose) {

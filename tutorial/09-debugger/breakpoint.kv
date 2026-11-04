@@ -1,6 +1,6 @@
-rwfunc loop(n:int64) -> () {
+rwfunc loop(*int64 $n) -> () {
     1 -> i
-    while (i <= n) {
+    while (i <= *n) {
         debugger()   // 内联断点：执行至此暂停，等待 agent 命令
         println(i)
         i + 1 -> i

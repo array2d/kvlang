@@ -5,11 +5,11 @@
 //   [1,6]
 //   [8,10]
 //   [15,18]
-rwfunc bubble_sort(n:int64) -> () {
+rwfunc bubble_sort(*int64 $n) -> () {
 	i = 0
-	while (i < n - 1) {
+	while (i < *n - 1) {
 		j = 0
-		while (j < n - 1 - i) {
+		while (j < *n - 1 - i) {
 			/tmp/mi·*j -> ta
 			j + 1 -> jp
 			/tmp/mi·*jp -> tb
@@ -28,12 +28,12 @@ rwfunc bubble_sort(n:int64) -> () {
 	}
 }
 
-rwfunc merge(n:int64) -> (m:int64) {
-	bubble_sort(n)
+rwfunc merge(*int64 $n) -> (*int64 $m) {
+	bubble_sort(*n)
 	ki = 0
 	/tmp/mi·*0 -> cur
 	idx = 1
-	while (idx < n) {
+	while (idx < *n) {
 		/tmp/mi·*idx -> nxt
 		cur[1] -> cur_end
 		nxt[0] -> nxt_start
@@ -52,7 +52,7 @@ rwfunc merge(n:int64) -> (m:int64) {
 		idx + 1 -> idx
 	}
 	cur -> /tmp/mr·*ki
-	ki + 1 -> m
+	ki + 1 -> *m
 }
 
 rwfunc test() -> () {

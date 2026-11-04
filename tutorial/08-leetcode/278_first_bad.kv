@@ -2,10 +2,10 @@
 // 来源: LeetCode #278
 // 期望输出:
 //   4
-rwfunc first_bad(n:int64) -> () {
+rwfunc first_bad(*int64 $n) -> () {
 	// isBadVersion(i) = i >= 4
 	1 -> lo
-	hi = n
+	hi = *n
 	while (lo < hi) {
 		s = lo + hi
 		s ÷ 2 -> mid

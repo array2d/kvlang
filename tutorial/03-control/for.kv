@@ -4,10 +4,10 @@
 // 期望输出:
 //   0 F = -17.77777777777778 C
 //   300 F = 148.88888888888889 C
-rwfunc fahr_to_cels(fahr:int64) -> (cels:float64) {
+rwfunc fahr_to_cels(*int64 $fahr) -> (*float64 $cels) {
 	factor = 5.0 ÷ 9.0
-	fahr - 32 -> diff
-	factor × diff -> cels
+	*fahr - 32 -> diff
+	factor × diff -> *cels
 }
 
 rwfunc test() -> () {

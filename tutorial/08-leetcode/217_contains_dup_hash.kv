@@ -3,13 +3,13 @@
 // 期望输出:
 //   true
 //   false
-rwfunc has_dup(a:[]int64) -> () {
-	compactarray·numel(a) -> n
+rwfunc has_dup(*[]int64 $a) -> () {
+	compactarray·numel(*a) -> n
 	seen:[]char/utf8·int64 = {}
 	found = false
 	i = 0
 	while (i < n) {
-		a[i] -> x
+		(*a)[i] -> x
 		seen·*x != None -> exists
 
 		if (exists) {

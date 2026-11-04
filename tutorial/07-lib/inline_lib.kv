@@ -2,14 +2,14 @@
 //   mylib·add(10,20) = 30
 //   double(mylib·add(10,20)) = 60
 lib mylib {
-	rwfunc add(A:int64, B:int64) -> (C:int64) {
-		A + B -> C
+	rwfunc add(*int64 $A, *int64 $B) -> (*int64 $C) {
+		*A + *B -> *C
 	}
 }
 
-rwfunc double(x:int64) -> (y:int64) {
-	y = x × 2
-	y_m = x × 2
+rwfunc double(*int64 $x) -> (*int64 $y) {
+	*y = *x × 2
+	y_m = *x × 2
 }
 
 rwfunc test() -> () {

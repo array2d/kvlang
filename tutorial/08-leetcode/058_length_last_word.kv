@@ -2,12 +2,12 @@
 // 来源: LeetCode #58
 // 期望输出:
 //   5
-rwfunc last_word_len(s:[]char/utf32) -> () {
-	n = string·len(s)
+rwfunc last_word_len(*[]char/utf32 $s) -> () {
+	n = string·len(*s)
 	n - 1 -> i
 	count = 0
 	while (i >= 0) {
-		c = string·char(s, i)
+		c = string·char(*s, i)
 		c == " " -> sp
 
 		if (sp) {

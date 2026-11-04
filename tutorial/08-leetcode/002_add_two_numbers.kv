@@ -10,12 +10,12 @@ struct Node {
 }
 
 lib lc {
-rwfunc add(a:*Node, b:*Node) -> () {
+rwfunc add(*Node $a, *Node $b) -> () {
 	carry = 0
 	result:[int64]·int64 = {  }
 	0 -> ri
-	pa = a
-	pb = b
+	pa = *a
+	pb = *b
 	while (pa != None || pb != None || carry != 0) {
 		sum = carry
 

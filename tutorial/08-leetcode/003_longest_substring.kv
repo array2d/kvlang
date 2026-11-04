@@ -4,14 +4,14 @@
 //   3
 //   1
 //   5
-rwfunc length_of_longest(s:[]char/utf32) -> (max_len:int64) {
-	n = string·len(s)
+rwfunc length_of_longest(*[]char/utf32 $s) -> (*int64 $max_len) {
+	n = string·len(*s)
 	last:[]char/utf8·int64 = {}
-	max_len = 0
+	*max_len = 0
 	left = 0
 	right = 0
 	while (right < n) {
-		s[right] -> c
+		(*s)[right] -> c
 		exists = last·*c != None
 		if (exists) {
 			prev = last·*c
@@ -20,7 +20,7 @@ rwfunc length_of_longest(s:[]char/utf32) -> (max_len:int64) {
 		}
 		right -> last·*c
 		cur = right - left + 1
-		if (cur > max_len) { cur -> max_len }
+		if (cur > *max_len) { cur -> *max_len }
 		right + 1 -> right
 	}
 }

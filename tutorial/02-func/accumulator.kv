@@ -6,23 +6,23 @@
 // 期望输出:
 //   10
 //   10
-rwfunc sum(arr:[]int64) -> (acc:int64) {
-	n = compactarray·numel(arr)
-	0 -> acc  // 显式初始化累加器（strict null：write parm 首读为 null，拒绝 null 算术）
+rwfunc sum(*[]int64 $arr) -> (*int64 $acc) {
+	n = compactarray·numel(*arr)
+	0 -> *acc  // 显式初始化累加器（strict null：write parm 首读为 null，拒绝 null 算术）
 	0 -> i
 	while (i < n) {
-		acc + arr[i] -> acc
+		*acc + (*arr)[i] -> *acc
 		i = i + 1
 	}
 }
 
-rwfunc rsum(arr:[]int64, i:int64, acc:int64) -> (r:int64) {
-	n = compactarray·numel(arr)
+rwfunc rsum(*[]int64 $arr, *int64 $i, *int64 $acc) -> (*int64 $r) {
+	n = compactarray·numel(*arr)
 
-	if (i >= n) {
-		acc -> r
+	if (*i >= n) {
+		*acc -> *r
 	} else {
-		rsum(arr, i + 1, acc + arr[i]) -> r
+		rsum(*arr, *i + 1, *acc + (*arr)[*i]) -> *r
 	}
 }
 

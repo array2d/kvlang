@@ -4,14 +4,14 @@
 //   word count = 3
 // 散 key 数组作实参时 for-in 在 layout 脱糖成 compact 取值（compactarray·at），
 // 函数内改用 kvspace·listlen/kvspace·listat/kvspace·get 显式遍历。
-rwfunc word_count(chars:*[int64]·[]char/utf32) -> (nw:int64) {
-	nw = 0
+rwfunc word_count(*[int64]·[]char/utf32 $chars) -> (*int64 $nw) {
+	*nw = 0
 	0 -> state
-	kvspace·listlen(chars) -> n
+	kvspace·listlen(*chars) -> n
 	0 -> i
 	while (i < n) {
-		kvspace·listat(chars, i) -> k
-		chars·*k -> c
+		kvspace·listat(*chars, i) -> k
+		(*chars)·*k -> c
 		blank = c == " "
 
 		if (blank) {
@@ -21,7 +21,7 @@ rwfunc word_count(chars:*[int64]·[]char/utf32) -> (nw:int64) {
 
 			if (was_out) {
 				state = 1
-				nw = nw + 1
+				*nw = *nw + 1
 			}
 		}
 		i = i + 1

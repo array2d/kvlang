@@ -4,8 +4,8 @@
 //   en = hello
 //   zh = 你好
 //   missing: true
-rwfunc lookup(dict:*[]char/utf8·[]char/utf32, k:[]char/utf32) -> (v:[]char/utf32) {
-	dict·*k -> v
+rwfunc lookup(*[]char/utf8·[]char/utf32 $dict, *[]char/utf32 $k) -> (*[]char/utf32 $v) {
+	(*dict)·*k -> *v
 }
 rwfunc test() -> () {
 	d:[]char/utf8·[]char/utf32 = {}

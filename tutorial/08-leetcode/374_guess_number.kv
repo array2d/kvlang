@@ -2,9 +2,9 @@
 // 来源: LeetCode #374
 // 期望输出:
 //   6
-rwfunc guess_number(n:int64) -> () {
+rwfunc guess_number(*int64 $n) -> () {
 	1 -> lo
-	hi = n
+	hi = *n
 	while (lo <= hi) {
 		s = lo + hi
 		s ÷ 2 -> mid

@@ -2,9 +2,9 @@
 // 来源: LeetCode #50
 // 期望输出:
 //   1024.0
-rwfunc my_pow(x:float64, n:int64) -> () {
-	base = x
-	exp = n
+rwfunc my_pow(*float64 $x, *int64 $n) -> () {
+	base = *x
+	exp = *n
 	1.0 -> result
 	neg = exp < 0
 

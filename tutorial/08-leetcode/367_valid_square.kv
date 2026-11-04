@@ -3,15 +3,15 @@
 // 期望输出:
 //   1
 //   0
-rwfunc is_square(n:int64) -> () {
-	small = n < 2
+rwfunc is_square(*int64 $n) -> () {
+	small = *n < 2
 
 	if (small) {
 		println(1)
 	} else {
 		lo = 1
-		n ÷ 2 -> hi
-		n ÷ 2 -> hi_m
+		*n ÷ 2 -> hi
+		*n ÷ 2 -> hi_m
 		ans = 0
 		while (lo <= hi) {
 			s = lo + hi
@@ -19,13 +19,13 @@ rwfunc is_square(n:int64) -> () {
 			s ÷ 2 -> mid_m
 			sq = mid × mid
 			sq_m = mid × mid
-			eq = sq == n
+			eq = sq == *n
 
 			if (eq) {
 				1 -> ans
 				lo = hi + 1
 			} else {
-				lt = sq < n
+				lt = sq < *n
 
 				if (lt) {
 					mid + 1 -> lo

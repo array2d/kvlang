@@ -2,9 +2,9 @@
 // 算法: while + 条件分支，start=27
 // 期望输出:
 //   steps = 111
-rwfunc collatz(n:int64) -> (steps:int64) {
-	n -> nv
-	0 -> steps
+rwfunc collatz(*int64 $n) -> (*int64 $steps) {
+	*n -> nv
+	0 -> *steps
 	while (nv > 1) {
 		mod = nv % 2
 		even = mod == 0
@@ -18,7 +18,7 @@ rwfunc collatz(n:int64) -> (steps:int64) {
 			nv = t + 1
 		}
 
-		steps + 1 -> steps
+		*steps + 1 -> *steps
 	}
 }
 

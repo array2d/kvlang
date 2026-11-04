@@ -3,9 +3,9 @@
 // 期望输出:
 //   true
 //   false
-rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
-	ns = string·len(s)
-	nt = string·len(t)
+rwfunc is_anagram(*[]char/utf32 $s, *[]char/utf32 $t) -> () {
+	ns = string·len(*s)
+	nt = string·len(*t)
 	ok = true
 
 	if (ns != nt) {
@@ -14,7 +14,7 @@ rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
 		h:[]char/utf8·int64 = {}
 		0 -> i
 		while (i < ns) {
-			string·char(s, i) -> c
+			string·char(*s, i) -> c
 			h·*c != None -> exists
 			if (exists) {
 				h·*c + 1 -> h·*c
@@ -25,7 +25,7 @@ rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
 		}
 		0 -> i
 		while (i < nt) {
-			string·char(t, i) -> c
+			string·char(*t, i) -> c
 			h·*c != None -> exists
 			if (exists) {
 				h·*c -> v
@@ -38,7 +38,7 @@ rwfunc is_anagram(s:[]char/utf32, t:[]char/utf32) -> () {
 		}
 		0 -> i
 		while (i < ns) {
-			string·char(s, i) -> c
+			string·char(*s, i) -> c
 			h·*c -> v
 
 			if (v != 0) {

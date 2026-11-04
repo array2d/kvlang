@@ -7,18 +7,18 @@
 //   21
 //   1211
 //   111221
-rwfunc next_seq(src_len:int64) -> (dst_len:int64) {
+rwfunc next_seq(*int64 $src_len) -> (*int64 $dst_len) {
 	/tmp/s2:[int64]·int64 = {}
 	i = 0
 	di = 0
-	while (i < src_len) {
+	while (i < *src_len) {
 		"/tmp/s"·*i -> cur
 		count = 1
 		j = i + 1
-		while (j < src_len) {
+		while (j < *src_len) {
 			"/tmp/s"·*j -> v
 			if (v == cur) { count + 1 -> count ; j + 1 -> j }
-			else { src_len -> j }
+			else { *src_len -> j }
 		}
 			count -> "/tmp/s2"·*di
 			di + 1 -> di1
@@ -26,12 +26,12 @@ rwfunc next_seq(src_len:int64) -> (dst_len:int64) {
 		di + 2 -> di
 		i + count -> i
 	}
-	di -> dst_len
+	di -> *dst_len
 }
 
-rwfunc print_seq_len(seq_len:int64) -> () {
+rwfunc print_seq_len(*int64 $seq_len) -> () {
 	i = 0
-	while (i < seq_len) {
+	while (i < *seq_len) {
 		"/tmp/s"·*i -> cnt
 		i + 1 -> i1
 		"/tmp/s"·*i1 -> val
@@ -45,22 +45,22 @@ rwfunc print_seq_len(seq_len:int64) -> () {
 	println()
 }
 
-rwfunc copy_from_s2_to_s(s2_len:int64) -> () {
+rwfunc copy_from_s2_to_s(*int64 $s2_len) -> () {
 	i = 0
-	while (i < s2_len) {
+	while (i < *s2_len) {
 		/tmp/s2[i] -> v
 		v -> "/tmp/s"·*i
 		i + 1 -> i
 	}
 }
 
-rwfunc count_and_say(N:int64) -> () {
+rwfunc count_and_say(*int64 $N) -> () {
 	/tmp/s:[int64]·int64 = {}
 	1 -> "/tmp/s"·*0
 	1 -> "/tmp/s"·*1
 	cur_len = 2
 	round = 1
-	while (round < N) {
+	while (round < *N) {
 		l = next_seq(cur_len)
 		copy_from_s2_to_s(l)
 		l -> cur_len

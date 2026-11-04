@@ -8,16 +8,16 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc get_intersection(ha:*Node, hb:*Node) -> () {
-	pa = ha
-	pb = hb
+rwfunc get_intersection(*Node $ha, *Node $hb) -> () {
+	pa = *ha
+	pb = *hb
 	switch_a = 0
 	switch_b = 0
 	while (pa != pb) {
 		pa·next -> nxt
 		if (nxt == None) {
 			if (switch_a == 0) {
-				hb -> pa
+				*hb -> pa
 				1 -> switch_a
 			} else {
 				None -> pa
@@ -28,7 +28,7 @@ rwfunc get_intersection(ha:*Node, hb:*Node) -> () {
 		pb·next -> nxt2
 		if (nxt2 == None) {
 			if (switch_b == 0) {
-				ha -> pb
+				*ha -> pb
 				switch_b = 1
 			} else {
 				None -> pb

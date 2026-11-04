@@ -4,13 +4,13 @@
 //   true
 //   true
 //   false
-rwfunc is_valid(s:[]char/utf32) -> (ok:int64) {
-	ok = 1
+rwfunc is_valid(*[]char/utf32 $s) -> (*int64 $ok) {
+	*ok = 1
 	si = -1
-	n = string·len(s)
+	n = string·len(*s)
 	i = 0
 	while (i < n) {
-		c = s[i]
+		c = (*s)[i]
 		if (c == "(") {
 			si + 1 -> si
 			/tmp/vp:[int64]·int64 = {}
@@ -25,35 +25,35 @@ rwfunc is_valid(s:[]char/utf32) -> (ok:int64) {
 			3 -> "/tmp/vp"·*si
 		}
 		if (c == ")") {
-			if (si < 0) { 0 -> ok ; n -> i }
+			if (si < 0) { 0 -> *ok ; n -> i }
 			else {
 				/tmp/vp[si] -> top
 				si - 1 -> si
-				if (top != 1) { ok = 0 ; n -> i }
+				if (top != 1) { *ok = 0 ; n -> i }
 				if (top ≠ 1) { ok_m = 0 ; n -> i }
 			}
 		}
 		if (c == "]") {
-			if (si < 0) { ok = 0 ; i = n }
+			if (si < 0) { *ok = 0 ; i = n }
 			else {
 				/tmp/vp[si] -> top
 				si - 1 -> si
-				if (top != 2) { 0 -> ok ; n -> i }
+				if (top != 2) { 0 -> *ok ; n -> i }
 				if (top ≠ 2) { 0 -> ok_m ; n -> i }
 			}
 		}
 		if (c == "}") {
-			if (si < 0) { 0 -> ok ; i = n }
+			if (si < 0) { 0 -> *ok ; i = n }
 			else {
 				/tmp/vp[si] -> top
 				si = si - 1
-				if (top != 3) { ok = 0 ; i = n }
+				if (top != 3) { *ok = 0 ; i = n }
 				if (top ≠ 3) { ok_m = 0 ; i = n }
 			}
 		}
 		i = i + 1
 	}
-	if (si >= 0) { 0 -> ok }
+	if (si >= 0) { 0 -> *ok }
 	if (si ≥ 0) { 0 -> ok_m }
 }
 

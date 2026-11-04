@@ -2,14 +2,14 @@
 // 来源: LeetCode #11
 // 期望输出:
 //   49
-rwfunc max_area(h:[]int64) -> (mx:int64) {
-	compactarray·numel(h) -> n
+rwfunc max_area(*[]int64 $h) -> (*int64 $mx) {
+	compactarray·numel(*h) -> n
 	l = 0
 	r = n - 1
-	0 -> mx
+	0 -> *mx
 	while (l < r) {
-		hl = h[l]
-		hr = h[r]
+		hl = (*h)[l]
+		hr = (*h)[r]
 		r - l -> w
 		ls = hl < hr
 
@@ -23,10 +23,10 @@ rwfunc max_area(h:[]int64) -> (mx:int64) {
 			r = r - 1
 		}
 
-		ar > mx -> bg
+		ar > *mx -> bg
 
 		if (bg) {
-			mx = ar
+			*mx = ar
 		}
 	}
 }

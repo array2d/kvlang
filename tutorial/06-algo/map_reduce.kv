@@ -5,14 +5,14 @@
 //   sum of squares: 165
 // 散 key 数组作实参时 for-in 在 layout 脱糖成 compact 取值（compactarray·at），
 // 函数内改用 kvspace·listlen/kvspace·listat/kvspace·get 显式遍历。
-rwfunc map_reduce(nums:*[int64]·int64) -> (count:int64, total:int64) {
-	0 -> count
-	total = 0
-	kvspace·listlen(nums) -> n
+rwfunc map_reduce(*[int64]·int64 $nums) -> (*int64 $count, *int64 $total) {
+	0 -> *count
+	*total = 0
+	kvspace·listlen(*nums) -> n
 	0 -> i
 	while (i < n) {
-		kvspace·listat(nums, i) -> k
-		nums·*k -> nv
+		kvspace·listat(*nums, i) -> k
+		(*nums)·*k -> nv
 		rem = nv % 2
 		rem == 1 -> is_odd
 
@@ -20,8 +20,8 @@ rwfunc map_reduce(nums:*[int64]·int64) -> (count:int64, total:int64) {
 			println("  keep:", nv)
 			sq = nv × nv
 			sq_m = nv × nv
-			total = total + sq
-			count + 1 -> count
+			*total = *total + sq
+			*count + 1 -> *count
 		} else {
 			println("  skip:", nv)
 		}
