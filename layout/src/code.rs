@@ -1941,10 +1941,17 @@ mod tests {
 
     #[test]
     fn nested_lib_layout_and_merge() {
-        let mut kv = Kv::conn(&format!(
-            "fs:///tmp/kvlanglayout_nested_{}",
-            std::process::id()
-        ));
+        let dsn_nested = format!("fs:///tmp/kvlanglayout_nested_{}", std::process::id());
+        // 测试自己建的 store 自己删：残留会累积到 /tmp 撑爆 pod。
+        struct Guard_nested(String);
+        impl Drop for Guard_nested {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(self.0.trim_start_matches("fs://"));
+            }
+        }
+        let _guard_nested = Guard_nested(dsn_nested.clone());
+        let _ = std::fs::remove_dir_all(dsn_nested.trim_start_matches("fs://"));
+        let mut kv = Kv::conn(&dsn_nested);
         init_dirs(&mut kv).unwrap();
 
         compile(
@@ -1994,10 +2001,17 @@ mod tests {
 
     #[test]
     fn call_slots_use_target_type() {
-        let mut kv = Kv::conn(&format!(
-            "fs:///tmp/kvlanglayout_call_kind_{}",
-            std::process::id()
-        ));
+        let dsn_call_kind = format!("fs:///tmp/kvlanglayout_call_kind_{}", std::process::id());
+        // 测试自己建的 store 自己删：残留会累积到 /tmp 撑爆 pod。
+        struct Guard_call_kind(String);
+        impl Drop for Guard_call_kind {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(self.0.trim_start_matches("fs://"));
+            }
+        }
+        let _guard_call_kind = Guard_call_kind(dsn_call_kind.clone());
+        let _ = std::fs::remove_dir_all(dsn_call_kind.trim_start_matches("fs://"));
+        let mut kv = Kv::conn(&dsn_call_kind);
         init_dirs(&mut kv).unwrap();
         // `println` 是运行时提供的内建，由它 def rwir 声明（布局期必须有声明来源）。
         kv.set(&[(
@@ -2056,10 +2070,17 @@ mod tests {
 
     #[test]
     fn struct_definition_uses_child_keys() {
-        let mut kv = Kv::conn(&format!(
-            "fs:///tmp/kvlanglayout_struct_{}",
-            std::process::id()
-        ));
+        let dsn_struct = format!("fs:///tmp/kvlanglayout_struct_{}", std::process::id());
+        // 测试自己建的 store 自己删：残留会累积到 /tmp 撑爆 pod。
+        struct Guard_struct(String);
+        impl Drop for Guard_struct {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(self.0.trim_start_matches("fs://"));
+            }
+        }
+        let _guard_struct = Guard_struct(dsn_struct.clone());
+        let _ = std::fs::remove_dir_all(dsn_struct.trim_start_matches("fs://"));
+        let mut kv = Kv::conn(&dsn_struct);
         init_dirs(&mut kv).unwrap();
         compile(
             &mut kv,
@@ -2086,10 +2107,17 @@ mod tests {
         // '.' 是普通字符（小数点/后缀等），foo.bar 视作单一 opcode，不再被切成 foo bar 两 token
         // 而摊出畸形坐标（#106）。断言：opcode 原样保留，且指令坐标连续、无空缺行。
         // #116 flat 模型：终结符补全后 [3,0] 为 terminate 追加的 return，[4,0] 才是帧末尾。
-        let mut kv = Kv::conn(&format!(
-            "fs:///tmp/kvlanglayout_dot_{}",
-            std::process::id()
-        ));
+        let dsn_dot = format!("fs:///tmp/kvlanglayout_dot_{}", std::process::id());
+        // 测试自己建的 store 自己删：残留会累积到 /tmp 撑爆 pod。
+        struct Guard_dot(String);
+        impl Drop for Guard_dot {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(self.0.trim_start_matches("fs://"));
+            }
+        }
+        let _guard_dot = Guard_dot(dsn_dot.clone());
+        let _ = std::fs::remove_dir_all(dsn_dot.trim_start_matches("fs://"));
+        let mut kv = Kv::conn(&dsn_dot);
         init_dirs(&mut kv).unwrap();
         // `baz` 是外部内建：裸名必须有声明来源（def rwir），否则布局期报错。
         kv.set(&[(

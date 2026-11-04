@@ -80,6 +80,8 @@ fn quoted_path_in_write_slot_is_rejected() {
         ),
         "诊断文本不符：{err}"
     );
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
 }
 
 #[test]
@@ -160,6 +162,8 @@ fn raw_quoted_path_in_write_slot_is_rejected() {
         ),
         "原始串诊断文本不符：{err}"
     );
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
 }
 
 #[test]

@@ -123,4 +123,6 @@ fn union_mismatch_reports_both_sides() {
         err.contains("cannot pass bool to int64|float64 (parameter x)"),
         "stderr: {err}"
     );
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
 }

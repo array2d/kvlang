@@ -147,6 +147,8 @@ fn string_plus_emits_concat_and_mixed_is_rejected() {
     assert!(!out.status.success(), "混合字符串与数值必须 layout 失败");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("cannot mix string and numeric"), "stderr: {err}");
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
 }
 
 #[test]
@@ -176,5 +178,8 @@ fn no_switch_can_bring_typed_names_back() {
                 "环境变量 {value:?} 让 typed opcode 复活：{text:?}"
             );
         }
+        drop(kv);
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
     }
 }

@@ -10,7 +10,16 @@ fn sig(data: &[u8]) -> String {
     String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 
-fn fresh_kv() -> Kv {
+/// store 守卫：离开作用域时删目录。先于 `Kv` 声明，故后 drop。
+struct TempStore(String);
+
+impl Drop for TempStore {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(self.0.trim_start_matches("fs://"));
+    }
+}
+
+fn fresh_kv() -> (TempStore, Kv) {
     // Isolate each parallel test in its own `fs://` directory to avoid concurrent backend races.
     static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dsn = format!(
@@ -19,16 +28,17 @@ fn fresh_kv() -> Kv {
     );
     let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
 
+    let store = TempStore(dsn.clone());
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
-    kv
+    (store, kv)
 }
 
 
 
 #[test]
 fn refuse_rwir_and_rwfunc() {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     compile(&mut kv, "rwfunc one_def() -> () {\n1 -> _\n}\n").unwrap();
     let err = compile(&mut kv, "rwir one_def() -> ()\n").unwrap_err();
     assert!(err.contains("one opcode, one definition"), "{err}");
@@ -40,7 +50,7 @@ fn refuse_rwir_and_rwfunc() {
 
 #[test]
 fn compile_simple_func() {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     let src = "rwfunc sum(*int64 $A, *int64 $B) -> (*int64 $C) {\n    *A + *B -> *C\n}\n";
     compile(&mut kv, src).unwrap();
 
@@ -87,7 +97,7 @@ fn compile_simple_func() {
 
 #[test]
 fn compile_string_literal_and_lib() {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     let src = "lib p { rwfunc hi() -> () {\n    \"hello\" -> _\n} }\n";
     compile(&mut kv, src).unwrap();
 
@@ -110,7 +120,7 @@ fn compile_string_literal_and_lib() {
 
 #[test]
 fn compile_multiline_string_literal() {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     let src = "lib m { rwfunc ml() -> () {\n    r#\"hello\nworld\"# -> _\n} }\n";
     compile(&mut kv, src).unwrap();
 
@@ -127,7 +137,7 @@ fn compile_multiline_string_literal() {
 
 #[test]
 fn compile_control_flow_is_single_plane() {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     let src = "rwfunc f(*int64 $X) -> (*int64 $Y) {\n    if (*X > 0) {\n        *X -> *Y\n    } else {\n        0 -> *Y\n    }\n}\n";
     compile(&mut kv, src).unwrap();
 
@@ -172,7 +182,7 @@ fn compile_control_flow_is_single_plane() {
 
 #[test]
 fn compile_while_goto_targets_are_int64() {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     let src = "rwfunc sum_to(*int64 $n) -> (*int64 $acc) {\n    0 -> *acc\n    1 -> i\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n";
     compile(&mut kv, src).unwrap();
     let children = kv.list("/lib/sum_to/", false, false);
