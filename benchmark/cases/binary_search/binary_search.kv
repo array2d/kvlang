@@ -2,18 +2,18 @@
 // 建 arr[i]=i，对 0..N-1 逐个二分，累加命中下标；N 由 __SCALE__ 占位（勿改逻辑）
 // 期望输出（N=32 时）:
 //   bsearch: found = 32 sum = 496
-rwfunc bsearch(arr:*[int64]·int64, n:int64, target:int64) -> (idx:int64) {
+rwfunc bsearch(*[int64]·int64 $arr, *int64 $n, *int64 $target) -> (*int64 $idx) {
 	0 -> lo
-	n - 1 -> hi
-	-1 -> idx
+	*n - 1 -> hi
+	-1 -> *idx
 	while (lo <= hi) {
 		lo + hi -> s
 		s ÷ 2 -> mid
-		arr·*mid -> mv
-		if (mv == target) {
-			mid -> idx
+		(*arr)·*mid -> mv
+		if (mv == *target) {
+			mid -> *idx
 			hi + 1 -> lo
-		} else if (mv < target) {
+		} else if (mv < *target) {
 			mid + 1 -> lo
 		} else {
 			mid - 1 -> hi
