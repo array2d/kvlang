@@ -11,34 +11,34 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc dedup() -> (head:*Node) {
-	head -> cur
+rwfunc dedup() -> (**Node $head) {
+	cur = *head
 	while (cur != None) {
-		cur·next -> nxt
+		(*cur)·next -> nxt
 		advance = true
 
 		if (nxt != None) {
-			cur·val -> v
-			nxt·val -> nv
+			(*cur)·val -> v
+			(*nxt)·val -> nv
 
 			if (nv == v) {
-				nxt·next -> nn
-				cur·next = nn
+				(*nxt)·next -> nn
+				nn -> (*cur)·next
 				false -> advance
 			}
 		}
 		if (advance) {
-			cur·next -> cur
+			(*cur)·next -> cur
 		}
 	}
 }
 
-rwfunc show(head:*Node) -> () {
-	head -> p
+rwfunc show(**Node $head) -> () {
+	p = *head
 	while (p != None) {
-		p·val -> v
+		(*p)·val -> v
 		println(v)
-		p·next -> p
+		(*p)·next -> p
 	}
 }
 

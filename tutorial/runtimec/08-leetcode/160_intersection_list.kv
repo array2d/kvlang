@@ -1,6 +1,6 @@
 // 160: Intersection of Two Linked Lists — 找两个链表的交点
 // 来源: LeetCode #160
-// 双指针法: pA 走完走 B, pB 走完走 A, 相遇即交点
+// 双指针法: pa 走完走 B, pb 走完走 A, 相遇即交点
 // 期望输出:
 //   8
 struct Node {
@@ -9,36 +9,36 @@ struct Node {
 }
 
 rwfunc get_intersection(*Node $ha, *Node $hb) -> () {
-	pa = *ha
-	pb = *hb
+	pa = ha
+	pb = hb
 	switch_a = 0
 	switch_b = 0
 	while (pa != pb) {
-		pa·next -> nxt
+		(*pa)·next -> nxt
 		if (nxt == None) {
 			if (switch_a == 0) {
-				*hb -> pa
+				pa = hb
 				1 -> switch_a
 			} else {
-				None -> pa
+				pa = None
 			}
 		} else {
-			nxt -> pa
+			pa = nxt
 		}
-		pb·next -> nxt2
+		(*pb)·next -> nxt2
 		if (nxt2 == None) {
 			if (switch_b == 0) {
-				*ha -> pb
-				switch_b = 1
+				pb = ha
+				1 -> switch_b
 			} else {
-				None -> pb
+				pb = None
 			}
 		} else {
-			nxt2 -> pb
+			pb = nxt2
 		}
 	}
 	if (pa != None) {
-		pa·val -> v
+		(*pa)·val -> v
 		println(v)
 	}
 }

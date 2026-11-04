@@ -10,22 +10,22 @@ struct TNode {
 	right:*TNode=None
 }
 
-rwfunc inorder(root:*TNode) -> () {
+rwfunc inorder(**TNode $root) -> () {
 	// iterative stack simulation
 	si = 0
 	stack:[int64]·*TNode = {}
-	cur = root
+	cur = *root
 	while (cur != None || si > 0) {
 		while (cur != None) {
 			cur -> stack·*si
 			si + 1 -> si
-			cur·left -> cur
+			(*cur)·left -> cur
 		}
 		si - 1 -> si
 		stack·*si -> node
-		node·val -> v
+		(*node)·val -> v
 		println(v)
-		node·right -> cur
+		(*node)·right -> cur
 	}
 }
 

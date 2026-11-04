@@ -33,7 +33,7 @@ kvlang tutorial/runtimec/06-algo/collatz.kv     # steps = 111
 
 注：上面 `01-hello/`、`06-while/` 两例尚未落地；其余示例见 `tutorial/runtimec/` 等三组目录。
 
-## Algorithms in 08-algo
+## Algorithms（`tutorial/runtimec/06-algo/` 等）
 
 | File | Algorithm | Key concepts |
 |------|-----------|--------------|
@@ -41,7 +41,7 @@ kvlang tutorial/runtimec/06-algo/collatz.kv     # steps = 111
 | `fizzbuzz.kv` | FizzBuzz 1–15 | modulo, nested if |
 | `gcd.kv` | GCD (Euclidean) | tail recursion |
 | `power.kv` | Fast power (loop) | while, counter |
-| `classify.kv` | Grade classifier | nested if, string literal |
+| `03-control/classify.kv` | Grade classifier | nested if, string literal |
 | `collatz.kv` | Collatz conjecture | while, even/odd branch |
-| `tco_depth.kv` | TCO verification | while → goto, tail recursion |
-| `scope_isolation.kv` | Frame isolation | multi-write params, call isolation |
+| `02-func/tco_depth.kv` | TCO verification | while → goto, tail recursion |
+| `02-func/scope_isolation.kv` | Frame isolation | multi-write params, call isolation |

@@ -11,20 +11,20 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc reverse() -> (head:*Node) {
+rwfunc reverse() -> (**Node $head) {
 	prev = None
-	head -> cur
+	cur = *head
 	while (cur != None) {
-		nxt = cur·next
-		cur·next = prev
-		cur -> prev
+		nxt = (*cur)·next
+		(*cur)·next = prev
+		prev = cur
 		cur = nxt
 	}
 	p = prev
 	while (p != None) {
-		p·val -> v
+		(*p)·val -> v
 		println(v)
-		p = p·next
+		p = (*p)·next
 	}
 }
 
