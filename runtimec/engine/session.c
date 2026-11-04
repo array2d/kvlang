@@ -17,6 +17,8 @@
 #include "vmbin/handlers/container.h"
 #include "vmbin/handlers/host.h"
 #include "vmbin/handlers/scalar.h"
+#include "vmbin/handlers/scatter.h"
+#include "vmbin/handlers/string.h"
 #ifdef RUNTIMEC_TEMP_PRINTLN
 #include "vmbin/temp_println.h"
 #endif
@@ -181,6 +183,34 @@ runtimec_status_t runtimec_session_create(
 
         status = binrwir_registry_append(&session->builtin_registry, "scalar",
                                          scalar_entries, scalar_entry_count,
+                                         error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            status = runtimec_session_forward(error, status, "builtin registry");
+            goto fail;
+        }
+    }
+    /* string 模块（B 线）：13 条。行为验证由 coding4 另行补，接线只验条目与去重。 */
+    {
+        size_t string_entry_count = 0U;
+        const binrwir_registry_entry_t *string_entries =
+            runtimec_string_handler_entries(&string_entry_count);
+
+        status = binrwir_registry_append(&session->builtin_registry, "string",
+                                         string_entries, string_entry_count,
+                                         error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            status = runtimec_session_forward(error, status, "builtin registry");
+            goto fail;
+        }
+    }
+    /* scatter 模块（B 线）：散 key 变长数组，8 条。同 string，接线先于行为验证。 */
+    {
+        size_t scatter_entry_count = 0U;
+        const binrwir_registry_entry_t *scatter_entries =
+            runtimec_scatter_handler_entries(&scatter_entry_count);
+
+        status = binrwir_registry_append(&session->builtin_registry, "scatter",
+                                         scatter_entries, scatter_entry_count,
                                          error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             status = runtimec_session_forward(error, status, "builtin registry");

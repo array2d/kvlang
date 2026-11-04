@@ -1562,6 +1562,16 @@ SCALAR_BOOLEAN_HANDLER(scalar_handle_bool_neq, 1)
  * 身份来自 wire：Ptr 的 body 就是目标 KV 路径（spec 03-类型系统/03-种类），
  * 空 body 即空引用（= None）。判定「这是不是指针」必须读 head 的 `ptr` 字节
  * ——wire langtype 不含 `*` 前缀（spec 07-文法与合法性:100），只能靠 ref 位。
+ *
+ * **ref 不足以判定 None**：None 的 ref 与普通标量同为 `INLINE`，只凭 ref 分不开
+ * 指针 / None / 标量这三态。所以必须先读 body，再按 `(ref, body 是否为空)` 判：
+ *   - ref == PTR              → 指针（body 是目标 key）
+ *   - ref != PTR 且 body 为空  → None
+ *   - ref != PTR 且 body 非空  → 普通标量（ptreq 不接受）
+ *
+ * **指针 vs None 是合法比较、结果为假**，不是 INVALID——matrix:66 原文是
+ * 「a pointer carrying a target never equals None」。INVALID 只留给
+ * 「指针对非指针非 None」。
  * 这两件事都由 `vmbin_value_access_reference_kind` 与 `_read_body` 提供，
  * 本实现不写任何偏移算术、不从 body 形状猜类型。
  *
@@ -1645,11 +1655,16 @@ static runtimec_status_t scalar_pointer_equality(
                         left_buffer.size) == 0);
 
             result = (uint8_t)((matched != 0) != (invert != 0) ? 1U : 0U);
+        } else if (left_is_none || right_is_none) {
+            /*
+             * 一侧是 None、另一侧是指针：matrix:66「a pointer carrying a target
+             * never equals None」——这是**合法的比较**，结果为不等，不是 INVALID。
+             */
+            result = (uint8_t)(invert ? 1U : 0U);
         } else if (left_is_pointer || right_is_pointer) {
             /*
              * 一侧指针、另一侧既不是指针也不是 None：按 matrix:66 是
-             * 「指针对非指针 → INVALID」，不是「不等」。指针与 None 的比较
-             * 已经在上面被 left_is_none / right_is_none 放行。
+             * 「指针对非指针 → INVALID」，不是「不等」。
              */
             return scalar_fail(
                 error, 35,

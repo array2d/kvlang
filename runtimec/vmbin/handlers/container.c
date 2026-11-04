@@ -39,6 +39,7 @@
 #include "contract/view.h"
 #include "kvspace/kvspace.h"
 #include "kvspace/xvalue_head.h"
+#include "vmbin/handlers/handler_target_key.h"
 #include "vmbin/value_access.h"
 
 /* 帧内槽 key 的上限：与 host 侧同量级，够放 `/vthread/<vid>/[d]/<符号名>`。 */
@@ -50,12 +51,7 @@
 /* 下标参数与本批元素宽度都是标量：8 字节足够放下任何一个整数 kind。 */
 #define CONTAINER_SCALAR_CAPACITY 8U
 
-typedef struct container_langtype {
-    /* 基种类（`int64`、`char/utf8`…），指向声明文本内部，不拷贝。 */
-    runtimec_string_view_t base;
-    uint32_t element_size;
-    int32_t dimension_count;
-} container_langtype_t;
+/* 类型与解析函数由 container.h 导出（scatter 也用同一份宽度表）。 */
 
 /*
  * 声明 langtype → 元素宽与维数。形状是 `[a][b]…kind`：连续维段在方括号里，
@@ -64,8 +60,8 @@ typedef struct container_langtype {
  *
  * 不认识的基种类返回 UNSUPPORTED：不猜宽度，也不按 body 长度反推。
  */
-static runtimec_status_t container_langtype_parse(
-    runtimec_string_view_t langtype, container_langtype_t *output) {
+runtimec_status_t runtimec_container_langtype_parse(
+    runtimec_string_view_t langtype, runtimec_container_langtype_t *output) {
     static const struct {
         const char *text;
         uint32_t size;
@@ -144,7 +140,7 @@ static runtimec_status_t container_fail_with_detail(
  */
 static runtimec_status_t container_view(
     const binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
-    vmbin_value_location_t *output_location, container_langtype_t *output_type,
+    vmbin_value_location_t *output_location, runtimec_container_langtype_t *output_type,
     runtimec_error_t *error) {
     runtimec_string_view_t langtype;
     runtimec_status_t status;
@@ -153,7 +149,7 @@ static runtimec_status_t container_view(
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
-    status = container_langtype_parse(langtype, output_type);
+    status = runtimec_container_langtype_parse(langtype, output_type);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -214,39 +210,6 @@ static const char *container_langtype_text(runtimec_string_view_t langtype,
 }
 
 /*
- * 写参的目标 key：`<frame_path>/<符号名>`。
- *
- * 目标槽是**未物化**的（容器局部不建零值槽），所以它不在绑定表里——绑定表只
- * 回答「已存在的东西在哪」。key 由本函数拼：帧路径来自 Frame（调用入口原样写
- * 入，本层不重拼），符号名来自 Program 符号池。**不猜 key、不回退按别的键写。**
- */
-static runtimec_status_t container_target_key(
-    const binrwir_execution_frame_t *frame,
-    const binrwir_argument_t *argument, char *buffer, size_t capacity) {
-    runtimec_string_view_t name;
-    runtimec_string_view_t langtype;
-    size_t length;
-
-    if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL ||
-        !runtimec_key_view_is_valid(frame->frame_path) ||
-        frame->frame_path.size == 0U ||
-        binrwir_program_get_symbol(frame->program, argument->slot, &name,
-                                   &langtype) != RUNTIMEC_STATUS_SUCCESS ||
-        name.size == 0U) {
-        return RUNTIMEC_STATUS_INVALID;
-    }
-    length = frame->frame_path.size + 1U + name.size;
-    if (length + 1U > capacity) {
-        return RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY;
-    }
-    memcpy(buffer, frame->frame_path.data, frame->frame_path.size);
-    buffer[frame->frame_path.size] = '/';
-    memcpy(buffer + frame->frame_path.size + 1U, name.data, name.size);
-    buffer[length] = '\0';
-    return RUNTIMEC_STATUS_SUCCESS;
-}
-
-/*
  * 造 wire 并整条写进写参的目标 key——五条创建型算子（`new` / `newslice` /
  * `fill` / `newreshape` / `newreinterpret`）的公共尾段。
  *
@@ -273,7 +236,7 @@ static runtimec_status_t container_publish(
         wire == NULL || wire_size > UINT32_MAX) {
         return container_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
     }
-    status = container_target_key(frame, &instruction->write_arguments.data[0],
+    status = runtimec_handler_target_key(frame, &instruction->write_arguments.data[0],
                                   key, sizeof(key));
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         message[0] = '\0';
@@ -369,7 +332,7 @@ static inline runtimec_status_t container_newslice(
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     vmbin_value_location_t source;
-    container_langtype_t type;
+    runtimec_container_langtype_t type;
     runtimec_string_view_t declared;
     int64_t bounds[2] = {0, 0};
     runtimec_error_t error;
@@ -538,7 +501,7 @@ static runtimec_status_t container_fill(
     binrwir_execution_exit_t *output_exit) {
     vmbin_value_location_t langtype_value;
     vmbin_value_location_t filler;
-    container_langtype_t type;
+    runtimec_container_langtype_t type;
     int64_t element_count;
     runtimec_string_view_t declared;
     runtimec_error_t error;
@@ -560,7 +523,7 @@ static runtimec_status_t container_fill(
     }
     declared = runtimec_string_view_make(
         (const char *)langtype_value.read_bytes, langtype_value.size);
-    status = container_langtype_parse(declared, &type);
+    status = runtimec_container_langtype_parse(declared, &type);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
     }
@@ -617,7 +580,7 @@ static inline runtimec_status_t container_numel(
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     vmbin_value_location_t location;
-    container_langtype_t type;
+    runtimec_container_langtype_t type;
     int64_t element_count;
     runtimec_error_t error;
     runtimec_status_t status;
@@ -672,7 +635,7 @@ static inline runtimec_status_t container_at(
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     vmbin_value_location_t location;
-    container_langtype_t type;
+    runtimec_container_langtype_t type;
     int64_t index = 0;
     runtimec_error_t error;
     runtimec_status_t status;
@@ -717,7 +680,7 @@ static inline runtimec_status_t container_set(
     binrwir_execution_exit_t *output_exit) {
     vmbin_value_location_t location;
     vmbin_value_location_t value;
-    container_langtype_t type;
+    runtimec_container_langtype_t type;
     int64_t index = 0;
     runtimec_error_t error;
     runtimec_status_t status;

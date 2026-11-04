@@ -43,6 +43,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "contract/status.h"
+#include "contract/view.h"
+
 #include "binrwir/registry.h"
 
 #ifdef __cplusplus
@@ -75,6 +78,27 @@ typedef enum runtimec_container_diagnostic {
      */
     RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER = 0x4301
 } runtimec_container_diagnostic_t;
+
+/*
+ * 一个 compact 数组的声明 langtype 解析结果：基种类 + 元素字节宽 + 维数。
+ *
+ * 导出给 `scatter`：`scatterarray·newscatter` 要把 compact body 按元素宽切开，
+ * 它需要同一个解析。**宽度表只有一份**——放在这里而不是各模块各写一张。
+ */
+typedef struct runtimec_container_langtype {
+    /* 基种类（`int64`、`char/utf8`…），指向声明文本内部，不拷贝。 */
+    runtimec_string_view_t base;
+    uint32_t element_size;
+    int32_t dimension_count;
+} runtimec_container_langtype_t;
+
+/*
+ * 声明 langtype → 元素宽与维数。形状是 `[a][b]…kind`：连续维段在方括号里，
+ * 基种类在最后一段之后。不认识的基种类返回 UNSUPPORTED——**不猜宽度**，
+ * 也不按 body 长度反推。
+ */
+runtimec_status_t runtimec_container_langtype_parse(
+    runtimec_string_view_t langtype, runtimec_container_langtype_t *output);
 
 /*
  * 返回本模块的静态条目数组，并把条目数写入 output_count。
