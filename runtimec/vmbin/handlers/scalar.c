@@ -76,6 +76,7 @@
 #include "contract/char_codec.h"
 #include "contract/program_counter.h"
 #include "contract/view.h"
+#include "kvspace/kvspace.h"
 #include "vmbin/value_access.h"
 #include "vmbin/vthread_status.h"
 
@@ -1552,6 +1553,129 @@ SCALAR_COMPARISON_HANDLER(scalar_handle_ge, SCALAR_COMPARISON_GREATER_EQUAL, 0)
 SCALAR_BOOLEAN_HANDLER(scalar_handle_bool_eq, 0)
 SCALAR_BOOLEAN_HANDLER(scalar_handle_bool_neq, 1)
 
+/*
+ * ptreq（0x0021）— rwir_catalog.def:282，behavior-decision `pointer-equality`。
+ *
+ * matrix:66：两个指针相等**当且仅当它们携带相同的目标 key**；None equals None；
+ * 携带目标的指针永不等于 None；**指针对非指针返回 INVALID**。
+ *
+ * 身份来自 wire：Ptr 的 body 就是目标 KV 路径（spec 03-类型系统/03-种类），
+ * 空 body 即空引用（= None）。判定「这是不是指针」必须读 head 的 `ptr` 字节
+ * ——wire langtype 不含 `*` 前缀（spec 07-文法与合法性:100），只能靠 ref 位。
+ * 这两件事都由 `vmbin_value_access_reference_kind` 与 `_read_body` 提供，
+ * 本实现不写任何偏移算术、不从 body 形状猜类型。
+ *
+ * `@ext` 的「相等」未定义（定位串相同 ≠ 同一个扩展对象），按裁决返回
+ * UNSUPPORTED 并点名原因，不发明一种表示。
+ */
+static runtimec_status_t scalar_pointer_equality(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, int invert,
+    runtimec_error_t *error) {
+    uint8_t left_bytes[SCALAR_CHAR_TEXT_CAPACITY];
+    uint8_t right_bytes[SCALAR_CHAR_TEXT_CAPACITY];
+    runtimec_bytes_buffer_t left_buffer = {left_bytes, 0U, sizeof(left_bytes)};
+    runtimec_bytes_buffer_t right_buffer = {
+        right_bytes, 0U, sizeof(right_bytes)};
+    uint8_t left_reference = KVSPACE_REF_INLINE;
+    uint8_t right_reference = KVSPACE_REF_INLINE;
+    uint8_t result;
+    runtimec_status_t status;
+
+    if (instruction->read_arguments.count != 2U ||
+        instruction->write_arguments.count != 1U) {
+        return scalar_fail(error, 33,
+                           "scalar handler: ptreq expects two reads and one "
+                           "write");
+    }
+    status = vmbin_value_access_reference_kind(
+        frame, &instruction->read_arguments.data[0], &left_reference, error);
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = vmbin_value_access_reference_kind(
+            frame, &instruction->read_arguments.data[1], &right_reference,
+            error);
+    }
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    /* @ext 的相等语义未定，两侧任一命中就明确拒绝，不猜。 */
+    if (left_reference == KVSPACE_REF_EXT || right_reference == KVSPACE_REF_EXT) {
+        return scalar_fail(
+            error, 34,
+            "scalar handler: ptreq on @ext is undefined (locator equality is "
+            "not specified)");
+    }
+    /*
+     * None 是合法操作数（matrix:66「None equals None」）。spec 03-类型系统/03 的
+     * None 判据有两条路径：storetype 0 的 None 形态（ref 为 INLINE），或 ptr=1
+     * 且 body 为空。前者在 ref 上看起来和普通标量一样，所以「两侧都是 INLINE」
+     * 时先按 body 读出来再判：两个空 body 就是 None==None。
+     */
+    /*
+     * 两侧的字节都要读出来：None 的判据是「body 为空」，而 None 的 ref 与普通
+     * 标量同为 INLINE，仅凭 ref 分不开。所以先读 body，再按 (ref, body 是否为空)
+     * 三态判定：指针 / None / 标量。
+     */
+    status = vmbin_value_access_read_body(
+        frame, &instruction->read_arguments.data[0], &left_buffer, error);
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = vmbin_value_access_read_body(
+            frame, &instruction->read_arguments.data[1], &right_buffer, error);
+    }
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    {
+        const int left_is_pointer = left_reference == KVSPACE_REF_PTR;
+        const int right_is_pointer = right_reference == KVSPACE_REF_PTR;
+        /* None：不是指针、且 body 为空（spec 03-类型系统/03 的两条判据合取）。 */
+        const int left_is_none = !left_is_pointer && left_buffer.size == 0U;
+        const int right_is_none = !right_is_pointer && right_buffer.size == 0U;
+
+        if (left_is_none && right_is_none) {
+            /* None equals None。 */
+            result = (uint8_t)(invert ? 0U : 1U);
+        } else if (left_is_pointer && right_is_pointer) {
+            /* 两侧都是指针：body（目标 key）逐字节比较；空 body 的指针是空引用，
+             * 与另一个空引用相等、与非空永不相等。 */
+            const int matched =
+                left_buffer.size == right_buffer.size &&
+                (left_buffer.size == 0U ||
+                 memcmp(left_buffer.data, right_buffer.data,
+                        left_buffer.size) == 0);
+
+            result = (uint8_t)((matched != 0) != (invert != 0) ? 1U : 0U);
+        } else if (left_is_pointer || right_is_pointer) {
+            /*
+             * 一侧指针、另一侧既不是指针也不是 None：按 matrix:66 是
+             * 「指针对非指针 → INVALID」，不是「不等」。指针与 None 的比较
+             * 已经在上面被 left_is_none / right_is_none 放行。
+             */
+            return scalar_fail(
+                error, 35,
+                "scalar handler: ptreq compares a pointer with a non-pointer");
+        } else {
+            /* 两侧都是非 None 的标量：ptreq 不接受。 */
+            return scalar_fail(error, 36,
+                               "scalar handler: ptreq requires pointer operands");
+        }
+    }
+    return vmbin_value_access_write_body(
+        frame, &instruction->write_arguments.data[0],
+        runtimec_bytes_view_make(&result, 1U), error);
+}
+
+static runtimec_status_t scalar_handle_ptreq(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    runtimec_error_t error;
+
+    (void)output_exit;
+    runtimec_error_reset(&error);
+    return scalar_pointer_equality(frame, instruction, 0, &error);
+}
+
 static runtimec_status_t scalar_handle_debugger(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
@@ -1633,6 +1757,7 @@ static const binrwir_registry_entry_t scalar_entries[] = {
     {0x001AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_handle_ge},
     {0x0022U, BINRWIR_REGISTRY_FLAG_NONE, scalar_handle_bool_eq},
     {0x002BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_handle_bool_neq},
+    {0x0021U, BINRWIR_REGISTRY_FLAG_NONE, scalar_handle_ptreq},
 };
 
 const binrwir_registry_entry_t *runtimec_scalar_handler_entries(

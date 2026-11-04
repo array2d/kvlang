@@ -210,9 +210,11 @@ target_link_libraries(runtimec_binrwir_compiler
 # vmbin 的 host handler 直接调 kvspace C ABI（用户裁决：不对 ABI 二次封装），
 # 因此它必须链代理库。**只链前端 `libkvspace`**——kvspace-c / kvspace-durable 是
 # 它的运行时后端，由 DSN scheme 在运行期选择，编译期不出现。
+# `libm`：scalar 一族的 sqrt/exp/log 是 C 数学库函数。不写 `${CMAKE_DL_LIBS}` 那类
+# 猜测，直接链 m——`-lm` 在 glibc 与 musl 上都是它。
 target_link_libraries(runtimec_vmbin
     PRIVATE runtimec_contract runtimec_binrwir
-            "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+            "${RUNTIMEC_KVSPACE_LIBRARY_PATH}" m)
 target_link_libraries(runtimec_engine
     PRIVATE
         runtimec_contract

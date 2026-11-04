@@ -14,7 +14,9 @@
 #include "binrwir_compiler/compiler.h"
 #include "engine/compilation_repository.h"
 #include "binrwir/registry.h"
+#include "vmbin/handlers/container.h"
 #include "vmbin/handlers/host.h"
+#include "vmbin/handlers/scalar.h"
 #ifdef RUNTIMEC_TEMP_PRINTLN
 #include "vmbin/temp_println.h"
 #endif
@@ -152,6 +154,34 @@ runtimec_status_t runtimec_session_create(
 
         status = binrwir_registry_append(&session->builtin_registry, "host",
                                          host_entries, host_entry_count, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            status = runtimec_session_forward(error, status, "builtin registry");
+            goto fail;
+        }
+    }
+    /* container 模块（B 线）：compactarray / scatterarray / map·new，8 条。 */
+    {
+        size_t container_entry_count = 0U;
+        const binrwir_registry_entry_t *container_entries =
+            runtimec_container_handler_entries(&container_entry_count);
+
+        status = binrwir_registry_append(
+            &session->builtin_registry, "container", container_entries,
+            container_entry_count, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            status = runtimec_session_forward(error, status, "builtin registry");
+            goto fail;
+        }
+    }
+    /* scalar 模块（A 线）：算术 / 位运算 / 比较，35 条，区间 0x0002–0x002B。 */
+    {
+        size_t scalar_entry_count = 0U;
+        const binrwir_registry_entry_t *scalar_entries =
+            runtimec_scalar_handler_entries(&scalar_entry_count);
+
+        status = binrwir_registry_append(&session->builtin_registry, "scalar",
+                                         scalar_entries, scalar_entry_count,
+                                         error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             status = runtimec_session_forward(error, status, "builtin registry");
             goto fail;
