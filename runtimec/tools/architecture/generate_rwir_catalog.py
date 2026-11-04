@@ -52,6 +52,22 @@ INSTRUCTION_HEADER = Path("runtimec/binrwir/instruction.h")
 
 MIDDLE_DOT = "·"
 
+# 已退役的能力行：(opid, identifier, 说明)。编号永久保留、不复用、不重编号——
+# 重编号会让历史 Program 里的 opid 全部错位。退役记录写进 rwir_catalog.def 头部，
+# 因为退役项按定义不在表体里，头部是它唯一能存在的地方。
+RETIRED_ROWS = (
+    ("OBJECT_LITERAL", "object", 0x0028, "obj"),
+)
+
+
+def retired_surface_names() -> set[str]:
+    """注册表里仍然登记、但 catalog 不再收的全部名字（规范名 + 别名）。"""
+    names: set[str] = set()
+    for row in RETIRED_ROWS:
+        names.add(row[1])
+        names.update(row[3:])
+    return names
+
 # ---------------------------------------------------------------------------------------
 # TypeSet: bit index -> kind. 0..17 keep the #583 §4.7 mapping; 18 is the pointer category,
 # which the §4.7 snapshot (taken from runtimec2's LangType) did not have. `None` is the
@@ -155,7 +171,7 @@ class Row:
 
 # ---------------------------------------------------------------------------------------
 # Level 1a: the 29 value operators (#583 §4.8), Copy, the control operators, debugger and
-# the object literal. opid is explicit: it never derives from table position.
+# the control operators. opid is explicit: it never derives from table position.
 # ---------------------------------------------------------------------------------------
 VALUE_ROWS = (
     # identifier suffix          operator  opid   read      write     constraint           result          alias      decisions
@@ -252,11 +268,6 @@ VALUE_ROWS = (
      ("control-flow-primitives",), "control"),
     ("BRANCH", "branch", 0x0027, 0, 0, "NONE", "NONE", "FORBIDDEN",
      ("control-flow-primitives",), "control"),
-    # 实测 nr=0：成员名与值都在写槽，它没有读参，结果类型也由写槽的 map langtype 给出，
-    # 不来自读参。所以结果规则是 `NONE` 而不是 `IDENTITY`（后者要求有读参）。
-    # 这一行即将随 `obj` 类型取消而删除（见 RETIRED_ROWS）。
-    ("OBJECT_LITERAL", "object", 0x0028, 0, STRING_KEY_MAP, "NONE", "NONE",
-     "DECLARED", ("map-literal-replaces-members",), "value"),
 )
 
 # ---------------------------------------------------------------------------------------
@@ -443,7 +454,6 @@ SYMBOLIC_ALIASES = {
 BARE_ALIASES = {
     "=": "COPY",
     "br": "BRANCH",
-    "obj": "OBJECT_LITERAL",
     "debugger": "DEBUGGER",
     "call": "CALL", "return": "RETURN", "goto": "GOTO",
 }
@@ -619,7 +629,10 @@ def build_alias_table(opcodes: list[str], rows: list[Row],
     rows_by_operator = {row.operator: row for row in rows}
     aliases: list[tuple[str, str]] = []
     gaps: list[tuple[str, str]] = []
+    retired = retired_surface_names()
     for opcode in sorted(opcodes):
+        if opcode in retired:
+            continue
         target = surface_row(opcode, rows_by_suffix, rows_by_operator)
         if target is None:
             gaps.append((opcode, "no capability row"))
@@ -671,7 +684,10 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
             findings.append(f"{row.identifier}: identity row states no source mask")
     registered = set(opcodes)
     alias_names = [name for name, _ in aliases]
-    missing = registered - set(alias_names) - {name for name, _ in gaps}
+    # 退役名仍在冻结仓的注册表里，但 catalog 有意不收——它们既不在别名表，
+    # 也不该算作缺口。这正是 RETIRED_ROWS 一行说明的第三件事。
+    missing = (registered - set(alias_names) - {name for name, _ in gaps}
+               - retired_surface_names())
     extra = set(alias_names) - registered
     if missing:
         findings.append(f"registered opcode missing from alias table: {sorted(missing)[:5]}")
@@ -839,6 +855,22 @@ def read_back_signature_table(text: str) -> list[tuple[str, list[str], list[str]
     return recovered
 
 
+def retirement_lines() -> list[str]:
+    """产物头部的退役段。行内素材全部来自 RETIRED_ROWS，没有第二份数据。"""
+    if not RETIRED_ROWS:
+        return []
+    lines = [" *", " * 已退役（编号永久保留，不复用、不重编号）："]
+    for identifier, operator, opid, *aliases in RETIRED_ROWS:
+        detail = (f" *   {operator!r} 为 {identifier} 的规范名，"
+                  f"~0x{opid:04X}")
+        line = (f" *   0x{opid:04X} {identifier} —— 具名容器字面量统一走 map·new"
+                f"（map/struct/scatterarray 本质是键值组）")
+        if aliases:
+            line += f"；{('、'.join(aliases))} 为其别名，一并退役"
+        lines.append(line)
+    return lines
+
+
 def render_catalog(rows: list[Row], aliases: list[tuple[str, str]],
                    opcodes: list[str], gaps: list[tuple[str, str]]) -> str:
     identity_names = {row.operator for row in rows}
@@ -863,6 +895,7 @@ def render_catalog(rows: list[Row], aliases: list[tuple[str, str]],
         f" * 统计：注册表 {len(opcodes)} 个 surface 名字 → {len(aliases)} 条别名映射；",
         f" *       {len(identity_names & {name for name, _ in aliases})} 条同名映射，"
         f"{alias_count} 条别名；能力行 {len(rows)} 条，待裁 {len(gaps)} 条。",
+    ] + retirement_lines() + [
         " */",
         "#ifndef RUNTIMEC_RWIR_OPERATION",
         '#error "Define RUNTIMEC_RWIR_OPERATION before including rwir_catalog.def"',

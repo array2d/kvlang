@@ -14,8 +14,11 @@
  *       /lib/<operator> 的 def rwir 槽在安装时声明（唯一签名来源，禁止在本表
  *       复制第二张签名表）；ResultRule IDENTITY 表示结果类型取安装签名，
  *       不是 wildcard。control 行不产生值。
- * 统计：注册表 316 个 surface 名字 → 316 条别名映射；
- *       120 条同名映射，196 条别名；能力行 131 条，待裁 0 条。
+ * 统计：注册表 316 个 surface 名字 → 315 条别名映射；
+ *       120 条同名映射，195 条别名；能力行 130 条，待裁 0 条。
+ *
+ * 已退役（编号永久保留，不复用、不重编号）：
+ *   0x0028 OBJECT_LITERAL —— 具名容器字面量统一走 map·new（map/struct/scatterarray 本质是键值组）；obj 为其别名，一并退役
  */
 #ifndef RUNTIMEC_RWIR_OPERATION
 #error "Define RUNTIMEC_RWIR_OPERATION before including rwir_catalog.def"
@@ -345,13 +348,6 @@ RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BRANCH, "branch", 0x0027,
                         RUNTIMEC_RWIR_RESULT_NONE,
                         RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
                         "control-flow-primitives")  /* no value -> no value */
-/* behavior-decision: map-literal-replaces-members */
-RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_OBJECT_LITERAL, "object", 0x0028,
-                        0x00000000, 0x00008000,
-                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
-                        RUNTIMEC_RWIR_RESULT_NONE,
-                        RUNTIMEC_RWIR_ALIAS_DECLARED,
-                        "map-literal-replaces-members")  /* install signature -> stringkeymap */
 /* behavior-decision: array-copy-result-kind */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_COPY, "compactarray·copy", 0x0100,
                         0x00000000, 0x00000000,
