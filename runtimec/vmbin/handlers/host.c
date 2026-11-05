@@ -83,6 +83,55 @@ static runtimec_status_t runtimec_host_fail(
 }
 
 /*
+ * 准备一次 host ABI 调用：校验读参个数、取句柄、按 `key_count` 取绝对路径。
+ *
+ * **目的单一**：把「这条指令要调哪个 ABI、参数长什么样」准备好，然后交给调用方。
+ * 它不调用 ABI、不做错误码翻译——那两件事属于各自的算子。
+ *
+ * 失败即置 `exit` 并返回 false，**不写任何输出参数**。
+ */
+static bool runtimec_host_prepare_call(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit, size_t expected_reads,
+    void **output_handle, char keys[][RUNTIMEC_HOST_KEY_CAPACITY]) {
+    const uint32_t source_program_counter =
+        instruction->source_logical_program_counter;
+    runtimec_status_t status;
+
+    *output_exit = (binrwir_execution_exit_t){0};
+    if (instruction->read_arguments.count != expected_reads) {
+        runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           source_program_counter);
+        return false;
+    }
+    status = runtimec_vthread_status_handle(frame, output_handle);
+    for (size_t ordinal = 0U; ordinal < expected_reads &&
+                              status == RUNTIMEC_STATUS_SUCCESS;
+         ++ordinal) {
+        status = runtimec_host_static_key(
+            frame, &instruction->read_arguments.data[ordinal], keys[ordinal],
+            RUNTIMEC_HOST_KEY_CAPACITY);
+    }
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        runtimec_host_fail(output_exit, status, source_program_counter);
+        return false;
+    }
+    return true;
+}
+
+/* 调 ABI 并翻译结果：非 0 一律 ERROR，带源 pc。 */
+static runtimec_status_t runtimec_host_finish_call(
+    binrwir_execution_exit_t *output_exit, int operation_status,
+    uint32_t source_program_counter) {
+    if (operation_status != 0) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                                  source_program_counter);
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
  * `kvspace·get(key)`：读参 1 是 key，结果写进写参 1。
  *
  * 取参顺序依据旧运行时 `runtime/src/rwir_kv.c:332`
@@ -91,47 +140,81 @@ static runtimec_status_t runtimec_host_fail(
  *
  * 缺失 key 不是错误：C ABI 返回 0 且 value=NULL，写参保持原样。
  */
+/*
+ * 把一个 int64 结果写进写参。`random·*`、`listlen` 这类「算出一个数」的算子共用。
+ *
+ * 一句话目的：**把一个数落到写参上**。
+ */
+static runtimec_status_t runtimec_host_store_int64(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, int64_t value,
+    binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
+    runtimec_error_t error;
+
+    runtimec_error_reset(&error);
+    if (vmbin_value_access_write_body(
+            frame, &instruction->write_arguments.data[0],
+            runtimec_bytes_view_make(&value, sizeof(value)),
+            &error) != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                                  source_program_counter);
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 把一次 `kvspaceGet` 读到的字节写进写参。空值（`NULL` 或长度 0）是**合法的
+ * 结果**（key 存在但体为空），不是错误——直接成功返回，不写写参。
+ *
+ * 一句话目的：**把读到的值落到写参上**。
+ */
+static runtimec_status_t runtimec_host_store_read_value(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, const uint8_t *value,
+    uint32_t value_size, binrwir_execution_exit_t *output_exit,
+    uint32_t source_program_counter) {
+    runtimec_error_t error;
+
+    if (value == NULL || value_size == 0U) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    runtimec_error_reset(&error);
+    if (vmbin_value_access_write(
+            frame, &instruction->write_arguments.data[0],
+            runtimec_bytes_view_make(value, (size_t)value_size),
+            &error) != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                                  source_program_counter);
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * `kvspace·get(key) -> v`：读一个 key 的整条 wire 写进写参。
+ * **成功才写写参，失败只写 `exit`**。
+ */
 static runtimec_status_t runtimec_host_kvspace_get(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
         instruction->source_logical_program_counter;
-    char key[RUNTIMEC_HOST_KEY_CAPACITY];
+    char keys[1][RUNTIMEC_HOST_KEY_CAPACITY];
     uint8_t *value = NULL;
     uint32_t value_size = 0U;
     void *handle = NULL;
-    runtimec_error_t error;
-    runtimec_status_t status;
 
-    runtimec_error_reset(&error);
-    *output_exit = (binrwir_execution_exit_t){0};
-    if (instruction->read_arguments.count != 1U ||
-        instruction->write_arguments.count != 1U) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
+    if (instruction->write_arguments.count != 1U ||
+        !runtimec_host_prepare_call(frame, instruction, output_exit, 1U,
+                                    &handle, keys)) {
+        return RUNTIMEC_STATUS_ERROR;
     }
-    status = runtimec_vthread_status_handle(frame, &handle);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_host_static_key(frame, &instruction->read_arguments.data[0],
-                                          key, sizeof(key));
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
-    }
-    if (kvspaceGet(handle, key, 1, &value, &value_size) != 0) {
+    if (kvspaceGet(handle, keys[0], 1, &value, &value_size) != 0) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                                   source_program_counter);
     }
-    if (value != NULL && value_size != 0U) {
-        status = vmbin_value_access_write(
-            frame, &instruction->write_arguments.data[0],
-            runtimec_bytes_view_make(value, (size_t)value_size), &error);
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            return runtimec_host_fail(output_exit, status, source_program_counter);
-        }
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
+    return runtimec_host_store_read_value(frame, instruction, value, value_size,
+                                          output_exit, source_program_counter);
 }
 
 /*
@@ -143,85 +226,98 @@ static runtimec_status_t runtimec_host_kvspace_get(
  * 给出的是 body 本身，不含 head——而 `kvspaceSetValue` 要的是完整 XValue。
  * 这里用 `read` 取整值（与 temp_println 同一口径），缺失或长度不符即失败。
  */
+/*
+ * 把读参解析成**完整 wire**（head + body + attr）。
+ *
+ * 整值写要的是完整 wire，不是 body。这里曾直接 `locate` 后把 `read_bytes` 交给
+ * `kvspaceSetValue`：对字面量那是对的（`locate` 对字面量给整条 wire），但对**普通
+ * 槽**它给的是 body，于是写进去的是一条没有 head 的裸缓冲——静默失败或写成畸形值。
+ *
+ * 判据只认 `locate` 自己给的 `is_whole_wire`，**不自己推断该不该剥**。
+ *
+ * 一句话目的：**把一个参数项变成可以整值写出的字节**。
+ */
+static bool runtimec_host_whole_wire(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, runtimec_bytes_view_t *output_wire,
+    binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
+    vmbin_value_location_t location;
+    runtimec_error_t error;
+
+    runtimec_error_reset(&error);
+    if (vmbin_value_access_locate(frame, argument, &location, &error) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           source_program_counter);
+        return false;
+    }
+    if (location.is_whole_wire) {
+        *output_wire =
+            runtimec_bytes_view_make(location.read_bytes, location.size);
+        return true;
+    }
+    /* body 视图 → 还原整条 wire：基址经合同逆入口，总长从 wire 头读出
+     * （attr 区没有独立长度前缀，所以只能从 head 拿）。 */
+    {
+        const runtimec_xvalue_address_t xvalue_address =
+            runtimec_value_body_xvalue_address(
+                (runtimec_value_body_address_t)(uintptr_t)location.read_bytes);
+        const kvspaceXvalueHead *head;
+
+        if (xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE) {
+            runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               source_program_counter);
+            return false;
+        }
+        head = (const kvspaceXvalueHead *)(uintptr_t)xvalue_address;
+        *output_wire = runtimec_bytes_view_make(
+            (const void *)(uintptr_t)xvalue_address,
+            (size_t)KVSPACE_XVALUE_HEAD_LEN +
+                (size_t)kvspaceXvalueHeadLen(head) +
+                (size_t)kvspaceXvalueHeadAttrsLen(head));
+        return true;
+    }
+}
+
+/*
+ * `kvspace·set(key, value)`：整值写。
+ *
+ * **不创建 key**——rwir 只容许触碰已经存在的 key，创建走生命周期指令。这里直接
+ * 调 `kvspaceSetValue`，没有「目标不存在就建」的分支。
+ */
 static runtimec_status_t runtimec_host_kvspace_set(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
         instruction->source_logical_program_counter;
-    char key[RUNTIMEC_HOST_KEY_CAPACITY];
+    char keys[1][RUNTIMEC_HOST_KEY_CAPACITY];
     char message[256];
     void *handle = NULL;
-    runtimec_error_t error;
-    runtimec_status_t status;
+    runtimec_bytes_view_t wire;
 
-    runtimec_error_reset(&error);
-    *output_exit = (binrwir_execution_exit_t){0};
     if (instruction->read_arguments.count != 2U) {
+        *output_exit = (binrwir_execution_exit_t){0};
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                                   source_program_counter);
     }
-    status = runtimec_vthread_status_handle(frame, &handle);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_host_static_key(frame, &instruction->read_arguments.data[0],
-                                          key, sizeof(key));
+    *output_exit = (binrwir_execution_exit_t){0};
+    if (runtimec_vthread_status_handle(frame, &handle) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        runtimec_host_static_key(frame, &instruction->read_arguments.data[0],
+                                 keys[0], RUNTIMEC_HOST_KEY_CAPACITY) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        !runtimec_host_whole_wire(frame, &instruction->read_arguments.data[1],
+                                  &wire, output_exit, source_program_counter)) {
+        return RUNTIMEC_STATUS_ERROR;
     }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
-    }
-    /*
-     * 整值写要的是**完整 wire**，不是 body。
-     *
-     * 这里曾直接 `locate` 后把 `location.read_bytes` 交给 `kvspaceSetValue`：
-     * 对字面量那是对的（`locate` 对字面量给整条 wire），但对**普通槽**它给的是
-     * body，于是写进去的是一条没有 head 的裸缓冲——静默失败或写成畸形值。
-     *
-     * 现在按 `is_whole_wire` 分流，**不自己推断该不该剥**（那是 `locate_body`
-     * 的职责）。两句都在这里，因为「这一处要哪一种」只有调用点知道。
-     */
-    {
-        vmbin_value_location_t location;
-        runtimec_bytes_view_t wire;
-
-        status = vmbin_value_access_locate(
-            frame, &instruction->read_arguments.data[1], &location, &error);
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            return runtimec_host_fail(output_exit, status, source_program_counter);
-        }
-        if (location.is_whole_wire) {
-            wire = runtimec_bytes_view_make(location.read_bytes, location.size);
-        } else {
-            /*
-             * body 视图 → 还原整条 wire：基址 = body - 固定头长度（经合同函数，
-             * 不写偏移算术）；总长 = 固定头 + bodylen + attrslen，两者都从
-             * wire 头读出。attr 区没有独立长度前缀，所以长得从 head 里拿。
-             */
-            const runtimec_value_body_address_t body_address =
-                (runtimec_value_body_address_t)(uintptr_t)location.read_bytes;
-            const runtimec_xvalue_address_t xvalue_address =
-                runtimec_value_body_xvalue_address(body_address);
-            const kvspaceXvalueHead *head;
-
-            if (xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE) {
-                return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                          source_program_counter);
-            }
-            head = (const kvspaceXvalueHead *)(uintptr_t)xvalue_address;
-            wire = runtimec_bytes_view_make(
-                (const void *)(uintptr_t)xvalue_address,
-                (size_t)KVSPACE_XVALUE_HEAD_LEN +
-                    (size_t)kvspaceXvalueHeadLen(head) +
-                    (size_t)kvspaceXvalueHeadAttrsLen(head));
-        }
-        message[0] = '\0';
-        /* 第 4 参（resolve）语义与旧实现一致：写侧不跟随 Ptr。 */
-        if (kvspaceSetValue(handle, key, wire.data, (uint32_t)wire.size, message,
-                            sizeof(message)) != 0) {
-            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                      source_program_counter);
-        }
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
+    message[0] = '\0';
+    /* 第 4 参（resolve）语义与旧实现一致：写侧不跟随 Ptr。 */
+    return runtimec_host_finish_call(
+        output_exit,
+        kvspaceSetValue(handle, keys[0], wire.data, (uint32_t)wire.size,
+                        message, sizeof(message)),
+        source_program_counter);
 }
 
 /*
@@ -530,40 +626,28 @@ static runtimec_status_t runtimec_host_vthread_not_implemented(
  */
 
 /* 单路径操作：读参 1 是路径，无写参。 */
+/* 单路径操作：读参 1 是路径，无写参。 */
 static runtimec_status_t runtimec_host_single_path_operation(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit,
     int (*operation)(void *handle, const char *path, char *error,
                      uint32_t error_capacity)) {
-    const uint32_t source_program_counter =
-        instruction->source_logical_program_counter;
-    char path[RUNTIMEC_HOST_KEY_CAPACITY];
+    char keys[1][RUNTIMEC_HOST_KEY_CAPACITY];
     char message[256];
     void *handle = NULL;
-    runtimec_status_t status;
 
-    *output_exit = (binrwir_execution_exit_t){0};
-    if (instruction->read_arguments.count != 1U) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
-    }
-    status = runtimec_vthread_status_handle(frame, &handle);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_host_static_key(frame, &instruction->read_arguments.data[0],
-                                          path, sizeof(path));
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
+    if (!runtimec_host_prepare_call(frame, instruction, output_exit, 1U,
+                                    &handle, keys)) {
+        return RUNTIMEC_STATUS_ERROR;
     }
     message[0] = '\0';
-    if (operation(handle, path, message, sizeof(message)) != 0) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                  source_program_counter);
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
+    return runtimec_host_finish_call(
+        output_exit, operation(handle, keys[0], message, sizeof(message)),
+        instruction->source_logical_program_counter);
 }
 
+/* 双路径操作：读参 1 是源、读参 2 是目标，无写参。 */
 /* 双路径操作：读参 1 是源、读参 2 是目标，无写参。 */
 static runtimec_status_t runtimec_host_two_path_operation(
     binrwir_execution_frame_t *frame,
@@ -572,37 +656,19 @@ static runtimec_status_t runtimec_host_two_path_operation(
     int (*operation)(void *handle, const char *source,
                      const char *destination, char *error,
                      uint32_t error_capacity)) {
-    const uint32_t source_program_counter =
-        instruction->source_logical_program_counter;
-    char source[RUNTIMEC_HOST_KEY_CAPACITY];
-    char destination[RUNTIMEC_HOST_KEY_CAPACITY];
+    char keys[2][RUNTIMEC_HOST_KEY_CAPACITY];
     char message[256];
     void *handle = NULL;
-    runtimec_status_t status;
 
-    *output_exit = (binrwir_execution_exit_t){0};
-    if (instruction->read_arguments.count != 2U) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
-    }
-    status = runtimec_vthread_status_handle(frame, &handle);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_host_static_key(frame, &instruction->read_arguments.data[0],
-                                          source, sizeof(source));
-    }
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_host_static_key(frame, &instruction->read_arguments.data[1],
-                                          destination, sizeof(destination));
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
+    if (!runtimec_host_prepare_call(frame, instruction, output_exit, 2U,
+                                    &handle, keys)) {
+        return RUNTIMEC_STATUS_ERROR;
     }
     message[0] = '\0';
-    if (operation(handle, source, destination, message, sizeof(message)) != 0) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                  source_program_counter);
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
+    return runtimec_host_finish_call(
+        output_exit,
+        operation(handle, keys[0], keys[1], message, sizeof(message)),
+        instruction->source_logical_program_counter);
 }
 
 /*
@@ -716,43 +782,13 @@ static runtimec_status_t runtimec_host_kvspace_make_index(
  * `kvspace·extindex(path, ext_path)`：两个路径，都是 STATIC。
  * 注意第二个是**字符串参数**而非存储操作对象，但它同样是编码期确定的路径。
  */
+/* `kvspace·mkindexext(path, extpath)`：两个路径，调 ABI。 */
 static runtimec_status_t runtimec_host_kvspace_extension_index(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
-    const uint32_t source_program_counter =
-        instruction->source_logical_program_counter;
-    char path[RUNTIMEC_HOST_KEY_CAPACITY];
-    char extension_path[RUNTIMEC_HOST_KEY_CAPACITY];
-    char message[256];
-    void *handle = NULL;
-    runtimec_status_t status;
-
-    *output_exit = (binrwir_execution_exit_t){0};
-    if (instruction->read_arguments.count != 2U) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
-    }
-    status = runtimec_vthread_status_handle(frame, &handle);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_host_static_key(frame, &instruction->read_arguments.data[0],
-                                          path, sizeof(path));
-    }
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_host_static_key(frame, &instruction->read_arguments.data[1],
-                                          extension_path,
-                                          sizeof(extension_path));
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
-    }
-    message[0] = '\0';
-    if (kvspaceMkindexExt(handle, path, extension_path, message,
-                          sizeof(message)) != 0) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                  source_program_counter);
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
+    return runtimec_host_two_path_operation(frame, instruction, output_exit,
+                                            kvspaceMkindexExt);
 }
 
 /*
@@ -761,45 +797,28 @@ static runtimec_status_t runtimec_host_kvspace_extension_index(
  * 旧实现在路径解析不出时返回 0 而不是报错（`rwir_kv.c:586`），这里同语义：
  * 空目录与取不到路径都给出 0，不制造「有错但要靠猜」的状态。
  */
+/* `kvspace·listlen(path) -> n`：前缀下直接子项数，枚举失败按 0（与旧实现一致）。 */
 static runtimec_status_t runtimec_host_kvspace_list_length(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
         instruction->source_logical_program_counter;
-    char path[RUNTIMEC_HOST_KEY_CAPACITY];
+    char keys[1][RUNTIMEC_HOST_KEY_CAPACITY];
     int32_t count = 0;
-    int64_t result = 0;
     void *handle = NULL;
-    runtimec_error_t error;
-    runtimec_status_t status;
 
-    runtimec_error_reset(&error);
-    *output_exit = (binrwir_execution_exit_t){0};
-    if (instruction->read_arguments.count != 1U ||
-        instruction->write_arguments.count != 1U) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
-    }
-    status = runtimec_vthread_status_handle(frame, &handle);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_host_static_key(frame, &instruction->read_arguments.data[0],
-                                          path, sizeof(path));
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
+    if (instruction->write_arguments.count != 1U ||
+        !runtimec_host_prepare_call(frame, instruction, output_exit, 1U,
+                                    &handle, keys)) {
+        return RUNTIMEC_STATUS_ERROR;
     }
     /* 枚举失败不算错：count 保持 0，与旧实现一致。 */
-    if (kvspaceListLen(handle, path, 0, 0, &count) == 0) {
-        result = (int64_t)count;
+    if (kvspaceListLen(handle, keys[0], 0, 0, &count) != 0) {
+        count = 0;
     }
-    status = vmbin_value_access_write_body(
-        frame, &instruction->write_arguments.data[0],
-        runtimec_bytes_view_make(&result, sizeof(result)), &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
+    return runtimec_host_store_int64(frame, instruction, (int64_t)count,
+                                     output_exit, source_program_counter);
 }
 
 /*
