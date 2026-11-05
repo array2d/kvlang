@@ -1385,6 +1385,21 @@ static void test_parameter_type_classification(void) {
                runtimec_string_view_from_c_string("int64"), &type_set) ==
            VMKV_PARAMETER_TYPE_RESULT_SINGLE);
     EXPECT(type_set == VMKV_RWIR_TYPE_SET_INT64);
+    /* 标量集里**不含**指针位：类别位判错要到特化改选时才炸，离根因很远。 */
+    EXPECT((type_set & VMKV_RWIR_TYPE_SET_POINTER) == 0U);
+    /* 指针：首字节 `*` 即指针类；`**T`（rwfunc 帧槽）必须同支。 */
+    EXPECT(vmkv_parameter_type_classify(
+               runtimec_string_view_from_c_string("*int64"), &type_set) ==
+           VMKV_PARAMETER_TYPE_RESULT_SINGLE);
+    EXPECT(type_set == VMKV_RWIR_TYPE_SET_POINTER);
+    EXPECT(vmkv_parameter_type_classify(
+               runtimec_string_view_from_c_string("**int64"), &type_set) ==
+           VMKV_PARAMETER_TYPE_RESULT_SINGLE);
+    EXPECT(type_set == VMKV_RWIR_TYPE_SET_POINTER);
+    EXPECT(vmkv_parameter_type_classify(
+               runtimec_string_view_from_c_string("*[3]int64"), &type_set) ==
+           VMKV_PARAMETER_TYPE_RESULT_SINGLE);
+    EXPECT(type_set == VMKV_RWIR_TYPE_SET_POINTER);
     EXPECT(vmkv_parameter_type_classify(
                runtimec_string_view_from_c_string("int64|float64"), &type_set) ==
            VMKV_PARAMETER_TYPE_RESULT_UNION);

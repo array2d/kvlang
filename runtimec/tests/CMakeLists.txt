@@ -74,7 +74,8 @@ target_link_libraries(runtimec_host_kvspace_backend_test PRIVATE
     runtimec_contract runtimec_host "${CMAKE_DL_LIBS}" Threads::Threads)
 runtimec_test_warnings(runtimec_host_kvspace_backend_test)
 add_test(NAME runtimec.host.kvspace_backend
-    COMMAND runtimec_host_kvspace_backend_test)
+    COMMAND runtimec_host_kvspace_backend_test
+            "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
 
 # head 布局探针：先判**库**，再判代码。
 #
@@ -619,3 +620,189 @@ target_link_libraries(runtimec_binrwir_dump PRIVATE
     runtimec_contract runtimec_host runtimec_binrwir runtimec_vmkv
     "${CMAKE_DL_LIBS}")
 runtimec_test_warnings(runtimec_binrwir_dump)
+
+# 诊断命名空间不得混用：error.code 是下层的、exit.detail_code 是本层的，两者不同。
+add_executable(runtimec_vmbin_diagnostic_namespace_test
+    vmbin_diagnostic_namespace_test.c)
+target_compile_features(runtimec_vmbin_diagnostic_namespace_test PRIVATE c_std_11)
+target_include_directories(runtimec_vmbin_diagnostic_namespace_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_vmbin_diagnostic_namespace_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmbin)
+runtimec_test_warnings(runtimec_vmbin_diagnostic_namespace_test)
+add_test(NAME runtimec.vmbin.diagnostic_namespace
+    COMMAND runtimec_vmbin_diagnostic_namespace_test)
+set_tests_properties(runtimec.binrwir.dispatch_diagnostic PROPERTIES
+    LABELS "runtimec;scaffold;binrwir;diagnostics")
+
+# 以下三个测试源文件早已在 HEAD 里、能编译，但从未出现在任何 add_test 中——
+# 「未注册」的后果与「注册被覆盖」一样：改坏了不会有任何东西红。
+add_executable(runtimec_scalar_generated_test scalar_generated_test.c)
+target_compile_features(runtimec_scalar_generated_test PRIVATE c_std_11)
+target_include_directories(runtimec_scalar_generated_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_scalar_generated_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmbin)
+runtimec_test_warnings(runtimec_scalar_generated_test)
+add_test(NAME runtimec.vmbin.scalar_generated
+    COMMAND runtimec_scalar_generated_test)
+set_tests_properties(runtimec.vmbin.scalar_generated PROPERTIES
+    LABELS "runtimec;scaffold;vmbin;scalar")
+
+add_executable(runtimec_scalar_special_test scalar_special_test.c)
+target_compile_features(runtimec_scalar_special_test PRIVATE c_std_11)
+target_include_directories(runtimec_scalar_special_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_scalar_special_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmbin)
+runtimec_test_warnings(runtimec_scalar_special_test)
+add_test(NAME runtimec.vmbin.scalar_special
+    COMMAND runtimec_scalar_special_test)
+set_tests_properties(runtimec.vmbin.scalar_special PROPERTIES
+    LABELS "runtimec;scaffold;vmbin;scalar")
+
+# 字符族：解码、码点判定、单字符编码、跨编码相等。
+#
+# 与 scalar_generated / scalar_special 分开成三个目标，是因为它们验的是**三层
+# 不同的事实**：生成物的模板语义、helper 的判据、字符族的解码与编码。合成一个
+# 目标时，一层红会被另一层的绿淹掉，看不出是哪层坏了。
+add_executable(runtimec_scalar_character_test scalar_character_test.c)
+target_compile_features(runtimec_scalar_character_test PRIVATE c_std_11)
+target_include_directories(runtimec_scalar_character_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_scalar_character_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmbin)
+runtimec_test_warnings(runtimec_scalar_character_test)
+add_test(NAME runtimec.vmbin.scalar_character
+    COMMAND runtimec_scalar_character_test)
+set_tests_properties(runtimec.vmbin.scalar_character PROPERTIES
+    LABELS "runtimec;scaffold;vmbin;scalar")
+
+# 条目表：每个 opid 都能被 registry_find 找到，且正向/取反成对完整。
+#
+# 与 handler 行为测试分开：那个验「算得对不对」，这个验「在不在表里」。
+# `scalar_entries` 是文件内 static，模块外只能经 `runtimec_scalar_handler_entries`
+# 看见它——所以这条路径是唯一能证明「注册了」的方式，看源码里的表不算。
+#
+# 链接 kvspace 代理库：scalar.c 的 vthread_status 依赖它。
+add_executable(runtimec_scalar_registry_test scalar_registry_test.c)
+target_compile_features(runtimec_scalar_registry_test PRIVATE c_std_11)
+target_include_directories(runtimec_scalar_registry_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+# 链接**文件**而不是 `-lkvspace`：仓库里没有名为 libkvspace.so 的链接目录在
+# 默认搜索路径上，裸写 `kvspace` 会在链接期报 `cannot find -lkvspace`。
+# 这与 `runtimec_wire_golden_real` 是同一套写法，本文件其它用例都这么链。
+target_link_libraries(runtimec_scalar_registry_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmbin
+    "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+set_target_properties(runtimec_scalar_registry_test PROPERTIES
+    BUILD_RPATH "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}")
+runtimec_test_warnings(runtimec_scalar_registry_test)
+add_test(NAME runtimec.vmbin.scalar_registry
+    COMMAND runtimec_scalar_registry_test)
+set_tests_properties(runtimec.vmbin.scalar_registry PROPERTIES
+    LABELS "runtimec;scaffold;vmbin;scalar")
+
+# ptreq / ptreq·not 的四种操作数组合。
+#
+# 不能塞进 handler_behavior：那个数据驱动用例走**字面量**操作数，wire 的 `ptr`
+# 字节恒为 INLINE，永远走不到指针分支。本目标用形参绑定构造真 XValue，
+# 才能覆盖 `(Ptr,Ptr)` / `(Ptr,None)` / `(None,None)` 三态。
+#
+# 重点在 `(None,None)`：`None != None` 必须为 false。漏了这一支的取反不会崩，
+# 只会让所有判空逻辑反向。
+add_executable(runtimec_scalar_pointer_equality_test
+    scalar_pointer_equality_test.c)
+target_compile_features(runtimec_scalar_pointer_equality_test PRIVATE c_std_11)
+target_include_directories(runtimec_scalar_pointer_equality_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+# 链接**文件**而不是 `-lkvspace`：仓库里没有名为 libkvspace.so 的链接目录在
+# 默认搜索路径上，裸写 `kvspace` 会在链接期报 `cannot find -lkvspace`。
+# 这与 `runtimec_wire_golden_real` 是同一套写法，本文件其它用例都这么链。
+target_link_libraries(runtimec_scalar_pointer_equality_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmbin
+    "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+set_target_properties(runtimec_scalar_pointer_equality_test PROPERTIES
+    BUILD_RPATH "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}")
+runtimec_test_warnings(runtimec_scalar_pointer_equality_test)
+add_test(NAME runtimec.vmbin.scalar_pointer_equality
+    COMMAND runtimec_scalar_pointer_equality_test)
+set_tests_properties(runtimec.vmbin.scalar_pointer_equality PROPERTIES
+    LABELS "runtimec;scaffold;vmbin;scalar;pointer")
+
+add_executable(runtimec_vmbin_langtype_handler_test vmbin_langtype_handler_test.c)
+target_compile_features(runtimec_vmbin_langtype_handler_test PRIVATE c_std_11)
+target_include_directories(runtimec_vmbin_langtype_handler_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_vmbin_langtype_handler_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmbin)
+runtimec_test_warnings(runtimec_vmbin_langtype_handler_test)
+add_test(NAME runtimec.vmbin.langtype_handler
+    COMMAND runtimec_vmbin_langtype_handler_test)
+set_tests_properties(runtimec.vmbin.langtype_handler PROPERTIES
+    LABELS "runtimec;scaffold;vmbin;langtype")
+
+# 能力目录的「声称」与 runtime 的「实际」必须一致。
+#
+# 判据：目录里 runtimec 声称自己执行的每一个 opid，session 建好之后
+# `binrwir_registry_find` 必须成功。
+#
+# 为什么需要：`generate_rwir_catalog.py` 的 REGISTRY_SOURCE 指向
+# `runtime/src/mywircaps.c`（不可构建的旧 runtime），而真正执行的是 session 装的
+# 表。两套「注册」互不校验，于是「目录说 0 gaps」与「registry_find(0x0014)
+# 返回 UNSUPPORTED」可以同时成立——`pow` 就躺在这个缝里。
+#
+# 走真 session（不自建 registry）：自建就绕过了 session.c 的装载路径，
+# 而那正是缺口所在。缺 kvspace 库时返回 77。
+add_executable(runtimec_catalog_coverage_test catalog_coverage_test.c)
+target_compile_features(runtimec_catalog_coverage_test PRIVATE c_std_11)
+target_compile_definitions(runtimec_catalog_coverage_test PRIVATE _GNU_SOURCE)
+target_include_directories(runtimec_catalog_coverage_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_catalog_coverage_test PRIVATE
+    runtimec_contract runtimec_host runtimec_engine runtimec_vmbin
+    runtimec_binrwir runtimec_vmkv "${CMAKE_DL_LIBS}")
+runtimec_test_warnings(runtimec_catalog_coverage_test)
+add_test(NAME runtimec.catalog.coverage
+    COMMAND runtimec_catalog_coverage_test
+            "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+set_tests_properties(runtimec.catalog.coverage PROPERTIES
+    SKIP_RETURN_CODE 77
+    LABELS "runtimec;scaffold;catalog")
+
+# 写不存在的绝对 key（甲案）：正向创建 + 负向读目标拒绝。
+# 旧规则「argument.c 必须拒绝零地址」在语义放开后移走，判据落到这里。
+add_executable(runtimec_absolute_write_test absolute_write_test.c)
+target_compile_features(runtimec_absolute_write_test PRIVATE c_std_11)
+target_include_directories(runtimec_absolute_write_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_absolute_write_test PRIVATE
+    runtimec_contract runtimec_host runtimec_vmkv runtimec_engine
+    "${CMAKE_DL_LIBS}")
+runtimec_test_warnings(runtimec_absolute_write_test)
+add_test(NAME runtimec.engine.absolute_write
+    COMMAND runtimec_absolute_write_test
+            "${KVLANG_LAYOUT_LIBRARY}"
+            "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+set_tests_properties(runtimec.engine.absolute_write PROPERTIES
+    SKIP_RETURN_CODE 77
+    LABELS "runtimec;scaffold;engine;absolute-write")
+

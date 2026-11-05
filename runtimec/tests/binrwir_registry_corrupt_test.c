@@ -242,6 +242,22 @@ int main(void) {
         EXPECT(binrwir_registry_append(&registry, "reserved", &reserved_operator,
                                        1U, NULL) == RUNTIMEC_STATUS_SUCCESS);
         EXPECT(registry.entry_count == 1U);
+        /*
+         * **注册成功 ≠ 能查到。** 只断言 `entry_count` 时，本组全绿而缺陷仍在：
+         * 早先 `rebuild_index` 把保留区排除在两处索引之外，于是保留区条目
+         * 「进去了、查不到」——任何临时 println 执行期都拿 CORRUPT_REGISTRY，
+         * 而这里一条断言都不会红。
+         *
+         * 判据：**能不能分派由注册表里有没有这条决定，不由 opid 落在哪个区间
+         * 决定**。所以注册之后必须再查一次，且查到的就是这一条。
+         */
+        const binrwir_registry_entry_t *found_reserved = NULL;
+        EXPECT(binrwir_registry_find(
+                   &registry, BINRWIR_OPERATION_IDENTIFIER_RESERVED_BASE,
+                   &found_reserved) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(found_reserved != NULL &&
+               found_reserved->operation_identifier ==
+                   BINRWIR_OPERATION_IDENTIFIER_RESERVED_BASE);
     }
 
     /*

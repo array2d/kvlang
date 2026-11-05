@@ -397,7 +397,14 @@ static void test_template_semantics(void) {
     }
 
     {
-        /* INT64_MIN / -1 是 UB（x86 会 SIGFPE），必须被拦且码不同。 */
+        /*
+         * `INT64_MIN / -1` 是 C 的 UB（x86 的 `idiv` 抛 #DE 杀进程）。
+         *
+         * 裁决（2026-11-05）：二补数**回绕**——商等于被除数本人
+         * （Go 的 `q = x / -1` 也是 `x`），不是错误。
+         *
+         * 这条断言的失败形态要留意：实现若漏判，**不是变红而是 SIGFPE**。
+         */
         const int64_t minimum = INT64_MIN;
         const int64_t minus_one = -1;
         int64_t result = 0;
@@ -405,8 +412,8 @@ static void test_template_semantics(void) {
 
         runtimec_scalar_probe_div_int64_int64_int64(&minimum, &minus_one,
                                                     &result, &exit);
-        EXPECT(exit.kind == BINRWIR_EXECUTION_EXIT_ERROR);
-        EXPECT(exit.detail_code == RUNTIMEC_SCALAR_DIAG_DIVIDE_OVERFLOW);
+        EXPECT(exit.kind == BINRWIR_EXECUTION_EXIT_NONE);
+        EXPECT(result == INT64_MIN);
     }
 
     {
@@ -441,6 +448,222 @@ static void test_template_semantics(void) {
                                                         &narrow, &exit);
             EXPECT(narrow == 4); /* 200 % 7 == 4 */
         }
+    }
+
+
+    /*
+     * 浮点 × 64 位整数：结果**必须是浮点**。
+     *
+     * 这组钉住今天最顽固的一类错：表曾把 `float32,int64` 的结果写成 int64——
+     * 「取较宽」时 `float32`(4 字节) 输给 `int64`(8 字节)。但 float32 的 4 字节
+     * 不是「比 int64 窄的整数」，跨类不能比宽度。spec 的规则是「任一侧浮点则
+     * 按 float 规则」。
+     *
+     * 判据落在这里而不是只落生成器：**表再错一次时，这一条会红**。
+     */
+    {
+        const float left = 1.5f;
+        const int64_t right = 2;
+        float result = 0.0f;
+
+        /* 结果类型是 float（不是 int64）：1.5 + 2 = 3.5，不是 3。 */
+        runtimec_scalar_probe_add_float32_int64_float32(&left, &right, &result);
+        EXPECT(result == 3.5f);
+    }
+
+    {
+        /* min(int32 5, float32 2.5) = 2.5 —— 若实现把结果当整数，会得 2。 */
+        const int32_t left = 5;
+        const float right = 2.5f;
+        float result = 0.0f;
+
+        runtimec_scalar_probe_min_int32_float32_float32(&left, &right, &result);
+        EXPECT(result == 2.5f);
+    }
+
+    {
+        /* mul(float32 2, uint64 3) = 6.0 —— uint64 走无符号值本身，不经 int64。 */
+        const float left = 2.0f;
+        const uint64_t right = 3;
+        float result = 0.0f;
+
+        runtimec_scalar_probe_mul_float32_uint64_float32(&left, &right,
+                                                         &result);
+        EXPECT(result == 6.0f);
+    }
+
+
+    /*
+     * 按**模板**补的边界锚点（不是按条数）。
+     *
+     * 判据：模板错一次会同时错几百条，所以每个模板至少要有一条"错实现会红"的
+     * 样本。常规值不够——它们在任何写法下都对；要挑**边界**：回绕点、相等点、
+     * 符号位、掩码边界、饱和点。
+     */
+
+    /* 整数回绕：int8(127 + 1) = -128，uint8(0 - 1) = 255。
+     * 若模板写成饱和（或走浮点），这两条会给出 127 与 0。 */
+    {
+        const int8_t high = 127;
+        const int8_t one = 1;
+        const uint8_t unsigned_zero = 0;
+        const uint8_t unsigned_one = 1;
+        int8_t signed_result = 0;
+        uint8_t unsigned_result = 0;
+
+        runtimec_scalar_probe_add_int8_int8_int8(&high, &one, &signed_result);
+        EXPECT(signed_result == -128);
+        runtimec_scalar_probe_sub_uint8_uint8_uint8(&unsigned_zero,
+                                                    &unsigned_one,
+                                                    &unsigned_result);
+        EXPECT(unsigned_result == 255);
+        /* int8(-1 - (-1)) = 0：符号与零值都对。 */
+        {
+            const int8_t minus_one = -1;
+            int8_t zero_result = 99;
+
+            runtimec_scalar_probe_sub_int8_int8_int8(&minus_one, &minus_one,
+                                                     &zero_result);
+            EXPECT(zero_result == 0);
+        }
+    }
+
+    /* 浮点算术：float32 与 float64 精度不同。
+     * `(float)(1.0f/3.0f)` 与 `(double)(1.0/3.0)` 必须不等——若模板把 float32
+     * 也按 double 算再截断，两者可能相等。 */
+    {
+        const float one_third_f32 = 1.0f / 3.0f;
+        const double one_third_f64 = 1.0 / 3.0;
+        const float zero_f32 = 0.0f;
+        float result = 0.0f;
+
+        EXPECT((double)one_third_f32 != one_third_f64);
+        /* 加 0 不该改变值，也不该把 -0.0 变成 +0.0 之外的任何数。 */
+        runtimec_scalar_probe_add_float32_float32_float32(&one_third_f32,
+                                                          &zero_f32, &result);
+        EXPECT(result == one_third_f32);
+    }
+
+    /* 比较：`lt(5,5) == false` 是唯一能区分 `<` 与 `<=` 的样本。 */
+    {
+        const int32_t five = 5;
+        const int32_t also_five = 5;
+        const int32_t six = 6;
+        bool result = true;
+
+        runtimec_scalar_probe_less_int32_int32_bool(&five, &also_five, &result);
+        EXPECT(result == false);
+        runtimec_scalar_probe_less_int32_int32_bool(&five, &six, &result);
+        EXPECT(result == true);
+    }
+
+    /* 相等：大整数相等必须走精确比较，不能经浮点。 */
+    {
+        const int64_t big = INT64_C(9007199254740993); /* 2^53 + 1 */
+        const int64_t nearby = INT64_C(9007199254740992); /* 2^53 */
+        bool result = true;
+
+        /* 这两个数**相邻但不相等**；若实现先转 double，两者会相等。 */
+        runtimec_scalar_probe_equal_int64_int64_bool(&big, &nearby, &result);
+        EXPECT(result == false);
+        runtimec_scalar_probe_equal_int64_int64_bool(&big, &big, &result);
+        EXPECT(result == true);
+    }
+
+    /* 位运算：掩码语义。 */
+    {
+        const uint8_t left = 0xF0;
+        const uint8_t right = 0x3C;
+        uint8_t result = 0;
+
+        runtimec_scalar_probe_bitwise_and_uint8_uint8_uint8(&left, &right,
+                                                            &result);
+        EXPECT(result == 0x30);
+    }
+
+    /* 逻辑：真值表两组关键行——`or(0,0)` 假、`or(0,负值)` 真（负的非零是真）。 */
+    {
+        const double zero = 0.0;
+        const double negative = -1.5;
+        bool result = true;
+
+        runtimec_scalar_probe_logical_or_float64_float64_bool(&zero, &zero,
+                                                              &result);
+        EXPECT(result == false);
+        runtimec_scalar_probe_logical_or_float64_float64_bool(&zero, &negative,
+                                                              &result);
+        EXPECT(result == true);
+    }
+
+    /* not：`not(0) == true`、`not(非零) == false`。 */
+    {
+        const int64_t zero = 0;
+        const int64_t nonzero = -7;
+        bool result = false;
+
+        runtimec_scalar_probe_logical_not_int64_bool(&zero, &result);
+        EXPECT(result == true);
+        runtimec_scalar_probe_logical_not_int64_bool(&nonzero, &result);
+        EXPECT(result == false);
+    }
+
+    /* 移位：掩码边界（uint8 计数只取低 3 位）与算术右移。 */
+    {
+        const uint8_t one = 1;
+        const uint8_t eight = 8; /* 8 & 7 == 0，所以结果是 1 */
+        const int8_t negative = -8;
+        const int8_t shift_one = 1;
+        uint8_t unsigned_result = 0;
+        int8_t signed_result = 0;
+
+        runtimec_scalar_probe_shift_left_uint8_uint8_uint8(&one, &eight,
+                                                           &unsigned_result);
+        EXPECT(unsigned_result == 1);
+        runtimec_scalar_probe_shift_right_int8_int8_int8(&negative, &shift_one,
+                                                         &signed_result);
+        EXPECT(signed_result == -4);
+    }
+
+    /* cast 饱和：`int8(float 300.0)` 饱和到 127（不是回绕成 44）。
+     * 回绕与饱和在这里给出不同答案，这正是能区分两种实现的样本。
+     *
+     * 注：`(int8_t)(uint8_t)converted_` 这种「多绕一次无符号」的改动**不改变
+     * 结果**——饱和后值恒在 int8 范围内，再走一次 uint8 是恒等。所以那种变异
+     * 抓不到不是漏洞。能抓到的是「绕过 helper、直接 (int8_t)*a」这种真回绕。 */
+    {
+        const double large = 300.0;
+        const double nan_value = NAN;
+        int8_t result = 0;
+        binrwir_execution_exit_t exit = {0};
+
+        runtimec_scalar_probe_cast_float64_int8_int8(&large, &result, &exit);
+        EXPECT(exit.kind == BINRWIR_EXECUTION_EXIT_NONE);
+        EXPECT(result == 127);
+        EXPECT(result != 44); /* 回绕会给 44 —— 那是整数 cast 的语义，不是浮点的 */
+
+        /* NaN 报错，输出槽不动。 */
+        exit = (binrwir_execution_exit_t){0};
+        result = INT8_C(0x5A);
+        runtimec_scalar_probe_cast_float64_int8_int8(&nan_value, &result, &exit);
+        EXPECT(exit.kind == BINRWIR_EXECUTION_EXIT_ERROR);
+        EXPECT(exit.detail_code == RUNTIMEC_SCALAR_DIAG_NOT_A_NUMBER);
+        EXPECT(result == INT8_C(0x5A));
+    }
+
+    /* cast 饱和（无符号侧）：`uint8(float -5.0)` 饱和到 0，不是回绕成 251。 */
+    {
+        const float negative = -5.0f;
+        const float huge = 1e30f;
+        uint8_t result = 99;
+        binrwir_execution_exit_t exit = {0};
+
+        runtimec_scalar_probe_cast_float32_uint8_uint8(&negative, &result,
+                                                       &exit);
+        EXPECT(result == 0);
+        exit = (binrwir_execution_exit_t){0};
+        result = 0;
+        runtimec_scalar_probe_cast_float32_uint8_uint8(&huge, &result, &exit);
+        EXPECT(result == 255);
     }
 
 }

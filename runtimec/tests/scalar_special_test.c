@@ -113,37 +113,52 @@ static void test_divide_by_zero(void) {
 }
 
 static void test_divide_overflow(void) {
-    binrwir_execution_exit_t exit;
+    /*
+     * `INT64_MIN / -1` 与 `INT64_MIN % -1`：**二补数回绕**，不是错误。
+     *
+     * 裁决（2026-11-05，架构师）：`INT64_MIN / -1` 得 `INT64_MIN`（Go 规范
+     * `q = x / -1` 等于 `x`），`INT64_MIN % -1` 得 `0`。
+     *
+     * 这两条仍然必须由实现**显式判**：C 在这里是未定义行为，x86 的 `idiv`
+     * 直接抛 #DE 杀掉进程。判完之后给的是定义好的回绕值，不是 exit = ERROR。
+     *
+     * 这条测试的失败形态值得留意：若实现漏了这个判断，**不是断言变红，是进程
+     * 收到 SIGFPE 就地死掉**（exit 136，无任何断言输出）。所以 CI 上看到 core
+     * dump，第一反应应当是「溢出判据被删了」。
+     */
+    binrwir_execution_exit_t exit = {0};
     int64_t value = UNTOUCHED;
 
-    /* INT64_MIN / -1：C 是 UB，x86 直接 SIGFPE。必须被拦，且码不同于除零。 */
-    exit = (binrwir_execution_exit_t){0};
     runtimec_scalar_divide_signed(INT64_MIN, -1, 64U, &value, &exit);
-    EXPECT(exit.kind == BINRWIR_EXECUTION_EXIT_ERROR);
-    EXPECT(exit.detail_code == RUNTIMEC_SCALAR_DIAG_DIVIDE_OVERFLOW);
-    EXPECT(exit.detail_code != RUNTIMEC_SCALAR_DIAG_DIVIDE_BY_ZERO);
-    EXPECT(value == UNTOUCHED);
+    EXPECT(exit.kind == BINRWIR_EXECUTION_EXIT_NONE);
+    EXPECT(value == INT64_MIN);
+    /* 不能是 −(INT64_MIN) 的 UB 结果，也不是任何别的数。 */
+    EXPECT(value != INT64_MAX);
 
-    /* 同一条判据在窄宽度上：int8 的 -128 / -1 同样是溢出。 */
+    /* 窄宽度同判据：int8 的 −128 / −1 回绕成 −128。 */
     exit = (binrwir_execution_exit_t){0};
     value = UNTOUCHED;
     runtimec_scalar_divide_signed(-128, -1, 8U, &value, &exit);
-    EXPECT(exit.detail_code == RUNTIMEC_SCALAR_DIAG_DIVIDE_OVERFLOW);
-    EXPECT(value == UNTOUCHED);
+    EXPECT(exit.kind == BINRWIR_EXECUTION_EXIT_NONE);
+    EXPECT(value == -128);
 
-    /* 反向控制：-127 / -1 = 127 必须**算出来**，不是一并拒绝。 */
+    /* 余数：回绕后是 0。 */
+    exit = (binrwir_execution_exit_t){0};
+    value = UNTOUCHED;
+    runtimec_scalar_remainder_signed(INT64_MIN, -1, 64U, &value, &exit);
+    EXPECT(exit.kind == BINRWIR_EXECUTION_EXIT_NONE);
+    EXPECT(value == 0);
+
+    /* 反向对照：普通负数除法照常算，不是一并走回绕分支。 */
     exit = (binrwir_execution_exit_t){0};
     value = UNTOUCHED;
     runtimec_scalar_divide_signed(-127, -1, 8U, &value, &exit);
     EXPECT(exit.kind == BINRWIR_EXECUTION_EXIT_NONE);
     EXPECT(value == 127);
-
-    /* 余数同源。 */
     exit = (binrwir_execution_exit_t){0};
     value = UNTOUCHED;
-    runtimec_scalar_remainder_signed(INT64_MIN, -1, 64U, &value, &exit);
-    EXPECT(exit.detail_code == RUNTIMEC_SCALAR_DIAG_DIVIDE_OVERFLOW);
-    EXPECT(value == UNTOUCHED);
+    runtimec_scalar_divide_signed(-7, 3, 64U, &value, &exit);
+    EXPECT(value == -2);
 }
 
 static void test_divide_quotient_rounds_toward_zero(void) {
