@@ -20,6 +20,7 @@
 #include "vmbin/handlers/scalar.h"
 #include "vmbin/handlers/scalar_generated.h"
 #include "vmbin/handlers/scatter.h"
+#include "vmbin/handlers/time.h"
 #include "vmbin/handlers/string.h"
 #ifdef RUNTIMEC_TEMP_PRINTLN
 #include "vmbin/temp_println.h"
@@ -246,6 +247,26 @@ runtimec_status_t runtimec_session_create(
         status = binrwir_registry_append(&session->builtin_registry, "scatter",
                                          scatter_entries, scatter_entry_count,
                                          error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            status = runtimec_session_forward(error, status, "builtin registry");
+            goto fail;
+        }
+    }
+
+    /*
+     * time 模块：`time·` 与 `time/duration·` 两族，19 条。
+     *
+     * 它们**不是** kvspace 能力，也不是标量运算——是内建表里独立的一族
+     * （spec `05-runtime语义/05-runtimec内建.kv` 的「`·` 限定内建族」把它列成
+     * 单独一行）。所以有自己的模块与自己的注册行，不并入 host 或 scalar。
+     */
+    {
+        size_t time_entry_count = 0U;
+        const binrwir_registry_entry_t *time_entries =
+            runtimec_time_handler_entries(&time_entry_count);
+
+        status = binrwir_registry_append(&session->builtin_registry, "time",
+                                         time_entries, time_entry_count, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             status = runtimec_session_forward(error, status, "builtin registry");
             goto fail;

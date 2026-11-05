@@ -1211,6 +1211,25 @@ typedef enum compare_result {
  *
  * 与 `tutorial/test.py` 的 `_normalize_output_lines` 同一规则（那边已有反向控制
  * 5 条）：多打印不管、顺序错不管、期望 `1` 还能匹到 `12` 的比对不算比对。 */
+/*
+ * 测量噪声行：`__bench_ns:` / `__bench_us:` 开头的行**不是用例输出**。
+ *
+ * 出处：`tutorial/test.py:157-164` 的 `_extract_bench_us()`——那是这套语料的
+ * **约定定义处**，它在比对前把这两类行剥掉并单独取出耗时。本 runner 服务同一套
+ * 语料，必须用同一条约定。
+ *
+ * 不剥的后果不是报错，是**假失败**：`hello.kv` 的用例里本来就两个 println，
+ * 而期望头只写第一个（第二个是 bench 行），于是「实际 2 行 / 期望 1 行」——
+ * 看起来像实现多打印了一行。**两个 harness 服务同一套语料时，约定必须完全一致。**
+ */
+static int line_is_bench_noise(const char *line) {
+    static const char nanosecond_prefix[] = "__bench_ns:";
+    static const char microsecond_prefix[] = "__bench_us:";
+
+    return strncmp(line, nanosecond_prefix, sizeof(nanosecond_prefix) - 1U) == 0 ||
+           strncmp(line, microsecond_prefix, sizeof(microsecond_prefix) - 1U) == 0;
+}
+
 static size_t split_lines(const char *text, char (*lines)[512],
                           size_t capacity) {
     size_t count = 0U;
@@ -1222,6 +1241,17 @@ static size_t split_lines(const char *text, char (*lines)[512],
         }
         memcpy(lines[count], cursor, length);
         lines[count][length] = '\0';
+        /* 测量噪声行整行丢掉，不占行号（见 `line_is_bench_noise`）。 */
+        if (line_is_bench_noise(lines[count])) {
+            cursor += strcspn(cursor, "\r\n");
+            if (*cursor == '\r') {
+                ++cursor;
+            }
+            if (*cursor == '\n') {
+                ++cursor;
+            }
+            continue;
+        }
         /* 剥行尾空白（空格与制表符）。 */
         while (length > 0U &&
                (lines[count][length - 1U] == ' ' ||
