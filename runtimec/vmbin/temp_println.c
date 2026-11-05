@@ -282,12 +282,15 @@ static runtimec_status_t runtimec_temp_cerr_handler(
 
 /* 三条条目的唯一定义点；开关关闭时整个文件不参与编译。 */
 static const binrwir_registry_entry_t runtimec_temp_println_entry_table[] = {
-    {RUNTIMEC_TEMP_PRINTLN_OPERATION_IDENTIFIER, BINRWIR_REGISTRY_FLAG_EFFECT,
-     runtimec_temp_println_handler},
-    {RUNTIMEC_TEMP_PRINT_OPERATION_IDENTIFIER, BINRWIR_REGISTRY_FLAG_EFFECT,
-     runtimec_temp_print_handler},
-    {RUNTIMEC_TEMP_CERR_OPERATION_IDENTIFIER, BINRWIR_REGISTRY_FLAG_EFFECT,
-     runtimec_temp_cerr_handler},
+    {.operation_identifier = RUNTIMEC_TEMP_PRINTLN_OPERATION_IDENTIFIER,
+     .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
+     .handler = runtimec_temp_println_handler},
+    {.operation_identifier = RUNTIMEC_TEMP_PRINT_OPERATION_IDENTIFIER,
+     .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
+     .handler = runtimec_temp_print_handler},
+    {.operation_identifier = RUNTIMEC_TEMP_CERR_OPERATION_IDENTIFIER,
+     .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
+     .handler = runtimec_temp_cerr_handler},
 };
 
 const binrwir_registry_entry_t *runtimec_temp_println_entries(

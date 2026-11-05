@@ -1,10 +1,10 @@
 /*
- * 组件：vmbin/handlers/handler_target_key 的实现
+ * 组件：vmbin/frame_target_key 的实现
  * 作用：写参 → 存储绝对 key（`<frame_path>/<符号名>`）。
  * 约束：不猜、不回退：帧路径无效、符号取不到、引用种类不是 LOCAL，一律失败。
  */
 
-#include "vmbin/handlers/handler_target_key.h"
+#include "frame_target_key.h"
 
 #include <string.h>
 
@@ -12,7 +12,7 @@
 #include "binrwir/program.h"
 #include "contract/view.h"
 
-runtimec_status_t runtimec_handler_target_key(
+runtimec_status_t vmbin_frame_target_key(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument, char *buffer, size_t capacity) {
     runtimec_string_view_t name;

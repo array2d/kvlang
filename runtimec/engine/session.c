@@ -16,6 +16,7 @@
 #include "binrwir/registry.h"
 #include "vmbin/handlers/container.h"
 #include "vmbin/handlers/host.h"
+#include "vmbin/handlers/langtype.h"
 #include "vmbin/handlers/scalar.h"
 #include "vmbin/handlers/scatter.h"
 #include "vmbin/handlers/string.h"
@@ -197,6 +198,21 @@ runtimec_status_t runtimec_session_create(
 
         status = binrwir_registry_append(&session->builtin_registry, "string",
                                          string_entries, string_entry_count,
+                                         error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            status = runtimec_session_forward(error, status, "builtin registry");
+            goto fail;
+        }
+    }
+    /* langtype 模块：`parselangtype` 两条（0x010D compactarray / 0x0136 xv）。
+     * 此前它导出了条目表却没人装配——编得出、装不进，执行到即 INVALID。 */
+    {
+        size_t langtype_entry_count = 0U;
+        const binrwir_registry_entry_t *langtype_entries =
+            runtimec_langtype_handler_entries(&langtype_entry_count);
+
+        status = binrwir_registry_append(&session->builtin_registry, "langtype",
+                                         langtype_entries, langtype_entry_count,
                                          error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             status = runtimec_session_forward(error, status, "builtin registry");

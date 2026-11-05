@@ -374,13 +374,49 @@ static runtimec_status_t vmbin_interpreter_dispatch_builtin(
             execution, instruction, RUNTIMEC_STATUS_INVALID,
             VMBIN_INTERPRETER_DIAG_INVALID_INSTRUCTION, output_exit);
     }
+    /*
+     * 调 handler 前清零，调完只补缺的字段——**两件事不冲突，各有各的职责**：
+     *
+     *   清零在前，防陈旧：上一次分派留下的 exit 不能漏进这一次，否则 handler
+     *   什么都不写时，调用方会读到上一条指令的退出状态。
+     *   补字段在后，保成因：handler 已经写好的诊断码是它对自己的失败最准确的
+     *   描述（例如 `0x4304` 值宽不符），用通用的 `DIAG_HANDLER_FAILED` 覆盖掉
+     *   等于把「为什么失败」换成「某个 handler 失败了」。
+     *
+     * 所以下面分两种情形：handler 自己写了 ERROR 出口就只补位置，没写才兜底
+     * 成 `DIAG_HANDLER_FAILED`。别把这两句当成矛盾而删掉其中一个。
+     */
     *output_exit = (binrwir_execution_exit_t){0};
     status = entry->handler(execution->frame, instruction,
                                       output_exit);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        vmbin_interpreter_error_exit(
-            output_exit, status, VMBIN_INTERPRETER_DIAG_HANDLER_FAILED,
-            instruction->source_logical_program_counter);
+        if (output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR) {
+            /*
+             * handler 已给 kind 与诊断码：只补它不知道的位置信息。
+             *
+             * 判据不能用 `== PROGRAM_COUNTER_NONE`：出口在调 handler 前被清零，
+             * 未设置的位置是 **0**，而哨兵是 `UINT32_MAX`——拿哨兵去比，等于
+             * 永远补不上。0 不是合法的源码位置（源码 pc 从 1 起），所以判据
+             * 写成「0 或哨兵都补」。
+             */
+            if (output_exit->logical_program_counter == 0U ||
+                output_exit->logical_program_counter ==
+                    BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE) {
+                output_exit->logical_program_counter =
+                    instruction->source_logical_program_counter;
+            }
+            if (output_exit->resume_logical_program_counter == 0U ||
+                output_exit->resume_logical_program_counter ==
+                    BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE) {
+                output_exit->resume_logical_program_counter =
+                    instruction->source_logical_program_counter;
+            }
+        } else {
+            /* handler 只回了状态、没写出口：兜底成通用诊断。 */
+            vmbin_interpreter_error_exit(
+                output_exit, status, VMBIN_INTERPRETER_DIAG_HANDLER_FAILED,
+                instruction->source_logical_program_counter);
+        }
         return status;
     }
     if (output_exit->kind != BINRWIR_EXECUTION_EXIT_NONE) {

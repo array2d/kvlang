@@ -76,7 +76,26 @@ typedef enum runtimec_container_diagnostic {
      * 看到裸 `OUT_OF_MEMORY` 才去查分配器。正解是流式写或让存储层分配，
      * 属下一批。
      */
-    RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER = 0x4301
+    RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER = 0x4301,
+    /* 声明 langtype 解析不出元素宽（形状非法或基种类不认识）。 */
+    RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE = 0x4302,
+    /* 下标越界或为负（判据是长度，与元素类型无关）。 */
+    RUNTIMEC_CONTAINER_DIAG_INDEX_OUT_OF_RANGE = 0x4303,
+    /*
+     * 待写入的值字节宽与元素宽不符。
+     *
+     * 与 `INDEX_OUT_OF_RANGE` **分开**：两者动作相同（都是拒绝这次写），但成因不同
+     * ——一个是位置不存在，一个是值的形状不对。共用一个码会让「看到 0x4303」
+     * 的人分不清该查下标还是查类型。
+     */
+    RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH = 0x4304,
+    /*
+     * `newreshape` 的新旧元素总数不守恒。
+     *
+     * `[4]int64 → [3,3]int64`：4 ≠ 9，body 长度装不下。与 `VALUE_WIDTH_MISMATCH`
+     * 分开——那个是「单个值的宽不对」，这个是「整体元素数变了」。
+     */
+    RUNTIMEC_CONTAINER_DIAG_RESHAPE_SIZE_MISMATCH = 0x4305
 } runtimec_container_diagnostic_t;
 
 /*

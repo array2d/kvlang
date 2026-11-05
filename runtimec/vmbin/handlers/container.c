@@ -39,7 +39,8 @@
 #include "contract/view.h"
 #include "kvspace/kvspace.h"
 #include "kvspace/xvalue_head.h"
-#include "vmbin/handlers/handler_target_key.h"
+#include "vmbin/frame_target_key.h"
+#include "vmbin/handlers/handler_call.h"
 #include "vmbin/value_access.h"
 
 /* 帧内槽 key 的上限：与 host 侧同量级，够放 `/vthread/<vid>/[d]/<符号名>`。 */
@@ -132,69 +133,6 @@ static runtimec_status_t container_fail_with_detail(
 }
 
 /*
- * 读主参数的数组视图：声明类型 + 值体地址 + 值体长度，一次定位。
- *
- * 值体长度来自 `locate`（它走合同的 `runtimec_value_body_length`），元素宽来自
- * 声明类型——两者相除就是元素个数。空值体（None）长度 0，元素数就是 0，
- * 不是坏地址：地址的有效性由 locate 成功证明。
- */
-static runtimec_status_t container_view(
-    const binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
-    vmbin_value_location_t *output_location, runtimec_container_langtype_t *output_type,
-    runtimec_error_t *error) {
-    runtimec_string_view_t langtype;
-    runtimec_status_t status;
-
-    status = vmbin_value_access_langtype(frame, argument, &langtype, error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return status;
-    }
-    status = runtimec_container_langtype_parse(langtype, output_type);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return status;
-    }
-    return vmbin_value_access_locate_body(frame, argument, output_location,
-                                          error);
-}
-
-/* 一个下标参数 → 非负扁平序号；越界与负值都由调用方按长度判。 */
-static runtimec_status_t container_index(
-    const binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
-    int64_t *output_index, runtimec_error_t *error) {
-    vmbin_value_location_t location;
-    uint64_t raw = 0U;
-    runtimec_status_t status = vmbin_value_access_locate_body(
-        frame, argument, &location, error);
-
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return status;
-    }
-    switch (location.size) {
-    case 1U:
-        *output_index = (int64_t)(int8_t)location.read_bytes[0];
-        return RUNTIMEC_STATUS_SUCCESS;
-    case 2U: {
-        int16_t value = 0;
-        memcpy(&value, location.read_bytes, sizeof(value));
-        *output_index = (int64_t)value;
-        return RUNTIMEC_STATUS_SUCCESS;
-    }
-    case 4U: {
-        int32_t value = 0;
-        memcpy(&value, location.read_bytes, sizeof(value));
-        *output_index = (int64_t)value;
-        return RUNTIMEC_STATUS_SUCCESS;
-    }
-    case 8U:
-        memcpy(&raw, location.read_bytes, sizeof(raw));
-        *output_index = (int64_t)raw;
-        return RUNTIMEC_STATUS_SUCCESS;
-    default:
-        return RUNTIMEC_STATUS_INVALID;
-    }
-}
-
-/*
  * 把声明 langtype 拷成 NUL 结尾的 C 串（`container_publish` 收的是 C 串）。
  * 放不下返回 NULL——调用方据此失败封闭，不截断：截断的 langtype 会造出一条
  * 类型错误的 wire，比失败难查得多。
@@ -209,180 +147,257 @@ static const char *container_langtype_text(runtimec_string_view_t langtype,
     return buffer;
 }
 
+
 /*
- * 造 wire 并整条写进写参的目标 key——五条创建型算子（`new` / `newslice` /
- * `fill` / `newreshape` / `newreinterpret`）的公共尾段。
+ * 五条创建型算子的公共尾段：它们只在「body 从哪来、head 的 langtype 是什么」上
+ * 不同，那部分各自算完再进来。
  *
- * 它们只在「body 从哪来、head 的 langtype 是什么」上不同，那部分各自算完再进来；
- * 组 wire 与写存储一件事，只写一遍。**分配归存储层**：`kvspaceSetValue` 收完整
- * wire，容量它说了算。本函数只用 `kvspaceXvalueHeadNewSlack` 临时产一条 wire，
- * 传完即还。
+ * **组 wire 与写存储只有一份实现**（`vmbin_handler_write_new_value`），本函数只是
+ * 把 langtype 文本换成视图再转调——避免 container 与 string 各留一份。
  */
 static runtimec_status_t container_publish(
     const binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction, const uint8_t *body,
-    size_t body_size, const char *langtype_text,
-    binrwir_execution_exit_t *output_exit) {
-    char key[CONTAINER_KEY_CAPACITY];
-    char message[256];
-    uint8_t *wire = NULL;
-    uint64_t wire_size = 0U;
-    const uint32_t counter = instruction->source_logical_program_counter;
-    runtimec_status_t status;
-
-    if (kvspaceXvalueHeadNewSlack(body, (uint64_t)body_size,
-                                  (uint64_t)body_size, langtype_text, &wire,
-                                  &wire_size) != 0 ||
-        wire == NULL || wire_size > UINT32_MAX) {
-        return container_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
-    }
-    status = runtimec_handler_target_key(frame, &instruction->write_arguments.data[0],
-                                  key, sizeof(key));
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        message[0] = '\0';
-        if (kvspaceSetValue(frame->kvspace_handle, key, wire,
-                            (uint32_t)wire_size, message, sizeof(message)) != 0) {
-            status = RUNTIMEC_STATUS_ERROR;
-        }
-    }
-    free(wire);
-    return status == RUNTIMEC_STATUS_SUCCESS
-               ? RUNTIMEC_STATUS_SUCCESS
-               : container_fail(output_exit, status, counter);
+    size_t body_size, binrwir_execution_exit_t *output_exit) {
+    return vmbin_handler_write_new_value(frame, instruction, body, body_size,
+                                         output_exit);
 }
 
 /*
- * `compactarray·new(els...) -> a`：把读参的 body 原样连续打包成一条新 XValue，
- * 整条写进目标 key——**写入即创建**，不依赖预先存在的槽。
+ * 打包：遍历全部读参，逐个核宽后拼进 body。返回拼好的字节数，失败返回 -1。
  *
- * head 的 langtype 取自**写槽的声明类型**（`[N]K`），不按元素类型重编码：
- * 读参 body 已经是按元素宽连续的字节，拼起来就是结果 body。元素宽与声明类型
- * 必须自洽（总字节数 = 元素数 × 宽），不一致就是编译期与执行期对不上，失败封闭。
- *
- * 分配交给存储层：`kvspaceSetValue` 收完整 wire，容量由它决定（扩容只有存储层
- * 能做）。本 handler 只用 `kvspaceXvalueHeadNewSlack` 组一条 wire，用完即还。
+ * **这一层就是「打包」的全部**——遍历、核宽、拼装是同一件事的三个步骤，不再往下拆。
+ * 核宽的理由写在 `container_new_build` 的注释里：body 布局由声明类型决定，任何与
+ * 声明不符的输入都不许拼进去。
  */
-static inline runtimec_status_t container_new(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    uint8_t body[CONTAINER_NEW_BODY_CAPACITY];
+static int64_t container_pack_elements(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, size_t element_size,
+    uint8_t *body, size_t capacity,
+    runtimec_container_diagnostic_t *output_detail) {
     size_t body_size = 0U;
-    char langtype_text[CONTAINER_KEY_CAPACITY];
-    runtimec_string_view_t declared;
     runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
 
+    *output_detail = RUNTIMEC_CONTAINER_DIAG_NONE;
     runtimec_error_reset(&error);
-    if (instruction->write_arguments.count != 1U) {
-        return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = vmbin_value_access_langtype(
-        frame, &instruction->write_arguments.data[0], &declared, &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS ||
-        declared.size + 1U > sizeof(langtype_text)) {
-        return container_fail(output_exit,
-                              status == RUNTIMEC_STATUS_SUCCESS
-                                  ? RUNTIMEC_STATUS_INVALID
-                                  : status,
-                              counter);
-    }
-    /* 各读参的 body 依次拼起来：不按元素类型分支，元素宽差异已体现在字节里。 */
     for (size_t ordinal = 0U; ordinal < instruction->read_arguments.count;
          ++ordinal) {
         vmbin_value_location_t element;
 
-        status = vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[ordinal], &element,
-            &error);
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            return container_fail(output_exit, status, counter);
+        if (vmbin_value_access_locate_body(
+                frame, &instruction->read_arguments.data[ordinal], &element,
+                &error) != RUNTIMEC_STATUS_SUCCESS) {
+            *output_detail = RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE;
+            return -1;
         }
-        if (body_size + element.size > sizeof(body)) {
-            /*
-             * 这是**定长缓冲**的限制（`CONTAINER_NEW_BODY_CAPACITY`），不是内存
-             * 不足。结构化退出没有文本通道，所以可读的说明在这里：
-             * 看到 `RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER` 就该去查缓冲上限，
-             * 而不是分配器。解法是流式写或让存储层分配，属下一批。
-             */
-            return container_fail_with_detail(
-                output_exit, RUNTIMEC_STATUS_OUT_OF_MEMORY, counter,
-                RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER);
+        if (element.size != element_size) {
+            *output_detail = RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH;
+            return -1;
+        }
+        if (body_size + element.size > capacity) {
+            *output_detail = RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER;
+            return -1;
         }
         memcpy(body + body_size, element.read_bytes, element.size);
         body_size += element.size;
     }
-    memcpy(langtype_text, declared.data, declared.size);
-    langtype_text[declared.size] = '\0';
-    return container_publish(frame, instruction, body, body_size, langtype_text,
-                             output_exit);
+    return (int64_t)body_size;
 }
 
 /*
- * `compactarray·newslice(a, lo, hi) -> b`：把 `a` 的 `[lo, hi)` 元素段造成新的
- * compact 值，写进目标 key。
+ * 从读参造一个新 compact 值并发布：解析声明类型、按元素宽打包、写目标 key。
  *
- * 边界按**元素个数**判（`body 长度 / 元素宽`），越界返回 INVALID——与 `at` 同一条
- * 判据，与类型无关。新值的 langtype 由写槽声明给出，不从源抄：源的 dims 是旧长度，
- * 抄过来就是错的。
+ * 一句话目的：**把「N 个读参」变成一个 compact 值**。内部的打包细节归
+ * `container_pack_elements`，写存储归 `vmbin_handler_write_new_value`——本函数
+ * 只负责「解析类型 + 把两件事接起来」。
+ *
+ * body 的字节布局完全由写参的声明类型决定：每个读参的宽必须等于声明宽，多了会
+ * 覆盖下一个元素，少了会留空洞，而 head 仍自称合法——「自洽但语义错误」。
  */
-static inline runtimec_status_t container_newslice(
+static void container_create_from_elements(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    runtimec_string_view_t result_langtype,
+    binrwir_execution_exit_t *output_exit) {
+    uint8_t body[CONTAINER_NEW_BODY_CAPACITY];
+    runtimec_container_langtype_t declared_type;
+    runtimec_container_diagnostic_t detail;
+    int64_t body_size;
+
+    if (runtimec_container_langtype_parse(result_langtype, &declared_type) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        declared_type.element_size == 0U) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    body_size = container_pack_elements(frame, instruction,
+                                        declared_type.element_size, body,
+                                        sizeof(body), &detail);
+    if (body_size < 0) {
+        vmbin_handler_fail(output_exit,
+                           detail == RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER
+                               ? RUNTIMEC_STATUS_OUT_OF_MEMORY
+                               : RUNTIMEC_STATUS_INVALID,
+                           detail, output_exit->logical_program_counter);
+        return;
+    }
+    (void)container_publish(frame, instruction, body, (size_t)body_size,
+                            output_exit);
+}
+
+/* 逻辑函数：一句话——从读参造一个新数组并发布。 */
+static inline void container_new_build(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    runtimec_string_view_t result_langtype,
+    binrwir_execution_exit_t *output_exit) {
+    container_create_from_elements(frame, instruction, result_langtype, output_exit);
+}
+
+VMBIN_HANDLER_CREATE_VARIADIC(container_new_handler, container_new_build)
+
+
+/*
+ * 切片边界：给定源 body 长度与元素宽，判 `[lo, hi)` 是否合法，合法则给出
+ * 起始字节偏移与字节长度。返回 -1 表示越界。
+ *
+ * 「判边界」是独立语义（将来 `scatterarray·slice` 要同一套判据），所以单列。
+ */
+static int64_t container_slice_bounds(size_t body_size, size_t element_size,
+                                      int64_t lo, int64_t hi,
+                                      size_t *output_byte_length) {
+    *output_byte_length = 0U;
+    if (element_size == 0U || lo < 0 || hi < lo ||
+        (uint64_t)hi > body_size / element_size) {
+        return -1;
+    }
+    *output_byte_length = (size_t)(hi - lo) * element_size;
+    return lo * (int64_t)element_size;
+}
+
+/*
+ * 按边界切一段并发布：取源 body 与元素宽、取两个边界、判越界、写目标 key。
+ *
+ * 一句话目的：**把源的一段元素变成一个新 compact 值**。边界判据在
+ * `container_slice_bounds` 里，本函数只负责取参数与接起来。
+ *
+ * 新值的 langtype 由**写槽声明**给出，不从源抄——源的 dims 是旧长度，抄过来就错。
+ */
+static void container_create_from_slice(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     vmbin_value_location_t source;
+    vmbin_value_location_t bounds[2];
     runtimec_container_langtype_t type;
-    runtimec_string_view_t declared;
-    int64_t bounds[2] = {0, 0};
+    runtimec_string_view_t source_langtype;
+    int64_t lo = 0;
+    int64_t hi = 0;
+    size_t byte_length = 0U;
+    int64_t offset;
     runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
 
     runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 3U ||
-        instruction->write_arguments.count != 1U) {
-        return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    if (vmbin_value_access_locate_body(
+            frame, &instruction->read_arguments.data[0], &source, &error) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        vmbin_value_access_langtype(
+            frame, &instruction->read_arguments.data[0], &source_langtype,
+            &error) != RUNTIMEC_STATUS_SUCCESS ||
+        runtimec_container_langtype_parse(source_langtype, &type) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        vmbin_value_access_locate_body(
+            frame, &instruction->read_arguments.data[1], &bounds[0], &error) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        vmbin_value_access_locate_body(
+            frame, &instruction->read_arguments.data[2], &bounds[1], &error) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        bounds[0].size != sizeof(lo) || bounds[1].size != sizeof(hi)) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                           output_exit->logical_program_counter);
+        return;
     }
-    status = container_view(frame, &instruction->read_arguments.data[0],
-                            &source, &type, &error);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        for (size_t ordinal = 0U; ordinal < 2U; ++ordinal) {
-            status = container_index(
-                frame, &instruction->read_arguments.data[ordinal + 1U],
-                &bounds[ordinal], &error);
-            if (status != RUNTIMEC_STATUS_SUCCESS) {
-                break;
-            }
-        }
+    memcpy(&lo, bounds[0].read_bytes, sizeof(lo));
+    memcpy(&hi, bounds[1].read_bytes, sizeof(hi));
+    offset = container_slice_bounds(source.size, type.element_size, lo, hi,
+                                    &byte_length);
+    if (offset < 0) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_INDEX_OUT_OF_RANGE,
+                           output_exit->logical_program_counter);
+        return;
     }
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = vmbin_value_access_langtype(
-            frame, &instruction->write_arguments.data[0], &declared, &error);
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return container_fail(output_exit, status, counter);
-    }
-    {
-        const int64_t element_count = (int64_t)(source.size / type.element_size);
-        char langtype_text[CONTAINER_KEY_CAPACITY];
-        const char *text;
+    (void)container_publish(frame, instruction, source.read_bytes + offset,
+                            byte_length, output_exit);
+}
 
-        if (bounds[0] < 0 || bounds[1] < bounds[0] ||
-            bounds[1] > element_count) {
-            return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-        }
-        text = container_langtype_text(declared, langtype_text,
-                                       sizeof(langtype_text));
-        if (text == NULL) {
-            return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-        }
-        return container_publish(
-            frame, instruction,
-            source.read_bytes + (size_t)bounds[0] * type.element_size,
-            (size_t)(bounds[1] - bounds[0]) * type.element_size, text,
-            output_exit);
+/* 逻辑函数：一句话——按边界切一段并发布。 */
+static inline void container_newslice_build(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    container_create_from_slice(frame, instruction, output_exit);
+}
+
+VMBIN_HANDLER_CREATE_TERNARY(container_newslice_handler, container_newslice_build)
+
+
+/*
+ * 一个形状段 `[d1,d2,…]` 的元素总数；形状非法返回 -1。
+ *
+ * 只解析**首个**方括号段：本批只支持一维定长（`[N]K`），多维留到单独立条时再扩。
+ * 不认识的写法一律返回 -1，不猜。
+ */
+static int64_t container_shape_numel(runtimec_string_view_t langtype) {
+    int64_t total = 1;
+    size_t offset = 1U;
+
+    if (langtype.size < 3U || langtype.data[0] != '[') {
+        return -1;
     }
+    while (offset < langtype.size && langtype.data[offset] != ']') {
+        int64_t value = 0;
+
+        if (langtype.data[offset] < '0' || langtype.data[offset] > '9') {
+            return -1;
+        }
+        while (offset < langtype.size && langtype.data[offset] >= '0' &&
+               langtype.data[offset] <= '9') {
+            value = value * 10 + (langtype.data[offset] - '0');
+            ++offset;
+        }
+        total *= value;
+        if (offset < langtype.size && langtype.data[offset] == ',') {
+            ++offset;
+        }
+    }
+    if (offset >= langtype.size || langtype.data[offset] != ']') {
+        return -1;
+    }
+    /* 形状段之后必须还有基种类，否则 `[N]` 后面没类型。 */
+    return offset + 1U < langtype.size ? total : -1;
+}
+
+/*
+ * 按 langtype 算「总字节数」：形状段乘积 × 元素宽。返回 -1 表示算不出。
+ *
+ * 与 `container_shape_numel` 的区别：那个只看形状段乘积（元素个数），这个乘上
+ * 元素宽给字节数——reshape 的守恒判据要的是字节数对得上。
+ */
+static int64_t container_langtype_total_bytes(runtimec_string_view_t langtype) {
+    runtimec_container_langtype_t type;
+    const int64_t element_count = container_shape_numel(langtype);
+
+    if (element_count < 0 ||
+        runtimec_container_langtype_parse(langtype, &type) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        type.element_size == 0U) {
+        return -1;
+    }
+    return element_count * (int64_t)type.element_size;
 }
 
 /*
@@ -447,124 +462,163 @@ static runtimec_status_t container_replace_langtype(
     if (text == NULL) {
         return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
     }
-    return container_publish(frame, instruction, source.read_bytes, source.size,
-                             text, output_exit);
-}
+    /*
+     * 守恒判据（只对 `newreshape`；`newreinterpret` 本来就允许变总元素数）：
+     * **两边的总字节数都必须等于 body 长度**。
+     *
+     * 只核「新类型对得上」会漏两种：
+     *   - `[4]int64 → [3,3]int64`：9 × 8 = 72 装不进 32 字节的 body；
+     *   - 源本身畸形（声明 `[4]int64` 应 32 字节、body 实际 36）：新类型 `[9]int32`
+     *     恰好也是 36 字节，于是 reshape 把一条畸形值**洗白**成合法值。
+     *
+     * reshape 是「同一块字节换一种切法」，**两边都得对得上这块字节**；只对一边
+     * 就等于接受畸形输入。源侧的声明同样从参数类型表取，不是从 body 反推。
+     */
+    if (langtype_from_value == 0) {
+        runtimec_string_view_t source_langtype;
+        int64_t new_bytes;
+        int64_t old_bytes;
 
-/*
- * 一个形状段 `[d1,d2,…]` 的元素总数；形状非法返回 -1。
- *
- * 只解析**首个**方括号段：本批只支持一维定长（`[N]K`），多维留到单独立条时再扩。
- * 不认识的写法一律返回 -1，不猜。
- */
-static int64_t container_shape_numel(runtimec_string_view_t langtype) {
-    int64_t total = 1;
-    size_t offset = 1U;
-
-    if (langtype.size < 3U || langtype.data[0] != '[') {
-        return -1;
-    }
-    while (offset < langtype.size && langtype.data[offset] != ']') {
-        int64_t value = 0;
-
-        if (langtype.data[offset] < '0' || langtype.data[offset] > '9') {
-            return -1;
-        }
-        while (offset < langtype.size && langtype.data[offset] >= '0' &&
-               langtype.data[offset] <= '9') {
-            value = value * 10 + (langtype.data[offset] - '0');
-            ++offset;
-        }
-        total *= value;
-        if (offset < langtype.size && langtype.data[offset] == ',') {
-            ++offset;
-        }
-    }
-    if (offset >= langtype.size || langtype.data[offset] != ']') {
-        return -1;
-    }
-    /* 形状段之后必须还有基种类，否则 `[N]` 后面没类型。 */
-    return offset + 1U < langtype.size ? total : -1;
-}
-
-/*
- * `compactarray·fill(langtype[, v]) -> a`：按**声明类型**一次成型，每元素填 `v`
- * （省略即全零）。
- *
- * 唯一的初始化模式（spec：核心 runtime 只认 `T·new` + `T·fill`）。`langtype` 这个
- * 读参的值是类型文本，形状段给出元素个数；填充值逐个拷贝到每个元素位置——
- * **只拷 `element_size` 字节，不看是什么 kind**，所以没有按类型分叉。
- */
-static runtimec_status_t container_fill(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t langtype_value;
-    vmbin_value_location_t filler;
-    runtimec_container_langtype_t type;
-    int64_t element_count;
-    runtimec_string_view_t declared;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    uint8_t body[CONTAINER_NEW_BODY_CAPACITY];
-    uint8_t element[CONTAINER_SCALAR_CAPACITY];
-    const uint32_t counter = instruction->source_logical_program_counter;
-
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count < 1U ||
-        instruction->read_arguments.count > 2U ||
-        instruction->write_arguments.count != 1U) {
-        return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = vmbin_value_access_locate_body(
-        frame, &instruction->read_arguments.data[0], &langtype_value, &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return container_fail(output_exit, status, counter);
-    }
-    declared = runtimec_string_view_make(
-        (const char *)langtype_value.read_bytes, langtype_value.size);
-    status = runtimec_container_langtype_parse(declared, &type);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    element_count = container_shape_numel(declared);
-    if (element_count < 0 ||
-        (uint64_t)element_count * type.element_size > sizeof(body)) {
-        return container_fail_with_detail(
-            output_exit, RUNTIMEC_STATUS_OUT_OF_MEMORY, counter,
-            RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER);
-    }
-    /* 填充值：省略即全零；给了就必须正好一个元素的宽。 */
-    memset(element, 0, sizeof(element));
-    if (instruction->read_arguments.count == 2U) {
-        status = vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[1], &filler, &error);
+        status = vmbin_value_access_langtype(
+            frame, &instruction->read_arguments.data[0], &source_langtype, &error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return container_fail(output_exit, status, counter);
         }
-        if (filler.size != type.element_size) {
-            return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+        new_bytes = container_langtype_total_bytes(replacement);
+        old_bytes = container_langtype_total_bytes(source_langtype);
+        if (new_bytes < 0 || old_bytes < 0 ||
+            (size_t)new_bytes != source.size || (size_t)old_bytes != source.size) {
+            return container_fail_with_detail(
+                output_exit, RUNTIMEC_STATUS_INVALID, counter,
+                RUNTIMEC_CONTAINER_DIAG_RESHAPE_SIZE_MISMATCH);
         }
-        memcpy(element, filler.read_bytes, type.element_size);
+    } else {
+        /* `newreinterpret`：换解释允许变总元素数，只要求元素宽整除 body。 */
+        runtimec_container_langtype_t new_type;
+
+        if (runtimec_container_langtype_parse(replacement, &new_type) !=
+                RUNTIMEC_STATUS_SUCCESS ||
+            new_type.element_size == 0U ||
+            source.size % new_type.element_size != 0U) {
+            return container_fail_with_detail(
+                output_exit, RUNTIMEC_STATUS_INVALID, counter,
+                RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH);
+        }
+    }
+    return container_publish(frame, instruction, source.read_bytes, source.size,
+                             output_exit);
+}
+
+/*
+ * 填充体：按声明类型一次成型，每元素填同一个值。
+ *
+ * 三件事合成一层（它们就是「按类型造一个填满的 body」这一个语义）：
+ * 解析形状段得到元素个数、核填充值宽度、按元素宽重复填充。
+ */
+static int64_t container_fill_body(runtimec_string_view_t langtype,
+                                   const uint8_t *filler, size_t filler_size,
+                                   int has_filler, uint8_t *body,
+                                   size_t capacity,
+                                   runtimec_container_diagnostic_t *output_detail) {
+    runtimec_container_langtype_t type;
+    const int64_t element_count = container_shape_numel(langtype);
+    uint8_t element[CONTAINER_SCALAR_CAPACITY];
+
+    *output_detail = RUNTIMEC_CONTAINER_DIAG_NONE;
+    if (element_count < 0 ||
+        runtimec_container_langtype_parse(langtype, &type) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        type.element_size == 0U) {
+        *output_detail = RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE;
+        return -1;
+    }
+    if (has_filler != 0 && filler_size != type.element_size) {
+        *output_detail = RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH;
+        return -1;
+    }
+    if ((uint64_t)element_count * type.element_size > capacity) {
+        *output_detail = RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER;
+        return -1;
+    }
+    memset(element, 0, sizeof(element));
+    if (has_filler != 0) {
+        memcpy(element, filler, type.element_size);
     }
     for (int64_t ordinal = 0; ordinal < element_count; ++ordinal) {
         memcpy(body + (size_t)ordinal * type.element_size, element,
                type.element_size);
     }
-    {
-        char langtype_text[CONTAINER_KEY_CAPACITY];
-        const char *text =
-            container_langtype_text(declared, langtype_text,
-                                    sizeof(langtype_text));
-
-        if (text == NULL) {
-            return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-        }
-        return container_publish(frame, instruction, body,
-                                 (size_t)element_count * type.element_size, text,
-                                 output_exit);
-    }
+    return element_count * (int64_t)type.element_size;
 }
+
+/*
+ * 按声明类型造一个填满的 compact 值并发布：取类型文本读参、取可选填充值、
+ * 成型、写目标 key。
+ *
+ * 一句话目的：**造一个「N 个相同值」的 compact 值**。成型细节在
+ * `container_fill_body` 里，本函数只负责取参数与接起来。
+ *
+ * 这是核心 runtime 唯一的初始化模式（spec：只认 `T·new` + `T·fill`）。
+ */
+static void container_create_from_fill(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    vmbin_value_location_t langtype_value;
+    vmbin_value_location_t filler;
+    runtimec_container_diagnostic_t detail;
+    uint8_t body[CONTAINER_NEW_BODY_CAPACITY];
+    int64_t body_size;
+    runtimec_error_t error;
+
+    runtimec_error_reset(&error);
+    if (vmbin_value_access_locate_body(
+            frame, &instruction->read_arguments.data[0], &langtype_value,
+            &error) != RUNTIMEC_STATUS_SUCCESS) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    memset(&filler, 0, sizeof(filler));
+    if (instruction->read_arguments.count == 2U &&
+        vmbin_value_access_locate_body(
+            frame, &instruction->read_arguments.data[1], &filler,
+            &error) != RUNTIMEC_STATUS_SUCCESS) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    body_size = container_fill_body(
+        runtimec_string_view_make((const char *)langtype_value.read_bytes,
+                                  langtype_value.size),
+        filler.read_bytes, filler.size,
+        instruction->read_arguments.count == 2U ? 1 : 0, body, sizeof(body),
+        &detail);
+    if (body_size < 0) {
+        vmbin_handler_fail(output_exit,
+                           detail == RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER
+                               ? RUNTIMEC_STATUS_OUT_OF_MEMORY
+                               : RUNTIMEC_STATUS_INVALID,
+                           detail, output_exit->logical_program_counter);
+        return;
+    }
+    (void)container_publish(frame, instruction, body, (size_t)body_size,
+                            output_exit);
+}
+
+/* 逻辑函数：一句话——造一个「N 个相同值」的数组并发布。 */
+static inline void container_fill_build(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    runtimec_string_view_t result_langtype,
+    binrwir_execution_exit_t *output_exit) {
+    (void)result_langtype; /* fill 的类型来自读参文本，不是写槽声明。 */
+    container_create_from_fill(frame, instruction, output_exit);
+}
+
+VMBIN_HANDLER_CREATE_VARIADIC(container_fill_handler, container_fill_build)
 
 /*
  * `compactarray·numel(a) -> n`：元素总数 = 值体长度 / 元素宽。
@@ -575,222 +629,204 @@ static runtimec_status_t container_fill(
  * 两者在合法值上恒等（body 是元素连续打包的）；将来 head 加了 array_len，就应
  * 改读它，而不是继续在这里除。
  */
-static inline runtimec_status_t container_numel(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t location;
-    runtimec_container_langtype_t type;
-    int64_t element_count;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
-
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 1U ||
-        instruction->write_arguments.count != 1U) {
-        return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = container_view(frame, &instruction->read_arguments.data[0],
-                            &location, &type, &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return container_fail(output_exit, status, counter);
-    }
-    element_count = (int64_t)(location.size / type.element_size);
-    /* 结果槽是调用方声明的具体类型，宽度由它自己决定；本 handler 只保证数是这个。 */
-    {
-        vmbin_value_location_t destination;
-        uint8_t payload[CONTAINER_SCALAR_CAPACITY];
-
-        status = vmbin_value_access_locate_body(
-            frame, &instruction->write_arguments.data[0], &destination, &error);
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            return container_fail(output_exit, status, counter);
-        }
-        if (destination.write_bytes == NULL ||
-            destination.size > sizeof(payload)) {
-            return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-        }
-        memset(payload, 0, sizeof(payload));
-        memcpy(payload, &element_count,
-               destination.size < sizeof(element_count) ? destination.size
-                                                        : sizeof(element_count));
-        status = vmbin_value_access_write_body(
-            frame, &instruction->write_arguments.data[0],
-            runtimec_bytes_view_make(payload, destination.size), &error);
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            return container_fail(output_exit, status, counter);
-        }
-        return RUNTIMEC_STATUS_SUCCESS;
-    }
-}
-
 /*
- * `compactarray·at(a, i) -> e`：元素读。本体是一句 `基址 + i × 宽`。
+ * `compactarray·numel(a) -> n`：元素总数 = 值体长度 / 元素宽。
  *
- * 越界与负下标都返回 INVALID（行为矩阵的负向判据），判据是**长度**，与类型无关。
+ * spec（03-类型系统/13-ndarray元数据算子.kv）说 numel 读 head 的 array_len；
+ * 本运行时的 head 只有 bodylen 与 langtype（dims 在 langtype 里），**没有独立的
+ * array_len 字段**，所以这个数由除法得出——**这是当前唯一可得的数，不是定义**。
+ * 两者在合法值上恒等（body 是元素连续打包的）；将来 head 加了 array_len，就应
+ * 改读它，而不是继续在这里除。
  */
-static inline runtimec_status_t container_at(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t location;
-    runtimec_container_langtype_t type;
-    int64_t index = 0;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
-
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 2U ||
-        instruction->write_arguments.count != 1U) {
-        return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = container_view(frame, &instruction->read_arguments.data[0],
-                            &location, &type, &error);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = container_index(frame, &instruction->read_arguments.data[1],
-                                 &index, &error);
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return container_fail(output_exit, status, counter);
-    }
-    if (index < 0 || (uint64_t)index >= location.size / type.element_size) {
-        return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    return vmbin_value_access_write_body(
-               frame, &instruction->write_arguments.data[0],
-               runtimec_bytes_view_make(
-                   location.read_bytes + (size_t)index * type.element_size,
-                   type.element_size),
-               &error) == RUNTIMEC_STATUS_SUCCESS
-               ? RUNTIMEC_STATUS_SUCCESS
-               : container_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
-}
-
 /*
- * `compactarray·set(a, i, v) -> a`：元素写，**仅同槽 patch**——目标就是读参那个
- * 槽本身，改的是它的 body 里的一段字节，head 与 attr 一个字节都不动。
+ * 元素总数：值体长度 / 元素宽。**成功才写 `*out`，失败只写 `exit`**——哨兵不出
+ * 这个函数，调用方因此不需要「把 -1 翻成失败」那一步（那一步曾让 numel 把 -1
+ * 当结果写进输出槽）。
  *
- * 值参的字节宽必须等于元素宽：改元素宽就是换 langtype，那是另一种算子的事。
+ * spec（03-类型系统/13-ndarray元数据算子.kv）说 numel 读 head 的 array_len；
+ * 本运行时的 head 只有 bodylen 与 langtype（dims 在 langtype 里），**没有独立的
+ * array_len 字段**，所以这个数由除法得出——**这是当前唯一可得的数，不是定义**。
+ * 将来 head 加了 array_len，就应改读它。
  */
-static inline runtimec_status_t container_set(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t location;
-    vmbin_value_location_t value;
+static void container_element_count(size_t body_size,
+                                    runtimec_string_view_t langtype,
+                                    int64_t *out,
+                                    binrwir_execution_exit_t *output_exit) {
     runtimec_container_langtype_t type;
-    int64_t index = 0;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
 
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 3U ||
-        instruction->write_arguments.count != 1U) {
-        return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    if (runtimec_container_langtype_parse(langtype, &type) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        type.element_size == 0U) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                           output_exit->logical_program_counter);
+        return;
     }
-    status = container_view(frame, &instruction->read_arguments.data[0],
-                            &location, &type, &error);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = container_index(frame, &instruction->read_arguments.data[1],
-                                 &index, &error);
-    }
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[2], &value, &error);
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return container_fail(output_exit, status, counter);
-    }
-    if (index < 0 || (uint64_t)index >= location.size / type.element_size ||
-        value.size != type.element_size || location.write_bytes == NULL) {
-        return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    memcpy(location.write_bytes + (size_t)index * type.element_size,
-           value.read_bytes, type.element_size);
-    return RUNTIMEC_STATUS_SUCCESS;
+    *out = (int64_t)(body_size / type.element_size);
 }
+
+/* 逻辑函数：一行。 */
+static inline void container_numel_compute(const uint8_t *body, size_t size,
+                                           runtimec_string_view_t langtype,
+                                           int64_t *out,
+                                           binrwir_execution_exit_t *output_exit) {
+    (void)body;
+    container_element_count(size, langtype, out, output_exit);
+}
+
+VMBIN_HANDLER_UNARY_ARRAY(container_numel_handler, container_numel_compute,
+                           int64_t)
 
 /*
- * 注册用的薄封装：`binrwir_registry_entry_t` 要的是函数地址，而主体是
- * `static inline`（头文件内联点与注册地址各自独立）。薄封装只在**本文件**
- * 定义一次，注册表里因此只有一份地址。
+ * 元素读：`基址 + i × 宽`。**成功才写 `*element` 与 `*output_element_size`，
+ * 失败只写 `exit`**——哨兵不出这个函数，调用方不需要翻译。
+ *
+ * 越界与负下标都失败（行为矩阵的负向判据）——判据是**长度**，与类型无关。
  */
-static runtimec_status_t container_numel_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return container_numel(frame, instruction, output_exit);
+static void container_read_element(const uint8_t *body, size_t body_size,
+                                   runtimec_string_view_t langtype, int64_t index,
+                                   uint8_t *element, size_t element_capacity,
+                                   size_t *output_element_size,
+                                   binrwir_execution_exit_t *output_exit) {
+    runtimec_container_langtype_t type;
+
+    if (runtimec_container_langtype_parse(langtype, &type) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        type.element_size == 0U || index < 0 ||
+        (uint64_t)index >= body_size / type.element_size) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_INDEX_OUT_OF_RANGE,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    if (type.element_size > element_capacity) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    *output_element_size = type.element_size;
+    memcpy(element, body + (size_t)index * type.element_size, type.element_size);
 }
 
-static runtimec_status_t container_at_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return container_at(frame, instruction, output_exit);
+/* 逻辑函数：一行。 */
+static inline void container_at_compute(const uint8_t *body, size_t body_size,
+                                        runtimec_string_view_t langtype,
+                                        int64_t index, uint8_t *element,
+                                        size_t element_capacity,
+                                        binrwir_execution_exit_t *output_exit) {
+    size_t element_size = 0U;
+    container_read_element(body, body_size, langtype, index, element, element_capacity, &element_size, output_exit);
 }
 
-static runtimec_status_t container_set_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return container_set(frame, instruction, output_exit);
+VMBIN_HANDLER_ARRAY_INDEX(container_at_handler, container_at_compute,
+                             int64_t)
+
+/*
+ * 元素写：**仅同槽 patch**——改的是 body 里的一段字节，head 与 attr 一个字节不动。
+ * **成功不写哨兵，失败只写 `exit`**。
+ *
+ * 判序有讲究：**先判值宽（形状问题，与下标无关），再判下标**。两者都失败时报宽度
+ * ——形状不对时「下标是否越界」没有意义，报它会把读者引向错误的第二因。
+ */
+static void container_write_element(const uint8_t *body, size_t body_size,
+                                    runtimec_string_view_t langtype,
+                                    int64_t index, const uint8_t *value,
+                                    size_t value_size, uint8_t *target,
+                                    binrwir_execution_exit_t *output_exit) {
+    runtimec_container_langtype_t type;
+
+    (void)body; /* 同槽 patch 只写不读。 */
+    if (runtimec_container_langtype_parse(langtype, &type) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        type.element_size == 0U) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    if (value_size != type.element_size) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    if (index < 0 || (uint64_t)index >= body_size / type.element_size) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_INDEX_OUT_OF_RANGE,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    memcpy(target + (size_t)index * type.element_size, value, value_size);
 }
 
-static runtimec_status_t container_new_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return container_new(frame, instruction, output_exit);
+/* 逻辑函数：一行。 */
+static inline void container_set_compute(const uint8_t *body, size_t body_size,
+                                         runtimec_string_view_t langtype,
+                                         int64_t index, const uint8_t *value,
+                                         size_t value_size, uint8_t *target,
+                                         binrwir_execution_exit_t *output_exit) {
+    container_write_element(body, body_size, langtype, index, value, value_size, target, output_exit);
 }
 
-static runtimec_status_t container_fill_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return container_fill(frame, instruction, output_exit);
-}
+VMBIN_HANDLER_ARRAY_INDEX_WRITE(container_set_handler, container_set_compute,
+                                  int64_t)
 
-static runtimec_status_t container_newslice_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return container_newslice(frame, instruction, output_exit);
-}
 
-static runtimec_status_t container_newreshape_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return container_replace_langtype(frame, instruction, 0, output_exit);
-}
 
-static runtimec_status_t container_newreinterpret_handler(
+
+static void container_newreshape_build(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
+    const vmbin_value_location_t *source,
+    const runtimec_string_view_t *source_langtype,
     binrwir_execution_exit_t *output_exit) {
-    return container_replace_langtype(frame, instruction, 1, output_exit);
+    (void)source;
+    (void)source_langtype;
+    (void)container_replace_langtype(frame, instruction, 0, output_exit);
 }
+VMBIN_HANDLER_CREATE_ONE(container_newreshape_handler, container_newreshape_build)
+
+static void container_newreinterpret_build(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    const vmbin_value_location_t *source,
+    const runtimec_string_view_t *source_langtype,
+    const vmbin_value_location_t *langtype_value,
+    binrwir_execution_exit_t *output_exit) {
+    (void)source;
+    (void)source_langtype;
+    (void)langtype_value;
+    (void)container_replace_langtype(frame, instruction, 1, output_exit);
+}
+VMBIN_HANDLER_CREATE_TWO(container_newreinterpret_handler,
+                         container_newreinterpret_build)
 
 static const binrwir_registry_entry_t runtimec_container_entry_table[] = {
-    {BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_NEW, BINRWIR_REGISTRY_FLAG_NONE,
-     container_new_handler},
-    {BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_NUMEL, BINRWIR_REGISTRY_FLAG_NONE,
-     container_numel_handler},
-    {BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_AT, BINRWIR_REGISTRY_FLAG_NONE,
-     container_at_handler},
-    {BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_SET, BINRWIR_REGISTRY_FLAG_NONE,
-     container_set_handler},
-    {BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_FILL, BINRWIR_REGISTRY_FLAG_NONE,
-     container_fill_handler},
-    {BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_NEW_SLICE,
-     BINRWIR_REGISTRY_FLAG_NONE, container_newslice_handler},
-    {BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_NEW_RESHAPE,
-     BINRWIR_REGISTRY_FLAG_NONE, container_newreshape_handler},
-    {BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_NEW_REINTERPRET,
-     BINRWIR_REGISTRY_FLAG_NONE, container_newreinterpret_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_NEW,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_new_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_NUMEL,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_numel_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_AT,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_at_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_SET,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_set_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_FILL,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_fill_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_NEW_SLICE,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_newslice_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_NEW_RESHAPE,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_newreshape_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_NEW_REINTERPRET,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_newreinterpret_handler},
 };
 
 const binrwir_registry_entry_t *runtimec_container_handler_entries(

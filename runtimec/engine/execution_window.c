@@ -19,6 +19,7 @@
 #include "binrwir/execution_frame.h"
 #include "binrwir/frame_bindings.h"
 #include "binrwir/program.h"
+#include "binrwir/specialize.h"
 #include "binrwir_compiler/compiler.h"
 #include "binrwir_compiler/jit/executor.h"
 #include "contract/checkpoint.h"
@@ -550,6 +551,35 @@ static runtimec_status_t runtimec_execution_window_compile_and_insert(
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_ENCODE_FAILED;
         return status;
+    }
+    /*
+     * 特化：把通用算子按操作数的静态类型组合改写成特化 opid。
+     *
+     * **位置**：编码产出 Program 之后、编译之前——编译器要看到最终的 opid，
+     * 特化放在编译之后就晚了。
+     *
+     * **per Program 一次**：这条路径只在 `compilation_repository` 未命中时走到
+     * （见调用方），命中时直接用缓存的那份 compilation。所以特化天然是
+     * 「每份 Program 一次」，绝不放进 `vmbin_execute`——那里每条指令执行前都会
+     * 走到，复制一份 Program 的代价与其大小成正比。
+     *
+     * **失败不回退**：特化失败就当编码失败处理。半特化的 Program 比不特化更糟——
+     * 一部分 opid 改了、一部分没改，而注册表只认其中一套。
+     */
+    {
+        binrwir_program_t *specialized = NULL;
+
+        status = binrwir_program_specialize(program, &host->allocator,
+                                            &specialized, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            (void)binrwir_program_destroy(program);
+            *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_ENCODE_FAILED;
+            return status;
+        }
+        /* 特化产新 Program，旧的那份由本层销毁——它是 `vmkv_encode` 给的，
+         * 还没交给编译器，所有权仍在这里。 */
+        (void)binrwir_program_destroy(program);
+        program = specialized;
     }
     /* 编译器接管 program：成败都由它处置，route 不再销毁。 */
     status = binrwir_compiler_compile(components->binrwir_compiler, program,

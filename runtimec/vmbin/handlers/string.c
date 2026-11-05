@@ -33,7 +33,9 @@
 #include "kvspace/kvspace.h"
 #include "kvspace/xvalue_head.h"
 #include "vmbin/handlers/container.h"
-#include "vmbin/handlers/handler_target_key.h"
+#include "vmbin/frame_target_key.h"
+#include "vmbin/handlers/handler_call.h"
+#include "vmbin/handlers/handler_call_text.h"
 #include "vmbin/value_access.h"
 
 /* 一个字符串算子最多处理这么多个码点；超限失败封闭，不静默截断。 */
@@ -41,130 +43,6 @@
 #define STRING_BYTES_CAPACITY \
     (STRING_CODEPOINT_CAPACITY * RUNTIMEC_CHAR_CODEC_UTF8_MAX_BYTES)
 #define STRING_KEY_CAPACITY 512U
-
-typedef struct string_text {
-    /* 码点序列。所有位置算术都在这个视图上做，与源编码无关。 */
-    uint32_t codepoints[STRING_CODEPOINT_CAPACITY];
-    size_t count;
-} string_text_t;
-
-static runtimec_status_t string_fail(binrwir_execution_exit_t *output_exit,
-                                     runtimec_status_t status,
-                                     uint32_t source_program_counter) {
-    *output_exit = (binrwir_execution_exit_t){0};
-    output_exit->kind = BINRWIR_EXECUTION_EXIT_ERROR;
-    output_exit->status = status;
-    output_exit->logical_program_counter = source_program_counter;
-    output_exit->resume_logical_program_counter = source_program_counter;
-    return status;
-}
-
-/*
- * 基种类 → 编码。三种编码是**参数类型的一部分**，不是内容分支：本函数只看
- * 声明 langtype 的基种类，返回一个枚举值，之后的分派是「三种编码各一条解码器」，
- * 不是「按内容猜」。
- */
-typedef enum string_encoding {
-    STRING_ENCODING_INVALID = 0,
-    STRING_ENCODING_UTF8 = 1,
-    STRING_ENCODING_UTF32 = 2,
-    STRING_ENCODING_ASCII = 3
-} string_encoding_t;
-
-static string_encoding_t string_encoding_of(runtimec_string_view_t langtype) {
-    static const struct {
-        const char *text;
-        string_encoding_t encoding;
-    } table[] = {
-        {"char/utf8", STRING_ENCODING_UTF8},
-        {"char/utf32", STRING_ENCODING_UTF32},
-        {"char/ascii", STRING_ENCODING_ASCII},
-    };
-    size_t offset = 0U;
-
-    /* 剥前导 `[dims]`：值的 langtype 带维度段，符号/签名里的是裸种类。 */
-    while (offset < langtype.size && langtype.data[offset] == '[') {
-        const char *closing =
-            memchr(langtype.data + offset, ']', langtype.size - offset);
-
-        if (closing == NULL) {
-            return STRING_ENCODING_INVALID;
-        }
-        offset = (size_t)(closing - langtype.data) + 1U;
-    }
-    for (size_t ordinal = 0U; ordinal < sizeof(table) / sizeof(table[0]);
-         ++ordinal) {
-        const size_t size = strlen(table[ordinal].text);
-
-        if (langtype.size - offset == size &&
-            memcmp(langtype.data + offset, table[ordinal].text, size) == 0) {
-            return table[ordinal].encoding;
-        }
-    }
-    return STRING_ENCODING_INVALID;
-}
-
-/*
- * 解码成码点序列。三种编码各一条解码器，**这是本模块唯一按编码分派的地方**；
- * 之后所有算子都在码点序列上工作。
- */
-static runtimec_status_t string_decode(runtimec_string_view_t langtype,
-                                       const uint8_t *bytes, size_t size,
-                                       string_text_t *output) {
-    const string_encoding_t encoding = string_encoding_of(langtype);
-    size_t written = 0U;
-
-    output->count = 0U;
-    switch (encoding) {
-    case STRING_ENCODING_UTF32:
-        /* 码点序列已经是目标形态：拷贝即得，无需转换。 */
-        if (size % 4U != 0U || size / 4U > STRING_CODEPOINT_CAPACITY) {
-            return RUNTIMEC_STATUS_INVALID;
-        }
-        for (size_t offset = 0U; offset < size; offset += 4U) {
-            uint32_t codepoint = (uint32_t)bytes[offset] |
-                                 ((uint32_t)bytes[offset + 1U] << 8U) |
-                                 ((uint32_t)bytes[offset + 2U] << 16U) |
-                                 ((uint32_t)bytes[offset + 3U] << 24U);
-
-            if (codepoint > 0x10FFFFU) {
-                return RUNTIMEC_STATUS_INVALID;
-            }
-            output->codepoints[output->count++] = codepoint;
-        }
-        return RUNTIMEC_STATUS_SUCCESS;
-    case STRING_ENCODING_UTF8: {
-        uint8_t converted[STRING_CODEPOINT_CAPACITY * 4U];
-
-        if (!runtimec_char_utf8_to_utf32(bytes, size, converted,
-                                         sizeof(converted), &written)) {
-            return RUNTIMEC_STATUS_INVALID;
-        }
-        for (size_t offset = 0U; offset < written; offset += 4U) {
-            output->codepoints[output->count++] =
-                (uint32_t)converted[offset] |
-                ((uint32_t)converted[offset + 1U] << 8U) |
-                ((uint32_t)converted[offset + 2U] << 16U) |
-                ((uint32_t)converted[offset + 3U] << 24U);
-        }
-        return RUNTIMEC_STATUS_SUCCESS;
-    }
-    case STRING_ENCODING_ASCII:
-        /* ASCII 一个字节一个码点；>= 0x80 不是合法 ASCII，失败封闭。 */
-        if (size > STRING_CODEPOINT_CAPACITY) {
-            return RUNTIMEC_STATUS_INVALID;
-        }
-        for (size_t offset = 0U; offset < size; ++offset) {
-            if (bytes[offset] >= 0x80U) {
-                return RUNTIMEC_STATUS_INVALID;
-            }
-            output->codepoints[output->count++] = bytes[offset];
-        }
-        return RUNTIMEC_STATUS_SUCCESS;
-    default:
-        return RUNTIMEC_STATUS_UNSUPPORTED;
-    }
-}
 
 /* 码点序列 → UTF-8 字节（拼接的结果恒为 char/utf8，见行为矩阵）。 */
 static runtimec_status_t string_encode_utf8(const string_text_t *text,
@@ -200,828 +78,556 @@ static runtimec_status_t string_encode_utf8(const string_text_t *text,
 }
 
 /*
- * 造一条 char/utf8 的 wire 并整条写进写参的目标 key——拼接、取字符两条
- * 创建型算子的公共尾段。**结果恒为 char/utf8**（行为矩阵
- * string-concat-result-kind）：不沿用操作数的编码，也不按操作数组合分叉。
+ * 按编码规定的**单位**数出长度。
+ *
+ * spec（`03-类型系统/23-langtype语义类型.kv:12`）：「UTF-8 的 len 为字节数，
+ * N 为码点数」。所以三种编码的单位不同：
+ *   char/utf8   字节数           （Go `len(s)` / Rust `s.len()` 阵营）
+ *   char/utf32  码点数 = 字节/4
+ *   char/ascii  字节数（= 码点数，ASCII 恒 1 字节/码点）
+ *
+ * **这是唯一结果依赖操作数编码的字符串算子**，所以它不解码——答案就在 body 长度里。
+ * 其余算子解码后统一处理，那些不受影响。
  */
-static runtimec_status_t string_publish_utf8(
-    const binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction, const uint8_t *bytes,
-    size_t size, binrwir_execution_exit_t *output_exit) {
-    char key[STRING_KEY_CAPACITY];
-    char message[256];
-    uint8_t *wire = NULL;
-    uint64_t wire_size = 0U;
-    char langtype_text[64];
-    const uint32_t counter = instruction->source_logical_program_counter;
-    runtimec_status_t status;
+static void string_length_of(runtimec_string_view_t langtype, size_t body_size,
+                             int64_t *out,
+                             binrwir_execution_exit_t *output_exit) {
+    static const struct {
+        const char *text;
+        int is_codepoint_count;
+    } table[] = {
+        {"char/utf8", 0}, {"char/ascii", 0}, {"char/utf32", 1},
+    };
+    size_t offset = 0U;
 
-    /* 形状段 = 码点数？不：这里的 langtype 用 `[字节数]char/utf8` 还是裸种类，
-     * 由存储形态决定——compact 字符序列的 langtype 带 `[N]`，N 是**码点数**。
-     * 本函数收到的是已编码字节，码点数不等于字节数，所以不能在这里推 N。
-     * 写法：从写槽声明取（调用方已经知道结果类型），本函数不猜。 */
-    {
-        runtimec_string_view_t declared;
+    while (offset < langtype.size && langtype.data[offset] == '[') {
+        const char *closing =
+            memchr(langtype.data + offset, ']', langtype.size - offset);
 
-        status = vmbin_value_access_langtype(
-            frame, &instruction->write_arguments.data[0], &declared, NULL);
-        if (status != RUNTIMEC_STATUS_SUCCESS ||
-            declared.size + 1U > sizeof(langtype_text)) {
-            return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+        if (closing == NULL) {
+            break;
         }
-        memcpy(langtype_text, declared.data, declared.size);
-        langtype_text[declared.size] = '\0';
+        offset = (size_t)(closing - langtype.data) + 1U;
     }
-    if (kvspaceXvalueHeadNewSlack(bytes, (uint64_t)size, (uint64_t)size,
-                                  langtype_text, &wire, &wire_size) != 0 ||
-        wire == NULL || wire_size > UINT32_MAX) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
-    }
-    status = runtimec_handler_target_key(frame, &instruction->write_arguments.data[0], key,
-                               sizeof(key));
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        message[0] = '\0';
-        if (kvspaceSetValue(frame->kvspace_handle, key, wire,
-                            (uint32_t)wire_size, message, sizeof(message)) != 0) {
-            status = RUNTIMEC_STATUS_ERROR;
+    for (size_t ordinal = 0U; ordinal < sizeof(table) / sizeof(table[0]);
+         ++ordinal) {
+        const size_t size = strlen(table[ordinal].text);
+
+        if (langtype.size - offset == size &&
+            memcmp(langtype.data + offset, table[ordinal].text, size) == 0) {
+            *out = table[ordinal].is_codepoint_count != 0
+                       ? (int64_t)(body_size / 4U)
+                       : (int64_t)body_size;
+            return;
         }
     }
-    free(wire);
-    return status == RUNTIMEC_STATUS_SUCCESS
-               ? RUNTIMEC_STATUS_SUCCESS
-               : string_fail(output_exit, status, counter);
+    vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_UNSUPPORTED,
+                       VMBIN_HANDLER_CALL_TEXT_DIAG_UNSUPPORTED_ENCODING,
+                       output_exit->logical_program_counter);
 }
 
-/* 一个参数项 → 解码后的码点序列。 */
-static runtimec_status_t string_argument(
-    const binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
-    string_text_t *output, runtimec_error_t *error) {
-    runtimec_string_view_t langtype;
-    vmbin_value_location_t location;
-    runtimec_status_t status =
-        vmbin_value_access_langtype(frame, argument, &langtype, error);
-
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return status;
-    }
-    status = vmbin_value_access_locate_body(frame, argument, &location, error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return status;
-    }
-    return string_decode(langtype, location.read_bytes, location.size, output);
+/* 逻辑函数：一句话——按编码规定的单位数出长度。 */
+static void string_length_build(const vmbin_value_location_t *text,
+                                runtimec_string_view_t langtype, int64_t *out,
+                                binrwir_execution_exit_t *output_exit) {
+    string_length_of(langtype, text->size, out, output_exit);
 }
 
-/* 写一个 int64 结果到写参（宽度由写参自己决定）。 */
-static runtimec_status_t string_write_int64(
-    binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
-    int64_t value, runtimec_error_t *error) {
-    vmbin_value_location_t destination;
-    uint8_t payload[8];
-    runtimec_status_t status =
-        vmbin_value_access_locate_body(frame, argument, &destination, error);
-
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return status;
-    }
-    if (destination.write_bytes == NULL || destination.size > sizeof(payload)) {
-        return RUNTIMEC_STATUS_INVALID;
-    }
-    memset(payload, 0, sizeof(payload));
-    memcpy(payload, &value, destination.size < sizeof(value) ? destination.size
-                                                             : sizeof(value));
-    return vmbin_value_access_write_body(
-        frame, argument, runtimec_bytes_view_make(payload, destination.size),
-        error);
-}
 
 /*
- * `string·len(s) -> n`：**码点数**，不是字节数（行为矩阵
- * string-codepoint-indexing 的判据：位置按码点算）。
+ * 第 i 个码点，结果是一个**单字符字符串**——不是整数（行为矩阵
+ * string-codepoint-indexing 的正向例子就是「返回首个码点作为一字符字符串」）。
+ *
+ * **成功才写缓冲与长度，失败只写 `exit`**。越界按码点数判，与编码无关。
  */
-static inline runtimec_status_t string_length(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    string_text_t text;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
-
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 1U ||
-        instruction->write_arguments.count != 1U) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = string_argument(frame, &instruction->read_arguments.data[0], &text,
-                             &error);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = string_write_int64(frame, &instruction->write_arguments.data[0],
-                                    (int64_t)text.count, &error);
-    }
-    return status == RUNTIMEC_STATUS_SUCCESS
-               ? RUNTIMEC_STATUS_SUCCESS
-               : string_fail(output_exit, status, counter);
-}
-
-/*
- * `string·char(s, i) -> c`：第 i 个码点，结果是一个**单字符字符串**（不是整数）——
- * 行为矩阵 string-codepoint-indexing 的正向例子就是「返回首个码点作为一字符字符串」。
- * 越界按码点数判，与编码无关。
- */
-static inline runtimec_status_t string_character(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    string_text_t text;
+static void string_character_of(const string_text_t *text, const int64_t *index,
+                                uint8_t *buffer, size_t capacity,
+                                size_t *output_length,
+                                binrwir_execution_exit_t *output_exit) {
     string_text_t single;
-    vmbin_value_location_t index;
-    uint8_t encoded[STRING_BYTES_CAPACITY];
-    size_t encoded_size = 0U;
-    int64_t position = 0;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
 
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 2U ||
-        instruction->write_arguments.count != 1U) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = string_argument(frame, &instruction->read_arguments.data[0], &text,
-                             &error);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[1], &index, &error);
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
-    }
-    if (index.size != sizeof(int64_t)) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    memcpy(&position, index.read_bytes, sizeof(position));
-    if (position < 0 || (uint64_t)position >= text.count) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    *output_length = 0U;
+    if (*index < 0 || (uint64_t)*index >= text->count) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
     }
     single.count = 1U;
-    single.codepoints[0] = text.codepoints[position];
-    status = string_encode_utf8(&single, encoded, sizeof(encoded),
-                                &encoded_size);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
+    single.codepoints[0] = text->codepoints[*index];
+    if (string_text_encode_utf8(&single, buffer, capacity, output_length) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        *output_length = 0U;
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
     }
-    return string_publish_utf8(frame, instruction, encoded, encoded_size,
-                               output_exit);
 }
 
-/*
- * `string·cmp(a, b) -> n`：按**码点**逐位比较，返回 -1 / 0 / 1
- * （行为矩阵 string-compare-ordering 是 consensus：五语言都按码点）。
- *
- * 先用公共前缀比，前缀相同则短的更小——这是各语言字典序的同一套规则。
- */
-static inline runtimec_status_t string_compare(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    string_text_t left;
-    string_text_t right;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
-
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 2U ||
-        instruction->write_arguments.count != 1U) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = string_argument(frame, &instruction->read_arguments.data[0], &left,
-                             &error);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = string_argument(frame, &instruction->read_arguments.data[1],
-                                 &right, &error);
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
-    }
-    {
-        const size_t shared = left.count < right.count ? left.count : right.count;
-        int64_t result = 0;
-        size_t ordinal = 0U;
-
-        for (; ordinal < shared; ++ordinal) {
-            if (left.codepoints[ordinal] != right.codepoints[ordinal]) {
-                result = left.codepoints[ordinal] < right.codepoints[ordinal]
-                             ? -1
-                             : 1;
-                break;
-            }
-        }
-        if (ordinal == shared && left.count != right.count) {
-            result = left.count < right.count ? -1 : 1;
-        }
-        status = string_write_int64(frame, &instruction->write_arguments.data[0],
-                                    result, &error);
-    }
-    return status == RUNTIMEC_STATUS_SUCCESS
-               ? RUNTIMEC_STATUS_SUCCESS
-               : string_fail(output_exit, status, counter);
+/* 逻辑函数：一句话——取出第 i 个码点作为单字符字符串。 */
+static inline void string_character_build(const string_text_t *text,
+                                          const int64_t *index,
+                                          uint8_t *buffer, size_t capacity,
+                                          size_t *output_length,
+                                          binrwir_execution_exit_t *output_exit) {
+    string_character_of(text, index, buffer, capacity, output_length, output_exit);
 }
 
+VMBIN_HANDLER_TEXT_INDEX_CREATE(string_character_handler, string_character_build,
+                                int64_t)
+
+
+/* 按码点逐位比较：公共前缀相同则短的更小——各语言字典序的同一套规则。 */
+static int64_t string_compare_codepoints(const string_text_t *left,
+                                         const string_text_t *right) {
+    const size_t shared = left->count < right->count ? left->count : right->count;
+    size_t ordinal = 0U;
+
+    for (; ordinal < shared; ++ordinal) {
+        if (left->codepoints[ordinal] != right->codepoints[ordinal]) {
+            return left->codepoints[ordinal] < right->codepoints[ordinal] ? -1 : 1;
+        }
+    }
+    if (left->count == right->count) {
+        return 0;
+    }
+    return left->count < right->count ? -1 : 1;
+}
+
+/* 逻辑函数：一句话——按码点比较两段文本。 */
+static inline void string_compare_build(const string_text_t *left,
+                                        const string_text_t *right,
+                                        int64_t *out) {
+    *out = string_compare_codepoints(left, right);
+}
+
+VMBIN_HANDLER_BINARY_TEXT_SCALAR(string_compare_handler, string_compare_build,
+                                 int64_t)
+
 /*
- * `string·concat(a, b) -> c`：结果恒为 **char/utf8**（行为矩阵
- * string-concat-result-kind 是 consensus：拼接产出新串，两个操作数不变）。
+ * 把两段文本接起来并编码成 UTF-8。**成功才写 `*output_length`，失败只写 `exit`**。
  *
- * 操作数可以任意编码：先各自解码成码点，拼起来再统一编码一次——这正是
- * 「按码点拼接、编码只做一次」的实现形态，不需要为编码组合写 N² 条路径。
+ * 操作数可以任意编码（解码器由宏按 opid 选好），但**结果恒为 char/utf8**
+ * （行为矩阵 string-concat-result-kind，五语言 consensus）——不按操作数种类推，
+ * 也不沿用操作数的编码。
  */
-static inline runtimec_status_t string_concat(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    string_text_t left;
-    string_text_t right;
+static void string_concat_encode(const string_text_t *left,
+                                 const string_text_t *right, uint8_t *buffer,
+                                 size_t capacity, size_t *output_length,
+                                 binrwir_execution_exit_t *output_exit) {
     string_text_t joined;
-    uint8_t encoded[STRING_BYTES_CAPACITY];
-    size_t encoded_size = 0U;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
 
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 2U ||
-        instruction->write_arguments.count != 1U) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    *output_length = 0U;
+    if (left->count + right->count > STRING_CODEPOINT_CAPACITY) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_OUT_OF_MEMORY,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
     }
-    status = string_argument(frame, &instruction->read_arguments.data[0], &left,
-                             &error);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = string_argument(frame, &instruction->read_arguments.data[1],
-                                 &right, &error);
+    joined.count = left->count + right->count;
+    memcpy(joined.codepoints, left->codepoints, left->count * sizeof(uint32_t));
+    memcpy(joined.codepoints + left->count, right->codepoints,
+           right->count * sizeof(uint32_t));
+    if (string_encode_utf8(&joined, buffer, capacity, output_length) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        *output_length = 0U;
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
     }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
-    }
-    if (left.count + right.count > STRING_CODEPOINT_CAPACITY) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_OUT_OF_MEMORY, counter);
-    }
-    joined.count = left.count + right.count;
-    memcpy(joined.codepoints, left.codepoints, left.count * sizeof(uint32_t));
-    memcpy(joined.codepoints + left.count, right.codepoints,
-           right.count * sizeof(uint32_t));
-    status = string_encode_utf8(&joined, encoded, sizeof(encoded),
-                                &encoded_size);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
-    }
-    return string_publish_utf8(frame, instruction, encoded, encoded_size,
-                               output_exit);
 }
 
 /*
  * 注册用的薄封装：主体是 `static inline`，注册表要的是函数地址，两件事各自
  * 独立；薄封装只在**本文件**定义一次，注册表里因此只有一份地址。
  */
-static runtimec_status_t string_length_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return string_length(frame, instruction, output_exit);
+VMBIN_HANDLER_UNARY_TEXT_SCALAR(string_length_handler, string_length_build,
+                                int64_t)
+
+
+/* 逻辑函数：一句话——把两段文本接起来。 */
+static inline void string_concat_build(const string_text_t *left,
+                                       const string_text_t *right,
+                                       uint8_t *buffer, size_t capacity,
+                                       size_t *output_length,
+                                       binrwir_execution_exit_t *output_exit) {
+    string_concat_encode(left, right, buffer, capacity, output_length, output_exit);
 }
 
-static runtimec_status_t string_character_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return string_character(frame, instruction, output_exit);
+VMBIN_HANDLER_BINARY_TEXT_CREATE(string_concat_handler, string_concat_build)
+
+
+/*
+ * 同槽 patch：`char/utf32` 上换一个码点**长度不变**（恒 4 字节），可以直接改那一段。
+ * **成功不写哨兵，失败只写 `exit`**。
+ */
+static void string_set_in_place(const string_text_t *text,
+                                const vmbin_value_location_t *write_location,
+                                const int64_t *position, const string_text_t *replacement,
+                                binrwir_execution_exit_t *output_exit) {
+    size_t byte_offset = 0U;
+
+    if (*position < 0 || (uint64_t)*position >= text->count ||
+        replacement->count != 1U) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    /* utf32：每码点 4 字节，偏移就是 position × 4。 */
+    byte_offset = (size_t)*position * 4U;
+    if (byte_offset + 4U > write_location->size) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    {
+        const uint32_t codepoint = replacement->codepoints[0];
+
+        write_location->write_bytes[byte_offset] = (uint8_t)(codepoint & 0xFFU);
+        write_location->write_bytes[byte_offset + 1U] =
+            (uint8_t)((codepoint >> 8U) & 0xFFU);
+        write_location->write_bytes[byte_offset + 2U] =
+            (uint8_t)((codepoint >> 16U) & 0xFFU);
+        write_location->write_bytes[byte_offset + 3U] =
+            (uint8_t)((codepoint >> 24U) & 0xFFU);
+    }
 }
 
-static runtimec_status_t string_compare_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return string_compare(frame, instruction, output_exit);
+/*
+ * 重建整串：`char/utf8` 与 `char/ascii` 上一个码点的字节数不固定，
+ * 换码点会**改变 body 长度**——那是存储层的事，必须造新 wire。
+ * **成功才写缓冲与长度，失败只写 `exit`**。
+ */
+static void string_set_rebuild(const string_text_t *text,
+                               const int64_t *position,
+                               const string_text_t *replacement,
+                               uint8_t *buffer, size_t capacity,
+                               size_t *output_length,
+                               binrwir_execution_exit_t *output_exit) {
+    string_text_t rebuilt;
+
+    *output_length = 0U;
+    if (*position < 0 || (uint64_t)*position >= text->count ||
+        replacement->count != 1U) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    rebuilt = *text;
+    rebuilt.codepoints[*position] = replacement->codepoints[0];
+    if (string_text_encode_utf8(&rebuilt, buffer, capacity, output_length) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        *output_length = 0U;
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+    }
 }
 
-static runtimec_status_t string_concat_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
+/* 逻辑函数（patch 路径）：一句话——就地把第 i 个码点换掉。 */
+static inline void string_set_patch_build(
+    const string_text_t *text, const vmbin_value_location_t *write_location,
+    const int64_t *position, const string_text_t *replacement,
     binrwir_execution_exit_t *output_exit) {
-    return string_concat(frame, instruction, output_exit);
+    string_set_in_place(text, write_location, position, replacement, output_exit);
+}
+
+/* 逻辑函数（重建路径）：一句话——重建整串并给出新字节。 */
+static inline void string_set_rebuild_build(
+    const string_text_t *text, const int64_t *position,
+    const string_text_t *replacement, uint8_t *buffer, size_t capacity,
+    size_t *output_length, binrwir_execution_exit_t *output_exit) {
+    string_set_rebuild(text, position, replacement, buffer, capacity,
+                       output_length, output_exit);
 }
 
 
 /*
- * `string·set(s, i, c) -> s`：把第 i 个码点换成 `c` 的首码点，**同槽 patch**——
- * 只改 body 里那一段，head 与 attr 一个字节不动。
+ * 第 i 个码点的**码点值**。**成功才写 `*out`，失败只写 `exit`**。
  *
- * `s` 必须先物化成可变长度的字符序列；换成不同字节宽的码点时 body 长度会变，
- * 那不是 patch 能做的事，此时失败封闭（改长度属于存储层）。
+ * 越界按**码点数**判——与 `char` 同一条判据，与编码无关。
  */
-static inline runtimec_status_t string_set(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    string_text_t text;
-    string_text_t replacement;
-    vmbin_value_location_t location;
-    vmbin_value_location_t position_value;
-    int64_t position = 0;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
-
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 3U ||
-        instruction->write_arguments.count != 1U) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+static void string_ordinal_of(const string_text_t *text, const int64_t *index,
+                              int64_t *out,
+                              binrwir_execution_exit_t *output_exit) {
+    if (*index < 0 || (uint64_t)*index >= text->count) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
     }
-    status = string_argument(frame, &instruction->read_arguments.data[0], &text,
-                             &error);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[1], &position_value, &error);
-    }
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = string_argument(frame, &instruction->read_arguments.data[2],
-                                 &replacement, &error);
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
-    }
-    if (position_value.size != sizeof(position) || replacement.count != 1U) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    memcpy(&position, position_value.read_bytes, sizeof(position));
-    if (position < 0 || (uint64_t)position >= text.count) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = vmbin_value_access_locate_body(
-        frame, &instruction->write_arguments.data[0], &location, &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
-    }
-    if (location.write_bytes == NULL) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    /*
-     * 只处理码点宽度不变的替换：新码点与旧码点的 UTF-8 字节宽相同时直接覆盖
-     * 那一段。宽度不同要改 body 长度——那是存储层的事，这里失败封闭。
-     */
-    {
-        string_text_t old_one;
-        uint8_t old_bytes[STRING_BYTES_CAPACITY];
-        uint8_t new_bytes[STRING_BYTES_CAPACITY];
-        size_t old_size = 0U;
-        size_t new_size = 0U;
-
-        old_one.count = 1U;
-        old_one.codepoints[0] = text.codepoints[position];
-        status = string_encode_utf8(&old_one, old_bytes, sizeof(old_bytes),
-                                    &old_size);
-        if (status == RUNTIMEC_STATUS_SUCCESS) {
-            status = string_encode_utf8(&replacement, new_bytes,
-                                        sizeof(new_bytes), &new_size);
-        }
-        if (status != RUNTIMEC_STATUS_SUCCESS || old_size != new_size) {
-            return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-        }
-        /* 源编码到 UTF-8 的字节偏移：前面每个码点各自编码后的长度之和。 */
-        {
-            size_t byte_offset = 0U;
-
-            for (int64_t ordinal = 0; ordinal < position; ++ordinal) {
-                string_text_t single;
-                uint8_t scratch[STRING_BYTES_CAPACITY];
-                size_t scratch_size = 0U;
-
-                single.count = 1U;
-                single.codepoints[0] = text.codepoints[ordinal];
-                if (string_encode_utf8(&single, scratch, sizeof(scratch),
-                                       &scratch_size) != RUNTIMEC_STATUS_SUCCESS) {
-                    return string_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                       counter);
-                }
-                byte_offset += scratch_size;
-            }
-            if (byte_offset + new_size > location.size) {
-                return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-            }
-            memcpy(location.write_bytes + byte_offset, new_bytes, new_size);
-        }
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
+    *out = (int64_t)text->codepoints[*index];
 }
 
-/*
- * `string·ord(s, i) -> n`：第 i 个码点的**码点值**（整数）。与 `char` 相对：
- * `char` 返回一字符字符串，`ord` 返回它的数值。越界按码点数判。
- */
-static inline runtimec_status_t string_ordinal(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    string_text_t text;
-    vmbin_value_location_t position_value;
-    int64_t position = 0;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
-
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 2U ||
-        instruction->write_arguments.count != 1U) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = string_argument(frame, &instruction->read_arguments.data[0], &text,
-                             &error);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[1], &position_value, &error);
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
-    }
-    if (position_value.size != sizeof(position)) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    memcpy(&position, position_value.read_bytes, sizeof(position));
-    if (position < 0 || (uint64_t)position >= text.count) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = string_write_int64(frame, &instruction->write_arguments.data[0],
-                                (int64_t)text.codepoints[position], &error);
-    return status == RUNTIMEC_STATUS_SUCCESS
-               ? RUNTIMEC_STATUS_SUCCESS
-               : string_fail(output_exit, status, counter);
+/* 逻辑函数：一句话——取第 i 个码点的数值。 */
+static inline void string_ordinal_build(const string_text_t *text,
+                                        const int64_t *index, int64_t *out,
+                                        binrwir_execution_exit_t *output_exit) {
+    string_ordinal_of(text, index, out, output_exit);
 }
 
-/*
- * `string·find(s, needle) -> n`：needle 首次出现的**码点下标**，找不到返回 -1。
- * 空 needle 返回 0（各语言的同一套约定）。
- */
-static inline runtimec_status_t string_find(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    string_text_t haystack;
-    string_text_t needle;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
+VMBIN_HANDLER_TEXT_INDEX_SCALAR(string_ordinal_handler, string_ordinal_build,
+                                int64_t, int64_t)
 
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 2U ||
-        instruction->write_arguments.count != 1U) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = string_argument(frame, &instruction->read_arguments.data[0],
-                             &haystack, &error);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = string_argument(frame, &instruction->read_arguments.data[1],
-                                 &needle, &error);
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
-    }
-    {
-        int64_t found = -1;
-        size_t start = 0U;
+/* 在 haystack 里找 needle 首次出现的**码点下标**；找不到 -1，空 needle 返回 0。 */
+static int64_t string_find_in(const string_text_t *haystack,
+                              const string_text_t *needle) {
+    size_t start = 0U;
 
-        if (needle.count == 0U) {
-            found = 0;
-        } else {
-            for (; start + needle.count <= haystack.count && found < 0; ++start) {
-                size_t matched = 0U;
+    if (needle->count == 0U) {
+        return 0;
+    }
+    for (; start + needle->count <= haystack->count; ++start) {
+        size_t matched = 0U;
 
-                while (matched < needle.count &&
-                       haystack.codepoints[start + matched] ==
-                           needle.codepoints[matched]) {
-                    ++matched;
-                }
-                if (matched == needle.count) {
-                    found = (int64_t)start;
-                }
-            }
+        while (matched < needle->count &&
+               haystack->codepoints[start + matched] ==
+                   needle->codepoints[matched]) {
+            ++matched;
         }
-        status = string_write_int64(frame, &instruction->write_arguments.data[0],
-                                    found, &error);
+        if (matched == needle->count) {
+            return (int64_t)start;
+        }
     }
-    return status == RUNTIMEC_STATUS_SUCCESS
-               ? RUNTIMEC_STATUS_SUCCESS
-               : string_fail(output_exit, status, counter);
+    return -1;
 }
 
+/* 逻辑函数：一句话——找 needle 在 haystack 里首次出现的位置。 */
+static inline void string_find_build(const string_text_t *haystack,
+                                     const string_text_t *needle,
+                                     int64_t *out) {
+    *out = string_find_in(haystack, needle);
+}
+
+VMBIN_HANDLER_BINARY_TEXT_SCALAR(string_find_handler, string_find_build, int64_t)
+
 /*
- * `string·slice(s, lo, hi) -> t`：按**码点**取半开区间 `[lo, hi)`，结果恒为
- * char/utf8。位置越界或 lo > hi 返回 INVALID（行为矩阵 string-slice-bounds）。
+ * 按**码点**取半开区间 `[lo, hi)` 并编码成 UTF-8。位置越界或 `lo > hi` 失败
+ * （行为矩阵 string-slice-bounds）。**成功才写缓冲与长度，失败只写 `exit`**。
+ *
+ * 结果是**码点的一段**，不是字节的一段——`"héllo"[1:3]` 取的是两个码点，
+ * 字节边界由编码决定。
  */
-static inline runtimec_status_t string_slice(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    string_text_t text;
-    string_text_t sliced;
-    vmbin_value_location_t bounds[2];
+static void string_slice_of(const string_text_t *text, const vmbin_value_location_t *bounds,
+                            uint8_t *buffer, size_t capacity,
+                            size_t *output_length,
+                            binrwir_execution_exit_t *output_exit) {
     int64_t lo = 0;
     int64_t hi = 0;
-    uint8_t encoded[STRING_BYTES_CAPACITY];
-    size_t encoded_size = 0U;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
+    string_text_t sliced;
 
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 3U ||
-        instruction->write_arguments.count != 1U) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = string_argument(frame, &instruction->read_arguments.data[0], &text,
-                             &error);
-    for (size_t ordinal = 0U; ordinal < 2U && status == RUNTIMEC_STATUS_SUCCESS;
-         ++ordinal) {
-        status = vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[ordinal + 1U],
-            &bounds[ordinal], &error);
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
-    }
-    if (bounds[0].size != sizeof(lo) || bounds[1].size != sizeof(hi)) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    *output_length = 0U;
+    if (bounds[0].size != sizeof(int64_t) || bounds[1].size != sizeof(int64_t)) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
     }
     memcpy(&lo, bounds[0].read_bytes, sizeof(lo));
     memcpy(&hi, bounds[1].read_bytes, sizeof(hi));
-    if (lo < 0 || hi < lo || (uint64_t)hi > text.count) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    if (lo < 0 || hi < lo || (uint64_t)hi > text->count) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
     }
     sliced.count = (size_t)(hi - lo);
-    memcpy(sliced.codepoints, text.codepoints + lo,
+    memcpy(sliced.codepoints, text->codepoints + lo,
            sliced.count * sizeof(uint32_t));
-    status = string_encode_utf8(&sliced, encoded, sizeof(encoded),
-                                &encoded_size);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
+    if (string_text_encode_utf8(&sliced, buffer, capacity, output_length) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        *output_length = 0U;
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
     }
-    return string_publish_utf8(frame, instruction, encoded, encoded_size,
-                               output_exit);
 }
 
+/* 逻辑函数：一句话——按码点切一段并编码。 */
+static inline void string_slice_build(const string_text_t *text,
+                                      const vmbin_value_location_t *bounds,
+                                      uint8_t *buffer, size_t capacity,
+                                      size_t *output_length,
+                                      binrwir_execution_exit_t *output_exit) {
+    string_slice_of(text, bounds, buffer, capacity, output_length, output_exit);
+}
+
+
 /*
- * 整数 → 文本（`formatint` / `formatuint` 共用）：base 缺省 10，11 以上用
- * **小写**字母（行为矩阵 string-format-base-radix）。负号只对带符号版本生效。
+ * 整数 → 文本：base 缺省 10，10 以上用**小写**字母（行为矩阵
+ * string-format-base-radix）。负号只对带符号版本生效。
+ *
+ * 写法：先把各位数字**从低位到高位**写进 `digits`，再倒序输出到码点序列。
+ * 负号在倒序输出时先写——**不用占位符**：占位符要额外判断「这格是不是占位」，
+ * 那是自找的分支。
+ *
+ * **成功才写缓冲与长度，失败只写 `exit`**。`magnitude` 按无符号算，
+ * 避免 `INT64_MIN` 取绝对值时溢出。
  */
-static runtimec_status_t string_format_integer(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction, int is_signed,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t value_location;
-    vmbin_value_location_t base_location;
-    uint64_t magnitude = 0U;
-    int64_t signed_value = 0;
-    int64_t base = 10;
+static void string_format_of(const vmbin_value_location_t *value_location,
+                             int64_t base, int is_signed, uint8_t *buffer,
+                             size_t capacity, size_t *output_length,
+                             binrwir_execution_exit_t *output_exit) {
     char digits[80];
-    size_t length = 0U;
-    int negative = 0;
-    uint8_t encoded[STRING_BYTES_CAPACITY];
-    size_t encoded_size = 0U;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
+    size_t digit_count = 0U;
+    uint64_t magnitude;
+    int64_t value = 0;
+    int negative;
+    string_text_t text;
 
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count < 1U ||
-        instruction->read_arguments.count > 2U ||
-        instruction->write_arguments.count != 1U) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    *output_length = 0U;
+    if (value_location->size != sizeof(int64_t) || base < 2 || base > 36) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
     }
-    status = vmbin_value_access_locate_body(
-        frame, &instruction->read_arguments.data[0], &value_location, &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
-    }
-    if (value_location.size != sizeof(int64_t)) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    if (is_signed != 0) {
-        memcpy(&signed_value, value_location.read_bytes, sizeof(signed_value));
-        if (signed_value < 0) {
-            negative = 1;
-            /* 取绝对值时按无符号算，避免 INT64_MIN 的溢出。 */
-            magnitude = (uint64_t)(-(signed_value + 1)) + 1U;
-        } else {
-            magnitude = (uint64_t)signed_value;
-        }
-    } else {
-        memcpy(&magnitude, value_location.read_bytes, sizeof(magnitude));
-    }
-    if (instruction->read_arguments.count == 2U) {
-        status = vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[1], &base_location, &error);
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            return string_fail(output_exit, status, counter);
-        }
-        if (base_location.size != sizeof(base)) {
-            return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-        }
-        memcpy(&base, base_location.read_bytes, sizeof(base));
-    }
-    if (base < 2 || base > 36) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    {
-        char reversed[80];
-        size_t written = 0U;
+    memcpy(&value, value_location->read_bytes, sizeof(value));
+    negative = (is_signed != 0 && value < 0) ? 1 : 0;
+    /* 取绝对值按无符号算：`-(INT64_MIN + 1) + 1` 不会溢出。 */
+    magnitude = negative != 0 ? (uint64_t)(-(value + 1)) + 1U : (uint64_t)value;
+    do {
+        const uint64_t remainder = magnitude % (uint64_t)base;
 
-        do {
-            const uint64_t remainder = magnitude % (uint64_t)base;
-            reversed[written++] =
-                remainder < 10U ? (char)('0' + remainder)
-                                : (char)('a' + (remainder - 10U));
-            magnitude /= (uint64_t)base;
-        } while (magnitude != 0U && written < sizeof(reversed));
-        if (negative != 0) {
-            digits[length++] = '-';
-        }
-        while (written > 0U) {
-            digits[length++] = reversed[--written];
-        }
+        digits[digit_count++] = remainder < 10U
+                                    ? (char)('0' + remainder)
+                                    : (char)('a' + (remainder - 10U));
+        magnitude /= (uint64_t)base;
+    } while (magnitude != 0U && digit_count < sizeof(digits));
+    text.count = 0U;
+    if (negative != 0) {
+        text.codepoints[text.count++] = (uint32_t)'-';
     }
-    {
-        string_text_t text;
-        size_t ordinal = 0U;
-
-        text.count = length;
-        for (; ordinal < length; ++ordinal) {
-            text.codepoints[ordinal] = (uint32_t)(uint8_t)digits[ordinal];
-        }
-        status = string_encode_utf8(&text, encoded, sizeof(encoded),
-                                    &encoded_size);
+    while (digit_count > 0U) {
+        text.codepoints[text.count++] = (uint32_t)(uint8_t)digits[--digit_count];
     }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
+    if (string_text_encode_utf8(&text, buffer, capacity, output_length) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        *output_length = 0U;
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
     }
-    return string_publish_utf8(frame, instruction, encoded, encoded_size,
-                               output_exit);
 }
+
+/* 逻辑函数：一句话——把一个整数按进制写成文本。 */
+static inline void string_format_build(const vmbin_value_location_t *value,
+                                       int64_t base, int is_signed,
+                                       uint8_t *buffer, size_t capacity,
+                                       size_t *output_length,
+                                       binrwir_execution_exit_t *output_exit) {
+    string_format_of(value, base, is_signed, buffer, capacity, output_length,
+                     output_exit);
+}
+
 
 /*
- * 严格全消费的数字解析（`parseint` / `parseuint` / `parsefloat` 共用）：
- * 行为矩阵 string-parse-strict-full-consumption —— 整串必须吃完，否则 INVALID。
- * **不做部分解析、不跳过空白**：`strtol` 那种「停在第一个非法字符」正是这条
- * 决策明确否掉的语义。
+ * 严格全消费的数字解析：**整串必须吃完**，否则失败。
+ *
+ * 行为矩阵 `string-parse-strict-full-consumption`（Python / Rust / Go 阵营）：
+ * `strtol` 那种「停在第一个非法字符」正是这条决策明确否掉的语义——`"12x"` 必须
+ * 失败而不是解析出 12。判据是 `*end == '\0'` 且**确实消费了内容**（`end != 开头`），
+ * 两条缺一不可：`""` 与 `"x"` 都不能成功。
+ *
+ * `is_signed == 0` 时额外拒绝前导 `-`：`strtoull` 接受它并回绕，那不是「无符号解析」。
+ *
+ * **成功才写 `*out`，失败只写 `exit`**。
  */
-static runtimec_status_t string_parse_number(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction, int allow_float,
-    int is_signed, binrwir_execution_exit_t *output_exit) {
-    string_text_t text;
-    vmbin_value_location_t destination;
-    uint8_t payload[8];
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
+static void string_parse_number_of(const string_text_t *text, int allow_float,
+                                   int is_signed, uint8_t *output,
+                                   size_t output_size,
+                                   binrwir_execution_exit_t *output_exit) {
+    char ascii[STRING_TEXT_CODEPOINT_CAPACITY + 1U];
+    size_t ordinal = 0U;
 
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 1U ||
-        instruction->write_arguments.count != 1U) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    for (; ordinal < text->count; ++ordinal) {
+        /* 只接受 ASCII：非 ASCII 码点一律不是数字。 */
+        if (text->codepoints[ordinal] > 0x7FU) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                               output_exit->logical_program_counter);
+            return;
+        }
+        ascii[ordinal] = (char)(uint8_t)text->codepoints[ordinal];
     }
-    status = string_argument(frame, &instruction->read_arguments.data[0], &text,
-                             &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
-    }
-    if (text.count == 0U || text.count + 1U > STRING_CODEPOINT_CAPACITY) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = vmbin_value_access_locate_body(
-        frame, &instruction->write_arguments.data[0], &destination, &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return string_fail(output_exit, status, counter);
-    }
-    if (destination.write_bytes == NULL || destination.size > sizeof(payload)) {
-        return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    ascii[ordinal] = '\0';
+    if (ordinal == 0U) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
     }
     {
-        char ascii[STRING_CODEPOINT_CAPACITY + 1U];
-        size_t ordinal = 0U;
+        char *parse_end = NULL;
+        uint8_t scratch[sizeof(double)];
 
-        for (; ordinal < text.count; ++ordinal) {
-            /* 只接受 ASCII 数字形态：非 ASCII 码点一律不是数字。 */
-            if (text.codepoints[ordinal] > 0x7FU) {
-                return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-            }
-            ascii[ordinal] = (char)(uint8_t)text.codepoints[ordinal];
+        if (output_size > sizeof(scratch)) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                               output_exit->logical_program_counter);
+            return;
         }
-        ascii[ordinal] = '\0';
-        memset(payload, 0, sizeof(payload));
+        memset(scratch, 0, sizeof(scratch));
         if (allow_float != 0) {
-            char *end = NULL;
-            const double parsed = strtod(ascii, &end);
+            const double parsed = strtod(ascii, &parse_end);
 
-            /* 严格全消费：end 必须停在结尾，且真的消费了内容。 */
-            if (end == ascii || *end != '\0') {
-                return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-            }
-            memcpy(payload, &parsed, sizeof(parsed));
+            memcpy(scratch, &parsed, sizeof(parsed));
         } else if (is_signed != 0) {
-            char *end = NULL;
-            const long long parsed = strtoll(ascii, &end, 10);
+            const long long parsed = strtoll(ascii, &parse_end, 10);
 
-            if (end == ascii || *end != '\0') {
-                return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-            }
-            {
-                const int64_t value = (int64_t)parsed;
-
-                memcpy(payload, &value, sizeof(value));
-            }
+            memcpy(scratch, &parsed, sizeof(parsed));
         } else {
-            char *end = NULL;
-            const unsigned long long parsed = strtoull(ascii, &end, 10);
+            const unsigned long long parsed = strtoull(ascii, &parse_end, 10);
 
-            /* 负数不是合法无符号数：strtoull 会接受 '-'，这里要拦。 */
-            if (ascii[0] == '-' || end == ascii || *end != '\0') {
-                return string_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-            }
-            {
-                const uint64_t value = (uint64_t)parsed;
-
-                memcpy(payload, &value, sizeof(value));
-            }
+            memcpy(scratch, &parsed, sizeof(parsed));
         }
+        /* 严格全消费：必须真的消费了内容，且停在结尾。 */
+        if (parse_end == ascii || *parse_end != '\0' ||
+            (is_signed == 0 && allow_float == 0 && ascii[0] == '-')) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                               output_exit->logical_program_counter);
+            return;
+        }
+        memcpy(output, scratch, output_size);
     }
-    status = vmbin_value_access_write_body(
-        frame, &instruction->write_arguments.data[0],
-        runtimec_bytes_view_make(payload, destination.size), &error);
-    return status == RUNTIMEC_STATUS_SUCCESS
-               ? RUNTIMEC_STATUS_SUCCESS
-               : string_fail(output_exit, status, counter);
 }
 
-static runtimec_status_t string_set_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return string_set(frame, instruction, output_exit);
-}
 
-static runtimec_status_t string_ordinal_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return string_ordinal(frame, instruction, output_exit);
-}
+VMBIN_HANDLER_SET_BY_ENCODING(string_set_handler, string_set_patch_build,
+                               string_set_rebuild_build)
 
-static runtimec_status_t string_find_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return string_find(frame, instruction, output_exit);
-}
 
-static runtimec_status_t string_slice_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return string_slice(frame, instruction, output_exit);
-}
+VMBIN_HANDLER_TEXT_INDEX2(string_slice_handler, string_slice_build, int64_t)
+VMBIN_HANDLER_FORMAT_INTEGER(string_format_integer_handler, string_format_build, 1)
+VMBIN_HANDLER_FORMAT_INTEGER(string_format_unsigned_handler, string_format_build, 0)
 
-static runtimec_status_t string_format_integer_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return string_format_integer(frame, instruction, 1, output_exit);
+/* 逻辑函数：文本 → 有符号整数。 */
+static inline void string_parse_integer_build(const string_text_t *text,
+                                              uint8_t *buffer, size_t capacity,
+                                              binrwir_execution_exit_t *output_exit) {
+    string_parse_number_of(text, 0, 1, buffer, capacity, output_exit);
 }
+VMBIN_HANDLER_UNARY_TEXT(string_parse_integer_handler, string_parse_integer_build)
 
-static runtimec_status_t string_format_unsigned_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return string_format_integer(frame, instruction, 0, output_exit);
+/* 逻辑函数：文本 → 无符号整数。 */
+static inline void string_parse_unsigned_build(const string_text_t *text,
+                                               uint8_t *buffer, size_t capacity,
+                                               binrwir_execution_exit_t *output_exit) {
+    string_parse_number_of(text, 0, 0, buffer, capacity, output_exit);
 }
+VMBIN_HANDLER_UNARY_TEXT(string_parse_unsigned_handler, string_parse_unsigned_build)
 
-static runtimec_status_t string_parse_integer_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return string_parse_number(frame, instruction, 0, 1, output_exit);
+/* 逻辑函数：文本 → 浮点。 */
+static inline void string_parse_float_build(const string_text_t *text,
+                                            uint8_t *buffer, size_t capacity,
+                                            binrwir_execution_exit_t *output_exit) {
+    string_parse_number_of(text, 1, 0, buffer, capacity, output_exit);
 }
-
-static runtimec_status_t string_parse_unsigned_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return string_parse_number(frame, instruction, 0, 0, output_exit);
-}
-
-static runtimec_status_t string_parse_float_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return string_parse_number(frame, instruction, 1, 0, output_exit);
-}
+VMBIN_HANDLER_UNARY_TEXT(string_parse_float_handler, string_parse_float_build)
 
 static const binrwir_registry_entry_t runtimec_string_entry_table[] = {
     {BINRWIR_OPERATION_IDENTIFIER_STRING_LENGTH, BINRWIR_REGISTRY_FLAG_NONE,
