@@ -1471,3 +1471,21 @@ runtimec_status_t binrwir_program_builder_finalize(
     *output_program = program;
     return RUNTIMEC_STATUS_SUCCESS;
 }
+
+bool binrwir_symbol_name_is_member(runtimec_string_view_t name) {
+    /*
+     * `·` 是 U+00B7，UTF-8 两字节 `0xC2 0xB7`。**必须按完整序列匹配**：
+     * 只判 `0xC2` 会把任何以它开头的其他字符也当成成员符。
+     */
+    static const char separator[] = "\xC2\xB7";
+    if (name.data == NULL || name.size < 2U) {
+        return false;
+    }
+    for (size_t offset = 0U; offset + 2U <= name.size; ++offset) {
+        if ((uint8_t)name.data[offset] == (uint8_t)separator[0] &&
+            (uint8_t)name.data[offset + 1U] == (uint8_t)separator[1]) {
+            return true;
+        }
+    }
+    return false;
+}

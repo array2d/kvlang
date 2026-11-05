@@ -114,6 +114,16 @@ runtimec_status_t vmkv_rwir_operation_name_from_wire(
  */
 bool vmkv_rwir_key_is_member(runtimec_key_view_t key);
 
+/*
+ * 键文本里是否含**动态成员键** `·*`（完整三字节 `0xC2 0xB7 0x2A`）。
+ *
+ * `m·*k` 的 `*k` 要求值后取成员键，而 BinRWIR 没有「运行期求值这段键」的表示。
+ * 此前它被当帧内局部名原样登记，写读都落在名为 `m·*k` 的静态键上——同写法
+ * 自洽、换写法暴露（`println(m·a)` 得 0）。编码器据此**失败封闭**，让它成为
+ * 有名字的能力缺口，而不是一条输出错的绿。裁决见 `specification/dynamic-key.md` §六.1。
+ */
+bool vmkv_rwir_key_is_dynamic_member(runtimec_key_view_t key);
+
 runtimec_status_t vmkv_rwir_reader_create(
     vmkv_function_source_t *function,
     vmkv_rwir_reader_t **output_reader,

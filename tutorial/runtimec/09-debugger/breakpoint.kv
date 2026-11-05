@@ -1,3 +1,4 @@
+// 期望阻塞: debugger 由 byteseek stdlib 提供，本 runner 不装载 stdlib
 rwfunc loop(*int64 $n) -> () {
     1 -> i
     while (i <= *n) {

@@ -132,6 +132,57 @@ bool string_text_decode_ascii(const uint8_t *bytes, size_t size,
                          size, output) == RUNTIMEC_STATUS_SUCCESS;
 }
 
+/*
+ * 码点序列 → **按 langtype 指定的编码**的字节。
+ *
+ * 这是 A 裁决（`decision`：值的字节形态服从写槽声明的 langtype）的唯一落点。
+ * 三种编码的差别是**形状**，不是内容：
+ *   char/utf32 —— 每个码点 4 字节小端，定宽；
+ *   char/utf8  —— 变长 1~4 字节；
+ *   char/ascii —— 每码点 1 字节，> 0x7F 装不下即失败（**不截断**：截断会把 `é`
+ *                 变成某个控制字符，那是静默的数据损坏）。
+ *
+ * `langtype` 无效（不是三种字符种类之一）⇒ INVALID，不猜。
+ */
+runtimec_status_t string_text_encode(runtimec_string_view_t langtype,
+                                     const string_text_t *text,
+                                     uint8_t *output, size_t capacity,
+                                     size_t *output_size) {
+    *output_size = 0U;
+    switch (string_encoding_of(langtype)) {
+    case STRING_ENCODING_UTF32:
+        if (text->count > capacity / 4U) {
+            return RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY;
+        }
+        for (size_t ordinal = 0U; ordinal < text->count; ++ordinal) {
+            const uint32_t codepoint = text->codepoints[ordinal];
+            output[ordinal * 4U] = (uint8_t)(codepoint & 0xFFU);
+            output[ordinal * 4U + 1U] = (uint8_t)((codepoint >> 8U) & 0xFFU);
+            output[ordinal * 4U + 2U] = (uint8_t)((codepoint >> 16U) & 0xFFU);
+            output[ordinal * 4U + 3U] = (uint8_t)((codepoint >> 24U) & 0xFFU);
+        }
+        *output_size = text->count * 4U;
+        return RUNTIMEC_STATUS_SUCCESS;
+    case STRING_ENCODING_ASCII:
+        if (text->count > capacity) {
+            return RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY;
+        }
+        for (size_t ordinal = 0U; ordinal < text->count; ++ordinal) {
+            if (text->codepoints[ordinal] > UINT32_C(0x7F)) {
+                return RUNTIMEC_STATUS_INVALID;
+            }
+            output[ordinal] = (uint8_t)text->codepoints[ordinal];
+        }
+        *output_size = text->count;
+        return RUNTIMEC_STATUS_SUCCESS;
+    case STRING_ENCODING_UTF8:
+        return string_text_encode_utf8(text, output, capacity, output_size);
+    case STRING_ENCODING_INVALID:
+    default:
+        return RUNTIMEC_STATUS_INVALID;
+    }
+}
+
 runtimec_status_t string_text_encode_utf8(const string_text_t *text,
                                           uint8_t *output, size_t capacity,
                                           size_t *output_size) {

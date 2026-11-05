@@ -1,0 +1,15 @@
+// 判据：`char/utf8` 槽里的单字符结果按**该槽声明的编码**写——中文是多字节，
+// 不能截成 1 字节，也不能写成 utf32 的定宽 4 字节。
+// 依据：five-language-behavior-matrix `string-codepoint-indexing`。
+// 期望输出:
+//   h
+//   中文
+rwfunc test() -> () {
+	x = "hi"
+	a = string·char(x, 0)
+	println(a)
+
+	y = "中文"
+	b = string·slice(y, 0, 2)
+	println(b)
+}

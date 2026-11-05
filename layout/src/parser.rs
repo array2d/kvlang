@@ -2927,9 +2927,29 @@ impl Parser {
             .unwrap_or(false);
         if is_struct_new && !s.contains('*') {
             let e = inst.expr.take().unwrap();
+            /*
+             * **写类型必须跟着走**：`struct·new` 的第一个实参就是**原型路径**，
+             * 那就是这次实例化的类型（`/lib/Node`），不需要猜。
+             *
+             * 曾经这里把 `write_types` 和 `writes` 一起清空，于是 desugar 出的
+             * `kvspace·cplist(struct·new(…), dst)` 没有结果类型——临时槽与 dst
+             * 的类型都缺，编码器报「local '_1' is written with a non-concrete
+             * langtype」。`p:Point = {…}`（有声明写槽）不走这条 desugar，所以
+             * 只有「struct 字面量写进成员/散键」这条路径才暴露。
+             */
+            let prototype = e
+                .args
+                .first()
+                .filter(|a| a.quote != 0)
+                .map(|a| a.val.clone())
+                .unwrap_or_default();
             inst.expr = Some(ast::call("kvspace·cplist", vec![e, ast::leaf(&s)]));
             inst.writes = Vec::new();
-            inst.write_types = Vec::new();
+            inst.write_types = if prototype.is_empty() {
+                Vec::new()
+            } else {
+                vec![prototype]
+            };
             return;
         }
         // 成员链写槽 p·a·b = v / p·*k = v：保持写槽原样（含 `·`/`·*`），不再转 kvspace·set。

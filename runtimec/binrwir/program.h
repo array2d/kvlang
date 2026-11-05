@@ -100,6 +100,31 @@ runtimec_status_t binrwir_program_get_literal(
 runtimec_status_t binrwir_program_destroy(binrwir_program_t *program);
 
 /*
+ * 符号名是否含**成员分隔符** `·`（U+00B7，UTF-8 完整两字节 `0xC2 0xB7`）。
+ *
+ * ── 这个判据回答什么 ────────────────────────────────────────────────
+ * **帧拥有的槽，还是一个容器内部的存储位置？**
+ *
+ *   不含 `·` —— 帧拥有的槽：由声明创建，地址在帧生命周期内稳定 ⇒ 可以建、可以绑；
+ *   含  `·` —— 成员键：它是**容器值内部的存储**，容器可被 `·new` 或任何整容器写
+ *                **整体重建**，地址永不稳定 ⇒ 不建、不绑，每次按 key 现解析。
+ *
+ * **判据不是「谁声明的」，而是「它是不是一段路径」**（`vmkv/rwir.h` 早有此条，
+ * 只是 `materialize_locals` 与绑定路径没照它执行）。此前帧准备给成员符号建零值
+ * 并绑死地址，而 `struct·new` 的 `kvspaceCpTree` 会整体重建子树 ⇒ 绑定表里留着
+ * 一具已不存在的 box，`println(p·x)` 读到 0 ——**写侧完全正确、读侧读旧地址**。
+ *
+ * ── 为什么按完整字节序列匹配 ────────────────────────────────────────
+ * 只判首字节 `0xC2` 会把任何以它开头的其他字符也当成成员符；只判「含 `·`」又会
+ * 把动态键 `base·*k` 与静态成员混在一起（后者另有一条判据，见 vmkv）。
+ *
+ * ── 唯一定义点 ──────────────────────────────────────────────────────
+ * `vmkv_rwir_key_is_member` **转调本函数**（vmkv 依赖 binrwir，反向依赖不存在）。
+ * engine 与 vmbin 也调它。任何地方再写第二份扫描，就是「同一事实两个来源」。
+ */
+bool binrwir_symbol_name_is_member(runtimec_string_view_t name);
+
+/*
  * builder 生命周期：可写 —— finalize 成功 ——> 已定稿。定稿后所有 add_* 与再次
  * finalize 都返回 INVALID；reset 回到空的可写状态并保留已分配容量；destroy 只释放
  * builder 自身存储，不影响已经产出的 Program。

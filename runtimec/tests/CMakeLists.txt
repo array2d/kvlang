@@ -432,31 +432,6 @@ set_tests_properties(runtimec.engine.execution_window PROPERTIES
  LABELS "runtimec;scaffold;engine;execution_window")
 
 
-# 临时 println 的端到端验收：仅 RUNTIMEC_TEMP_PRINTLN=ON 时存在。
-# 链路 publish → layout → execute → 断言；关联 layout 产物（check_layers 不约束
-# tests/CMakeLists.txt，见其 iter_product_sources 只遍历 PRODUCT_DIRECTORIES）。
-if(RUNTIMEC_TEMP_PRINTLN)
- add_executable(runtimec_temp_println_test temp_println_test.c)
- target_compile_features(runtimec_temp_println_test PRIVATE c_std_11)
- target_compile_definitions(runtimec_temp_println_test PRIVATE
- _GNU_SOURCE)
- target_include_directories(runtimec_temp_println_test PRIVATE
- "${CMAKE_CURRENT_SOURCE_DIR}/.."
- "${RUNTIMEC_INCLUDE_DIRECTORY}"
- "${KVLANG_INCLUDE_DIRECTORY}")
- target_link_libraries(runtimec_temp_println_test PRIVATE
- runtimec_contract runtimec_vmbin runtimec_engine
- "${CMAKE_DL_LIBS}")
- runtimec_test_warnings(runtimec_temp_println_test)
- add_test(NAME runtimec.temp.println
- COMMAND runtimec_temp_println_test
- "${RUNTIMEC_KVSPACE_LIBRARY_PATH}"
- "${KVLANG_LAYOUT_LIBRARY}")
- set_tests_properties(runtimec.temp.println PROPERTIES
- SKIP_RETURN_CODE 77
- LABELS "runtimec;temp;println")
-endif()
-
 add_executable(runtimec_public_interface_bootstrap_test
  public_interface_bootstrap_test.c)
 target_compile_features(runtimec_public_interface_bootstrap_test
@@ -734,8 +709,11 @@ target_include_directories(runtimec_binrwir_dump PRIVATE
  "${CMAKE_CURRENT_SOURCE_DIR}/.."
  "${RUNTIMEC_INCLUDE_DIRECTORY}"
  "${KVSPACE_INCLUDE_DIRECTORY}")
+# 编码器必须用**带 `RUNTIMEC_TEMP_PRINTLN` 的副本**：否则 `println` 在 dump 里
+# 落成 `foreign()`——零读写参数、零信息，用它归因 `println` 的失败根本看不到读参。
+# 只编不执行，所以不需要 vmbin / engine 两份副本。
 target_link_libraries(runtimec_binrwir_dump PRIVATE
- runtimec_contract runtimec_binrwir runtimec_vmkv
+ runtimec_contract runtimec_binrwir runtimec_kv_runner_vmkv
  "${CMAKE_DL_LIBS}")
 runtimec_test_warnings(runtimec_binrwir_dump)
 

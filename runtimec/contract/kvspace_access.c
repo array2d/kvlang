@@ -994,13 +994,6 @@ runtimec_status_t runtimec_kvspace_access_ensure_zero_value(
             error, RUNTIMEC_STATUS_INVALID, 80,
             "invalid ensure-zero-value request");
     }
-    uint64_t width = 0U;
-    if (!runtimec_kvspace_zero_width(langtype, &width)) {
-        return runtimec_kvspace_access_fail(
-            error, RUNTIMEC_STATUS_UNSUPPORTED, 81,
-            "this langtype has no fixed zero width; variable-length local "
-            "slots are out of scope for this runtime");
-    }
     char key_text[RUNTIMEC_KVSPACE_KEY_CAPACITY];
     if (!runtimec_kvspace_access_key_text(key, key_text, sizeof(key_text),
                                            NULL)) {
@@ -1009,7 +1002,27 @@ runtimec_status_t runtimec_kvspace_access_ensure_zero_value(
             "local slot key is not an absolute key");
     }
 
-    /* 已存在：长度相同即成功，长度不同是冲突。 */
+    /*
+     * ── 两条语义拆开：**先查存在，再谈零值** ──────────────────────────
+     *
+     * 本函数历史上把「接收一个已存在的槽」与「创建一个零值」混在一起，而且顺序
+     * 是**先算零宽、再看存在**——于是 `[]char/utf32` 这类变长槽哪怕**已经存在**，
+     * 也会在算零宽那一步被拒（「no fixed zero width」）。可是「已有的槽合法与否」
+     * 与「零值有多宽」根本是两个问题：前者不需要宽度。
+     *
+     * 后果实测（`strings.kv`）：`replace_at(s,0,"H") -> s` 的写目标 `s` 是调用方
+     * 已有的变量，却被当成要新建的零值槽拒掉 ⇒ 窗口翻成
+     * `ARGUMENT_MATERIALIZE_FAILED`（0x4014）。
+     */
+    uint64_t width = 0U;
+    const bool fixed_width = runtimec_kvspace_zero_width(langtype, &width);
+
+    /*
+     * 已存在：
+     *   定宽 —— 长度相同即成功，不同则冲突（维持原判据）；
+     *   变长 —— **成功**。变长槽没有「应有的宽度」可对，存在即合法；它的 body
+     *           长度由内容决定，不是声明决定。
+     */
     uint8_t *existing = NULL;
     uint32_t existing_size = 0U;
     if (kvspaceGet(adapter->handle, key_text, 1, &existing,
@@ -1019,6 +1032,9 @@ runtimec_status_t runtimec_kvspace_access_ensure_zero_value(
             return runtimec_kvspace_access_fail(
                 error, RUNTIMEC_STATUS_ERROR, 83,
                 "existing local slot has no readable XValue head");
+        }
+        if (!fixed_width) {
+            return RUNTIMEC_STATUS_SUCCESS;
         }
         kvspaceXvalueHead existing_head;
         memcpy(&existing_head, existing, sizeof(existing_head));
@@ -1030,6 +1046,17 @@ runtimec_status_t runtimec_kvspace_access_ensure_zero_value(
             "existing local slot has a different width than its langtype");
     }
 
+    /*
+     * 不存在，才谈创建：
+     *   定宽 —— 零值宽度就是声明宽度（原路径，不变）；
+     *   变长 —— **零值就是空 body**。空串对 `[]char/…` 是一个合法值，长度 0 与
+     *           「没有值」由 XValue 本身区分（存在性来自 head，不是来自长度）。
+     *           ⇒ 这里不是「按定宽思路算不出零宽所以拒绝」，而是「变长的零值本来就
+     *           是零字节」。
+     *   表里没有的类型仍与变长同路处理：它是不是合法 langtype 由上游（layout /
+     *   编码器）裁定，本层不重复判。
+     */
+
     /* 不存在：按 langtype 编完整 wire。编码交给上游，本层不拼字节。 */
     char langtype_text[RUNTIMEC_KVSPACE_KEY_CAPACITY];
     if (langtype.size + 1U > sizeof(langtype_text)) {
@@ -1039,8 +1066,9 @@ runtimec_status_t runtimec_kvspace_access_ensure_zero_value(
     memcpy(langtype_text, langtype.data, langtype.size);
     langtype_text[langtype.size] = '\0';
 
-    uint8_t *zero_body = width != 0U ? calloc(1U, (size_t)width) : NULL;
-    if (width != 0U && zero_body == NULL) {
+    const uint64_t body_length = fixed_width ? width : 0U;
+    uint8_t *zero_body = body_length != 0U ? calloc(1U, (size_t)body_length) : NULL;
+    if (body_length != 0U && zero_body == NULL) {
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_OUT_OF_MEMORY, 86,
             "zero body allocation failed");
@@ -1048,7 +1076,7 @@ runtimec_status_t runtimec_kvspace_access_ensure_zero_value(
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
     const int encode_status = kvspaceXvalueHeadNewSlack(
-        zero_body, width, width, langtype_text, &wire, &wire_size);
+        zero_body, body_length, body_length, langtype_text, &wire, &wire_size);
     free(zero_body);
     if (encode_status != 0 || wire == NULL || wire_size > UINT32_MAX) {
         return runtimec_kvspace_access_fail(

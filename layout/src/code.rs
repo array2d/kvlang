@@ -97,6 +97,35 @@ pub struct CheckedFile {
     top_init: Option<AnalyzedFunc>,
 }
 
+/*
+ * 诊断阶段的**唯一失败收尾**：先打印全部诊断，再构造返回给调用方的错误串。
+ *
+ * **返回串必须带首条 error 级诊断**，不能只给一句汇总。
+ *
+ * 为什么：CLI 用户看得到 `eprintln!` 打出的具体原因，但 **C ABI 调用方看不到**——
+ * `kvlangLayoutCode` / `kvlangLayoutFile` 只把本函数的 `Err` 文本写进 `err_out`。
+ * 只给「refusing to load」等于让嵌入式与 LLM 工具链拿到一个**没有原因的失败**，
+ * 只能靠猜。同一个失败，两拨人看到的信息量不该差这么远。
+ *
+ * 打印仍然保留（CLI 的 stderr 输出行为不变），返回串追加摘要。
+ */
+fn refuse_with_diagnostics(diags: &[crate::scanner::Diagnostic], stage: &str) -> String {
+    for d in diags {
+        eprintln!("{}", d.string());
+    }
+    let first = diags
+        .iter()
+        .find(|d| !d.warn)
+        .map(|d| d.string())
+        .unwrap_or_else(|| stage.to_string());
+    let errors = diags.iter().filter(|d| !d.warn).count();
+    if errors > 1 {
+        format!("{stage}: error-level diagnostics — refusing to load ({first}; and {} more)", errors - 1)
+    } else {
+        format!("{stage}: error-level diagnostics — refusing to load ({first})")
+    }
+}
+
 /// Pure kvspace-free validation shared by `vet` and `compile`: parse/container diagnostics,
 /// lowering, write-slot checks, specialization, linearization, jump target resolution, and op arity.
 /// State-dependent checks (such as `/lib/<opcode>` `def rwir` collisions) remain in `compile`.
@@ -107,11 +136,11 @@ fn analyze_file(src: &str) -> Result<CheckedFile, String> {
         diags.extend(lower::check_map_defined(&f));
         diags.extend(lower::check_container_typed(&f));
     }
+    if parser::has_errors(&diags) {
+        return Err(refuse_with_diagnostics(&diags, "parse"));
+    }
     for d in &diags {
         eprintln!("{}", d.string());
-    }
-    if parser::has_errors(&diags) {
-        return Err("parse: error-level diagnostics — refusing to load".to_string());
     }
     let mut sigs: lower::SigTable = HashMap::new();
     for f in &file.funcs {
@@ -219,11 +248,11 @@ fn analyze_func(
     diags.extend(lower::specialize(
         &mut fn_, &type_map, &declared, &type_sets, &stable,
     ));
+    if parser::has_errors(&diags) {
+        return Err(refuse_with_diagnostics(&diags, "type"));
+    }
     for d in &diags {
         eprintln!("{}", d.string());
-    }
-    if parser::has_errors(&diags) {
-        return Err("type: error-level diagnostics — refusing to load".to_string());
     }
     let mut seq: Vec<Instruction> = Vec::new();
     let mut labels: HashMap<String, i32> = HashMap::new();
@@ -231,8 +260,13 @@ fn analyze_func(
         .map_err(|e| format!("{}: {e}", fn_.sig.name))?;
     check_jumps(&seq, &labels).map_err(|e| format!("{}: {e}", fn_.sig.name))?;
     /* lower 之后补写槽类型：A/B/D 三类缺口共用这一个入口。必须在 write_func 之前、
-     * 在 seq 定稿之后——早于 lower 时临时槽还没展开。 */
-    annotate_slot_types(&mut seq, &declared, sigs, structs);
+     * 在 seq 定稿之后——早于 lower 时临时槽还没展开。
+     *
+     * 同时把推导结果并进 `stable`（读侧最后一个来源），让写槽与后续读槽共用同一份
+     * 结论。**这必须在 `specialize` 之后**：`specialize` 只看 op/操作数形态与
+     * 声明类型，不看槽类型；一旦将来有特化规则需要槽类型，合并点要再前移，
+     * 而不是让 `specialize` 自己去补查——那会造出第二个查询面。 */
+    annotate_slot_types(&mut seq, &declared, &type_sets, &mut stable, sigs, structs);
     // Validate instruction arity before touching kvspace (shared by `vet` and `compile`).
     for inst in &seq {
         let (op, reads) = inst.flat();
@@ -881,42 +915,6 @@ pub fn write_func(
     let fn_ = &a.func;
     let (seq, labels, declared, type_sets, stable) =
         (&a.seq, &a.labels, &a.declared, &a.type_sets, &a.stable);
-    /*
-     * lowering 产生的临时槽（`_1`、`_2`…）不在 `declared`/`type_sets`/`stable`
-     * 任何一张表里。它们的写槽类型由 `annotate_slot_types` 推导出来并写在
-     * `instruction.write_types` 上，但**读**它们的指令仍按空类型落槽——
-     * 编码器于是报「parameter is not a single concrete langtype」。
-     *
-     * 这里把「写槽上已经推出的类型」并进 `stable`（读侧的最后一个来源），
-     * 让同一份推导结果同时服务写槽与后续读槽，不另建第二套推断。
-     */
-    let mut stable_with_temporaries = stable.clone();
-    for instruction in seq.iter() {
-        for (write, write_type) in instruction.writes.iter().zip(&instruction.write_types) {
-            if write_type.is_empty() {
-                continue;
-            }
-            /*
-             * 只补**别处都查不到**的名字：`declared` / `type_sets` / `stable`
-             * 任何一张表里有它，就以那张表为准（它们的优先级本来也更高）。
-             *
-             * 曾经这里只认 `_` 开头的临时槽。但 lowering 还会产生**隐式局部**——
-             * `(*p)·x -> t` 的 `t` 没有声明，写槽类型是靠推导填上的，读它时
-             * 四张表全查不到，于是读槽落成空类型。判据不是「名字长什么样」，
-             * 而是「这个名字的类型还能从哪儿查到」。
-             */
-            if declared.contains_key(write)
-                || type_sets.contains_key(write)
-                || stable.contains_key(write)
-            {
-                continue;
-            }
-            stable_with_temporaries
-                .entry(write.clone())
-                .or_insert_with(|| write_type.clone());
-        }
-    }
-    let stable = &stable_with_temporaries;
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
     let opcode = if pkg.is_empty() {
         fn_.sig.name.clone()
@@ -941,9 +939,19 @@ pub fn write_func(
     }
 
     /* 源级类型表：复合写目标（`(*r)`、`x·y`）与写槽兜底都按**源级**类型解析。
-     * 私有结构 + 派生函数，别在调用点直接拿 entries。 */
+     * 私有结构 + 派生函数，别在调用点直接拿 entries。
+     *
+     * 再把 `stable` 补进去（**只补空缺**）：`resolve_slot_type` 解析复合槽名
+     * （`_6·left`、`(*p)·x`）时只查这一张表，查不到就整条链没有类型。而 `_6`
+     * 这类 lowering 临时槽的类型恰恰只登记在 `stable` 里——不补，复合槽与普通槽
+     * 就成了两个查询面，正是 `04-tree` 那个 `_6·left` 的成因。 */
     let source_langtypes = lower::SourceLangtypes::new(&fn_.sig);
-    let declared_source = source_langtypes.merged_under(declared);
+    let mut declared_source = source_langtypes.merged_under(declared);
+    for (name, kind) in stable {
+        if !kind.is_empty() && !kind.contains('|') {
+            declared_source.entry(name.clone()).or_insert_with(|| kind.clone());
+        }
+    }
 
     let ctime_key = format!("{func_dir}/‥ctime");
     let ctime = next_ctime(read_ctime(kv, &ctime_key));
@@ -1331,8 +1339,14 @@ fn slot_static_type(
     // `lower::resolve_slot_type`（不在这里再写一份）。它按源级类型解析，返回的是
     // **值**类型；读槽要的是 wire 形态，故过 `to_wire`。
     if !lower::slot_is_plain_name(name) {
-        if let Some(resolved) = lower::resolve_slot_type(name, declared_source, structs, declared_source)
-        {
+        /* 复合槽名的基座直接取自本函数传进来的两张表：`declared_source` 是源级
+         * （形参 `*T` 保留），`declared` 是值级（形参已剥）。用两份是**故意的**：
+         * `_6·left` 的 `_6` 只登记在 `stable`（已并进 `declared_source`），而形参
+         * 名只在值级表里带对了形态。两表同源，这里只是各自给 `resolve_slot_type`
+         * 它能解析的那一种。 */
+        let resolved = lower::resolve_slot_type(name, declared_source, structs, declared_source)
+            .or_else(|| lower::resolve_slot_type(name, declared, structs, declared));
+        if let Some(resolved) = resolved {
             let wire = to_wire(&resolved);
             if !wire.is_empty() {
                 return narrow_union(wire, name, stable);
@@ -1406,21 +1420,48 @@ fn read_slot_type(
 ///
 /// 空 kindexpr（`rwfunc f(x:)`）**不在此补**：spec 说它合法（「不约束」），
 /// 替它编一个具体类型就是发明语义。那条由 runtimec 明确拒绝（见 BOARD）。
+///
+/// **读侧与写侧共用一张表**：推导结果并进 `stable`，写 `stable` 与后来读同一槽
+/// 的指令查的都是它。见函数体内的并入规则。
 fn annotate_slot_types(
     seq: &mut [Instruction],
     declared: &HashMap<String, String>,
+    type_sets: &HashMap<String, Vec<String>>,
+    stable: &mut HashMap<String, String>,
     sigs: &lower::SigTable,
     structs: &lower::StructTable,
 ) {
     /*
-     * lowering 产生的临时槽（`_N`）不在 `declared` 里，但它们的类型已经在前面
-     * 指令的写槽上推出来了。成员读/解引用的**基座**往往是这类临时槽
-     * （`(*node)·left` 的 `_8`），拿不到基座类型就算不出结果类型。
+     * lowering 产生的临时槽（`_N`）与**隐式局部**（`(*p)·x -> t` 的 `t`）不在
+     * `declared`/`type_sets`/`stable` 任何一张表里。它们的写槽类型由本函数推导并
+     * 写在 `instruction.write_types` 上；读它们的指令必须看到**同一个**结果。
      *
-     * 这里顺序扫一遍，把已推出的写槽类型记进 `derived`，后面遇到的基座从它取。
-     * 与写槽用同一份推导结果，不另起一套推断。
+     * 所以推导结果直接并进 `stable`——读侧的最后一个来源，全函数唯一的一份。
+     * 不另建 `derived` 这类第二张表：写侧与读侧各查一张表，就是「同一事实两个
+     * 来源」，改一处漏一处（先例：写侧早就在 `write_func` 里合并，读侧却查不到）。
+     *
+     * 顺序扫描保证：后出现的指令查到的 `stable` 已含前面指令推出的类型。
+     * 本轮内全程同一张表，不存在「一半查合并前、一半查合并后」。
+     *
+     * **并入规则（硬约束）**：
+     *   - 只补空缺：`declared` / `type_sets` / `stable` 已有的名字一律以原表为准；
+     *   - 只收已推出的**具体**类型：空串与并集（含 `|`）一律不收——`stable` 还被
+     *     `narrow_union` 当作「可证明类型」用，塞进并集就毁掉那个语义。
+     *
+     * **「已有」必须按 `type_sets` 的成员数判，不能按 `contains_key`**：
+     * `type_sets` 收的是「该名字所有写位置的类型**集合**」，临时槽往往只有一条
+     * `*p` 来源，于是 `{"…"}` 是**单元素集合**——那已经是可证明的具体类型，
+     * 只是 `stable` 不认（它只收数值 kind）。按 `contains_key` 判会把这类名字
+     * 当成「别处已有」而跳过，随后 `slot_static_type` 查 `type_sets` 又只能拼出
+     * union 串（单元素也可能带括号），最终读槽拿到空类型。`04-tree` 的 `_6·left`
+     * 与 `083` 的 `_5·next` 都是这条。
      */
-    let mut derived: HashMap<String, String> = HashMap::new();
+    /*
+     * 本轮扫描直接读写 `stable`，不再另建 `derived`：曾经这里是
+     * `let mut derived = HashMap::new()`，只服务本轮扫描；写侧 `write_func` 又
+     * 自带一份 `stable_with_temporaries` 做同样的事。两张表算的是同一件事
+     * （「这个临时槽的类型是什么」），却是两个查询面。
+     */
     for inst in seq.iter_mut() {
         if inst.writes.is_empty() {
             continue;
@@ -1428,10 +1469,21 @@ fn annotate_slot_types(
         let Some(expr) = inst.expr.as_ref() else {
             continue;
         };
-        if expr.is_leaf() {
-            continue;
-        }
-        let ty = expr_slot_type(expr, declared, sigs, &derived, structs);
+        /* 叶子表达式（`s -> t`、`*p -> t`）也要走一遍：拷贝型写槽的类型就是**源**
+         * 的类型。**跳过叶子**曾经让「先拷贝、再取成员」这条链整条断掉——
+         * `derived_base` 探针（`s:N={}; s -> t; t·val`）与 `walk_lib.kv` 都是这条：
+         * `t` 从没进过 `stable`，于是 `t·val` 这个复合读槽找不到基座。
+         *
+         * 源的类型用**同一个解析器**取（`resolve_slot_type`），不在这里另写一份：
+         * 它同时覆盖裸名、`*p` 解引用、`(*p)·seg` 与坐标段。 */
+        let ty = if expr.is_leaf() {
+            let resolved = lower::resolve_slot_type(&expr.val, declared, structs, declared)
+                .or_else(|| lower::resolve_slot_type(&expr.val, stable, structs, stable));
+            resolved.map(|t| to_wire(&t)).unwrap_or_default()
+        } else {
+            expr_slot_type(expr, declared, sigs, stable, structs).unwrap_or_default()
+        };
+        let ty = (!ty.is_empty()).then_some(ty);
         if let Some(ty) = ty.filter(|value| !value.is_empty()) {
             if inst.write_types.len() < inst.writes.len() {
                 inst.write_types.resize(inst.writes.len(), String::new());
@@ -1440,11 +1492,22 @@ fn annotate_slot_types(
                 inst.write_types[0] = ty;
             }
         }
-        /* 已推出的写槽类型记进 derived（后续指令的基座可能是它）。 */
-        for (write, write_type) in inst.writes.iter().zip(&inst.write_types) {
-            if !write_type.is_empty() {
-                derived.entry(write.clone()).or_insert_with(|| write_type.clone());
-            }
+        let learned: Vec<(String, String)> = inst
+            .writes
+            .iter()
+            .zip(&inst.write_types)
+            .filter(|(_, write_type)| !write_type.is_empty() && !write_type.contains('|'))
+            .filter(|(write, _)| {
+                !declared.contains_key(*write)
+                    && !type_sets
+                        .get(*write)
+                        .is_some_and(|members| members.len() > 1)
+                    && !stable.contains_key(*write)
+            })
+            .map(|(write, write_type)| (write.clone(), write_type.clone()))
+            .collect();
+        for (write, write_type) in learned {
+            stable.entry(write).or_insert(write_type);
         }
     }
 }
@@ -1461,6 +1524,46 @@ fn expr_slot_type(
      * 两者都可能以**复合表达式**为基座（`(*p)·x`），所以走同一套递归取型。 */
     if expr.op == ast::DEREF_OP || expr.op == ast::MEMBER_READ_OP {
         return value_type_of(expr, declared, derived, structs);
+    }
+    /* `compactarray·fill` 的**首个形参就是写目标的 langtype**——这是它的**签名**，
+     * 不是「第一个字面量」这种语法巧合（spec `array-fill-write-param`：它填的是
+     * 一段定宽数组，类型由调用方给出）。
+     *
+     * 判据挂在签名上：**先查 `sigs`**（`compactarray·fill` 若有安装签名就以它为准，
+     * 形状为 `fill(*[]char/utf8 $t) -> …`），签名不可得时才按「首参是 langtype
+     * 文本」取——因为这一行的类型本来就来自调用方写下的那串 langtype，而它必然
+     * 是个字符串字面量。
+     *
+     * 明确记一笔：这里**不使用**「带不带引号」作为语义判据。今晚已有两次栽在
+     * 「用字符形态代替语义判断」（`starts_with('[')` 误判 `[]char`、
+     * `w.find('[')` 把 `a·[0]` 截成 `a·`）。
+     *
+     * 这一支缺失时写槽 `empty` 没有类型——本行是 install signature 行、
+     * `sig_lookup` 查不到，落到 `call_result_type` 而那里也没有 fill。
+     */
+    if expr.op == "compactarray·fill" {
+        if let Some(signature) = lower::sig_lookup(sigs, &expr.op) {
+            if let Some(first) = signature.params.first() {
+                if !first.ty.is_empty() && !first.ty.contains('|') {
+                    return Some(first.ty.clone());
+                }
+            }
+        }
+        return expr.args.first().and_then(|argument| {
+            let text = argument.val.trim();
+            (!text.is_empty()).then(|| text.to_string())
+        });
+    }
+    /* **类型转换算子的结果类型就是算子名本身**——这是**规则**，不是特例：
+     * `int64(x)` → `int64`、`char/utf32(s)` → `char/utf32`，因为算子名写的就是
+     * 目标类型。
+     *
+     * `is_cast_op` 只列了数值 kind，是既有缺陷：`char/utf8` / `char/utf32` /
+     * `char/ascii` 三种字符转换算子**从来没进过这一支**（`infer_op_type` 里
+     * 对应的那条对它们一直是死代码）。所以这里把判据扩到 `char/` 系列，
+     * 与 `infer_op_type` 保持同一答案。 */
+    if lower::is_cast_op(&expr.op) || expr.op.starts_with("char/") {
+        return Some(expr.op.clone());
     }
     /* A：调用 `f(…)` → callee 的返回类型。 */
     /* 与 `annotate_returns_inst` 共用同一查找：先文件签名，再 native 表。
@@ -1517,7 +1620,18 @@ fn value_type_of(
         let base = expr.args.first()?;
         let base_type = value_type_of(base, declared, derived, structs)?;
         let tail: Vec<&str> = expr.args.iter().skip(1).map(|a| a.val.as_str()).collect();
-        return lower::member_chain_type(&base_type, &tail.join(keytree::MEMBER_SEP), structs);
+        let member = tail.join(keytree::MEMBER_SEP);
+        return lower::member_chain_type(&base_type, &member, structs)
+            /* 坐标段 `base·[i]` 的段文本是 `[i]`：`member_chain_type` 按「成员名」查
+             * struct 字段自然查不到，但它对**容器**有现成规则——`container_value`
+             * 取 `·` 之后的值类型，与键是不是坐标段无关。这里补的就是那一条：
+             * `m:[int64]·int64` 的 `m·[0]` 与 `m·0` 是同一个值类型。 */
+            .or_else(|| {
+                tail.iter()
+                    .all(|segment| segment.starts_with('[') && segment.ends_with(']'))
+                    .then(|| lower::container_value(&base_type))
+                    .flatten()
+            });
     }
     if expr.val.is_empty() {
         return None;
@@ -1710,9 +1824,13 @@ fn write_linear_inst(
                     "{opcode}: 无法判定空引用比较的类型——另一侧 `{other}` 没有具体类型"
                 ));
             }
-            if !other_type.starts_with('*') {
+            /* 判据只有一份：`lower::is_none_comparable`（指针 `*T` 与 structref
+             * `/lib/X`）。这里不能写「以 `*` 开头」——`(*node)·left` 的成员读结果
+             * 是值形态的 `/lib/TNode`（`*` 是传递方式，已被剥），按 `*` 判会把
+             * 一条合法的判空挡在 layout 期。 */
+            if !lower::is_none_comparable(&other_type) {
                 return Err(format!(
-                    "{opcode}: 空引用判定的左值不是引用类型（`{other}` 的类型是 `{other_type}`）"
+                    "{opcode}: 空引用判定的另一侧不是引用类型（`{other}` 的类型是 `{other_type}`）"
                 ));
             }
             other_type

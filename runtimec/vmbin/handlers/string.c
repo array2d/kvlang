@@ -141,6 +141,7 @@ static void string_length_build(const vmbin_value_location_t *text,
  * **成功才写缓冲与长度，失败只写 `exit`**。越界按码点数判，与编码无关。
  */
 static void string_character_of(const string_text_t *text, const int64_t *index,
+                                runtimec_string_view_t write_langtype,
                                 uint8_t *buffer, size_t capacity,
                                 size_t *output_length,
                                 binrwir_execution_exit_t *output_exit) {
@@ -155,10 +156,22 @@ static void string_character_of(const string_text_t *text, const int64_t *index,
     }
     single.count = 1U;
     single.codepoints[0] = text->codepoints[*index];
-    if (string_text_encode_utf8(&single, buffer, capacity, output_length) !=
-        RUNTIMEC_STATUS_SUCCESS) {
+    /*
+     * **按写槽声明的 langtype 编码**，不是恒 UTF-8。
+     *
+     * 结果是一个「单字符字符串」，它的字节形态必须服从槽的类型：`char/utf32`
+     * 槽里放 `'L'` 必须是 4 字节 `4C 00 00 00`，否则下游按 utf32 解时
+     * `size % 4 != 0` 直接判畸形（这正是 0x4C08「两侧 1 vs 4 字节」的根因）。
+     * 而 `char/ascii` 装不下的码点要**失败**，不是截断。
+     */
+    const runtimec_status_t encoded = string_text_encode(
+        write_langtype, &single, buffer, capacity, output_length);
+    if (encoded != RUNTIMEC_STATUS_SUCCESS) {
         *output_length = 0U;
-        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
+        vmbin_handler_fail(output_exit,
+                           encoded == RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY
+                               ? RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY
+                               : RUNTIMEC_STATUS_INVALID,
                            VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
                            output_exit->logical_program_counter);
     }
@@ -167,10 +180,12 @@ static void string_character_of(const string_text_t *text, const int64_t *index,
 /* 逻辑函数：一句话——取出第 i 个码点作为单字符字符串。 */
 static inline void string_character_build(const string_text_t *text,
                                           const int64_t *index,
+                                          runtimec_string_view_t write_langtype,
                                           uint8_t *buffer, size_t capacity,
                                           size_t *output_length,
                                           binrwir_execution_exit_t *output_exit) {
-    string_character_of(text, index, buffer, capacity, output_length, output_exit);
+    string_character_of(text, index, write_langtype, buffer, capacity,
+                        output_length, output_exit);
 }
 
 VMBIN_HANDLER_TEXT_INDEX_CREATE(string_character_handler, string_character_build,
@@ -303,6 +318,7 @@ static void string_set_in_place(const string_text_t *text,
 static void string_set_rebuild(const string_text_t *text,
                                const int64_t *position,
                                const string_text_t *replacement,
+                               runtimec_string_view_t write_langtype,
                                uint8_t *buffer, size_t capacity,
                                size_t *output_length,
                                binrwir_execution_exit_t *output_exit) {
@@ -318,8 +334,11 @@ static void string_set_rebuild(const string_text_t *text,
     }
     rebuilt = *text;
     rebuilt.codepoints[*position] = replacement->codepoints[0];
-    if (string_text_encode_utf8(&rebuilt, buffer, capacity, output_length) !=
-        RUNTIMEC_STATUS_SUCCESS) {
+    /* **按写槽声明的 langtype 编码**：这条分支只在源串非定宽（utf8/ascii）时走，
+     * 而写槽可能声明成 `char/utf32`——恒写 utf8 就会把 1 字节塞进 4 字节槽，
+     * 下游判「不是 4 的倍数」直接畸形。 */
+    if (string_text_encode(write_langtype, &rebuilt, buffer, capacity,
+                           output_length) != RUNTIMEC_STATUS_SUCCESS) {
         *output_length = 0U;
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
                            VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
@@ -338,39 +357,57 @@ static inline void string_set_patch_build(
 /* 逻辑函数（重建路径）：一句话——重建整串并给出新字节。 */
 static inline void string_set_rebuild_build(
     const string_text_t *text, const int64_t *position,
-    const string_text_t *replacement, uint8_t *buffer, size_t capacity,
-    size_t *output_length, binrwir_execution_exit_t *output_exit) {
-    string_set_rebuild(text, position, replacement, buffer, capacity,
-                       output_length, output_exit);
+    const string_text_t *replacement, runtimec_string_view_t write_langtype,
+    uint8_t *buffer, size_t capacity, size_t *output_length,
+    binrwir_execution_exit_t *output_exit) {
+    string_set_rebuild(text, position, replacement, write_langtype, buffer,
+                       capacity, output_length, output_exit);
 }
 
 
 /*
- * 第 i 个码点的**码点值**。**成功才写 `*out`，失败只写 `exit`**。
+ * 首码点；解不出来或空串时**置 exit 并返回 0**（调用方据 `exit.kind` 判成败）。
  *
- * 越界按**码点数**判——与 `char` 同一条判据，与编码无关。
+ * 空串没有首码点：**失败封闭**，不返回一个看起来像码点的哨兵。
  */
-static void string_ordinal_of(const string_text_t *text, const int64_t *index,
-                              int64_t *out,
-                              binrwir_execution_exit_t *output_exit) {
-    if (*index < 0 || (uint64_t)*index >= text->count) {
+static int64_t string_first_codepoint(const vmbin_value_location_t *text,
+                                      runtimec_string_view_t langtype,
+                                      binrwir_execution_exit_t *output_exit) {
+    string_text_t decoded;
+
+    if (string_text_decode(
+            runtimec_bytes_view_make(text->read_bytes, text->size), langtype,
+            &decoded) != RUNTIMEC_STATUS_SUCCESS ||
+        decoded.count == 0U) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                            VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
                            output_exit->logical_program_counter);
-        return;
+        return 0;
     }
-    *out = (int64_t)text->codepoints[*index];
+    return (int64_t)decoded.codepoints[0];
 }
 
-/* 逻辑函数：一句话——取第 i 个码点的数值。 */
-static inline void string_ordinal_build(const string_text_t *text,
-                                        const int64_t *index, int64_t *out,
-                                        binrwir_execution_exit_t *output_exit) {
-    string_ordinal_of(text, index, out, output_exit);
+/*
+ * `string·ord(s)`：**单读参**，取首码点的数值（不是「第 i 个」）。
+ *
+ * 契约以前是错的：它复用了 `VMBIN_HANDLER_TEXT_INDEX_SCALAR`，那个宏硬要求
+ * **2 读 1 写**——而 `string·ord` 只有一个字符串实参。于是每个正确调用都在
+ * 运行期报 `0x4A01 WRONG_ARITY`，把一条**实现错**伪装成**用例错**。
+ *
+ * 裁决依据是参考实现 `runtime/src/rwir_string.c:181` 的 `kvlangBuiltinStringOrd`：
+ * 只取 `in[0]`、返回首码点；带下标的那个是 `string·char(s, i)`，不是这个。
+ *
+ * 逻辑函数签名用 `_UNARY_TEXT_SCALAR` 那一族（文本 + 语言类型 → 标量）：
+ * **自己解码**，不借 `string_ordinal_of` 的「按下标取」，因为这里没有下标。
+ */
+static void string_ordinal_build(const vmbin_value_location_t *text,
+                                 runtimec_string_view_t langtype, int64_t *out,
+                                 binrwir_execution_exit_t *output_exit) {
+    *out = string_first_codepoint(text, langtype, output_exit);
 }
 
-VMBIN_HANDLER_TEXT_INDEX_SCALAR(string_ordinal_handler, string_ordinal_build,
-                                int64_t, int64_t)
+VMBIN_HANDLER_UNARY_TEXT_SCALAR(string_ordinal_handler, string_ordinal_build,
+                                int64_t)
 
 /* 在 haystack 里找 needle 首次出现的**码点下标**；找不到 -1，空 needle 返回 0。 */
 static int64_t string_find_in(const string_text_t *haystack,
@@ -411,7 +448,9 @@ VMBIN_HANDLER_BINARY_TEXT_SCALAR(string_find_handler, string_find_build, int64_t
  * 结果是**码点的一段**，不是字节的一段——`"héllo"[1:3]` 取的是两个码点，
  * 字节边界由编码决定。
  */
-static void string_slice_of(const string_text_t *text, const vmbin_value_location_t *bounds,
+static void string_slice_of(const string_text_t *text,
+                            const vmbin_value_location_t *bounds,
+                            runtimec_string_view_t write_langtype,
                             uint8_t *buffer, size_t capacity,
                             size_t *output_length,
                             binrwir_execution_exit_t *output_exit) {
@@ -437,8 +476,8 @@ static void string_slice_of(const string_text_t *text, const vmbin_value_locatio
     sliced.count = (size_t)(hi - lo);
     memcpy(sliced.codepoints, text->codepoints + lo,
            sliced.count * sizeof(uint32_t));
-    if (string_text_encode_utf8(&sliced, buffer, capacity, output_length) !=
-        RUNTIMEC_STATUS_SUCCESS) {
+    if (string_text_encode(write_langtype, &sliced, buffer, capacity,
+                           output_length) != RUNTIMEC_STATUS_SUCCESS) {
         *output_length = 0U;
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
                            VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
@@ -449,10 +488,12 @@ static void string_slice_of(const string_text_t *text, const vmbin_value_locatio
 /* 逻辑函数：一句话——按码点切一段并编码。 */
 static inline void string_slice_build(const string_text_t *text,
                                       const vmbin_value_location_t *bounds,
+                                      runtimec_string_view_t write_langtype,
                                       uint8_t *buffer, size_t capacity,
                                       size_t *output_length,
                                       binrwir_execution_exit_t *output_exit) {
-    string_slice_of(text, bounds, buffer, capacity, output_length, output_exit);
+    string_slice_of(text, bounds, write_langtype, buffer, capacity,
+                    output_length, output_exit);
 }
 
 
@@ -468,8 +509,10 @@ static inline void string_slice_build(const string_text_t *text,
  * 避免 `INT64_MIN` 取绝对值时溢出。
  */
 static void string_format_of(const vmbin_value_location_t *value_location,
-                             int64_t base, int is_signed, uint8_t *buffer,
-                             size_t capacity, size_t *output_length,
+                             int64_t base, int is_signed,
+                             runtimec_string_view_t write_langtype,
+                             uint8_t *buffer, size_t capacity,
+                             size_t *output_length,
                              binrwir_execution_exit_t *output_exit) {
     char digits[80];
     size_t digit_count = 0U;
@@ -504,8 +547,10 @@ static void string_format_of(const vmbin_value_location_t *value_location,
     while (digit_count > 0U) {
         text.codepoints[text.count++] = (uint32_t)(uint8_t)digits[--digit_count];
     }
-    if (string_text_encode_utf8(&text, buffer, capacity, output_length) !=
-        RUNTIMEC_STATUS_SUCCESS) {
+    /* **按写槽声明的 langtype 编码**：十进制码点全 <= 0x7F 只说明内容窄，
+     * 不说明字节宽度——`char/utf32` 槽要 4 字节/字符。 */
+    if (string_text_encode(write_langtype, &text, buffer, capacity,
+                           output_length) != RUNTIMEC_STATUS_SUCCESS) {
         *output_length = 0U;
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
                            VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
@@ -516,11 +561,12 @@ static void string_format_of(const vmbin_value_location_t *value_location,
 /* 逻辑函数：一句话——把一个整数按进制写成文本。 */
 static inline void string_format_build(const vmbin_value_location_t *value,
                                        int64_t base, int is_signed,
+                                       runtimec_string_view_t write_langtype,
                                        uint8_t *buffer, size_t capacity,
                                        size_t *output_length,
                                        binrwir_execution_exit_t *output_exit) {
-    string_format_of(value, base, is_signed, buffer, capacity, output_length,
-                     output_exit);
+    string_format_of(value, base, is_signed, write_langtype, buffer, capacity,
+                     output_length, output_exit);
 }
 
 

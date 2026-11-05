@@ -150,6 +150,53 @@ typedef struct blocked_entry {
 } blocked_entry_t;
 
 #define MAX_BLOCKED 512
+
+/*
+ * ── 编码期的**能力缺口**白名单 ──────────────────────────────────────
+ *
+ * `blocked` 的定义是「有名字的能力缺口」——本 runtime 没有该能力，等别人补。
+ * 编码期也有这一类：编码器发现某条指令的形态超出本 runtime 能表达的集合，
+ * 于是 `UNSUPPORTED`。**它和「编码成功但含 FOREIGN」是同一件事的两种发生时点**，
+ * 只是前者在编码期就停了、后者留成标记等执行期交接。
+ *
+ * **默认是 fail，不是 blocked。** 判据不能是 `status == UNSUPPORTED`——
+ * UNSUPPORTED 只说明「拒绝了」，不说明「拒绝的理由是能力缺失」。例如
+ * `VMKV_LOCAL_TYPES_DIAG_NOT_WRITTEN`（局部读而未写）也是 UNSUPPORTED，
+ * 但那是**坏程序**，等不到任何人来补——把它记成 blocked 会让一个真 bug 永久
+ * 躺在「等能力」的桶里。
+ *
+ * ⇒ 名单只能靠**证据**加：每一条都要能说出「为什么这是能力缺口而不是坏程序」，
+ * 并且加的时候要有一个能变绿的用例指着它。名单外的诊断码，缺省仍计 fail。
+ */
+typedef struct encoder_gap_code {
+    int64_t code;   /* `error.code`，即 vmkv/encoder.c 的诊断枚举值 */
+    const char *reason;
+} encoder_gap_code_t;
+
+/*
+ * 编号来源：`runtimec/vmkv/encoder.c:21` 的诊断枚举。**该枚举没有「只增不改」
+ * 的承诺**，所以这里不能凭数字记忆——加新条目时回去核一遍那枚举的现值。
+ * 这也是为什么本表要显式写注释而不是用 `>= 某个值` 的区间判断：区间会把
+ * 未来新加的码悄悄放进来，而白名单的价值恰恰在于「每一条都是被看过才进来的」。
+ */
+static const encoder_gap_code_t kEncoderGapCodes[] = {
+    {29, "dynamic member key: layout emits a `base·*k` form this runtime cannot "
+         "encode yet (issue #634)"},
+    {25, "pointer/extension parameter type is not representable from RWIR text "
+         "yet"},
+};
+
+/* 该诊断码是不是声明过的能力缺口；命中返回理由，否则 NULL。 */
+static const char *encoder_gap_reason(int64_t code) {
+    for (size_t ordinal = 0U;
+         ordinal < sizeof(kEncoderGapCodes) / sizeof(kEncoderGapCodes[0]);
+         ++ordinal) {
+        if (kEncoderGapCodes[ordinal].code == code) {
+            return kEncoderGapCodes[ordinal].reason;
+        }
+    }
+    return NULL;
+}
 static blocked_entry_t g_blocked[MAX_BLOCKED];
 static size_t g_blocked_count;
 
@@ -1021,7 +1068,69 @@ typedef struct expectation {
     size_t count;
     /* `// 期望错误: <子串>`；空串表示「没有这一行」，即正向用例。 */
     char expected_error[256];
+    /*
+     * `// 期望阻塞: <原因>`；空串表示「没有这一行」。
+     *
+     * 语义与 `// 期望错误:` **平行但不同**：期望错误是「这个程序该被拒」，
+     * 期望阻塞是「这条跑不起来，而且**原因不在被测程序**——是本 runner / 本
+     * runtime 缺能力」。命中即计 blocked（带原因打印），不进 fail。
+     *
+     * 为什么需要它：`09-debugger` 目录依赖 byteseek stdlib 的 `debugger`，本 runner
+     * 按早先裁决**不装载 stdlib**；`07-lib/multi/lib_b.kv` 是多文件 `loadandrun`
+     * 用例，单文件 runner 跑不了。**补期望头只会让它们变成永远红的用例**——
+     * 那不是修复，是把「运行器缺能力」记成「被测程序有缺陷」。
+     *
+     * 沿用三态词汇（executed / blocked / fail），**不新造第四个「跳过」**：
+     * blocked 的定义本来就是「有名字的能力缺口」。
+     */
+    char expected_block[256];
 } expectation_t;
+
+/*
+ * 该文件是不是**一条用例**：它有 `rwfunc test` 入口吗？
+ *
+ * 判据是**入口函数**，不是文件名。理由：`07-lib` 下的支持文件只声明
+ * `lib` 与 `init`、没有 `test`，`09-debugger` 下的是调试素材（入口是 `loop`
+ * 之类）。它们**本来就不该有期望输出**，计入分母会让「缺期望头」变成一个永远
+ * 消不掉的假失败——分母里混进不是用例的文件，任何通过率都不可信。
+ *
+ * 只看 `rwfunc test` 这一种写法：语料的入口约定就是它（`test.py` 也按它跑）。
+ */
+static bool file_is_case(const char *path) {
+    FILE *file = fopen(path, "rb");
+    if (file == NULL) {
+        return false;
+    }
+    bool found = false;
+    char line[512];
+    while (fgets(line, sizeof(line), file) != NULL) {
+        /* `rwfunc test(` 或 `rwfunc test ()`——名字必须紧接在 `rwfunc` 之后，
+         * 否则 `rwfunc test_helper(` 也会命中。 */
+        const char *cursor = line;
+        while ((cursor = strstr(cursor, "rwfunc")) != NULL) {
+            const char *after = cursor + strlen("rwfunc");
+            while (*after == ' ' || *after == '\t') {
+                after += 1;
+            }
+            if (strncmp(after, "test", 4U) == 0) {
+                const char *tail = after + 4U;
+                while (*tail == ' ' || *tail == '\t') {
+                    tail += 1;
+                }
+                if (*tail == '(') {
+                    found = true;
+                    break;
+                }
+            }
+            cursor = after;
+        }
+        if (found) {
+            break;
+        }
+    }
+    fclose(file);
+    return found;
+}
 
 static void parse_expectations(const char *path, expectation_t *out) {
     memset(out, 0, sizeof(*out));
@@ -1039,6 +1148,18 @@ static void parse_expectations(const char *path, expectation_t *out) {
         /* `// 期望错误: xxx`。先于「期望输出」判定，但两者互不干扰：一个文件要么
          * 是正向（只写期望输出）、要么是负向（只写期望错误），同时写属作者错误，
          * 由 main 里的互斥校验拦下，不在这里替它选一个。 */
+        if (strstr(line, "期望阻塞") != NULL) {
+            char *colon = strchr(line, ':');
+            if (colon != NULL) {
+                char *text = colon + 1;
+                while (*text == ' ') {
+                    text += 1;
+                }
+                snprintf(out->expected_block, sizeof(out->expected_block), "%s",
+                         text);
+                continue;
+            }
+        }
         if (strstr(line, "期望错误") != NULL) {
             char *colon = strchr(line, ':');
             if (colon != NULL) {
@@ -1051,22 +1172,39 @@ static void parse_expectations(const char *path, expectation_t *out) {
                 continue;
             }
         }
-        if (strstr(line, "期望输出") != NULL || strstr(line, "Expected output") != NULL) {
-            char *colon = strchr(line, ':');
-            if (colon != NULL) {
-                char *text = colon + 1;
-                while (*text == ' ') {
-                    text += 1;
+        if (strstr(line, "期望输出") != NULL ||
+            strstr(line, "Expected output") != NULL) {
+            /*
+             * **冒号可选**。`tutorial/test.py:104` 的判据是
+             * `if inline.startswith(":"): inline = inline[1:].strip()`——
+             * 带冒号就剥掉，不带就把 `// 期望输出` 之后当内容。两个 harness
+             * 服务同一套语料，约定必须一致；否则「`// 期望输出` 不带冒号」这种
+             * 合法写法在本 runner 里变成「缺期望头」，是**假失败**。
+             */
+            const char *prefix_end = strstr(line, "期望输出");
+            size_t prefix_size = strlen("期望输出");
+            if (prefix_end == NULL) {
+                prefix_end = strstr(line, "Expected output");
+                prefix_size = strlen("Expected output");
+            }
+            const char *inline_text = prefix_end + prefix_size;
+            while (*inline_text == ' ') {
+                inline_text += 1;
+            }
+            if (*inline_text == ':') {
+                inline_text += 1;
+                while (*inline_text == ' ') {
+                    inline_text += 1;
                 }
-                if (*text != '\0' && out->count < 16U) {
-                    snprintf(out->lines[out->count], 256, "%s", text);
-                    out->count += 1U;
-                    in_block = false;
-                    continue;
-                }
-                in_block = true;
+            }
+            if (*inline_text != '\0' && out->count < 16U) {
+                snprintf(out->lines[out->count], 256, "%s", inline_text);
+                out->count += 1U;
+                in_block = false;
                 continue;
             }
+            in_block = true;
+            continue;
         }
         if (in_block) {
             if (strncmp(line, "//   ", 5) == 0 || strncmp(line, "// \t", 4) == 0) {
@@ -1373,14 +1511,55 @@ int main(int argument_count, char **arguments) {
             (void)case_store_close(&environment);
             continue;
         }
-        if (expects_layout_failure && expectation.count != 0U) {
-            /* 两类期望互斥。同时写说明作者没决定这条用例测什么；替它选一边
-             * 会让另一边永远不被检查。 */
+        /*
+         * **`期望阻塞` 优先于另外两种**（不是三者互斥）。
+         *
+         * 为什么它特殊：`期望输出` / `期望错误` 都在描述「**被测程序**的行为」，
+         * 二者互斥是当然的——一条用例不能既期望跑通又期望被拒。而
+         * `期望阻塞` 描述的是「**本 runner 缺什么能力**」，与程序行为正交。
+         *
+         * 具体场景：`09-debugger/pauses.kv` 本来就写了 `// 期望输出:`——那份
+         * 记录的是「stdlib 接上之后应该输出什么」，是**未来可用的规格**。两条
+         * 共存是对的，删掉期望块反而丢规格。
+         *
+         * 规则：有 `期望阻塞` 就计 blocked，不看另外两个；另两个之间仍互斥。
+         */
+        if (expectation.expected_block[0] == '\0' &&
+            expectation.expected_error[0] != '\0' &&
+            expectation.count != 0U) {
             fprintf(stderr,
-                    "FAIL %s: 同时写了 `期望输出:` 与 `期望错误:` —— 一条用例只能是"
-                    "正向或负向\n",
+                    "FAIL %s: `期望输出` 与 `期望错误` 互斥——一条用例只能是正向"
+                    "或负向\n",
                     cases.paths[index]);
             counts.failed += 1U;
+            (void)case_store_close(&environment);
+            continue;
+        }
+        /*
+         * 声明了阻塞：**必须带非空原因**。
+         *
+         * 空原因的 `// 期望阻塞:` 等于「这条随便怎么都算有缺口」——它会变成一个
+         * 免检标记。原因非空才有分组价值（按原因归类就是能力缺口表）。
+         */
+        if (expectation.expected_block[0] != '\0') {
+            if (g_blocked_count < MAX_BLOCKED) {
+                blocked_entry_t *slot = &g_blocked[g_blocked_count];
+                snprintf(slot->file, sizeof(slot->file), "%s",
+                         cases.paths[index]);
+                slot->pc = 0U;
+                snprintf(slot->operation, sizeof(slot->operation), "declared");
+                g_blocked_count += 1U;
+            }
+            fprintf(stderr, "BLOCKED %s: declared — %s\n", cases.paths[index],
+                    expectation.expected_block);
+            counts.blocked += 1U;
+            (void)case_store_close(&environment);
+            continue;
+        }
+        if (!file_is_case(full)) {
+            /* **不是用例，不进分母**。判据是「有没有 `rwfunc test` 入口」，
+             * 不是文件名——`07-lib` 下的 `lib-` 前缀支持文件、`09-debugger` 下的
+             * 调试素材，它们本来就不该有期望输出。见 `file_is_case` 的注释。 */
             (void)case_store_close(&environment);
             continue;
         }
@@ -1515,8 +1694,45 @@ int main(int argument_count, char **arguments) {
                 components.vmkv_encoder, &encode_request, &program,
                 &encode_error);
             if (encoded != RUNTIMEC_STATUS_SUCCESS) {
-                fprintf(stderr, "FAIL %s: encode failed: %s\n",
-                        cases.paths[index],
+                /*
+                 * 编码失败分两类（判据见 `kEncoderGapCodes` 的注释）：
+                 *   - 诊断码在能力缺口白名单里 ⇒ blocked（本 runtime 没有该能力，
+                 *     等别人补；**带诊断码与键/参数文本**，便于按算子分组）；
+                 *   - 其余一律 fail（含「局部读而未写」这类坏程序）。
+                 *
+                 * 白名单只按 `error.code` 查，不看 `status`——UNSUPPORTED 本身
+                 * 不区分「缺能力」与「程序坏」，用它做判据会把真 bug 藏进 blocked。
+                 */
+                const char *gap_reason =
+                    encoded == RUNTIMEC_STATUS_UNSUPPORTED
+                        ? encoder_gap_reason(encode_error.code)
+                        : NULL;
+
+                if (gap_reason != NULL) {
+                    if (g_blocked_count < MAX_BLOCKED) {
+                        blocked_entry_t *slot = &g_blocked[g_blocked_count];
+                        snprintf(slot->file, sizeof(slot->file), "%s",
+                                 cases.paths[index]);
+                        slot->pc = 0U;
+                        snprintf(slot->operation, sizeof(slot->operation),
+                                 "encode:code=%lld",
+                                 (long long)encode_error.code);
+                        g_blocked_count += 1U;
+                    }
+                    fprintf(stderr,
+                            "BLOCKED %s: encode gap code=%lld — %s\n"
+                            "  encoder message: %s\n",
+                            cases.paths[index], (long long)encode_error.code,
+                            gap_reason,
+                            encode_error.message.data
+                                ? encode_error.message.data
+                                : "");
+                    counts.blocked += 1U;
+                    (void)case_store_close(&environment);
+                    continue;
+                }
+                fprintf(stderr, "FAIL %s: encode failed (code=%lld): %s\n",
+                        cases.paths[index], (long long)encode_error.code,
                         encode_error.message.data ? encode_error.message.data
                                                   : "");
                 counts.failed += 1U;

@@ -594,6 +594,40 @@ static runtimec_status_t vmkv_encoder_take_operand_argument_index(
  * 名字按操作分两种：`call` 的第一个读参是函数名（FUNCTION），其余是帧局部变量名
  * （LOCAL）；两者都只把名字登进符号池，`/lib/` 前缀由 vmbin 拼。
  */
+/*
+ * 动态成员键的诊断消息**必须带实际键文本**。
+ *
+ * 只写一个字面量 `` `base·*k` `` 的话，下一个人要知道「是哪条键」得开 gdb——
+ * 而这条判据拦下来的恰恰是 layout 脱糖出来的临时键（`data·*_8`、`names·*_16`），
+ * 名字里带循环临时变量，**不打开看根本猜不到**。
+ *
+ * 键是 `runtimec_key_view_t`（data + size），**不是 NUL 结尾**：按 size 截断。
+ */
+static runtimec_status_t vmkv_encoder_dynamic_member_fail(
+    runtimec_error_t *error, runtimec_key_view_t key,
+    runtimec_program_counter_t logical_program_counter) {
+    static _Thread_local char message[512];
+    static const char prefix[] =
+        "vmkv encoder: dynamic member key '";
+    static const char suffix[] =
+        "' is not representable in BinRWIR; the key must be evaluated at run "
+        "time, which no reference kind models yet";
+    const size_t prefix_size = sizeof(prefix) - 1U;
+    const size_t suffix_size = sizeof(suffix) - 1U;
+    const size_t key_size =
+        key.size < sizeof(message) - prefix_size - suffix_size - 1U
+            ? key.size
+            : sizeof(message) - prefix_size - suffix_size - 1U;
+
+    memcpy(message, prefix, prefix_size);
+    memcpy(message + prefix_size, key.data, key_size);
+    memcpy(message + prefix_size + key_size, suffix, suffix_size);
+    message[prefix_size + key_size + suffix_size] = '\0';
+    return vmkv_encoder_fail(error, RUNTIMEC_STATUS_UNSUPPORTED,
+                             VMKV_ENCODER_DIAG_DYNAMIC_KEY, message,
+                             logical_program_counter);
+}
+
 static runtimec_status_t vmkv_encoder_map_argument(
     const vmkv_encode_request_t *request, binrwir_program_builder_t *builder,
     const vmkv_local_types_t *local_types, vmkv_encode_function_t *function,
@@ -655,6 +689,22 @@ static runtimec_status_t vmkv_encoder_map_argument(
             error, RUNTIMEC_STATUS_UNSUPPORTED, VMKV_ENCODER_DIAG_DYNAMIC_KEY,
             "vmkv encoder: framed slot expression is not representable",
             logical_program_counter);
+    }
+    /*
+     * 动态成员键 `base·*k`：**失败封闭，不许字面化**。
+     *
+     * 它必须在登记符号**之前**拦下——一旦写成符号池条目，写和读就用同一个
+     * 错误键，整条链上再也看不出「键取错了」（`println(m·a)` 得 0，而同写法的
+     * `println(m·*k)` 得 10，即 p1 说的「以奇怪的方式成功」）。
+     *
+     * 三种「以 `*` 出现」的形态在这里互不重叠：
+     *   `*[0,±k]` 形参引用 —— 上面已经 return；
+     *   `*[d,±k]` 帧坐标表达式 —— 下面第二支自己拦（以 `*` 开头）；
+     *   `base·*k` 动态成员键 —— 本支拦（以 `·*` 出现，不在开头）。
+     */
+    if (vmkv_rwir_key_is_dynamic_member(source_argument->key)) {
+        return vmkv_encoder_dynamic_member_fail(
+            error, source_argument->key, logical_program_counter);
     }
     /* 名字：调用目标是函数名，其余是帧局部变量名。两者都只登名字进符号池。 */
     const runtimec_string_view_t name = runtimec_string_view_make(

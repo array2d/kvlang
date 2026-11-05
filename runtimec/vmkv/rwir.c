@@ -9,6 +9,8 @@
 
 #include "vmkv/rwir.h"
 
+#include "binrwir/program.h"
+
 #include <string.h>
 
 #include "contract/kvspace_access.h"
@@ -59,22 +61,43 @@ static bool vmkv_rwir_langtype_is(const vmkv_source_slot_t *slot,
  * 从裸 body 取算子名。与下面 `vmkv_rwir_read_opcode` 共用同一套布局判断，
  * 只是不要求 `vmkv_source_slot_t`——上层（engine）手里只有读回来的字节。
  */
-bool vmkv_rwir_key_is_member(runtimec_key_view_t key) {
-    /*
-     * `·` 是 U+00B7，UTF-8 两字节 `0xC2 0xB7`。**必须按完整序列匹配**：
-     * 只判 `0xC2` 会把任何以它开头的其他字符也当成成员符。
-     */
+/*
+ * 键文本里是否含**动态成员键**：完整的 `·`（U+00B7，两字节 `0xC2 0xB7`）
+ * **紧跟** `*`（一字节）。
+ *
+ * **为什么必须按完整三字节序列判**：与 `vmkv_rwir_key_is_member` 同一条原则——
+ * 只判首字节会把别的以 `0xC2` 开头的字符也当成成员符；只判 `·` 存在则会把
+ * 静态成员 `m·x` 也拦下。
+ *
+ * **为什么这条判据存在**（issue #634 / `specification/dynamic-key.md` §六.1）：
+ * 源码 `m·*k` 的 `*k` 要**求值**后取成员键，但 BinRWIR 没有「这段键运行期求值」
+ * 的表示。此前编码器把它当帧内局部名原样登记，于是写和读都落在名为 `m·*k`
+ * 的静态键上——**同写法自洽、换写法暴露**（`println(m·a)` 得 0）。那正是 p1
+ * 禁止的「以奇怪的方式成功」。失败封闭至少让它变成**有名有姓的能力缺口**。
+ *
+ * 只拦成员键的这一形态；以 `*` 开头的帧坐标表达式有自己的分支，形参引用
+ * `*[0,±k]` 在此前已经 return，三者互不重叠。
+ */
+bool vmkv_rwir_key_is_dynamic_member(runtimec_key_view_t key) {
     static const char separator[] = "\xC2\xB7";
-    if (key.data == NULL || key.size < 2U) {
+    if (key.data == NULL || key.size < 3U) {
         return false;
     }
-    for (size_t offset = 0U; offset + 2U <= key.size; ++offset) {
+    for (size_t offset = 0U; offset + 3U <= key.size; ++offset) {
         if (key.data[offset] == separator[0] &&
-            key.data[offset + 1U] == separator[1]) {
+            key.data[offset + 1U] == separator[1] &&
+            key.data[offset + 2U] == '*') {
             return true;
         }
     }
     return false;
+}
+
+bool vmkv_rwir_key_is_member(runtimec_key_view_t key) {
+    /* **转调 binrwir 的唯一定义点**：vmkv 依赖 binrwir，反向依赖不存在。
+     * 这里再写一份扫描就是「同一事实两个来源」，两份迟早漂。 */
+    return binrwir_symbol_name_is_member(
+        runtimec_string_view_make(key.data, key.size));
 }
 
 runtimec_status_t vmkv_rwir_operation_name_from_wire(

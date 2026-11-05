@@ -126,7 +126,21 @@ FLOAT64 = type_set("float64")
 # 理由：这份清单已经是一份「类型表」。往这里加名字，等于在 layout 之外再养一份会漂移的
 # 类型事实源——今天已经在多处栽过同一个坑（两份 head 实现、两份签名表、两份 wire 常量）。
 # 加名字看起来是一行，实质是给漂移开一个新落点。
-SIGNATURE_LANGTYPES = ("time", "time/duration", "int64", "uint64", "bool")
+# 本表是「native 安装签名里允许出现哪些 langtype」的白名单。
+#
+# **它必须与 layout 的声明解析器接受面一致**——`char/utf8` 就是漂过的那一格：
+# 白名单原本只有前五项，而 layout 早已接受 `char/utf8`（实测
+# `rwir t·c(*char/utf8 $k) -> (*char/utf8 $v)` 经 `kvlanglayout vet` 返回 `ok`），
+# 于是 `vthread·create` 的返回类型无处可写。加这一项的依据就是那条实测。
+#
+# **按需给，不按「可能有用」给**：`char/utf32` / `char/ascii` / `[]char/...` 现在
+# 没有使用者，一个都不加。将来真用到再加，每次都带 layout 实测证据。
+#
+# **已知缺口（不在本文件解）**：本表是「layout 接受哪些 langtype」的**第二份名单**，
+# 它的存在本身就会漂。正确形态是从 layout 的同一张表派生，或至少有一条测试断言
+# 「本表 ⊆ layout 接受面」。已记入「同一事实两个来源」议题。
+SIGNATURE_LANGTYPES = ("time", "time/duration", "int64", "uint64", "bool",
+                       "char/utf8")
 # 类型串直接嵌进声明文本：逗号会切断参数表、竖线与引号会改变语义。这些字符一出现，
 # 生成物就会被 layout 解析成另一件事，而肉眼看着仍然像一条合法声明。
 FORBIDDEN_LANGTYPE_CHARACTERS = (",", "|", '"', "'", " ", "\t", "(", ")")
@@ -441,12 +455,27 @@ FAMILY_ROWS = (
     FamilyRow("kvspace", "extindex", 0x017A, "kvspace-extension-index"),
     FamilyRow("kvspace", "rmindexext", 0x017B, "kvspace-extension-index"),
     FamilyRow("kvspace", "watch", 0x017C, "kvspace-watch-blocking"),
-    # vthread
-    FamilyRow("vthread", "create", 0x0180, "vthread-control-opcodes"),
-    FamilyRow("vthread", "run", 0x0181, "vthread-control-opcodes"),
-    FamilyRow("vthread", "call", 0x0182, "vthread-control-opcodes"),
-    FamilyRow("vthread", "sleep", 0x0183, "vthread-control-opcodes"),
-    FamilyRow("vthread", "setstatus", 0x0184, "vthread-control-opcodes"),
+    # vthread：签名来自参考实现 `runtime/src/rwir_vthread.c`（**逐函数核对，不是推断**）。
+    #   每个 `kvlangBuiltinVthread*` 开头都有一句
+    #   `kvlangBuiltinReadInputs(f, in, 1)` + 类型检查，下面逐个对应：
+    #     create    :12-14  n<1 || !IsCharKind ⇒ "requires 1 string arg"；产 vid（char/utf8）
+    #     run       :29-31  同上（"requires 1 string (vid) arg"）；不产值
+    #     call      :65-67  同上（"requires 1 string arg"）；不产值
+    #     setstatus :105-107 同上（"requires 1 string arg"）；不产值
+    #     sleep     :79-81  只判 n<1，取 `kvlangScalarI64` ⇒ 1 个 duration（不是 char）
+    #   缺 `read_langtypes` 时该行不声明读参，layout 会以为它不收参数；
+    #   缺 `write_langtypes` 时 layout 拿不到返回类型（`15-vthread/*` 的
+    #   「local 'vid' 无类型」就是这个）。
+    FamilyRow("vthread", "create", 0x0180, "vthread-control-opcodes",
+              read_langtypes="char/utf8", write_langtypes="char/utf8"),
+    FamilyRow("vthread", "run", 0x0181, "vthread-control-opcodes",
+              read_langtypes="char/utf8"),
+    FamilyRow("vthread", "call", 0x0182, "vthread-control-opcodes",
+              read_langtypes="char/utf8"),
+    FamilyRow("vthread", "sleep", 0x0183, "vthread-control-opcodes",
+              read_langtypes="time/duration"),
+    FamilyRow("vthread", "setstatus", 0x0184, "vthread-control-opcodes",
+              read_langtypes="char/utf8"),
     # random：签名来自 runtime/src/rwir_random.c 的实现（不是推断）。
     #   uint64()/int63() 无读参；intn(int64) 取模后仍按 uint64 产出。
     FamilyRow("random", "uint64", 0x0190, "random-source-and-range",
@@ -808,7 +837,7 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
         for langtype in row.read_langtypes + row.write_langtypes:
             if langtype not in SIGNATURE_LANGTYPES:
                 findings.append(
-                    f"{row.identifier}: {bare!r} is not a langtype layout accepts")
+                    f"{row.identifier}: {langtype!r} is not a langtype layout accepts")
             for character in FORBIDDEN_LANGTYPE_CHARACTERS:
                 if character in langtype:
                     findings.append(

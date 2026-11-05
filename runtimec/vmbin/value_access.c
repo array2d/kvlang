@@ -29,6 +29,81 @@ static runtimec_status_t vmbin_value_access_fail(
     return status;
 }
 
+/*
+ * 成员键的地址解析：**每次按 key 现解析**，不查也不写绑定表
+ * （`decision-member-slot-binding.md` §三）。
+ *
+ * 三步：拼 `<frame_path>/<符号名>` → 向 host 现解析 XValue 基址 → 取 body 地址。
+ * key 不存在是**真实失败**（不是「空值」）：成员没被写过就读，与「局部读而未写」
+ * 同一类，报 `UNBOUND_SLOT` 并把 key 文本写进消息——只报「槽没绑」的话，
+ * 下一个人不知道该是哪个 key。
+ */
+static runtimec_status_t vmbin_value_access_locate_member(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument,
+    runtimec_string_view_t member_name,
+    vmbin_value_location_t *output_location, runtimec_error_t *error) {
+    char key_text[512];
+    runtimec_xvalue_address_t xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+    uint64_t generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
+    runtimec_status_t status;
+
+    (void)argument;
+    if (frame->kvspace_access == NULL) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT,
+            "frame carries no kvspace access for a member key");
+    }
+    status = vmbin_frame_target_key(frame, argument, key_text,
+                                    sizeof(key_text));
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "member key cannot be built");
+    }
+    status = runtimec_kvspace_access_resolve_frame_xvalue_address(
+        frame->kvspace_access, &frame->snapshot,
+        runtimec_key_view_from_c_string(key_text), &xvalue_address,
+        &generation, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS ||
+        xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE) {
+        static _Thread_local char message[512];
+        static const char prefix[] =
+            "member key is not present at execution time: ";
+        const size_t prefix_size = sizeof(prefix) - 1U;
+        const size_t key_size = strlen(key_text);
+        const size_t bounded =
+            key_size < sizeof(message) - prefix_size - 1U
+                ? key_size
+                : sizeof(message) - prefix_size - 1U;
+
+        memcpy(message, prefix, prefix_size);
+        memcpy(message + prefix_size, key_text, bounded);
+        message[prefix_size + bounded] = '\0';
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT, (const char *)message);
+    }
+    const runtimec_value_body_address_t body_address =
+        runtimec_xvalue_body_address(xvalue_address);
+    if (body_address == RUNTIMEC_VALUE_BODY_ADDRESS_NONE) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT,
+            "member address has no value body");
+    }
+    output_location->read_bytes = (const uint8_t *)(uintptr_t)body_address;
+    /* **写视图也给**：容器已存在时写成员是合法的（§五反向对照）。容器不存在
+     * 时上面的解析已经失败，走不到这里。 */
+    output_location->write_bytes = (uint8_t *)(uintptr_t)body_address;
+    output_location->size = (size_t)runtimec_value_body_length(body_address);
+    output_location->is_whole_wire = false;
+    (void)member_name;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 runtimec_status_t vmbin_value_access_locate(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument,
@@ -142,6 +217,28 @@ runtimec_status_t vmbin_value_access_locate(
         const binrwir_frame_binding_t *binding = NULL;
         uint16_t binding_slot = BINRWIR_FRAME_BINDING_SLOT_NONE;
 
+        /*
+         * **成员键每次按 key 现解析，不走绑定表**
+         * （`decision-member-slot-binding.md` §四.3）。
+         *
+         * 成员是容器值内部的存储，容器会被整容器写**整体重建**，地址永不稳定；
+         * 绑死地址就会读到已不存在的 box。所以这里：
+         *   拼 `<frame_path>/<符号名>` → 现解析 XValue 基址 → 取 body 地址。
+         * key 不存在 ⇒ `UNBOUND_SLOT`，**消息里带 key 文本**（否则下一个人只看到
+         * 「槽没绑」，不知道该是哪个 key）。
+         */
+        {
+            runtimec_string_view_t member_name;
+            runtimec_string_view_t member_langtype;
+            if (binrwir_program_get_symbol(frame->program, argument->slot,
+                                           &member_name, &member_langtype) ==
+                    RUNTIMEC_STATUS_SUCCESS &&
+                binrwir_symbol_name_is_member(member_name)) {
+                return vmbin_value_access_locate_member(frame, argument,
+                                                        member_name,
+                                                        output_location, error);
+            }
+        }
         if (frame->bindings == NULL ||
             vmbin_frame_slot_of_argument(frame->program, argument,
                                          &binding_slot) !=
@@ -322,6 +419,80 @@ runtimec_status_t vmbin_value_access_read_body(
  *
  * 已绑定 ⇒ 什么都不做，维持「与当前值体等长」的直写规则，不重复创建。
  */
+/*
+ * 成员键的创建：**按 key 写一次，不绑定**（`decision-member-slot-binding.md` §四.3）。
+ *
+ * 与局部槽的差别只有一点，但那一点是根本的：
+ *   局部槽 —— 建 key + **绑定地址**（地址在帧生命周期内稳定）；
+ *   成员键 —— 只建 key，**永不绑定**（容器可被整体重建，地址不稳定）。
+ *
+ * 容器不存在时不在这里兜底创建：成员写要求 memhead 存在，kvspace 会硬失败——
+ * 那是对的（「往一个不存在的容器里写成员」是真错误，不是缺能力）。
+ */
+static runtimec_status_t vmbin_value_access_create_member(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, runtimec_bytes_view_t value,
+    runtimec_error_t *error) {
+    runtimec_string_view_t declared;
+    char langtype_text[256];
+    char key_text[512];
+    char message[256];
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    runtimec_status_t status;
+
+    status = vmbin_value_access_langtype(frame, argument, &declared, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    if (declared.size + 1U > sizeof(langtype_text)) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE,
+            "declared langtype does not fit the member slot");
+    }
+    memcpy(langtype_text, declared.data, declared.size);
+    langtype_text[declared.size] = '\0';
+    status = vmbin_frame_target_key(frame, argument, key_text,
+                                    sizeof(key_text));
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "member key cannot be built");
+    }
+    /*
+     * **按写入值建 wire**，不是空 body。这一点与非成员局部那条完全一致
+     * （`create_unbound_local` 也是 `NewSlack(value.data, value.size, …)`）：
+     * 建 key 只是「这个位置存在」，body 必须当场就是值本身——否则紧接着的
+     * `write_body` 会拿一个 0 长 body 去 memcpy 一个 int64，得到畸形。
+     *
+     * langtype 用**声明类型**（`declared`），不用值自带的：槽类型是成员类型，
+     * 值的 langtype 是它自己的。
+     */
+    if (kvspaceXvalueHeadNewSlack(value.data, (uint64_t)value.size,
+                                  (uint64_t)value.size, langtype_text, &wire,
+                                  &wire_size) != 0 ||
+        wire == NULL || wire_size > UINT32_MAX) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_ERROR,
+            VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
+            "member value cannot be encoded as an XValue");
+    }
+    message[0] = '\0';
+    const int set_status = kvspaceSetValue(frame->kvspace_handle, key_text, wire,
+                                           (uint32_t)wire_size, message,
+                                           sizeof(message));
+    free(wire);
+    if (set_status != 0) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_ERROR,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "member key could not be created in storage");
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 static runtimec_status_t vmbin_value_access_create_unbound_local(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
@@ -342,6 +513,24 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
     }
     if (frame->bindings == NULL || frame->kvspace_access == NULL) {
         return RUNTIMEC_STATUS_SUCCESS;
+    }
+    /*
+     * **成员键：建 key，但不绑定**（`decision-member-slot-binding.md` §四.3）。
+     *
+     * 与 `locate` 的成员分支同一条判据（`binrwir_symbol_name_is_member`）：
+     * 成员不拥有稳定地址，所以「创建」这件事就是一次 `SetValue`，**没有第二步**。
+     * 走到下面的绑定逻辑会给它一个注定失效的地址——那正是本裁决要消灭的形态。
+     */
+    {
+        runtimec_string_view_t member_name;
+        runtimec_string_view_t member_langtype;
+        if (binrwir_program_get_symbol(frame->program, argument->slot,
+                                       &member_name, &member_langtype) ==
+                RUNTIMEC_STATUS_SUCCESS &&
+            binrwir_symbol_name_is_member(member_name)) {
+            return vmbin_value_access_create_member(frame, argument,
+                                                     value, error);
+        }
     }
     if (vmbin_frame_slot_of_argument(frame->program, argument, &binding_slot) !=
         RUNTIMEC_STATUS_SUCCESS) {
@@ -418,6 +607,8 @@ runtimec_status_t vmbin_value_access_write_body(
             VMBIN_VALUE_ACCESS_DIAG_LITERAL_IS_READ_ONLY,
             "a literal is not a writable location");
     }
+    /* **定宽路径一字不动**：size 比对与 memcpy 都保留——它是快路径，也是
+     * 「写入宽度必须与声明一致」这道检查的唯一所在。 */
     if (value.size != location.size) {
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_ERROR,
@@ -652,11 +843,38 @@ runtimec_status_t vmbin_value_access_bind_write_target(
     if (argument->reference_kind == BINRWIR_REFERENCE_STATIC) {
         return RUNTIMEC_STATUS_SUCCESS;
     }
-    if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL) {
+    /*
+     * **成员键不绑**（`decision-member-slot-binding.md` §四.3）：与 STATIC 同理，
+     * 该类本来就没有绑定这一步——成员地址每次按 key 现解析，绑死就会读到容器
+     * 整体重建后已不存在的旧 box。
+     *
+     * 与 `locate` / `create_unbound_local` 用**同一个判据**，任何一处自己再扫
+     * 字节就是第二套定义。
+     */
+    if (argument->reference_kind == BINRWIR_REFERENCE_LOCAL) {
+        runtimec_string_view_t member_name;
+        runtimec_string_view_t member_langtype;
+        if (binrwir_program_get_symbol(frame->program, argument->slot,
+                                       &member_name, &member_langtype) ==
+                RUNTIMEC_STATUS_SUCCESS &&
+            binrwir_symbol_name_is_member(member_name)) {
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+    }
+    /*
+     * `PARAMETER_WRITE` 同样需要重绑：整值写会把 wire 换到新地址，调用方那一侧
+     * 的绑定表条目指向旧 box，不刷新就会「写完接着读还是旧值」。
+     *
+     * 判据用 `vmbin_frame_slot_of_argument`——它对 LOCAL 与两种 PARAMETER 都给出
+     * 绑定槽号（`vmbin/frame_slot.c` 的分区），其余种类（LITERAL / STATIC /
+     * FUNCTION）本来就没有绑定这一步。
+     */
+    if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL &&
+        argument->reference_kind != BINRWIR_REFERENCE_PARAMETER_WRITE) {
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_INVALID,
             VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE,
-            "only local slots are bound after creation");
+            "only local and parameter-write slots are bound after creation");
     }
     if (frame->snapshot_generation == BINRWIR_FRAME_BINDING_GENERATION_NONE) {
         return vmbin_value_access_fail(

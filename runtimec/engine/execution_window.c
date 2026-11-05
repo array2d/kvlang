@@ -227,10 +227,10 @@ static runtimec_status_t runtimec_execution_window_materialize_argument(
          * 而 `literal_bytes` 正是那个形状（`binrwir/argument.h` 的 LITERAL 约定）。 */
         if (runtimec_kvspace_access_write(
                 host, snapshot,
-                        runtimec_key_view_make(scratch, strlen(scratch)),
-                        runtimec_bytes_view_make(description->literal_bytes.data,
-                                                 description->literal_bytes.size),
-                        error) != RUNTIMEC_STATUS_SUCCESS) {
+                runtimec_key_view_make(scratch, strlen(scratch)),
+                runtimec_bytes_view_make(description->literal_bytes.data,
+                                         description->literal_bytes.size),
+                error) != RUNTIMEC_STATUS_SUCCESS) {
             *output_detail =
                 RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_MATERIALIZE_FAILED;
             return RUNTIMEC_STATUS_INVALID;
@@ -626,6 +626,23 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
          * 在 `·new` 之前读它 ⇒ 绑定表里没有 ⇒ `UNBOUND_SLOT` 硬错。这是正确
          * 行为，不为它加兜底。
          */
+        /*
+         * **成员键不建、不绑**（`decision-member-slot-binding.md` §四.2）。
+         *
+         * 成员是**容器值内部的存储**：容器可被 `·new` 或任何整容器写**整体重建**
+         * （`struct·new` 的 `kvspaceCpTree` 就是先删目的子树再克隆），它的地址
+         * 永不稳定。帧准备给它建零值并绑死地址，就是在绑定表里留一具已不存在的
+         * box——写侧按 key 写对了，读侧却读那个旧地址，得到 0。
+         *
+         * `fs://` 后端更早暴露：成员写要求 memhead（容器 base）存在，而帧准备
+         * 阶段容器还没被 `·new` 建出来 ⇒ 整帧准备失败。
+         *
+         * 判据是「它是不是一段路径」（`binrwir_symbol_name_is_member`），
+         * 不是「谁声明的」。
+         */
+        if (binrwir_symbol_name_is_member(name)) {
+            continue;
+        }
         if (!runtimec_kvspace_access_langtype_has_fixed_zero_width(langtype)) {
             continue;
         }

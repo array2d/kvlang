@@ -80,7 +80,20 @@ bool string_text_decode_ascii(const uint8_t *bytes, size_t size,
  */
 bool string_text_encoding_is_fixed_width(runtimec_string_view_t langtype);
 
-/* 码点序列 → UTF-8 字节。 */
+/*
+ * 码点序列 → **按 langtype 指定编码**的字节。这是「值的字节形态服从写槽声明的
+ * langtype」这条规则的唯一落点（char·char / slice / canonicalize / formatint /
+ * concat 全部走它）。
+ *
+ * 三种编码的差别是形状不是内容：utf32 每码点 4 字节定宽、utf8 变长、ascii 每码点
+ * 1 字节且 > 0x7F 失败封闭（不截断）。langtype 不是字符种类之一 ⇒ INVALID。
+ */
+runtimec_status_t string_text_encode(runtimec_string_view_t langtype,
+                                     const string_text_t *text,
+                                     uint8_t *output, size_t capacity,
+                                     size_t *output_size);
+
+/* 码点序列 → UTF-8 字节。只在「结果恒 UTF-8」的场合直接用。 */
 runtimec_status_t string_text_encode_utf8(const string_text_t *text,
                                           uint8_t *output, size_t capacity,
                                           size_t *output_size);

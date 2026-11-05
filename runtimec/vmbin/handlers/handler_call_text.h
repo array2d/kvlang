@@ -506,10 +506,21 @@ static inline void vmbin_handler_fail_decode(
                                       instruction->source_logical_program_counter);\
             return RUNTIMEC_STATUS_ERROR;                                          \
         }                                                                          \
+        /* 写槽声明的 langtype：结果的字节形态服从它（A 裁决）。 */                \
+        runtimec_string_view_t write_langtype_;                                    \
+        vmbin_handler_status_ = vmbin_value_access_langtype(                       \
+            frame, &instruction->write_arguments.data[0], &write_langtype_,        \
+            &vmbin_handler_error_);                                                \
+        if (vmbin_handler_status_ != RUNTIMEC_STATUS_SUCCESS) {                    \
+            vmbin_handler_fail(output_exit, vmbin_handler_status_,                 \
+                               VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,              \
+                               instruction->source_logical_program_counter);       \
+            return RUNTIMEC_STATUS_ERROR;                                          \
+        }                                                                          \
         function(&text_,                                                          \
                  (const index_type *)(const void *)index_position_.read_bytes,     \
-                 result_bytes_, sizeof(result_bytes_), &result_length_,            \
-                 output_exit);                                                     \
+                 write_langtype_, result_bytes_, sizeof(result_bytes_),            \
+                 &result_length_, output_exit);                                    \
         return vmbin_handler_write_new_value(frame, instruction, result_bytes_,    \
                                              result_length_, output_exit);         \
     }
@@ -555,8 +566,25 @@ static inline void vmbin_handler_fail_decode(
                                   instruction);                                    \
             memcpy(&base_, base_position_.read_bytes, sizeof(base_));              \
         }                                                                          \
-        function(&value_position_, base_, (is_signed_value), result_bytes_,        \
-                 sizeof(result_bytes_), &result_length_, output_exit);             \
+        /* 写槽声明的 langtype：结果的字节形态服从它（A 裁决）。               \
+         * 十进制码点全 <= 0x7F 只说明内容窄，不说明字节宽度。 */                 \
+        runtimec_string_view_t write_langtype_;                                    \
+        {                                                                          \
+            runtimec_error_t langtype_error_;                                      \
+            runtimec_error_reset(&langtype_error_);                                \
+            if (vmbin_value_access_langtype(                                       \
+                    frame, &instruction->write_arguments.data[0],                  \
+                    &write_langtype_, &langtype_error_) !=                             \
+                RUNTIMEC_STATUS_SUCCESS) {                                         \
+                vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,           \
+                                   VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,          \
+                                   instruction->source_logical_program_counter);   \
+                return RUNTIMEC_STATUS_ERROR;                                      \
+            }                                                                      \
+        }                                                                          \
+        function(&value_position_, base_, (is_signed_value), write_langtype_,      \
+                 result_bytes_, sizeof(result_bytes_), &result_length_,            \
+                 output_exit);                                                     \
         return vmbin_handler_write_new_value(frame, instruction, result_bytes_,    \
                                              result_length_, output_exit);         \
     }
@@ -614,8 +642,19 @@ static inline void vmbin_handler_fail_decode(
                                       instruction->source_logical_program_counter);\
             return RUNTIMEC_STATUS_ERROR;                                          \
         }                                                                          \
-        function(&text_, bounds_, result_bytes_, sizeof(result_bytes_),            \
-                 &result_length_, output_exit);                                    \
+        /* 写槽声明的 langtype：结果的字节形态服从它（A 裁决）。 */                \
+        runtimec_string_view_t write_langtype_;                                    \
+        vmbin_handler_status_ = vmbin_value_access_langtype(                       \
+            frame, &instruction->write_arguments.data[0], &write_langtype_,        \
+            &vmbin_handler_error_);                                                \
+        if (vmbin_handler_status_ != RUNTIMEC_STATUS_SUCCESS) {                    \
+            vmbin_handler_fail(output_exit, vmbin_handler_status_,                 \
+                               VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,              \
+                               instruction->source_logical_program_counter);       \
+            return RUNTIMEC_STATUS_ERROR;                                          \
+        }                                                                          \
+        function(&text_, bounds_, write_langtype_, result_bytes_,                  \
+                 sizeof(result_bytes_), &result_length_, output_exit);             \
         return vmbin_handler_write_new_value(frame, instruction, result_bytes_,    \
                                              result_length_, output_exit);         \
     }
@@ -695,6 +734,17 @@ static inline void vmbin_handler_fail_decode(
                                       instruction->source_logical_program_counter);\
             return RUNTIMEC_STATUS_ERROR;                                          \
         }                                                                          \
+        /* 写槽声明的 langtype：结果的字节形态服从它（A 裁决）。 */                \
+        runtimec_string_view_t write_langtype_;                                    \
+        vmbin_handler_status_ = vmbin_value_access_langtype(                       \
+            frame, &instruction->write_arguments.data[0], &write_langtype_,        \
+            &vmbin_handler_error_);                                                \
+        if (vmbin_handler_status_ != RUNTIMEC_STATUS_SUCCESS) {                    \
+            vmbin_handler_fail(output_exit, vmbin_handler_status_,                 \
+                               VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,              \
+                               instruction->source_logical_program_counter);       \
+            return RUNTIMEC_STATUS_ERROR;                                          \
+        }                                                                          \
         /* 分岔只此一处：定宽的走 patch，变长的重建整串。 */                       \
         if (string_text_encoding_is_fixed_width(text_langtype_)) {                 \
             VMBIN_HANDLER_LOCATE_WRITE(frame, instruction, 0U, &write_position_,   \
@@ -705,8 +755,9 @@ static inline void vmbin_handler_fail_decode(
                        ? output_exit->status                                       \
                        : RUNTIMEC_STATUS_SUCCESS;                                  \
         }                                                                          \
-        rebuild_function(&text_, &position_, &replacement_, rebuilt_bytes_,        \
-                         sizeof(rebuilt_bytes_), &rebuilt_length_, output_exit);   \
+        rebuild_function(&text_, &position_, &replacement_, write_langtype_,      \
+                         rebuilt_bytes_, sizeof(rebuilt_bytes_),                   \
+                         &rebuilt_length_, output_exit);                           \
         if (output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR) {                   \
             return output_exit->status;                                            \
         }                                                                          \

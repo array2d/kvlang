@@ -23,6 +23,23 @@ fn is_string_kind(t: &str) -> bool {
     t.contains("char")
 }
 
+/// 该类型能否与 `None` 比较（spec `03-类型系统/16-ptr`）。
+///
+/// **唯一判据，code.rs 与 lower.rs 都调这一份**。接受两类：
+///   - 指针值 `*T`（`*` 是传递方式前缀，它的槽可能没有值）；
+///   - structref `/lib/X`（结构体引用本身即指针值，同样可判空）。
+///
+/// **不接受 `bool` 与 mapexpr `k·v`**。曾经这里是「宽表」（`bool` / `*` / `/` / 含 `·`），
+/// 那份宽表有 `bool` 但没有 spec 背书：spec 说非指针判空需要 `nonnull` / `nonnull·not`
+/// 能力行，**尚未实现**；mapexpr 只有 lower 自己的记录，放行而运行时不检查，结果是
+/// 「永远不等于 None」的静默错误。**以 spec 为准，不以本地宽表为准。**
+///
+/// 这是**能力缺失**而不是语言规定：spec 明说存在性判定本应对任意类型成立，
+/// 在 `nonnull` 落地前先在 layout 期报错，不得据此把合法代码改掉。
+pub fn is_none_comparable(t: &str) -> bool {
+    !t.is_empty() && (t.starts_with('*') || t.starts_with('/'))
+}
+
 /// 值类型 `value` 是否匹配声明表达式 `decl`（支持 `a|b|c` 有限 union）。
 /// 只用于可证明的实参（字面量 / 已声明变量）；union 值要求每个成员都命中等。
 pub fn value_matches(decl: &str, value: &str) -> bool {
@@ -530,8 +547,103 @@ pub fn sig_lookup<'a>(sigs: &'a SigTable, op: &str) -> Option<&'a ast::FuncSig> 
 
 /// 将函数体中 if/while 控制流降级为 ScopeStmt + br/goto，展开复合表达式。
 /// Parser reports invalid control flow with source positions; this falls back to `Err` without panicking.
+/*
+ * 字符串下标 `s[i]` → `string·char(s, i)`。
+ *
+ * **为什么必须在 lower 里改判，不能在 parser 里定**：parser 看不到类型，它把每个
+ * `[i]` 一律降成 `compactarray·at`。而 `compactarray·at` 的语义是「定宽数组按
+ * **元素大小**乘下标」——字符串不是这个模型：`char/utf8` 是 1–4 字节/字符，
+ * 「元素大小」对它根本不成立，运行时也确实没有「按序号取第 i 个 UTF-8 字符」的
+ * 能力（要取必须扫码点）。曾经为此给 layout 的 `container_elem` 加过
+ * `char/<enc> → char/<enc>` 一格，结果是**能编码、跑到一半 `0x4A02` 失败**——
+ * 比编码期就挡住更晚发现，所以那一格已删。
+ *
+ * **判据只认类型，不认写法**（架构师裁决）：
+ *   - 字符串种类（`char/<enc>` 或 `[]char/<enc>`）→ `string·char`，按码点取一字符；
+ *   - 定宽数组（`[N]char/<enc>`）→ 保持 `compactarray·at`（真按元素大小乘）。
+ *
+ * 不改 operand 的解析，也不为 `char/utf8` 编造 `element_size`——那正是 p1 要杀的
+ * 「给变长编码编一个假宽度」。
+ */
+/*
+ * 定宽数组（`[N]K`、`[N,M]K`）——**不含 `[]K`**（那是变长字符串/变长数组）。
+ *
+ * 只看第一个维度：`[]` 是空维度 = 变长；`[N]` 里 N 全为数字才是定宽。
+ */
+fn is_fixed_width_array(ty: &str) -> bool {
+    let t = ty.trim_start_matches('*');
+    let Some(rest) = t.strip_prefix('[') else {
+        return false;
+    };
+    let Some(close) = rest.find(']') else {
+        return false;
+    };
+    /* **判据是「第一维是否定宽」，不是「有没有方括号」**：`[]char/X` 与
+     * `[N]char/X` 都带 `[`，但前者是变长字符串。用 `starts_with('[')` 会把
+     * `[]char/utf32` 一起误判成定宽——本函数最初就是这么写的，被自己造的反向
+     * 对照抓出来。空维度 = 变长；维度全为数字（可带逗号）才是定宽。 */
+    let dimensions = &rest[..close];
+    !dimensions.is_empty() && dimensions.bytes().all(|b| b.is_ascii_digit() || b == b',')
+}
+
+fn desugar_string_subscript(body: &mut [Stmt], tm: &HashMap<String, String>) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => desugar_string_subscript_inst(s, tm),
+            Stmt::Scope(s) => desugar_string_subscript(&mut s.body, tm),
+            Stmt::If(s) => {
+                if let Some(c) = &mut s.cond {
+                    desugar_string_subscript_inst(c, tm);
+                }
+                desugar_string_subscript(&mut s.then_, tm);
+                desugar_string_subscript(&mut s.else_, tm);
+            }
+            Stmt::While(s) => {
+                if let Some(c) = &mut s.cond {
+                    desugar_string_subscript_inst(c, tm);
+                }
+                desugar_string_subscript(&mut s.body, tm);
+            }
+            Stmt::For(s) => desugar_string_subscript(&mut s.body, tm),
+            _ => {}
+        }
+    }
+}
+
+fn desugar_string_subscript_inst(inst: &mut Instruction, tm: &HashMap<String, String>) {
+    let Some(e) = inst.expr.as_mut() else { return };
+    desugar_string_subscript_expr(e, tm);
+}
+
+fn desugar_string_subscript_expr(e: &mut Expr, tm: &HashMap<String, String>) {
+    /* 先递归进实参：`f(a[i])` 里的 `a[i]` 同样要改判。 */
+    for argument in e.args.iter_mut() {
+        desugar_string_subscript_expr(argument, tm);
+    }
+    if e.op != "compactarray·at" || e.args.len() != 2 {
+        return;
+    }
+    let Some(base) = e.args.first() else { return };
+    if !base.is_leaf() || base.val.is_empty() {
+        return;
+    }
+    let Some(base_type) = tm.get(&base.val) else { return };
+    /* 判据是「字符串种类 vs 定宽数组」，不是「有没有 `[` 前缀」：
+     *   `[]char/X`    —— 变长字符串，走 `string·char`（按码点）；
+     *   `[N]char/X`   —— 定宽数组，保持 `compactarray·at`（真按元素大小乘）。
+     * 用 `starts_with('[')` 会把 `[]char/X` 一起误拦——两者都带 `[`。 */
+    if is_fixed_width_array(base_type) || !is_string_kind(base_type) {
+        return;
+    }
+    e.op = "string·char".to_string();
+}
+
 pub fn lower_func(fn_: &Func) -> Result<Func, String> {
     let tm = infer_types(fn_);
+    /* 字符串下标在 lower 之前改判（判据是类型，见 `desugar_string_subscript`）。 */
+    let mut fn_ = fn_.clone();
+    desugar_string_subscript(&mut fn_.body, &tm);
+    let fn_ = &fn_;
     let mut lg = LabelGen { n: 0, err: None };
     // 收集已有 br/goto 的跳转目标：这些 label 已可达，lower 时不再补 fall-through goto（幂等）。
     let mut targets = HashSet::new();
@@ -1015,11 +1127,29 @@ fn flatten_expr(e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>) -> Expr {
         if !arg.is_leaf() {
             let tmp = lg.tmp();
             let flat_expr = flatten_expr(arg, lg, extra);
+            /* **物化成临时槽时要把类型一起带过去**：`struct·new(原型路径, …)` 的
+             * 类型就是那个原型路径（第一个实参，字符串字面量），不需要猜；不带的
+             * 话临时槽落成空类型，编码器报「non-concrete langtype」。
+             * 其余表达式这里仍留空——它们的类型由 `annotate_slot_types` 统一推。 */
+            let prototype = if flat_expr.op == format!("struct{}new", keytree::MEMBER_SEP) {
+                flat_expr
+                    .args
+                    .first()
+                    .filter(|a| a.quote != 0)
+                    .map(|a| a.val.clone())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
             extra.push(Stmt::Instruction(Instruction {
                 comments: Vec::new(),
                 expr: Some(flat_expr),
                 writes: vec![tmp.clone()],
-                write_types: Vec::new(),
+                write_types: if prototype.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![prototype]
+                },
                 arrow_left: false,
                 operator: false,
                 operand_kind: String::new(),
@@ -1618,7 +1748,7 @@ fn literal_text_kind(name: &str) -> Option<&'static str> {
     }
 }
 
-fn is_cast_op(op: &str) -> bool {
+pub fn is_cast_op(op: &str) -> bool {
     matches!(
         op,
         "int8"
@@ -1684,15 +1814,33 @@ fn infer_op_type(
         };
     }
     if symbol::lookup(opcode).arith || matches!(opcode, "max" | "min" | "abs" | "neg") {
-        // 字符串拼接走 add：读参是 char 族（或其 union）时，结果仍是该字符串类型。
+        /* 字符串族操作数 = 拼接：结果**恒 char/utf8**（矩阵 `character-concat-kind`：
+         * 两侧各自解码成 Unicode 标量序列，结果统一编码一次为 char/utf8）。**不随
+         * 操作数编码变**——`char/ascii` 与 `char/utf32` 拼出来同样是 char/utf8。
+         *
+         * 这里是**唯一**对齐点：本函数在 specialize **之前**跑，那时 e.op 还是字形
+         * `+`，走的就是这一支；等 specialize 把 `+` 改名成 `string·concat` 时，
+         * 写槽类型已经定了。曾经两处都 `return t`（操作数类型），于是
+         * `"a" + "b"` 得 char/utf32、`char/ascii + char/utf32` 得 char/ascii，
+         * 与矩阵相反。
+         *
+         * **只有静态可知是字符串族才走这里**（`01-basics/strings` 的
+         * `"kv" + "lang"` 就是）。操作数类型**未知**时这一支不进入，`+` 保留通用
+         * 的 `add`、不脱糖成 `string·concat`。
+         *
+         * 这条限制的代价要记清：**动态键取出的真字符串做拼接**（
+         * `08-leetcode/062_unique_paths` 的 `prev + v`，两侧都来自
+         * `"/tmp/up"·*k`）在静态无从判定，因此不特化——运行期拿 `add` 会**响亮
+         * 失败**（不是静默错值）。这是 #634 长期方案必须解决的一格，在那之前
+         * 动态键 + 字符串拼接不可用。**不许为了让它"能跑"而把未知猜成字符串**，
+         * 那正是 038 那条 bug 的形态。 */
         for r in reads {
             let t = slot_type(r, tm);
             let members = type_members(&t);
-            if !members.is_empty() && members.iter().all(|m| is_string_kind(m)) {
-                return t;
-            }
-            if is_string_kind(&t) {
-                return t;
+            if (!members.is_empty() && members.iter().all(|m| is_string_kind(m)))
+                || is_string_kind(&t)
+            {
+                return "char/utf8".to_string();
             }
         }
         let word = symbol::lookup(opcode).word.to_string();
@@ -1789,7 +1937,17 @@ fn infer_op_type(
         }
         "compactarray·langtype" => return "[]char/utf8".to_string(),
         "compactarray·shape" => return "[]int64".to_string(),
-        "string·char" | "string·set" | "string·slice" | "string·concat" | "string·formatint"
+        /* 拼接结果**恒 char/utf8**（矩阵 `character-concat-kind`：两侧各自解码成
+         * Unicode 标量序列，结果统一编码一次为 char/utf8）。**不随操作数编码变**：
+         * `char/ascii` 与 `char/utf32` 拼出来同样是 char/utf8。
+         *
+         * 这里是它唯一的落点：`string·concat` 是**语义名**，不在字形表里，所以上面
+         * 的 arith 分支根本进不去（`symbol::lookup("string·concat").arith == false`）。
+         *
+         * 与 coding4 的「值的字节形态服从写槽声明 langtype」配套：handler 按写槽
+         * 编码，写槽类型由这里给出。两边对齐后同一份 handler 自动正确。 */
+        "string·concat" => return "char/utf8".to_string(),
+        "string·char" | "string·set" | "string·slice" | "string·formatint"
         | "string·formatuint" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),
         "random·intn" | "random.uint64" | "string·parseuint" => return "uint64".to_string(),
@@ -1934,7 +2092,36 @@ fn slot_type(name: &str, tm: &HashMap<String, String>) -> String {
     if let Some(t) = tm.get(name) {
         return t.clone();
     }
-    if name.starts_with('"') {
+    /*
+     * **以 `"` 开头不等于「这是一个字符串字面量」。**
+     *
+     * `flat()` 把成员读摊成一个**路径文本读参**：`"/tmp/s"·*0` 变成
+     * `"\"/tmp/s\"·0"`——它的第一个字符就是引号，但它不是字符串值，是一条
+     * 「按路径读存储」的指令。判据必须是「整串就是一个带引号的字面量」，
+     * 而不是「以引号开头」。
+     *
+     * 曾经只看 `starts_with('"')`：于是 `"/tmp/s"·*0 -> cnt` 的 `cnt` 被推成
+     * `char/utf32`，随后 `k < cnt` 报 `lt cannot mix string and numeric operands`
+     * （`08-leetcode/038_count_and_say`）。**未知/路径文本被翻译成「字符串」**，
+     * 正是 p0 不容的静默改写。
+     *
+     * 含 `·` 的路径文本在这里返回空（未知），交给运行期按值的实际类型判。
+     *
+     * ── 同类错误的**第三次** ─────────────────────────────────────────
+     * 这一处、`container_elem` 的 `starts_with('[')`、`resolve_slot_type` 的
+     * `w.find('[')`，是同一个病：**用文本形态猜语义**。
+     *   - `starts_with('[')` 把 `[]char/X` 误判成定宽数组（其实第一维是空的）；
+     *   - `w.find('[')` 把 `a·[0]` 截成 `a·`（含 `·` 的 `[` 是坐标段，不是下标）；
+     *   - `starts_with('"')` 把 `"/tmp/s"·*0` 的路径文本判成字符串字面量。
+     * 三次都是「文本长得像 X」被当成「语义是 X」。判断前先问：**这个形状还可能是
+     * 别的什么？** 只要还有别的可能，就得找不依赖形态的判据。
+     *
+     * 另外：`flat()` 给的文本**不一定带结尾引号**（`+` 的操作数落成 `"\"kv"`，
+     * 只有开头那一个）。曾试图用「首尾都是 `"`」收紧，结果把每个拼接操作数都判成
+     * 未知，`11-string/01-basic` 的写槽丢掉类型、executed 掉 1 条。所以判据是
+     * 「以 `"` 开头且不含 `·`」，不是「首尾配对」。
+     */
+    if name.starts_with('"') && !name.contains(keytree::MEMBER_SEP) {
         return "char/utf32".to_string();
     }
     if name == "true" || name == "false" {
@@ -1952,11 +2139,28 @@ fn slot_type(name: &str, tm: &HashMap<String, String>) -> String {
     String::new()
 }
 
+/// 字面量**作为值**时的类型。
+///
+/// 字符串是 `[]char/utf32`（变长数组），不是裸 `char/utf32`（那是**单个码点**）。
+/// 依据是 wire 本身：`"hello"` 的 body 是 5 个 UTF-32 码点（20 字节），head 的 ndim
+/// 说它是数组。写成标量 kind 会让运行时按 4 字节解 20 字节的 body——那是
+/// `0x4503 MALFORMED_VALUE` 的直接来源（12 条 println 失败）。
+///
+/// **本函数的产出只进槽的类型串，不进 literal 的 wire**：literal 字节由 parser 按
+/// 字面量自身生成，与这里无关。改动后必须验证 `"hello"` 的 wire 仍是
+/// `[5]char/utf32` / 20 字节。
+///
+/// **已知分歧（归入「类型统一」缺口，不在本次修）**：`arg_type` / `slot_type` 在
+/// **算子操作数**语境仍把字符串字面量当 `char/utf32`——那里判的是「这个操作数是
+/// 不是字符串族」，`cast`/`concat` 的选择依赖它。同一个字面量因此在两种语境下
+/// 得到两个类型：值语境 `[]char/utf32`、操作数语境 `char/utf32`。合成一处需要
+/// 「字面量在写槽上是数组、在操作数位置可退化为标量」的显式规则，属类型统一那条
+/// 缺口的范围——不要顺手改 `arg_type`。
 fn lit_to_type(lit: LitKind) -> &'static str {
     match lit {
         LitKind::LitInt => "int64",
         LitKind::LitFloat => "float64",
-        LitKind::LitString | LitKind::LitRawString => "char/utf32",
+        LitKind::LitString | LitKind::LitRawString => "[]char/utf32",
         LitKind::LitBool => "bool",
         _ => "",
     }
@@ -1997,6 +2201,20 @@ fn validate_num_op(
     let mut saw_num = false;
     for a in args {
         let t = arg_type(a, tm);
+        /*
+         * **空类型 ≠ 字符串族；未知就是未知。**
+         *
+         * 推不出类型的操作数（动态键、跨文件、运行期才定的路径文本）在这里**不做
+         * 静态报错**——运行期有类型标签，它会按值的实际类型报自己的错。
+         *
+         * 把空串当成字符串族是最坏的一种：它把「没推出来」翻译成「是字符串」，
+         * 于是一条本来能跑的程序在 layout 期被拒，而报错文本指向一个根本不成立
+         * 的结论（`08-leetcode/038_count_and_say` 的 `lt cannot mix string and
+         * numeric` 就是这么来的）。
+         *
+         * **反向边界**：真字符串（`char/` 族、`[]char/` 族）参与数值运算**仍然报错**
+         * ——下面 `is_string_kind(t)` 那一支不受本改动影响。
+         */
         if t.is_empty() {
             continue;
         }
@@ -2004,11 +2222,9 @@ fn validate_num_op(
         let members = type_members(&t);
         let all_num = !members.is_empty() && members.iter().all(|m| builtin::is_num_kind(m));
         let all_str = !members.is_empty() && members.iter().all(|m| is_string_kind(m));
-        // 可与 None 比较的类型：bool、指针、以及 **key 空间组织**（structref `/lib/X`
-        // 与 mapexpr `k·v`）——后者判的是「这个成员目录存在与否」，运行时做值检查。
-        let nullable = |m: &str| {
-            m == "bool" || m.starts_with('*') || m.starts_with('/') || m.contains('\u{b7}')
-        };
+        // 可与 None 比较的类型：指针与 structref。判据只有一份（见 `is_none_comparable`），
+        // 这里不再维护本地宽表——`bool` 与 mapexpr 没有 spec 背书，等 `nonnull` 能力行。
+        let nullable = is_none_comparable;
         let all_cmp_ok = !members.is_empty() && members.iter().all(|m| nullable(m));
         if is_string_kind(&t) || all_str {
             saw_char = true;
@@ -2149,8 +2365,10 @@ fn exact_kind(
             return Some("uint64".to_string())
         }
         "string·parsefloat" => return Some("float64".to_string()),
-        // 字符串族结果：类型精确（char/utf32），供字符串 `+` 的脱糖判定。
-        "string·char" | "string·set" | "string·slice" | "string·concat" | "string·formatint"
+        // 字符串族结果：类型精确，供字符串 `+` 的脱糖判定。
+        // `string·concat` 恒 `char/utf8`（矩阵 `character-concat-kind`），与操作数编码无关。
+        "string·concat" => return Some("char/utf8".to_string()),
+        "string·char" | "string·set" | "string·slice" | "string·formatint"
         | "string·formatuint" => return Some("char/utf32".to_string()),
         _ => {}
     }
@@ -2773,6 +2991,22 @@ fn is_none_lit(e: &Expr) -> bool {
 /// compact 数组元素 kind：`[dims]K` / `[]K`（含 `[2][3]K`）。
 fn container_elem(ty: &str) -> Option<String> {
     let t = ty.trim_start_matches('*');
+    /*
+     * **裸 `char/<enc>` 不是容器**，不能取元素。
+     *
+     * 曾经这里加过 `char/<enc> → char/<enc>` 一格（「字符串下标」），理由是
+     * 「字符值即一字符字符串」。那条规则**类型上对、实现上错**：它让 layout 生成
+     * `compactarray·at(char/utf8 值, i)`，而运行时的
+     * `runtimec_container_langtype_parse` 要求 `[dims]` 前缀（裸种类直接
+     * UNSUPPORTED），于是**能编码、跑到一半 `0x4A02 LOCATE_FAILED`**——比改前的
+     * 「编码期就挡住」更晚失败。而且 `char/utf8` 是变长（1–4 字节/字符），
+     * 「元素大小」对它根本不成立。
+     *
+     * 正确的模型：字符串下标是**按码点取字符**，语言里已有算子 `string·char`，
+     * 编码由写槽 langtype 决定。改判在 `desugar_string_subscript`——它是 lower 阶段
+     * 而非 parser：**判据是类型**（`char/<enc>` / `[]char/<enc>` 走 `string·char`，
+     * `[N]char/<enc>` 保持 `compactarray·at`），而 parser 看不到类型。
+     */
     if !t.starts_with('[') {
         return None;
     }
@@ -2940,15 +3174,34 @@ pub fn resolve_slot_type(
         let t = declared.get(rest)?;
         return Some(deref_value_type(t).to_string());
     }
-    if let Some(open) = w.find('[') {
-        let base = &w[..open];
-        let t = declared.get(base)?;
-        return container_elem(t);
+    /* `x[i]`（**不含** `·`）是数组下标：基座是 `x`，取元素类型。
+     * 含 `·` 的形如 `a·[0]` 是**坐标段成员读**，走下面的成员链分支——
+     * 它在 `w.find('[')` 那里会被截成 `"a·"`，永远查不到。 */
+    if !w.contains(keytree::MEMBER_SEP) {
+        if let Some(open) = w.find('[') {
+            let base = &w[..open];
+            let t = declared.get(base)?;
+            return container_elem(t);
+        }
     }
     let mut it = w.split(keytree::MEMBER_SEP);
     let base = it.next()?;
     let ty = declared.get(base)?.clone();
     let tail: Vec<&str> = it.collect();
+    /* **坐标段 `base·[i]`**：段文本是 `[i]`，按成员名去 `member_chain_type` 查
+     * struct 字段必然查不到，但它对**容器**有现成规则（`container_value` 取 `·`
+     * 之后的值类型，与键是不是坐标段无关）。`m:[int64]·int64` 的 `m·[0]` 与
+     * `m·0` 是同一个值类型。
+     *
+     * 只在**所有段都是坐标段**时补——混着成员名与坐标段的链（`a·x·[0]`）语义
+     * 未定，不猜。 */
+    if !tail.is_empty()
+        && tail
+            .iter()
+            .all(|segment| segment.starts_with('[') && segment.ends_with(']'))
+    {
+        return container_value(&ty);
+    }
     member_chain_type(&ty, &tail.join(&keytree::MEMBER_SEP.to_string()), structs)
 }
 
@@ -2958,7 +3211,22 @@ pub(crate) fn member_chain_type(start: &str, tail: &str, structs: &StructTable) 
     if tail.is_empty() {
         return Some(ty);
     }
-    for part in tail.split(keytree::MEMBER_SEP) {
+    for (index, part) in tail.split(keytree::MEMBER_SEP).enumerate() {
+        /*
+         * **中间段是指针值 ⇒ 跟随一跳**（`t·1·left·val`：`t·1` 是 `N`、`left` 是
+         * `*N`，再 `·val` 要落到 `N` 上）。参考实现里有这段
+         * （`runtime/src/rwir_kv.c` 的「Follow intermediate Ptr segments」）。
+         *
+         * **但第 1 段的基座不剥**：`p·val`（`p` 本身是 `*N`）是 spec 16-ptr
+         * 禁止的**隐式解引用**，必须写 `(*p)·val`，由 `check_implicit_deref_member`
+         * 报它自己的错。两件事必须分开——在这里「任意位置剥星」会顺手放行
+         * `p·val`，那就把一条 spec 禁令变成了静默放行。
+         */
+        if index > 0 {
+            if let Some(inner) = ty.strip_prefix('*') {
+                ty = inner.to_string();
+            }
+        }
         if let Some(v) = container_value(&ty) {
             ty = v;
         } else if ty.starts_with('[') {
@@ -3264,6 +3532,31 @@ fn expr_result_type(e: &Expr, tm: &HashMap<String, String>, annotated: &str) -> 
             .map(|a| arg_type(a, tm))
             .unwrap_or_default();
         return deref_value_type(&inner).to_string();
+    }
+    /*
+     * 成员读 `base·seg…` 的结果类型 = **基座类型沿段下钻**。
+     *
+     * 缺这一支时它落到末尾的 `infer_op_type("=", reads)`，而那里把 `=` 当拷贝：
+     * `slot_type("/tmp/kvt")` 是空（路径字面量不是变量），于是走「单读参拷贝」
+     * 分支返回 `slot_type("data") = char/utf32`——**把成员名当成了值**。
+     * 症状是 `"/tmp/kvt"·data -> x` 报「cannot assign int64 to char/utf32」，
+     * 且报错无行号（诊断位是 `Pos{0,0}`）。
+     *
+     * 基座类型推不出来（路径字面量、跨文件等）时**返回空**，不猜——空 rhs 在
+     * `check_assignable` 里直接放行，与改前行为一致。
+     */
+    if e.op == ast::MEMBER_READ_OP {
+        let base = e.args.first().map(|a| arg_type(a, tm)).unwrap_or_default();
+        if base.is_empty() {
+            return String::new();
+        }
+        let tail: Vec<&str> = e.args.iter().skip(1).map(|a| a.val.as_str()).collect();
+        return member_chain_type(
+            &base,
+            &tail.join(&keytree::MEMBER_SEP.to_string()),
+            &StructTable::default(),
+        )
+        .unwrap_or_default();
     }
     if matches!(e.op.as_str(), "compactarray·new" | "map·new") {
         return annotated.to_string();

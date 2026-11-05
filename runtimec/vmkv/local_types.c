@@ -298,13 +298,24 @@ runtimec_status_t vmkv_local_types_collect(
                 continue;
             }
             /*
-             * **成员键不要求「先写过」**：spec `05-runtime语义/03-成员访问` 说
+             * **成员键不是局部变量**：spec `05-runtime语义/03-成员访问` 说
              * `base·name` 是独立物理 key，读它就是取那个 key——不存在时是**运行期
-             * 的确定失败**，不是「变量未定义」这种编译期错误。
+             * 的确定失败**，不是「变量未定义」这种编译期错误。所以它不参与本文件
+             * 的「读必先写」判据。
              *
-             * 但它仍要**登记**（进而让 `materialize_locals` 建槽）：写成员 `rec·name = v`
-             * 的写槽就是完整成员键，槽不存在时 `=` 无处可写。
-             * ⇒ 建槽、但不检查 written——两件事分开。
+             * **帧准备也不为它建槽、不绑定**（裁决见
+             * `workspace/622/architect/decision-member-slot-binding.md`）：
+             * 成员槽由**写路径按 key 现建**。曾经这里说「仍要登记，进而让
+             * `materialize_locals` 建槽」——那条已作废，原因正是下面这个失效链：
+             *
+             *   帧准备建零值并绑定地址 → `struct·new` 克隆整棵子树 →
+             *   那具地址作废 → 后续 `println(p·x)` 读到旧地址上的 0
+             *   （期望 3），而按 key 读 `/vthread/1/[1]/p·x` 是 3。
+             *
+             * ⇒ **帧准备阶段既建又绑**会造出一个在克隆时必然失效的地址；
+             * 改成「写路径按 key 现建」之后，地址只在使用点产生，不会跨克隆存活。
+             *
+             * 本处只跳过检查，不改变任何逻辑。
              */
             if (vmkv_rwir_key_is_member(
                     runtimec_key_view_make(record->name.data,
