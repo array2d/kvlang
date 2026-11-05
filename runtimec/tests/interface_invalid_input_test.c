@@ -1,4 +1,14 @@
-/* The unimplemented public interface must fail without producing output. */
+/*
+ * 公共接口在**非法输入**下必须失败封闭，且不留下半成品输出。
+ *
+ * 早先这条叫「未实现的接口必须失败」——那时 `execute` 是空壳，任何调用都回
+ * `NOT_IMPLEMENTED`。现在 `execute` 真的执行，所以这条的判据换了：
+ * 它测的是「非法句柄被拒 + 失败时输出被重置」，不再是「一律未实现」。
+ *
+ * **不再用伪造句柄**（旧版是 `(void*)1`）：`execute` 会经句柄取 session，
+ * 伪造地址是解引用未定义地址，表现是段错误而不是断言失败——那条路径
+ * 测不了任何东西，只会把测试进程打死。NULL 是唯一能安全断言的非法输入。
+ */
 
 #include <stdint.h>
 #include <stdio.h>
@@ -30,8 +40,7 @@ int main(void) {
     char program_counter[16] = "dirty";
     kvlang_runtime_error_t error = prepare_error(
         error_message, sizeof(error_message));
-    kvlang_runtime_t *runtime = (kvlang_runtime_t *)(uintptr_t)1U;
-    kvlang_runtime_t *created_runtime = runtime;
+    kvlang_runtime_t *created_runtime = NULL;
     kvlang_runtime_create_request_t create_request = {
         "shared-memory://test", UINT64_C(1)};
     const char *arguments[] = {"value"};
@@ -49,7 +58,7 @@ int main(void) {
         char error_text[512];
         kvlang_runtime_error_t load_error =
             prepare_error(error_text, sizeof(error_text));
-        created_runtime = runtime;
+        created_runtime = NULL;
         const runtimec_status_t create_status = kvlang_runtime_create(
             &create_request, &created_runtime, &load_error);
         RUNTIMEC_EXPECT(create_status == RUNTIMEC_STATUS_UNSUPPORTED ||
@@ -66,7 +75,7 @@ int main(void) {
         char small_error_message[4] = {'x', 'y', 'z', '\0'};
         kvlang_runtime_error_t small_error = prepare_error(
             small_error_message, sizeof(small_error_message));
-        created_runtime = runtime;
+        created_runtime = NULL;
         RUNTIMEC_EXPECT(kvlang_runtime_create(
             &create_request, &created_runtime, &small_error) ==
             RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY);
@@ -93,9 +102,12 @@ int main(void) {
     result.value.required_length = 5U;
     result.program_counter.length = 5U;
     result.program_counter.required_length = 5U;
+    /* 句柄必须是 `create` 返回的：`execute` 现在会经它取 session，
+     * 拿一个伪造地址（旧版本这里是 `(void*)1`）是**解引用未定义地址**，
+     * 表现是段错误而不是断言失败。NULL 是唯一能安全断言的非法输入。 */
     RUNTIMEC_EXPECT(kvlang_runtime_execute(
-        runtime, &execute_request, &result, &error) ==
-        RUNTIMEC_STATUS_NOT_IMPLEMENTED);
+        NULL, &execute_request, &result, &error) ==
+        RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(result.value.length == 0U);
     RUNTIMEC_EXPECT(result.value.required_length == 0U);
     RUNTIMEC_EXPECT(value[0] == '\0');

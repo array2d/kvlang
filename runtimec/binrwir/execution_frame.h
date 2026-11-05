@@ -12,7 +12,7 @@
 
 #include <stdint.h>
 
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "contract/snapshot.h"
 #include "contract/status.h"
 #include "contract/view.h"
@@ -56,7 +56,7 @@ typedef struct binrwir_execution_frame {
      *   - 对 STATIC 且 payload 为 NONE 的写目标做**执行期**地址解析。
      * 由执行入口填入；其它构造点保持 NULL，此时未解析的写目标失败封闭。
      */
-    const runtimec_host_services_t *host_services;
+    runtimec_kvspace_access_t *kvspace_access;
     /* 与 host services 配套的快照（源世代）；借用的拷贝。 */
     runtimec_snapshot_t snapshot;
     uint64_t snapshot_generation;

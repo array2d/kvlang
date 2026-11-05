@@ -21,7 +21,7 @@ handle close（没有指令边界回收调用）。写返回 body 偏移的二�
 新增外部可改写键必须在此登记为 volatile。
 
 **status 固定档（normative）**：`/vthread/*/‥status` 的**形状固定**——storetype 为
-SLACK（固定头 8 字节，headlen 恒 8）、合法内容长度上限
+SLACK（headlen 恒等于 `KVSPACE_XVALUE_HEAD_LEN`，**当前为 16 字节**；不得写死数字，一律以该常量为准）、合法内容长度上限
 LV=16。shm 后端创建该键时按**物理容量下限 80 字节**分配（实际
 `headlen`/`body_cap` 以 slot view 返回为准）。之后任何写入（runtime
 `setstatus`/`SetDone`/`SetError` 或外部 `kvspace set`）都必须原地完成；内容长度 > LV、

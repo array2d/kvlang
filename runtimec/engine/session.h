@@ -19,7 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "contract/allocator.h"
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "contract/status.h"
 
 #ifdef __cplusplus
@@ -43,14 +43,14 @@ typedef struct runtimec_session_options_t {
     void *kvspace_handle;
 } runtimec_session_options_t;
 runtimec_status_t runtimec_session_create(
-    const runtimec_host_services_t *host_services,
+    runtimec_kvspace_access_t *kvspace_access,
     const runtimec_session_options_t *options,
     runtimec_session_t **output_session,
     runtimec_error_t *error);
 runtimec_status_t runtimec_session_destroy(runtimec_session_t *session);
-runtimec_status_t runtimec_session_get_host_services(
+runtimec_status_t runtimec_session_get_kvspace_access(
     runtimec_session_t *session,
-    const runtimec_host_services_t **output_host_services);
+    runtimec_kvspace_access_t **output_kvspace_access);
 /*
  * 借出调用方给的 kvspace 句柄（`options.kvspace_handle` 的原样透传）。
  * 句柄可以为 NULL：表示本 session 不接存储，此时返回 SUCCESS 且输出为 NULL。

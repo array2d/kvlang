@@ -63,6 +63,16 @@ runtimec_status_t runtimec_vthread_status_key(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+/* 统一失败：写 error 并返回状态。本模块只此一处，读与写共用。 */
+static runtimec_status_t runtimec_vthread_status_fail(
+    runtimec_error_t *error, runtimec_status_t status, int64_t code,
+    const char *message) {
+    runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, code,
+                       runtimec_string_view_from_c_string(message),
+                       RUNTIMEC_PROGRAM_COUNTER_NONE);
+    return status;
+}
+
 runtimec_status_t runtimec_vthread_status_write(
     void *kvspace_handle, const char *status_key, runtimec_bytes_view_t status) {
     char message[256];
@@ -95,5 +105,84 @@ runtimec_status_t runtimec_vthread_status_write(
     if (status.size != 0U) {
         memcpy(body, status.data, status.size);
     }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 读入口：形状校验 + 借用视图。契约见头注释。
+ *
+ * 顺序是**先形状、后内容**：形状不符就是坏槽，此时内容是什么都不该给出去——
+ * 先读内容再判形状，会让「坏槽」的字节短暂地成为一个看似合法的状态。
+ */
+runtimec_status_t runtimec_vthread_status_read(
+    void *kvspace_handle, const char *status_key,
+    runtimec_string_view_t *output_text, runtimec_error_t *error) {
+    kvspaceHead_t head;
+    uint8_t *wire = NULL;
+    uint32_t wire_length = 0U;
+    const uint8_t *body = NULL;
+
+    if (output_text != NULL) {
+        *output_text = runtimec_string_view_make(NULL, 0U);
+    }
+    if (kvspace_handle == NULL || status_key == NULL ||
+        status_key[0] == '\0' || output_text == NULL) {
+        return runtimec_vthread_status_fail(
+            error, RUNTIMEC_STATUS_INVALID, 1,
+            "invalid status read request");
+    }
+    memset(&head, 0, sizeof(head));
+    if (kvspaceGetHead(kvspace_handle, status_key, &head) != 0) {
+        /* 键不存在是「没有」，不是「坏」——两者修法不同，状态要分开。 */
+        return runtimec_vthread_status_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED, 2,
+            "status key is absent");
+    }
+    /*
+     * 形状判据照抄 spec `02-kvspace模型/04-CABI.kv`：storetype SLACK、headlen 恒 8、
+     * 内容 ≤ LV、物理容量 ≥ 下限。常量在本文件头里，**不在这里写新字面量**。
+     */
+    /*
+     * 形状判据照抄 spec `02-kvspace模型/04-CABI.kv`：storetype SLACK、headlen 为
+     * XValue 头长度、内容 ≤ LV。
+     *
+     * **本入口只校验与后端无关的三项；物理容量由 slot view 把关。**
+     *
+     * `kvspaceGetHead` 给的 `body_cap` 是**逻辑长度**（= body_len），不是 box
+     * 物理容量（实测 `"run"` 报 body_cap=3，而 box 实际按 80 分配）。物理容量
+     * 只有 slot view 看得到，而 slot view 是 shm-only——本函数要对所有后端可用，
+     * 所以不在这里重复判，否则非 shm 后端会全线失败。
+     *
+     * **容量不是没人守**：`kvspace-c/src/kvspace.c` 的 slot view 对 status 键检查
+     * `cap < KVSPACE_STATUS_MIN_CAP` 就返回 -1，写路径也按同一常量兜底。
+     * 守在了另一个入口，不是漏了。
+     */
+    if (head.storetype != KVSPACE_STORETYPE_SLACK ||
+        head.headlen != RUNTIMEC_VTHREAD_STATUS_HEAD_LENGTH ||
+        head.body_len < 0 ||
+        (uint32_t)head.body_len > RUNTIMEC_VTHREAD_STATUS_CONTENT_LIMIT) {
+        return runtimec_vthread_status_fail(
+            error, RUNTIMEC_STATUS_INVALID, 3,
+            "status slot does not match the fixed shape");
+    }
+    /*
+     * `kvspaceGet` 对 `‥status` 这个 volatile key **每次重读后端**（spec 同一节），
+     * 不走快照——所以这里拿到的是当前值，不是某次快照的值。
+     */
+    if (kvspaceGet(kvspace_handle, status_key, 0, &wire, &wire_length) != 0) {
+        return runtimec_vthread_status_fail(
+            error, RUNTIMEC_STATUS_ERROR, 4, "status read failed");
+    }
+    if (wire == NULL || wire_length < (uint32_t)head.headlen) {
+        return runtimec_vthread_status_fail(
+            error, RUNTIMEC_STATUS_ERROR, 5, "status wire is truncated");
+    }
+    body = wire + head.headlen;
+    /*
+     * `len == 0` 且形状合法 → **成功**、空视图。这与「坏槽」必须分开：
+     * 空是「还没写状态」，坏是「槽不符合规范」，调用方的处置完全不同。
+     */
+    *output_text = runtimec_string_view_make((const char *)body,
+                                             (size_t)head.body_len);
     return RUNTIMEC_STATUS_SUCCESS;
 }

@@ -188,8 +188,17 @@ int main(void) {
 
     /*
      * ④ 表里没有的组合：add(int32, uint32, int32) —— 混合符号算术被
-     * matrix:28 拒绝，所以这对元组**不在表里**。必须**保留原 opid**，
-     * 不拒绝整条 Program。
+     * matrix:28 拒绝，所以这对元组**不在表里**。
+     *
+     * **必须拒绝整份 Program，error.code = 3**（NO_SPECIALIZATION_ROW）。
+     *
+     * 这是 2026-11-05 改的行为：基础 opid 的通用 handler 已按 p10 删掉
+     * （`scalar.c` 的 8 条算术 handler），保留基础 opid 只会得到一条必然
+     * `UNSUPPORTED` 的指令——那时错误出现在执行期、被归因成「注册表里没有」，
+     * 而真实原因是「特化表缺一行」。回落把后者永久掩盖。
+     *
+     * **旧断言（EXPECT_SUCCESS + 首条 opid 仍为 ADD）已废**：它锁住的正是
+     * `specialize.h` 里那段被删掉的设计。断言旧行为会让「改回去」看起来是对的。
      *
      * 注意别拿 add(int32,int64,int64) 当反例：那是**合法**组合
      * （NUMERIC_COMPATIBLE 允许同符号跨宽度），表里有它。
@@ -200,11 +209,15 @@ int main(void) {
 
         EXPECT(test_build_add_program(&allocator, "int32", "uint32", "int32",
                                       &program) == RUNTIMEC_STATUS_SUCCESS);
+        runtimec_error_reset(&error);
+        /*
+         * 拒绝时 `specialized` 必须是 NULL——「失败还留一个半成品」比失败更糟：
+         * 调用方若按返回值之外的路子用它，就拿到一份没特化完的 Program。
+         */
         EXPECT(binrwir_program_specialize(program, &allocator, &specialized,
-                                          &error) == RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(test_first_opid(specialized) == BINRWIR_OPERATION_IDENTIFIER_ADD);
-
-        EXPECT(binrwir_program_destroy(specialized) == RUNTIMEC_STATUS_SUCCESS);
+                                          &error) == RUNTIMEC_STATUS_INVALID);
+        EXPECT(specialized == NULL);
+        EXPECT(error.code == 3); /* BINRWIR_SPECIALIZE_DIAG_NO_SPECIALIZATION_ROW */
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
 

@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "binrwir/execution_frame.h"
 #include "binrwir/frame_bindings.h"
@@ -280,12 +281,126 @@ static void test_execution_frame_holds_bindings(void) {
                     RUNTIMEC_STATUS_SUCCESS);
 }
 
+/*
+ * **绑定表自己拥有 key 字节**。
+ *
+ * 为什么要单列：帧准备与 handler 都是「拼一个 key 缓冲 → 绑上 → 立刻释放缓冲」。
+ * 若绑定表存借用视图，那就是 use-after-free，而它今天不会立刻炸（堆还没复用），
+ * 只在换台机器或换分配器时变成读错数据。所以判据不是「跑通了」，是三件事：
+ *   1. 源缓冲释放之后，绑定的 key 仍然可读且内容正确；
+ *   2. 重绑同一槽会释放旧字节（用分配计数证明，不看「跑通了」）；
+ *   3. 销毁后活分配归零。
+ * 配合 ASan 跑：若某天退回到借用，第 1 步会直接报 heap-use-after-free。
+ */
+typedef struct counting_allocator {
+    size_t allocations;
+    size_t deallocations;
+    size_t live;
+} counting_allocator_t;
+
+static void *counting_allocate(void *context, size_t size, size_t alignment) {
+    counting_allocator_t *counter = (counting_allocator_t *)context;
+    void *allocation = malloc(size);
+    (void)alignment;
+    if (allocation != NULL) {
+        ++counter->allocations;
+        ++counter->live;
+    }
+    return allocation;
+}
+
+static void counting_deallocate(void *context, void *allocation, size_t size,
+                                size_t alignment) {
+    counting_allocator_t *counter = (counting_allocator_t *)context;
+    (void)size;
+    (void)alignment;
+    if (allocation != NULL) {
+        ++counter->deallocations;
+        --counter->live;
+        free(allocation);
+    }
+}
+
+static void test_keys_are_owned(void) {
+    counting_allocator_t counter = {0U, 0U, 0U};
+    runtimec_allocator_t allocator = {
+        .context = &counter,
+        .allocate = counting_allocate,
+        .deallocate = counting_deallocate,
+    };
+    binrwir_frame_bindings_t *bindings = NULL;
+    const binrwir_frame_binding_t *binding = NULL;
+    static const char slot_text[] = "/vthread/1/[1]/container";
+    static const char caller_text[] = "/vthread/1/[0]/[0,-1]";
+    char *slot_buffer;
+    char *caller_buffer;
+    size_t after_bind;
+
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_create(&allocator, 2U, &bindings) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    /* 缓冲故意用堆：释放后若表仍借用，ASan 会当场报 use-after-free。 */
+    slot_buffer = (char *)malloc(sizeof(slot_text) - 1U);
+    caller_buffer = (char *)malloc(sizeof(caller_text) - 1U);
+    memcpy(slot_buffer, slot_text, sizeof(slot_text) - 1U);
+    memcpy(caller_buffer, caller_text, sizeof(caller_text) - 1U);
+
+    RUNTIMEC_EXPECT(
+        binrwir_frame_bindings_bind(bindings, 1U,
+                                    slot_key_of(slot_buffer,
+                                                sizeof(slot_text) - 1U),
+                                    slot_key_of(caller_buffer,
+                                                sizeof(caller_text) - 1U),
+                                    UINT64_C(0x2000), 3U) ==
+        RUNTIMEC_STATUS_SUCCESS);
+    free(slot_buffer);
+    free(caller_buffer);
+
+    /* 1. 源缓冲已释放，绑定里的 key 仍必须是原字节。 */
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 1U, 3U, &binding) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binding != NULL);
+    if (binding != NULL) {
+        RUNTIMEC_EXPECT(binding->slot_key.size == sizeof(slot_text) - 1U);
+        RUNTIMEC_EXPECT(memcmp(binding->slot_key.data, slot_text,
+                               sizeof(slot_text) - 1U) == 0);
+        RUNTIMEC_EXPECT(binding->caller_key.size == sizeof(caller_text) - 1U);
+        RUNTIMEC_EXPECT(memcmp(binding->caller_key.data, caller_text,
+                               sizeof(caller_text) - 1U) == 0);
+    }
+    /*
+     * 计数判据：创建占 3 块（表 / 条目 / 槽键指针表），绑定再多 1 块（key 字节）。
+     * 不写死 4——先记下现值，再比增量，别的分配不会把判据带歪。
+     */
+    after_bind = counter.live;
+
+    /* 2. 重绑同一槽：旧 key 块被释放、新块被分配，活分配数不变。 */
+    RUNTIMEC_EXPECT(
+        binrwir_frame_bindings_bind(bindings, 1U,
+                                    slot_key_of("/vthread/1/[1]/other", 20U),
+                                    slot_key_of(NULL, 0U), UINT64_C(0x2000),
+                                    3U) == RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(counter.live == after_bind);
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_get(bindings, 1U, 3U, &binding) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    if (binding != NULL) {
+        RUNTIMEC_EXPECT(binding->slot_key.size == 20U);
+        RUNTIMEC_EXPECT(memcmp(binding->slot_key.data, "/vthread/1/[1]/other",
+                               20U) == 0);
+    }
+
+    RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    /* 3. 销毁后不允许有活分配残留。 */
+    RUNTIMEC_EXPECT(counter.live == 0U);
+}
+
 int main(void) {
     test_create_and_teardown();
     test_bind_and_get();
     test_bind_rejects_invalid_content();
     test_invalidate_and_rebind();
     test_execution_frame_holds_bindings();
+    test_keys_are_owned();
     if (failures != 0) {
         fprintf(stderr, "binrwir_frame_bindings_test: %d failure(s)\n", failures);
         return 1;

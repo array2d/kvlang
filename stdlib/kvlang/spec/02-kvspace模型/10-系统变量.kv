@@ -28,8 +28,8 @@ lib kvlang/spec/kvspace模型/系统变量 {
 |----|------|
 | *(帧根 extindex)* | rwfunc 帧根经 extindex 指向 `/lib/{pkg}·{name}/` 只读指令树；块帧不建 extindex |
 | `‥lib` | rwfunc 帧的 lib 路径，用于识别 rwfunc 帧边界 |
-| `‥callpc` | 帧内执行进度（每 op 更新；块帧重入亦更新） |
-| `‥returnpc` | 返回地址（帧创建时固化；块帧仅首次设置，重入不覆写） |
+| `‥callpc` | 发起本帧调用的指令位置（编码同 `‥pc`：`[2]int32`，`[0]` 帧序号、`[1]` source pc） |
+| `‥returnpc` | 返回后继续的位置（编码同上；帧创建时固化，重入不覆写） |
 | `‥arg[0,±k]` | 本次调用的参数 kvlang 指针 `*T`；帧槽 `[0,±k]` 指向它 |
 | `._litN` | 字面量实参物化后的 KV 值 |
 

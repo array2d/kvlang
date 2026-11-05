@@ -12,6 +12,7 @@
 
 #include "contract/error.h"
 #include "vmkv/parameter_type.h"
+#include "vmkv/rwir.h"
 #include "vmkv/rwir_manifest.h"
 #include "vmkv/rwir.h"
 
@@ -59,7 +60,11 @@ static bool vmkv_local_types_view_equals(runtimec_string_view_t left,
 
 /*
  * 裸标识符才是局部：内联字面量有字节视图，绝对路径是 STATIC，`*[d,±k]` 是帧内
- * 槽表达式（编码器会另行拒绝），三者都不是局部名。
+ * 槽表达式（编码器会另行拒绝），**含 `·` 的是容器成员键**，四者都不是局部名。
+ *
+ * 成员键不是局部变量（spec `05-runtime语义/03-成员访问`）：它是 `base·name` 这段
+ * 物理 key，kvspace 按前缀枚举，不需要先被写过。把它当局部会要求「先写后读」，
+ * 而那个判据只对**变量**成立——读一个不存在的成员是确定的失败，不是「变量未定义」。
  */
 static bool vmkv_local_types_name_of(const vmkv_rwir_argument_view_t *argument,
                                      runtimec_string_view_t *output_name) {
@@ -290,6 +295,20 @@ runtimec_status_t vmkv_local_types_collect(
             const vmkv_local_type_record_t *record =
                 &local_types->records[ordinal];
             if (record->written) {
+                continue;
+            }
+            /*
+             * **成员键不要求「先写过」**：spec `05-runtime语义/03-成员访问` 说
+             * `base·name` 是独立物理 key，读它就是取那个 key——不存在时是**运行期
+             * 的确定失败**，不是「变量未定义」这种编译期错误。
+             *
+             * 但它仍要**登记**（进而让 `materialize_locals` 建槽）：写成员 `rec·name = v`
+             * 的写槽就是完整成员键，槽不存在时 `=` 无处可写。
+             * ⇒ 建槽、但不检查 written——两件事分开。
+             */
+            if (vmkv_rwir_key_is_member(
+                    runtimec_key_view_make(record->name.data,
+                                           record->name.size))) {
                 continue;
             }
             (void)snprintf(local_types->message,

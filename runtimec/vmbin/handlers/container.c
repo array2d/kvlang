@@ -27,6 +27,7 @@
 
 #include "vmbin/handlers/container.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -678,6 +679,138 @@ VMBIN_HANDLER_UNARY_ARRAY(container_numel_handler, container_numel_compute,
                            int64_t)
 
 /*
+ * `compactarray·dim(a) -> d`：维数。形状段 `[a][b]…` 的个数——**就在 langtype 里**，
+ * 不读 head（`xvalue_head.h:146`：shape lives in leading `[dims]` of langtype）。
+ */
+/* 与 numel 共用同一段「解析失败即报」的样板：解析只有一条判据。 */
+static inline bool container_parse_or_fail(runtimec_string_view_t langtype,
+                                           runtimec_container_langtype_t *type,
+                                           binrwir_execution_exit_t *output_exit) {
+    if (runtimec_container_langtype_parse(langtype, type) ==
+        RUNTIMEC_STATUS_SUCCESS) {
+        return true;
+    }
+    vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                       RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                       output_exit->logical_program_counter);
+    return false;
+}
+
+static inline void container_dim_compute(const uint8_t *body, size_t size,
+                                         runtimec_string_view_t langtype,
+                                         int64_t *out,
+                                         binrwir_execution_exit_t *output_exit) {
+    runtimec_container_langtype_t type;
+
+    (void)body;
+    (void)size;
+    if (container_parse_or_fail(langtype, &type, output_exit)) {
+        *out = (int64_t)type.dimension_count;
+    }
+}
+
+VMBIN_HANDLER_UNARY_ARRAY(container_dim_handler, container_dim_compute, int64_t)
+
+/*
+ * `compactarray·bodylen(a) -> n`：body 字节数。**直接用读出来的 body 长度**，
+ * 不重新推算——那是本层唯一直接可测的量。
+ */
+static inline void container_bodylen_compute(const uint8_t *body, size_t size,
+                                             runtimec_string_view_t langtype,
+                                             int64_t *out,
+                                             binrwir_execution_exit_t *output_exit) {
+    (void)body;
+    (void)langtype;
+    (void)output_exit;
+    *out = (int64_t)size;
+}
+
+VMBIN_HANDLER_UNARY_ARRAY(container_bodylen_handler, container_bodylen_compute,
+                           int64_t)
+
+/*
+ * `compactarray·langtype(a) -> ka`：返回 head 的 langtype 串（如 `[4]int64`）。
+ *
+ * 与 `parselangtype` 的区别：那个把串**拆成**基名与维数两个输出，这个**整串返回**。
+ * 两者都读同一个事实源（值的 langtype），只是一个不拆。
+ *
+ * 写用 `vmbin_value_access_write_body`：写参槽的长度在绑定期已定，
+ * 长度不符由它裁定——本函数不自己判，那是第二套判据。
+ */
+/*
+ * 统一失败出口：把一步的 status 翻成结构化 exit。**只此一处**——容器 handler
+ * 里凡是「一步失败即整条失败」的，都走它，避免每个 handler 各写一份同样的
+ * `if (status != SUCCESS) { fail(...); return ERROR; }`。
+ */
+static runtimec_status_t container_finish(runtimec_status_t status,
+                                          binrwir_execution_exit_t *output_exit,
+                                          uint32_t source_program_counter) {
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    vmbin_handler_fail(output_exit, status,
+                       RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH,
+                       source_program_counter);
+    return RUNTIMEC_STATUS_ERROR;
+}
+
+/* 「读 langtype → 原样写回写参」。两步各自一行，失败合流到同一出口。 */
+static runtimec_status_t container_langtype_transfer(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction) {
+    runtimec_string_view_t langtype;
+    runtimec_error_t error;
+
+    runtimec_error_reset(&error);
+    const runtimec_status_t status = vmbin_value_access_langtype(
+        frame, &instruction->read_arguments.data[0], &langtype, &error);
+    return status == RUNTIMEC_STATUS_SUCCESS
+               ? vmbin_value_access_write_body(
+                     frame, &instruction->write_arguments.data[0],
+                     runtimec_bytes_view_make(langtype.data, langtype.size),
+                     &error)
+               : status;
+}
+
+static bool container_unary_arity(const binrwir_instruction_view_t *instruction,
+                                  binrwir_execution_exit_t *output_exit) {
+    if (instruction->read_arguments.count == 1U &&
+        instruction->write_arguments.count == 1U) {
+        return true;
+    }
+    vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                       VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY,
+                       instruction->source_logical_program_counter);
+    return false;
+}
+
+static bool container_target_key(binrwir_execution_frame_t *frame,
+                                 const binrwir_instruction_view_t *instruction,
+                                 char *buffer, size_t capacity,
+                                 binrwir_execution_exit_t *output_exit) {
+    if (vmbin_frame_target_key(frame, &instruction->write_arguments.data[0],
+                               buffer, capacity) == RUNTIMEC_STATUS_SUCCESS) {
+        return true;
+    }
+    vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                       RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                       instruction->source_logical_program_counter);
+    return false;
+}
+
+static runtimec_status_t container_langtype_handler(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    if (!container_unary_arity(instruction, output_exit)) {
+        return RUNTIMEC_STATUS_ERROR;
+    }
+    return container_finish(container_langtype_transfer(frame, instruction),
+                            output_exit,
+                            instruction->source_logical_program_counter);
+}
+
+/*
  * 元素读：`基址 + i × 宽`。**成功才写 `*element` 与 `*output_element_size`，
  * 失败只写 `exit`**——哨兵不出这个函数，调用方不需要翻译。
  *
@@ -802,7 +935,499 @@ static void container_newreinterpret_build(
 VMBIN_HANDLER_CREATE_TWO(container_newreinterpret_handler,
                          container_newreinterpret_build)
 
+/*
+ * `compactarray·copy(a) -> b`：**同形副本**。
+ *
+ * spec `03-类型系统/10-compact形态:59` 说明它的用途：`compactarray·set` 只做同槽
+ * patch，异槽写法非法，所以「改一个元素」必须先 copy 再在同槽 set。
+ *
+ * 实现就是「body 原样 + langtype 原样」。**不做跨形态转换**（spec 09-数组形态
+ * 「创建铁律」：compact 与散列无隐式转换）。
+ */
+/* 「把 source 的 body 原样写进写参」这一段的唯一实现；失败口径也在这里。 */
+static void container_write_or_fail(binrwir_execution_frame_t *frame,
+                                    const binrwir_instruction_view_t *instruction,
+                                    const vmbin_value_location_t *source,
+                                    binrwir_execution_exit_t *output_exit,
+                                    runtimec_error_t *error) {
+    const runtimec_status_t status = vmbin_value_access_write_body(
+        frame, &instruction->write_arguments.data[0],
+        runtimec_bytes_view_make(source->read_bytes, source->size), error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        vmbin_handler_fail(output_exit, status,
+                           RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH,
+                           instruction->source_logical_program_counter);
+    }
+}
+
+static void container_copy_build(binrwir_execution_frame_t *frame,
+                                 const binrwir_instruction_view_t *instruction,
+                                 const vmbin_value_location_t *source,
+                                 const runtimec_string_view_t *source_langtype,
+                                 binrwir_execution_exit_t *output_exit) {
+    runtimec_error_t error;
+
+    (void)source_langtype;
+
+    runtimec_error_reset(&error);
+    /* **写参的 langtype 不在这里写**：它在绑定期由 layout 编好的写槽声明给出。
+     * 本层只复制 body——写 langtype 是第二套事实源，会与声明漂移。 */
+    container_write_or_fail(frame, instruction, source, output_exit, &error);
+}
+
+
+/*
+ * ── map·new / struct·new ─────────────────────────────────────────────
+ *
+ * 参考实现：`runtime/src/rwir_map.c:142`（kvlangBuiltinMap）与
+ * `runtime/src/rwir_struct.c:20`（kvlangBuiltinStructNew）。**不另发明 wire**。
+ *
+ * 共同点：目标槽先写一个**空 body 的容器 marker**（langtype = 声明类型），
+ * 再逐成员写。marker 用 `vmbin_handler_write_new_value(frame, …, NULL, 0)`
+ * 正好等价于前辈的 `kvlangXvalueNew(out, langtype, "", 0, 1)`。
+ */
+
+/*
+ * 成员访问分隔符 `·`（U+00B7 中点号，`\xC2\xB7`）——**不是上点号 `‥`（U+2025）**。
+ *
+ * 两者差一个字节，长得很像，但它们承担的事实完全不同：
+ *   U+00B7 `·`   **成员访问**（`p·x`、`outer/inner·add1`），layout 的
+ *                `keytree::MEMBER_SEP` 就是它，`scatter.c` 的
+ *                `SCATTER_MEMBER_SEPARATOR` 也是它；
+ *   U+2025 `‥`   **运行期系统成员**（`‥pc`、`‥status`、`‥lib`、`‥ctime`），
+ *                只有 kvspace 的运行期成员用。
+ *
+ * 写错这一格的后果不是报错，是**静默读到 0**：`struct·new` 把成员写到
+ * `p‥x`，而 layout 编出来的读槽是 `p·x`——两个不同的 key，读不到就是零值域，
+ * 用例照样「成功」地打印 0。**成功但值错，比报错严重一个量级。**
+ *
+ * 判据不是「哪个符号看起来对」，是**「谁是同一事实的另一个写者」**：
+ * layout 编 key、scatter 组 key、本文件组 key 必须用同一份字节。
+ */
+static const char container_member_separator[] = "\xC2\xB7";
+
+static bool container_member_key(const char *slot_key, const char *suffix,
+                                 size_t suffix_size, char *buffer,
+                                 size_t capacity) {
+    const size_t slot_size = strlen(slot_key);
+    const size_t separator_size = sizeof(container_member_separator) - 1U;
+
+    if (slot_size + separator_size + suffix_size + 1U > capacity) {
+        return false;
+    }
+    memcpy(buffer, slot_key, slot_size);
+    memcpy(buffer + slot_size, container_member_separator, separator_size);
+    if (suffix_size != 0U) {
+        memcpy(buffer + slot_size + separator_size, suffix, suffix_size);
+    }
+    buffer[slot_size + separator_size + suffix_size] = '\0';
+    return true;
+}
+
+/*
+ * 具名 map 的键来自**字符串**字面量；位置型的读参是值本身（int64 等）。
+ * 区分只看「字面量的 langtype 是不是字符序列」，不看引用种类——两者都是 LITERAL。
+ */
+static bool container_argument_is_name(binrwir_execution_frame_t *frame,
+                                       const binrwir_argument_t *argument) {
+    runtimec_string_view_t declared;
+    runtimec_error_t error;
+
+    if (argument->reference_kind != BINRWIR_REFERENCE_LITERAL) {
+        return false;
+    }
+    runtimec_error_reset(&error);
+    if (vmbin_value_access_langtype(frame, argument, &declared, &error) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        return false;
+    }
+    for (size_t ordinal = 0U; ordinal + 5U <= declared.size; ++ordinal) {
+        if (memcmp(declared.data + ordinal, "char", 4U) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* 把一个值写成 `<slot>‥<suffix>`：body + 它自己的声明 langtype 组 wire。 */
+static runtimec_status_t container_write_member(
+    binrwir_execution_frame_t *frame, const char *slot_key,
+    const char *suffix, size_t suffix_size,
+    const binrwir_argument_t *value_argument, runtimec_error_t *error) {
+    vmbin_value_location_t element;
+    runtimec_string_view_t declared;
+    char langtype_text[256];
+    char member_key[VMBIN_HANDLER_KEY_CAPACITY];
+    char message[256];
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    runtimec_status_t status;
+
+    if (!container_member_key(slot_key, suffix, suffix_size, member_key,
+                              sizeof(member_key))) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    status = vmbin_value_access_locate_body(frame, value_argument, &element,
+                                             error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    status = vmbin_value_access_langtype(frame, value_argument, &declared,
+                                          error);
+    if (status != RUNTIMEC_STATUS_SUCCESS ||
+        declared.size + 1U > sizeof(langtype_text)) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    memcpy(langtype_text, declared.data, declared.size);
+    langtype_text[declared.size] = '\0';
+    if (kvspaceXvalueHeadNewSlack(element.read_bytes, (uint64_t)element.size,
+                                  (uint64_t)element.size, langtype_text, &wire,
+                                  &wire_size) != 0 ||
+        wire == NULL || wire_size > UINT32_MAX) {
+        return RUNTIMEC_STATUS_ERROR;
+    }
+    message[0] = '\0';
+    const int set_status = kvspaceSetValue(
+        frame->kvspace_handle, member_key, wire, (uint32_t)wire_size, message,
+        (uint32_t)sizeof(message));
+    free(wire);
+    return set_status == 0 ? RUNTIMEC_STATUS_SUCCESS : RUNTIMEC_STATUS_ERROR;
+}
+
+/*
+ * 位置型成员写入：每个读参一个元素，键 `<slot>‥[i]`。
+ *
+ * **具名型必须在这里被拒**：首参是字符串字面量时走 map 的命名键，必须先解
+ * 字面量文本——本函数只接位置型，遇到具名型失败封闭。宁可报「没实现」，
+ * 也不要用错的键写出一份看起来正常的容器。
+ */
+/*
+ * create 一族的统一开场：取写参槽 key，然后写空 body 的 marker。
+ * 两步任一失败即置 exit 并返回 false——调用方只需 `if (!ok) return;`。
+ */
+/*
+ * ── 容器的两个正交维度 ────────────────────────────────────────────────
+ *
+ * **「容器的创建」与「成员的写法」是两件不同的事，不许合并。**
+ *
+ *   创建：值是值、成员索引是成员索引——这对**所有**容器都一样
+ *         ⇒ **只有一处**（本函数 + `container_create_variadic` / `container_struct_create`
+ *           共用的那一段）。
+ *   成员写法：`map·new` 是**位置型**（`<slot>·[i]`，每个读参一个元素）；
+ *            `struct·new` 是**具名型**（`<slot>·<name>`，名字从 UTF-32 字面量解）。
+ *         ⇒ **两种事实，必须分开**。
+ *
+ * 下一个人会想「顺手统一两条成员循环」——**不要**。那次统一会把具名与位置
+ * 合并成一种，然后两者都不对。
+ *
+ * ── 建一个空容器要两件事，缺一不可 ──────────────────────────────────
+ * （与 `scatter.c` 的 `scatter_container_create` 同一判据——那是最早写对的地方，
+ * 照它做，不发明第三种。）
+ *
+ *   1. base key 写一条**空 body 的 container marker**（langtype 取自写槽声明）；
+ *   2. `kvspaceMkindex` 给 base 建目录 —— **成员索引**。
+ *
+ * 只做 1：base 上有类型、没有成员索引，`p·x` 写不进去——kvspace 报
+ *         「memhead 不存在，禁止写 memitem」；
+ * 只做 2：base 上没有类型。
+ *
+ * ⇒ **「值」与「成员索引」是容器的两样东西，写值不等于声明容器。**
+ */
+static bool container_open_marker(binrwir_execution_frame_t *frame,
+                                  const binrwir_instruction_view_t *instruction,
+                                  char *buffer, size_t capacity,
+                                  binrwir_execution_exit_t *output_exit) {
+    char message[256];
+    size_t key_length;
+
+    if (!container_target_key(frame, instruction, buffer, capacity,
+                              output_exit) ||
+        vmbin_handler_write_new_value(frame, instruction, NULL, 0U,
+                                      output_exit) != RUNTIMEC_STATUS_SUCCESS) {
+        return false;
+    }
+    /* 目录键以 '/' 结尾：kvspace 的目录枚举要求如此。 */
+    key_length = strlen(buffer);
+    if (key_length + 2U > capacity) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                           instruction->source_logical_program_counter);
+        return false;
+    }
+    buffer[key_length] = '/';
+    buffer[key_length + 1U] = '\0';
+    message[0] = '\0';
+    const int mkindex_status = kvspaceMkindex(frame->kvspace_handle, buffer, 0U,
+                                              message, (uint32_t)sizeof(message));
+    buffer[key_length] = '\0';
+    if (mkindex_status != 0) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                           VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
+                           instruction->source_logical_program_counter);
+        return false;
+    }
+    return true;
+}
+
+static void container_write_positional_members(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, const char *slot_key,
+    binrwir_execution_exit_t *output_exit) {
+    runtimec_error_t error;
+
+    for (size_t ordinal = 0U; ordinal < instruction->read_arguments.count;
+         ++ordinal) {
+        char suffix[24];
+        const int suffix_size = snprintf(suffix, sizeof(suffix), "[%zu]", ordinal);
+
+        runtimec_error_reset(&error);
+        if (container_argument_is_name(
+                frame, &instruction->read_arguments.data[ordinal]) ||
+            suffix_size <= 0 || (size_t)suffix_size >= sizeof(suffix) ||
+            container_write_member(
+                frame, slot_key, suffix, (size_t)suffix_size,
+                &instruction->read_arguments.data[ordinal],
+                &error) != RUNTIMEC_STATUS_SUCCESS) {
+            vmbin_handler_fail(output_exit,
+                               suffix_size <= 0
+                                   ? RUNTIMEC_STATUS_INVALID
+                                   : RUNTIMEC_STATUS_UNSUPPORTED,
+                               RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH,
+                               instruction->source_logical_program_counter);
+            return;
+        }
+    }
+}
+
+/* 变参 create 的完整开场：marker + 位置型成员。map·new 与 struct·new 共用。 */
+static void container_create_variadic(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    char slot_key[VMBIN_HANDLER_KEY_CAPACITY];
+
+    if (container_open_marker(frame, instruction, slot_key, sizeof(slot_key),
+                              output_exit)) {
+        container_write_positional_members(frame, instruction, slot_key,
+                                           output_exit);
+    }
+}
+
+/* 「一个读参、一个写参」的 arity 检查；不满足即置 exit。 */
+
+/* 写参槽的完整 key；取不到即置 exit 并返回 false。容器 create 一族共用。 */
+
+
+static void container_map_new_build(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    runtimec_string_view_t result_langtype,
+    binrwir_execution_exit_t *output_exit) {
+    (void)result_langtype;
+    /* marker 后逐成员写位置型元素；具名型在 members 里被拒。 */
+    container_create_variadic(frame, instruction, output_exit);
+}
+
+VMBIN_HANDLER_CREATE_VARIADIC(container_map_new_handler, container_map_new_build)
+
+/* 把 `/lib/Name` 的 UTF-32 字面量解成 ASCII 路径。非 UTF-32 形态直接复制。 */
+static bool container_literal_path(binrwir_execution_frame_t *frame,
+                                   const binrwir_argument_t *argument,
+                                   char *buffer, size_t capacity,
+                                   size_t *output_size) {
+    /*
+     * **必须 `= {0}`**：`runtimec_bytes_buffer_reset` 的契约是「只把已用长度
+     * 归零，不释放 data、不改变 capacity」（`contract/view.h:61`）——它**不**初始化。
+     * 未初始化的 `data` / `capacity` 是栈垃圾，而 `read_body` 的判据
+     * `data == NULL || capacity < size` 会被「垃圾非 NULL 且垃圾 ≥ size」
+     * 蒙混过去，于是 memcpy 直接写进野指针。
+     *
+     * 这是 p0 那条「二义状态不许存在」的同一类：**「清零」与「清内容」是两件事，
+     * 名字必须对得上**。reset 的名字说的是后者，就不能指望它做前者。
+     */
+    runtimec_bytes_buffer_t bytes = {0};
+    runtimec_string_view_t declared;
+    runtimec_error_t error;
+    bool ok = false;
+
+    /*
+     * **所有权必须是一个可判定的状态，不是一段推理。**
+     *
+     * 原来的写法是：先零容量读一次，断言「必然先拿 INSUFFICIENT_CAPACITY」，
+     * 于是第二遍用 malloc 的缓冲；然后所有出口无条件 `free(bytes.data)`。
+     * 那个断言**不是契约**——`vmbin_value_access_read_body` 只在 `data == NULL`
+     * 或容量不足时返回 INSUFFICIENT_CAPACITY，零容量 + 零长度 body 时直接
+     * SUCCESS，`bytes.data` 仍是刚 reset 的 NULL……**但下一句 `malloc` 分支
+     * 被跳过，`bytes.data` 保持 NULL 之外的任何一种历史值都可能发生**。
+     * Release 下 `constprop` 把这个假设优化得更彻底，于是 free 到了一个
+     * 不是 `malloc` 来的指针 ⇒ `arena_for_chunk` 段错误（Debug 不崩，是 glibc
+     * 宽容度的差别，不是两种构建行为不同）。
+     *
+     * ⇒ 改成：**每个出口只看 `owned`**。`owned` 只有一处被置真，
+     * 只有一处被 free（本函数末尾与两个失败出口共用同一个判据）。
+     */
+    bool owned = false;
+
+    runtimec_bytes_buffer_reset(&bytes);
+    runtimec_error_reset(&error);
+    if (vmbin_value_access_read_body(frame, argument, &bytes, &error) ==
+        RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY) {
+        bytes.data = (uint8_t *)malloc(bytes.size != 0U ? bytes.size : 1U);
+        if (bytes.data == NULL) {
+            return false;
+        }
+        owned = true;
+        bytes.capacity = bytes.size;
+        bytes.size = 0U;
+        runtimec_error_reset(&error);
+        if (vmbin_value_access_read_body(frame, argument, &bytes, &error) !=
+            RUNTIMEC_STATUS_SUCCESS) {
+            free(bytes.data); /* owned 在上方置真，此处是它自己的出口 */
+            return false;
+        }
+    }
+    if (!runtimec_bytes_buffer_is_valid(&bytes) ||
+        vmbin_value_access_langtype(frame, argument, &declared, &error) !=
+            RUNTIMEC_STATUS_SUCCESS) {
+        if (owned) {
+            free(bytes.data);
+        }
+        return false;
+    }
+    if (bytes.size != 0U) {
+        bool utf32 = false;
+        for (size_t ordinal = 1U; ordinal + 1U < declared.size; ++ordinal) {
+            if (memcmp(declared.data + ordinal, "char/utf32", 10U) == 0) {
+                utf32 = true;
+                break;
+            }
+        }
+        if (utf32) {
+            const size_t characters = bytes.size / 4U;
+            if (characters + 1U <= capacity) {
+                for (size_t ordinal = 0U; ordinal < characters; ++ordinal) {
+                    buffer[ordinal] = (char)bytes.data[ordinal * 4U];
+                }
+                buffer[characters] = '\0';
+                *output_size = characters;
+                ok = true;
+            }
+        } else if (bytes.size + 1U <= capacity) {
+            memcpy(buffer, bytes.data, bytes.size);
+            buffer[bytes.size] = '\0';
+            *output_size = bytes.size;
+            ok = true;
+        }
+    }
+    if (owned) {
+        free(bytes.data);
+    }
+    return ok;
+}
+
+/*
+ * struct·new 的三段：解原型路径 → 克隆子树（失败即回滚）→ 写实例基值 → 成对写字段。
+ *
+ * `kvspaceCpTree` **不是原子的**：它先删目的子树再逐层复制，中途失败只返回非零、
+ * 不回滚。所以失败后目的槽可能是空的、也可能是半个实例——半个实例正是 p0 禁止的
+ * 状态。这里自己回滚成「那里什么都没有」；回滚失败也走同一出口，调用方看到的是
+ * 失败，不是成功。
+ */
+static bool container_struct_clone(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, const char *slot_key,
+    binrwir_execution_exit_t *output_exit) {
+    char prototype_path[512];
+    size_t prototype_size = 0U;
+    char message[256];
+
+    message[0] = '\0';
+    if (!container_literal_path(frame, &instruction->read_arguments.data[0],
+                                prototype_path, sizeof(prototype_path),
+                                &prototype_size) ||
+        prototype_size == 0U ||
+        kvspaceCpTree(frame->kvspace_handle, prototype_path, slot_key, message,
+                      (uint32_t)sizeof(message)) == 0) {
+        return prototype_size != 0U;
+    }
+    char rollback[256];
+    rollback[0] = '\0';
+    (void)kvspaceDelTree(frame->kvspace_handle, slot_key, rollback,
+                         (uint32_t)sizeof(rollback));
+    vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                       RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                       instruction->source_logical_program_counter);
+    return false;
+}
+
+/* 成对 (字段名, 值)：字段名同样是 UTF-32 字面量，值直接写成员槽。 */
+static bool container_struct_fields(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, const char *slot_key,
+    binrwir_execution_exit_t *output_exit) {
+    for (size_t ordinal = 1U; ordinal + 1U < instruction->read_arguments.count;
+         ordinal += 2U) {
+        char field_name[128];
+        size_t field_size = 0U;
+        runtimec_error_t error;
+
+        runtimec_error_reset(&error);
+        if (!container_literal_path(
+                frame, &instruction->read_arguments.data[ordinal], field_name,
+                sizeof(field_name), &field_size) ||
+            field_size == 0U ||
+            container_write_member(
+                frame, slot_key, field_name, field_size,
+                &instruction->read_arguments.data[ordinal + 1U],
+                &error) != RUNTIMEC_STATUS_SUCCESS) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH,
+                               instruction->source_logical_program_counter);
+            return false;
+        }
+    }
+    return true;
+}
+
+/* struct·new 的全流程：取槽 → 克隆原型 → 写基值 → 成对写字段。 */
+static void container_struct_create(binrwir_execution_frame_t *frame,
+                                    const binrwir_instruction_view_t *instruction,
+                                    binrwir_execution_exit_t *output_exit) {
+    char slot_key[VMBIN_HANDLER_KEY_CAPACITY];
+
+    /*
+     * **创建维度共用 `container_open_marker`（marker + mkindex），成员维度用自己的
+     * 具名循环**（`container_struct_fields`）。不调 `container_create_variadic`：
+     * 那条的成员是位置型的，对 struct 是错的事实。
+     */
+    if (instruction->read_arguments.count >= 1U &&
+        container_open_marker(frame, instruction, slot_key, sizeof(slot_key),
+                              output_exit)) {
+        (void)container_struct_fields(frame, instruction, slot_key, output_exit);
+    }
+}
+
+static void container_struct_new_build(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    runtimec_string_view_t result_langtype,
+    binrwir_execution_exit_t *output_exit) {
+    (void)result_langtype;
+    container_struct_create(frame, instruction, output_exit);
+}
+
+VMBIN_HANDLER_CREATE_VARIADIC(container_struct_new_handler,
+                              container_struct_new_build)
+
+VMBIN_HANDLER_CREATE_ONE(container_copy_handler, container_copy_build)
+
 static const binrwir_registry_entry_t runtimec_container_entry_table[] = {
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_MAP_NEW,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_map_new_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_STRUCT_NEW,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_struct_new_handler},
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_NEW,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
      .handler = container_new_handler},
@@ -827,6 +1452,18 @@ static const binrwir_registry_entry_t runtimec_container_entry_table[] = {
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_NEW_REINTERPRET,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
      .handler = container_newreinterpret_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_COPY,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_copy_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_DIMENSION,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_dim_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_LANGTYPE,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_langtype_handler},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_COMPACT_ARRAY_BODY_LENGTH,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = container_bodylen_handler},
 };
 
 const binrwir_registry_entry_t *runtimec_container_handler_entries(

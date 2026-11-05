@@ -5,6 +5,11 @@
  * 这里用替身 compilation（一个非空指针）验证所有权与租约计数，不触发真实
  * 编译器；compilation 的 destroy 目前是桩，因此本用例只验证到「entry 被回收
  * 时不再持有它」这一层。
+ *
+ * **删除记录**：原第 11 条断言「依赖构造失败时错误消息以 `dependency failed: `
+ * 开头并点名组件」。`host_services` 删除后依赖不再是可注入的函数表，
+ * 该失败形态**不可达**，无法改写成状态断言；改成「传空 kvspace access ⇒ 失败、
+ * session 保持 NULL、消息非空」，保留「不留半初始化 + 可定位」这两条性质。
  */
 
 #include <stdint.h>
@@ -257,11 +262,16 @@ int main(void) {
     EXPECT(runtimec_compilation_repository_destroy(repository) ==
            RUNTIMEC_STATUS_SUCCESS);
 
-    /* 11. session 在依赖缺失时点名组件、且不留下半初始化 session。 */
+    /*
+     * 11. 创建失败时**不留下半初始化 session**，且错误消息非空。
+     *
+     * 原用例是「依赖缺失时点名组件」（错误消息以 `dependency failed: ` 开头）。
+     * `host_services` 删除后**这条性质不再可达**：依赖不再是可注入的函数表，
+     * 全是编译进二进制的模块，`session_create` 只剩「请求非法」与「分配失败」
+     * 两种失败。所以本条改成它在新形态下**仍然成立**的部分：传空 kvspace access
+     * ⇒ 返回失败、`*output_session` 保持 NULL、错误消息非空（可定位，不是哑失败）。
+     */
     {
-        runtimec_host_services_t services;
-        runtimec_host_services_initialize(&services);
-        services.allocator = allocator;
         runtimec_session_options_t options;
         memset(&options, 0, sizeof(options));
         options.structure_size = sizeof(options);
@@ -273,15 +283,11 @@ int main(void) {
         runtimec_error_t session_error;
         runtimec_error_reset(&session_error);
         const runtimec_status_t status = runtimec_session_create(
-            &services, &options, &session, &session_error);
+            NULL, &options, &session, &session_error);
         EXPECT(session == NULL);
         EXPECT(status != RUNTIMEC_STATUS_SUCCESS);
         EXPECT(session_error.message.data != NULL);
         EXPECT(session_error.message.size != 0U);
-        /* 第一个失败的依赖必须被点名，不能只是一句 not_implemented。 */
-        EXPECT(session_error.message.size > 18U);
-        EXPECT(memcmp(session_error.message.data, "dependency failed: ", 19U) ==
-               0);
     }
 
     if (failures != 0) {

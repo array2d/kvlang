@@ -25,6 +25,7 @@
 #include <string.h>
 
 #include "contract/char_codec.h"
+#include "contract/float_format.h"
 
 #include "binrwir/execution_exit.h"
 #include "binrwir/execution_frame.h"
@@ -119,31 +120,25 @@ static int runtimec_temp_println_is(runtimec_string_view_t langtype,
  * 判据是**值本身的 kind**（调用方已按 langtype 分流进来），不是事后看字符串
  * 像不像整数；`inf`/`nan` 不补，它们不是「看起来像整数」。
  */
-static int runtimec_temp_println_render_float(double value, char *scratch,
-                                              size_t capacity,
+/*
+ * 浮点格式化**已移入 contract/float_format**——本函数只剩转发。
+ *
+ * 移走的理由是位置：把唯一正确的浮点格式化放进一个「计划要删」的临时组件，
+ * 删它时就得把能力一起搬走，那是把一个临时决定延后成一次迁移工作。
+ *
+ * 这里只做一件事：把 float32 的**窄化 + 域选择**拼好交给合同。值本身以 double
+ * 传入（float32 的每个值都能精确表示为 double，不引入舍入），**往返域由宽度决定**。
+ */
+static int runtimec_temp_println_render_float(double value, int is_float32,
+                                              char *scratch, size_t capacity,
                                               size_t *output_length) {
-    int written = snprintf(scratch, capacity, "%g", value);
-
-    if (written <= 0 || (size_t)written >= capacity) {
-        return 0;
-    }
-    /* 已含小数点或指数（`3.5`、`1e+20`）就原样用。 */
-    if (strpbrk(scratch, ".eE") == NULL) {
-        const int is_non_finite =
-            value != value || value > DBL_MAX || value < -DBL_MAX;
-
-        if (!is_non_finite) {
-            if ((size_t)written + 2U >= capacity) {
-                return 0;
-            }
-            scratch[written] = '.';
-            scratch[written + 1] = '0';
-            written += 2;
-            scratch[written] = '\0';
-        }
-    }
-    *output_length = (size_t)written;
-    return 1;
+    return runtimec_float_format_shortest(
+               value,
+               is_float32 != 0 ? RUNTIMEC_FLOAT_DOMAIN_FLOAT32
+                               : RUNTIMEC_FLOAT_DOMAIN_FLOAT64,
+               scratch, capacity, output_length)
+           ? 1
+           : 0;
 }
 
 static int runtimec_temp_println_render(runtimec_string_view_t langtype,
@@ -225,7 +220,7 @@ static int runtimec_temp_println_render(runtimec_string_view_t langtype,
             return 0;
         }
         memcpy(&value, body, sizeof(value));
-        return runtimec_temp_println_render_float(value, scratch, capacity,
+        return runtimec_temp_println_render_float(value, 0, scratch, capacity,
                                                   output_length);
     }
     if (runtimec_temp_println_is(langtype, "float32")) {
@@ -238,7 +233,7 @@ static int runtimec_temp_println_render(runtimec_string_view_t langtype,
         /* 窄化到 double 是**保值**的（float32 的每个值都能精确表示为 double），
          * 所以这里不引入额外舍入；`%g` 对 double 打印再按需去掉尾零，
          * 结果与直接在 float 上打印一致。 */
-        return runtimec_temp_println_render_float((double)narrow, scratch,
+        return runtimec_temp_println_render_float((double)narrow, 1, scratch,
                                                   capacity, output_length);
     }
     return 0;

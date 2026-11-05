@@ -14,7 +14,7 @@
 #include <stdint.h>
 
 #include "contract/allocator.h"
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "contract/view.h"
 #include "vmkv/source.h"
 
@@ -69,7 +69,7 @@ typedef struct vmkv_source_slot {
 } vmkv_source_slot_t;
 
 struct vmkv_function_source_t {
-    runtimec_host_services_t host_services;
+    runtimec_kvspace_access_t *kvspace_access;
     runtimec_snapshot_t snapshot;
     const char *function_path;
     size_t function_path_size;

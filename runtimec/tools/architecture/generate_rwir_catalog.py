@@ -1203,7 +1203,12 @@ def specialization_combinations(row: Row) -> list[tuple[str, ...]]:
     if not read_types:
         return []
     if row.operator == CAST_OPERATOR:
-        tuples = [(source, target, target)
+        # cast 的指令形状是 **1 读 + 1 写**（目标类型由写槽声明给出），按
+        # 「读参在前、写参在后」元组就是 `(源, 目标)` 两段。
+        # 曾写成 `(source, target, target)`：那是把目标当成第二个读参，与真实
+        # 指令形状不符，于是**所有 cast 指令都查不到特化行**（表 196 行全 3 段，
+        # 指令恒产出 2 段）。证据：workspace/622/coding1/float32-print-detail21.md。
+        tuples = [(source, target)
                   for source in read_types for target in read_types
                   if constraint_allows(row.constraint, [source, target])]
     elif row.operator in UNARY_OPERATORS:
@@ -1374,6 +1379,12 @@ def render_specialization_table(rows: list[Row]) -> str:
         " * 作用：特化查找表的唯一定义。常量与计数在 operation_identifiers.h。",
         " * 约束：由 tools/architecture/generate_rwir_catalog.py 生成并校验；",
         " *       条数必须等于 BINRWIR_SPECIALIZATION_TABLE_COUNT。",
+        " * 缺行处置：`binrwir_program_specialize` 查不到本表的 (base opid, 元组串)",
+        " *       时**整份 Program 拒绝**，error.code = 3（NO_SPECIALIZATION_ROW）。",
+        " *       补行要改上游：specification/rwir_catalog.def 的能力行掩码，再由本",
+        " *       脚本重新生成——**不要手改本文件，也不要给 handler 加回落**。",
+        " *       error.code = 1 是另一种成因（操作数取不到 langtype / 元组超缓冲），",
+        " *       那要去修 layout 或 vmkv，与本表无关。",
         f" * 统计：{len(specializations)} 行。",
         " */",
         "",

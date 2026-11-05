@@ -87,7 +87,19 @@ int main(void) {
         }
         EXPECT(runtime != NULL);
 
-        /* 2. execute 尚未实现：必须明确失败，且输出被清空。 */
+        /*
+         * 2. execute 对**存储里不存在的函数**必须失败封闭、输出清空。
+         *
+         * **期望已变（2026-11-05）**：这里原来写的是「execute 尚未实现」——
+         * 那时 `kvlang_runtime_execute` 是空壳，任何调用都返回
+         * NOT_IMPLEMENTED / INVALID。它现在是**真的执行入口**（走
+         * execution window），所以期望要落在「跑一个不存在的东西会怎样」上。
+         *
+         * 实测成因（`ERROR`，消息 `function has no readable source revision key`）：
+         * 本用例的 store 是**刚建的空 store**，`/lib/example` 与它的 `‥ctime`
+         * 都不存在，窗口在建帧前就失败。**判据是失败封闭**：给出明确状态、
+         * 输出一个字节都不留，而不是编一个「跑完了」。
+         */
         char value[32] = "dirty";
         char program_counter[32] = "dirty";
         kvlang_runtime_execute_result_t result;
@@ -106,8 +118,11 @@ int main(void) {
         error = prepare_error(error_text, sizeof(error_text));
         const runtimec_status_t execute_status =
             kvlang_runtime_execute(runtime, &execute_request, &result, &error);
-        EXPECT(execute_status == RUNTIMEC_STATUS_NOT_IMPLEMENTED ||
-               execute_status == RUNTIMEC_STATUS_INVALID);
+        /* 具体状态而非「非成功」：`ERROR` 是这条路径的实际分类，写成
+         * `!= SUCCESS` 会把「状态码分类被改坏」一起放过。 */
+        EXPECT(execute_status == RUNTIMEC_STATUS_ERROR);
+        /* 错误必须点名成因，不能只给一个状态码。 */
+        EXPECT(error_text[0] != '\0');
         EXPECT(result.value.length == 0U);
         EXPECT(result.program_counter.length == 0U);
         EXPECT(value[0] == '\0');

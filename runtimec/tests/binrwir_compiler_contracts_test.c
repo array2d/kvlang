@@ -1,8 +1,17 @@
 /* Verify BinRWIR Compiler and its JIT compile-versus-execute boundaries. */
 
+#define _GNU_SOURCE
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <kvspace/kvspace.h>
+
+#include "contract/kvspace_access.h"
 
 #include "binrwir_compiler/compiler.h"
 #include "binrwir_compiler/jit/compiler.h"
@@ -165,38 +174,88 @@ static void test_deallocate(
     (void)alignment;
 }
 
-typedef struct static_xvalue_resolution_context {
-    runtimec_xvalue_address_t xvalue_address;
-    runtimec_status_t status;
-    size_t call_count;
-} static_xvalue_resolution_context_t;
+/*
+ * 场景数据：两条 key，一条已分配、一条未分配。判据仍是「编码器把 STATIC 参数
+ * 编成 host 给出的值体地址；host 说『尚未分配』(UNSUPPORTED) 时 payload 记 NONE」。
+ *
+ * 原来用注入的 `resolve_static_xvalue_address` 造这两种返回；现在数据面是**真
+ * kvspace**：已分配 = key 真的存在，未分配 = key 真的不存在。判据不变，载体换真。
+ */
+static bool store_open(void **output_handle) {
+    static int sequence = 0;
+    char directory[256];
+    static char data_source[360];
+    /* 目录与 DSN 必须活到进程结束：句柄指向它们。 */
+    snprintf(directory, sizeof(directory),
+             "/tmp/runtimec-compiler-contracts-%d-%d", (int)getpid(),
+             sequence++);
+    (void)mkdir(directory, 0700);
+    snprintf(data_source, sizeof(data_source), "shm://%s/store.shm", directory);
+    *output_handle = kvspaceConnect(data_source);
+    return *output_handle != NULL;
+}
 
-static runtimec_status_t resolve_static_xvalue_address(
-    void *context, const runtimec_snapshot_t *snapshot,
-    runtimec_key_view_t key,
-    runtimec_xvalue_address_t *output_xvalue_address,
-    runtimec_error_t *error) {
-    static_xvalue_resolution_context_t *resolution_context = context;
-
-    (void)snapshot;
-    (void)key;
-    (void)error;
-    ++resolution_context->call_count;
-    if (resolution_context->status != RUNTIMEC_STATUS_SUCCESS) {
-        *output_xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
-        return resolution_context->status;
+/*
+ * 把 8 字节 int64 写进 key，并读回自检。
+ * **必须写完整 wire（16 字节 head + body + attr）**：kvspace 存的是 XValue，
+ * 塞裸 8 字节会落进一条没有 head 的缓冲，之后按值头解析就是畸形值。
+ */
+static bool store_put_int64(void *handle, const char *key) {
+    uint8_t body[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    if (kvspaceXvalueHeadNewSlack(body, sizeof(body), sizeof(body), "int64",
+                                  &wire, &wire_size) != 0 ||
+        wire == NULL) {
+        return false;
     }
-    *output_xvalue_address = resolution_context->xvalue_address;
-    return RUNTIMEC_STATUS_SUCCESS;
+    char error_text[256];
+    error_text[0] = '\0';
+    const int written = kvspaceSetValue(handle, key, wire, (uint32_t)wire_size,
+                                        error_text,
+                                        (uint32_t)sizeof(error_text));
+    free(wire);
+    if (written != 0) {
+        fprintf(stderr, "store_put_int64(%s) failed: %s\n", key, error_text);
+        return false;
+    }
+    uint8_t *readback = NULL;
+    uint32_t readback_size = 0U;
+    return kvspaceGet(handle, key, 1, &readback, &readback_size) == 0 &&
+           readback != NULL && readback_size != 0U;
 }
 
 static void test_vmkv_xvalue_address_encoding(void) {
-    static_xvalue_resolution_context_t resolution_context = {
-        .xvalue_address = UINT64_C(0x1000),
-        .status = RUNTIMEC_STATUS_SUCCESS,
-        .call_count = 0U,
+    void *handle = NULL;
+    if (!store_open(&handle)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
+    /*
+     * `/value` 已分配；`/missing` 不存在，用来造 host 的 UNSUPPORTED（「尚未分配」）。
+     */
+    if (!store_put_int64(handle, "/value")) {
+        fprintf(stderr, "SKIP: cannot seed /value\n");
+        kvspaceClose(handle);
+        return;
+    }
+
+    runtimec_kvspace_access_t *access = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    /* `test_allocate` 是「故意返回 NULL」的失败探针，不能用来建 access。 */
+    const runtimec_kvspace_access_request_t access_request = {
+        .allocator = {.context = NULL,
+                      .allocate = test_allocate_working,
+                      .deallocate = test_deallocate},
+        .borrowed_kvspace_handle = handle,
+        .instance_identifier = UINT64_C(1),
     };
-    runtimec_host_services_t host_services;
+    RUNTIMEC_EXPECT(runtimec_kvspace_access_create(&access_request, &access,
+                                                   &host_error) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(access != NULL);
+
     runtimec_snapshot_t snapshot;
     const vmkv_rwir_argument_view_t source_argument = {
         .parameter_type_name = RUNTIMEC_STRING_VIEW_LITERAL("int64"),
@@ -213,18 +272,15 @@ static void test_vmkv_xvalue_address_encoding(void) {
         .payload = UINT64_MAX,
     };
 
-    runtimec_host_services_initialize(&host_services);
-    host_services.context = &resolution_context;
-    host_services.allocator = (runtimec_allocator_t){
-        .context = NULL,
-        .allocate = test_allocate,
-        .deallocate = test_deallocate,
-    };
-    host_services.resolve_static_xvalue_address =
-        resolve_static_xvalue_address;
+    /* request 的有效性判据要求快照里有函数键、源位置与契约版本——原实现用
+     * `resolution_context` 注入，绕过了这条；真后端下必须给全。 */
     runtimec_snapshot_reset(&snapshot);
+    snapshot.contract_version = runtimec_contract_version();
+    snapshot.function_key = runtimec_key_view_from_c_string("/lib/test");
+    snapshot.source_position_text =
+        runtimec_string_view_from_c_string("[1,0]");
     const vmkv_encode_request_t request = {
-        .host_services = &host_services,
+        .kvspace_access = access,
         .function_path = RUNTIMEC_STRING_VIEW_LITERAL("/lib/test"),
         .expected_snapshot = snapshot,
     };
@@ -248,25 +304,39 @@ static void test_vmkv_xvalue_address_encoding(void) {
                         &builder_allocator, &identity, &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
+    /* error 必须非 NULL：`kvspace_access` 把 `error == NULL` 判为 INVALID。
+     * 原来走注入 resolver，这条校验被绕过了。 */
+    runtimec_error_t encode_error;
+    runtimec_error_reset(&encode_error);
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(
-        &request, builder, &source_argument, 7U, &encoded_argument, NULL) ==
-        RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(resolution_context.call_count == 1U);
+        &request, builder, &source_argument, 7U, &encoded_argument,
+        &encode_error) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 7U);
     RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
                     BINRWIR_REFERENCE_STATIC);
     RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
     RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
-    /* payload 是推导出的值体地址：基址 + 头长度，不写死偏移。 */
-    RUNTIMEC_EXPECT(encoded_argument.payload ==
-                    UINT64_C(0x1000) +
-                        RUNTIMEC_XVALUE_BODY_OFFSET_BYTES);
+    /* payload 是推导出的值体地址：**真后端给出的基址** + 头长度，不写死地址。 */
+    {
+        uint8_t *wire = NULL;
+        uint32_t wire_size = 0U;
+        RUNTIMEC_EXPECT(kvspaceGet(handle, "/value", 1, &wire, &wire_size) == 0);
+        RUNTIMEC_EXPECT(wire != NULL);
+        RUNTIMEC_EXPECT(encoded_argument.payload ==
+                        (uint64_t)(uintptr_t)wire +
+                            RUNTIMEC_XVALUE_BODY_OFFSET_BYTES);
+    }
 
+    /* 每次调用前重建 builder：符号池是累积的，复用会让 slot 断言漂移。 */
+    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_program_builder_create(
+                        &builder_allocator, &identity, &builder) ==
+                    RUNTIMEC_STATUS_SUCCESS);
     dynamic_argument.key_addressability = VMKV_KEY_ADDRESSABILITY_DYNAMIC;
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(
-        &request, builder, &dynamic_argument, 7U, &encoded_argument, NULL) ==
-        RUNTIMEC_STATUS_UNSUPPORTED);
-    RUNTIMEC_EXPECT(resolution_context.call_count == 1U);
+        &request, builder, &dynamic_argument, 7U, &encoded_argument,
+        &encode_error) == RUNTIMEC_STATUS_UNSUPPORTED);
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
     RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
                     BINRWIR_REFERENCE_INVALID);
@@ -274,69 +344,52 @@ static void test_vmkv_xvalue_address_encoding(void) {
     RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
     RUNTIMEC_EXPECT(encoded_argument.payload == BINRWIR_BODY_ADDRESS_NONE);
 
-    resolution_context.xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
-    encoded_argument = (binrwir_argument_t){
-        .argument_index = UINT32_MAX,
-        .reference_kind = BINRWIR_REFERENCE_INVALID,
-        .reserved_8_bits = UINT8_MAX,
-        .slot = UINT16_MAX,
-        .payload = UINT64_MAX,
-    };
-    RUNTIMEC_EXPECT(vmkv_encode_static_argument(
-        &request, builder, &source_argument, 7U, &encoded_argument, NULL) ==
-        RUNTIMEC_STATUS_ERROR);
-    RUNTIMEC_EXPECT(resolution_context.call_count == 2U);
-    RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
-                    BINRWIR_REFERENCE_INVALID);
-    RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.payload == BINRWIR_BODY_ADDRESS_NONE);
-
-    resolution_context.xvalue_address = UINT64_MAX - 7U;
-    encoded_argument = (binrwir_argument_t){
-        .argument_index = UINT32_MAX,
-        .reference_kind = BINRWIR_REFERENCE_INVALID,
-        .reserved_8_bits = UINT8_MAX,
-        .slot = UINT16_MAX,
-        .payload = UINT64_MAX,
-    };
-    RUNTIMEC_EXPECT(vmkv_encode_static_argument(
-        &request, builder, &source_argument, 7U, &encoded_argument, NULL) ==
-        RUNTIMEC_STATUS_ERROR);
-    RUNTIMEC_EXPECT(resolution_context.call_count == 3U);
-    RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
-                    BINRWIR_REFERENCE_INVALID);
-    RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.payload == BINRWIR_BODY_ADDRESS_NONE);
-
-    resolution_context.xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
-    resolution_context.status = RUNTIMEC_STATUS_UNSUPPORTED;
-    encoded_argument = (binrwir_argument_t){
-        .argument_index = UINT32_MAX,
-        .reference_kind = BINRWIR_REFERENCE_INVALID,
-        .reserved_8_bits = UINT8_MAX,
-        .slot = UINT16_MAX,
-        .payload = UINT64_MAX,
-    };
     /*
-     * **2026-11-05 语义变更**：host 返回 UNSUPPORTED 的语义是「key 尚未分配」，
-     * 不再等于「编码失败」——程序自己会创建 key（同一函数内先写后读就是常态），
-     * 地址由执行期按 key 解析（写目标不存在则创建）。编码器此时仍登记符号，
-     * payload 记 NONE。失败时机下移、判据不下移：执行期解析不到仍明确失败
-     * （见 `runtimec.engine.absolute_write` 的两条负向用例）。
+     * **2026-11-05 语义变更**：host 报 UNSUPPORTED 的含义是「key 尚未分配」，
+     * 不等于「编码失败」——程序自己会创建 key。此时仍登记符号、payload 记 NONE，
+     * 地址由执行期按 key 解析。载体换真后这一条是**真·不存在的 key**。
      */
-    RUNTIMEC_EXPECT(vmkv_encode_static_argument(
-        &request, builder, &source_argument, 7U, &encoded_argument, NULL) ==
-        RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(resolution_context.call_count == 4U);
-    RUNTIMEC_EXPECT(encoded_argument.argument_index == 7U);
-    RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
-                    BINRWIR_REFERENCE_STATIC);
-    RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.payload == BINRWIR_BODY_ADDRESS_NONE);
+    {
+        const vmkv_rwir_argument_view_t missing_argument = {
+            .parameter_type_name = RUNTIMEC_STRING_VIEW_LITERAL("int64"),
+            .parameter_name = RUNTIMEC_STRING_VIEW_LITERAL("value"),
+            .key = RUNTIMEC_KEY_VIEW_LITERAL("/missing"),
+            .key_addressability = VMKV_KEY_ADDRESSABILITY_STATIC,
+        };
+        RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+                        RUNTIMEC_STATUS_SUCCESS);
+        RUNTIMEC_EXPECT(binrwir_program_builder_create(
+                            &builder_allocator, &identity, &builder) ==
+                        RUNTIMEC_STATUS_SUCCESS);
+        encoded_argument = (binrwir_argument_t){
+            .argument_index = UINT32_MAX,
+            .reference_kind = BINRWIR_REFERENCE_INVALID,
+            .reserved_8_bits = UINT8_MAX,
+            .slot = UINT16_MAX,
+            .payload = UINT64_MAX,
+        };
+        const runtimec_status_t missing_status = vmkv_encode_static_argument(
+            &request, builder, &missing_argument, 7U, &encoded_argument,
+            &encode_error);
+        RUNTIMEC_EXPECT(missing_status == RUNTIMEC_STATUS_SUCCESS);
+        RUNTIMEC_EXPECT(encoded_argument.argument_index == 7U);
+        RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
+                        BINRWIR_REFERENCE_STATIC);
+        RUNTIMEC_EXPECT(encoded_argument.payload ==
+                        BINRWIR_BODY_ADDRESS_NONE);
+    }
+
+    /*
+     * 地址溢出那条（基址 + 头长度越过 UINT64_MAX）在真后端下**造不出来**：
+     * 进程内地址远小于 UINT64_MAX - 16。那是 `runtimec_xvalue_body_address` 的
+     * 纯函数性质，已由 `runtimec.contracts` 的单元断言覆盖，不在这里重复。
+     */
+
+    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(runtimec_kvspace_access_destroy(access, &host_error) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    kvspaceClose(handle);
 }
 
 static void test_compiler_configuration(void) {

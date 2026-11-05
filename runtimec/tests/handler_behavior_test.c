@@ -38,11 +38,12 @@
 #include "binrwir/program.h"
 #include "binrwir/registry.h"
 #include "binrwir/signature.h"
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "contract/status.h"
 #include "kvspace/xvalue_head.h"
 #include "vmbin/core_operations.h"
 #include "vmbin/handlers/scalar.h"
+#include "vmbin/handlers/scalar_generated.h"
 #include "vmbin/interpreter.h"
 
 /* 特化表是生成物，定义在 binrwir/specialization_table.c；头文件只给类型与
@@ -228,7 +229,15 @@ static runtimec_status_t run_case(const handler_case_t *test_case,
         segments[segment_count] = type_text[segment_count];
         cursor = comma + 1;
     }
-    EXPECT(segments[2] != NULL);
+    /*
+     * 段数**不恒为三**：二元算子（add/sub/mul/div/mod/比较…）是三段
+     * `左,右,结果`，而 `cast` 是两段 `源,目标`——2026-11-05 特化表改过，
+     * cast 的元组去掉了第三段（目标即结果）。
+     *
+     * 这里不假设段数，只要求「至少两段」；具体几段由元组串自己说了算，
+     * 硬写 `segments[2] != NULL` 会把 cast 全部判死。
+     */
+    EXPECT(segments[1] != NULL);
 
     specialization = find_specialization(test_case->base_opid,
                                          test_case->operand_types,
@@ -293,16 +302,18 @@ static runtimec_status_t run_case(const handler_case_t *test_case,
          * 用**基础 opid**，不是特化 opid。
          *
          * 特化 opid（0x8000–0xFEFF）是「编译期按操作数类型选出的更窄的行」，
-         * 由编译器把指令改写成它；handler 仍按基础行注册，一条基础 handler
-         * 服务它名下所有特化。实测（2026-11-05）：registry 里只有基础 opid，
-         * 特化表 `binrwir_specializations` 目前**零产品消费方**，拿特化 opid
-         * 直接执行会落到「表里没有这个 opid」。
+         * 由编译器把指令改写成它，执行走**特化 opid**。
          *
-         * 所以本用例查特化表只为验证「表里确实有这条 (base, 元组) 行」，
-         * 执行走基础 opid。特化链本身是否接通，由另一条用例回答
-         * （`runtimec.architecture.*` 那批不给答案，这里也不越位断言）。
+         * 2026-11-05 改：基础 opid 的通用 handler 已按 p10「先删后增」整族删除
+         * （`scalar.c` 的算术 handler）。特化不命中的指令被拒绝而不是回落——
+         * 回落到一条**必然 `UNSUPPORTED`** 的指令会让「特化表缺行」伪装成
+         * 「注册表里没有」。见 `binrwir/specialize.h` 的注释。
+         *
+         * 所以本用例执行时用**查到的特化 opid**，与产品路径一致：产品也是
+         * 先把 Program 特化、再执行。基础 opid 只用来查特化表。
          */
-        request.operation_identifier = test_case->base_opid;
+        request.operation_identifier =
+            specialization->specialized_operation_identifier;
         request.source_logical_program_counter = 1U;
         request.read_arguments.data = reads;
         request.read_arguments.count = test_case->read_count;
@@ -328,6 +339,14 @@ static runtimec_status_t run_case(const handler_case_t *test_case,
         frame.bindings = bindings;
         status = binrwir_registry_initialize(&registry);
     }
+    /*
+     * **两张表都要注册**，与 `engine/session.c` 的产品装配一致。
+     *
+     * 只注册基础表会被特化 opid 打空——2026-11-05 实测：本用例改用特化 opid
+     * 执行后，若只装 `scalar_handler_entries`（29 条基础），57 条全部
+     * `UNIMPLEMENTED`。产品路径同时装两张：基础表服务非特化算子，
+     * 特化表服务算术这类只在特化后执行的算子。
+     */
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         size_t scalar_count = 0U;
         const binrwir_registry_entry_t *scalar_entries =
@@ -335,6 +354,11 @@ static runtimec_status_t run_case(const handler_case_t *test_case,
 
         status = binrwir_registry_append(&registry, "scalar", scalar_entries,
                                           scalar_count, NULL);
+    }
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = binrwir_registry_append(&registry, "scalar_generated",
+                                          scalar_generated_entries,
+                                          scalar_generated_entry_count, NULL);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         *output_exit = (binrwir_execution_exit_t){0};
@@ -937,7 +961,7 @@ int main(void) {
         cast_case.decision = "floating-to-integer-truncation";
         cast_case.name = "float64 -3.9 to int64 truncates toward zero";
         cast_case.base_opid = BINRWIR_OPERATION_IDENTIFIER_CAST;
-        cast_case.operand_types = "float64,int64,int64";
+        cast_case.operand_types = "float64,int64";
         float64_bytes(-3.9, cast_case.reads[0]);
         cast_case.read_sizes[0] = 8U;
         cast_case.read_count = 1U;
@@ -947,7 +971,7 @@ int main(void) {
     cases[case_count++] = cast_case;
 
         cast_case.name = "float64 1e300 to int8 saturates to 127";
-        cast_case.operand_types = "float64,int8,int8";
+        cast_case.operand_types = "float64,int8";
         float64_bytes(1e300, cast_case.reads[0]);
         int8_bytes(127, cast_case.expected);
         cast_case.expected_size = 1U;
@@ -955,7 +979,7 @@ int main(void) {
     cases[case_count++] = cast_case;
 
         cast_case.name = "float64 +inf to int64 saturates to INT64_MAX";
-        cast_case.operand_types = "float64,int64,int64";
+        cast_case.operand_types = "float64,int64";
         float64_bytes(INFINITY, cast_case.reads[0]);
         int64_bytes(INT64_MAX, cast_case.expected);
         cast_case.expected_size = 8U;
@@ -980,7 +1004,7 @@ int main(void) {
         cast_case.name =
             "int64 9007199791611905 to float32 rounds once (0x5a000001)";
         cast_case.base_opid = BINRWIR_OPERATION_IDENTIFIER_CAST;
-        cast_case.operand_types = "int64,float32,float32";
+        cast_case.operand_types = "int64,float32";
         int64_bytes(INT64_C(9007199791611905), cast_case.reads[0]);
         cast_case.read_sizes[0] = 8U;
         cast_case.read_count = 1U;
@@ -994,7 +1018,7 @@ int main(void) {
         cast_case.decision = "integer-no-float-roundtrip";
         cast_case.name = "uint64 max to float64 converts as unsigned";
         cast_case.base_opid = BINRWIR_OPERATION_IDENTIFIER_CAST;
-        cast_case.operand_types = "uint64,float64,float64";
+        cast_case.operand_types = "uint64,float64";
         uint64_bytes(UINT64_MAX, cast_case.reads[0]);
         cast_case.read_sizes[0] = 8U;
         cast_case.read_count = 1U;

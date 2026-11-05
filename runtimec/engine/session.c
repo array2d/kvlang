@@ -45,7 +45,8 @@
 #endif
 
 struct runtimec_session_t {
-    runtimec_host_services_t host_services;
+    /* 借用：所有权在 platform_session，session 只读不销毁。 */
+    runtimec_kvspace_access_t *kvspace_access;
     runtimec_session_options_t options;
     vmkv_encoder_t *vmkv_encoder;
     binrwir_compiler_t *binrwir_compiler;
@@ -90,14 +91,14 @@ static runtimec_status_t runtimec_session_forward(
 }
 
 runtimec_status_t runtimec_session_create(
-    const runtimec_host_services_t *host_services,
+    runtimec_kvspace_access_t *kvspace_access,
     const runtimec_session_options_t *options,
     runtimec_session_t **output_session, runtimec_error_t *error) {
     runtimec_error_reset(error);
     if (output_session != NULL) {
         *output_session = NULL;
     }
-    if (!runtimec_host_services_is_valid(host_services) || options == NULL ||
+    if (kvspace_access == NULL || options == NULL ||
         options->structure_size != sizeof(*options) ||
         !runtimec_allocator_is_valid(&options->allocator) ||
         options->compilation_cache_capacity == 0U ||
@@ -116,7 +117,7 @@ runtimec_status_t runtimec_session_create(
                                      "session allocation failed");
     }
     memset(session, 0, sizeof(*session));
-    session->host_services = *host_services;
+    session->kvspace_access = kvspace_access;
     session->options = *options;
     /* 借用调用方的句柄：session 不连接、不关闭，只透传给执行期。 */
     session->kvspace_handle = options->kvspace_handle;
@@ -343,16 +344,16 @@ runtimec_status_t runtimec_session_destroy(runtimec_session_t *session) {
                                          _Alignof(runtimec_session_t));
 }
 
-runtimec_status_t runtimec_session_get_host_services(
+runtimec_status_t runtimec_session_get_kvspace_access(
     runtimec_session_t *session,
-    const runtimec_host_services_t **output_host_services) {
-    if (output_host_services != NULL) {
-        *output_host_services = NULL;
+    runtimec_kvspace_access_t **output_kvspace_access) {
+    if (output_kvspace_access != NULL) {
+        *output_kvspace_access = NULL;
     }
-    if (session == NULL || output_host_services == NULL) {
+    if (session == NULL || output_kvspace_access == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    *output_host_services = &session->host_services;
+    *output_kvspace_access = session->kvspace_access;
     return RUNTIMEC_STATUS_SUCCESS;
 }
 

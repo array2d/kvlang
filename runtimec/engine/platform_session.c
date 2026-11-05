@@ -1,8 +1,22 @@
 /*
  * 组件：engine/platform_session 的实现
- * 作用：装载 kvspace 前端、绑定符号表、连接后端、建立 host 能力表、创建
- *       session；四步任一失败都按逆序回滚。
- * 联系：interface 只经本组件引导；host 只经本组件被绑定。
+ * 作用：装载 kvspace 前端、连接后端、交出借用句柄、创建 session；任一步失败
+ *       都按逆序回滚。
+ * 联系：interface 只经本组件引导。
+ *
+ * ── 谁 connect、谁 close：只有一个答案 ────────────────────────────────
+ * `contract/kvspace_access.h` 写着「只借用句柄：不 connect、不 close、不拥有」。
+ * 下一个读到这里的人会问：那谁连？答案是本组件——它是**组合根**。
+ *
+ *   platform_session       connect、持有、close      （所有者）
+ *   runtimec_kvspace_access_t   只借用 handle，不连接、不关闭（借用者）
+ *
+ * 两者职责不同，所以「谁 connect」不存在第二个答案。这句话写在这里，是因为
+ * 两份文件单独看都自洽，只有摆在一起才看得出这条边界。
+ *
+ * **释放顺序不可交换**：先 destroy access（它借用 handle 且持有地址台账），
+ * 再 close handle。反过来关掉句柄后，access 里登记过的地址全部悬垂。
+ *
  * 约束：不读环境变量；装载失败点名 SONAME；失败路径不留半初始化句柄。
  */
 
@@ -14,8 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "host/kvspace_adapter.h"
-#include "host/kvspace_binary_interface.h"
+#include "contract/kvspace_access.h"
+#include <kvspace/kvspace.h>
 
 /* kvspace 前端的装载名：Linux 用 .so，macOS 用 .dylib。 */
 #if defined(__APPLE__)
@@ -32,8 +46,8 @@ struct runtimec_platform_session_t {
     void *library;
     bool library_borrowed;
     void *kvspace_handle;
-    runtimec_host_services_t host_services;
-    bool host_services_active;
+    runtimec_kvspace_access_t *kvspace_access;
+    bool kvspace_access_active;
     runtimec_session_t *session;
 };
 
@@ -68,15 +82,6 @@ static runtimec_status_t runtimec_platform_fail(runtimec_error_t *error,
                        runtimec_string_view_from_c_string(message),
                        RUNTIMEC_PROGRAM_COUNTER_NONE);
     return status;
-}
-
-static runtimec_kvspace_symbol_address_t runtimec_platform_resolve_symbol(
-    void *context, const char *symbol_name) {
-    void *library = context;
-    /* dlsym 返回对象指针；ISO C 不允许它与函数指针互转，先经 uintptr_t 往返，
-     * 绑定层再按每个符号的真实类型转换一次。 */
-    return (runtimec_kvspace_symbol_address_t)(uintptr_t)dlsym(
-        library, symbol_name);
 }
 
 /*
@@ -114,27 +119,29 @@ static runtimec_status_t runtimec_platform_load_frontend(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/* 按逆序释放链路上已建立的部分；每一段都只在确实持有资源时执行。 */
+/*
+ * 按逆序释放链路上已建立的部分；每一段都只在确实持有资源时执行。
+ *
+ * **顺序不可交换**：先 destroy access（它借用 handle 并保有地址台账），再 close
+ * handle。反过来关掉句柄后，access 里登记过的地址全部悬垂。
+ */
 static void runtimec_platform_release_chain(
-    runtimec_platform_session_t *platform_session,
-    const runtimec_kvspace_binary_interface_t *binary_interface) {
+    runtimec_platform_session_t *platform_session) {
     runtimec_error_t ignored;
     runtimec_error_reset(&ignored);
     if (platform_session->session != NULL) {
         (void)runtimec_session_destroy(platform_session->session);
         platform_session->session = NULL;
     }
-    if (platform_session->host_services_active) {
-        (void)runtimec_kvspace_adapter_destroy_services(
-            &platform_session->host_services, &ignored);
-        platform_session->host_services_active = false;
+    if (platform_session->kvspace_access_active) {
+        (void)runtimec_kvspace_access_destroy(platform_session->kvspace_access,
+                                              &ignored);
+        platform_session->kvspace_access = NULL;
+        platform_session->kvspace_access_active = false;
     }
     if (platform_session->kvspace_handle != NULL) {
         /* 只关闭自己连上的句柄；借用的库句柄不 dlclose。 */
-        if (binary_interface != NULL && binary_interface->close != NULL) {
-            binary_interface->close(platform_session->kvspace_handle);
-        }
-        platform_session->kvspace_handle = NULL;
+        kvspaceClose(platform_session->kvspace_handle);
     }
     if (platform_session->library != NULL) {
         if (!platform_session->library_borrowed) {
@@ -171,34 +178,17 @@ runtimec_status_t runtimec_platform_session_create(
     memset(platform_session, 0, sizeof(*platform_session));
     platform_session->allocator = allocator;
 
-    runtimec_kvspace_binary_interface_t binary_interface;
-    runtimec_kvspace_binary_interface_reset(&binary_interface);
-
     runtimec_status_t status =
         runtimec_platform_load_frontend(platform_session, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        (void)runtimec_platform_release_chain(platform_session, NULL);
+        (void)runtimec_platform_release_chain(platform_session);
         (void)runtimec_allocator_deallocate(
             &allocator, platform_session, sizeof(*platform_session),
             _Alignof(runtimec_platform_session_t));
         return status;
     }
 
-    runtimec_kvspace_symbol_resolver_t resolver;
-    resolver.context = platform_session->library;
-    resolver.resolve = runtimec_platform_resolve_symbol;
-    status = runtimec_kvspace_binary_interface_bind(&resolver,
-                                                    &binary_interface, error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        (void)runtimec_platform_release_chain(platform_session, NULL);
-        (void)runtimec_allocator_deallocate(
-            &allocator, platform_session, sizeof(*platform_session),
-            _Alignof(runtimec_platform_session_t));
-        return status;
-    }
-
-    platform_session->kvspace_handle =
-        binary_interface.connect(data_source_name);
+    platform_session->kvspace_handle = kvspaceConnect(data_source_name);
     if (platform_session->kvspace_handle == NULL) {
         static char connect_text[RUNTIMEC_PLATFORM_ERROR_TEXT_CAPACITY];
         int written = snprintf(connect_text, sizeof(connect_text),
@@ -210,37 +200,34 @@ runtimec_status_t runtimec_platform_session_create(
                      : runtimec_platform_fail(
                            error, RUNTIMEC_STATUS_ERROR, 5,
                            "cannot connect kvspace data source");
-        (void)runtimec_platform_release_chain(platform_session,
-                                             &binary_interface);
+        (void)runtimec_platform_release_chain(platform_session);
         (void)runtimec_allocator_deallocate(
             &allocator, platform_session, sizeof(*platform_session),
             _Alignof(runtimec_platform_session_t));
         return status;
     }
 
-    runtimec_kvspace_adapter_request_t adapter_request;
-    adapter_request.allocator = allocator;
-    adapter_request.borrowed_kvspace_handle = platform_session->kvspace_handle;
-    adapter_request.instance_identifier = instance_identifier;
-    status = runtimec_kvspace_adapter_create_services(
-        &adapter_request, &binary_interface, &platform_session->host_services,
-        error);
+    const runtimec_kvspace_access_request_t access_request = {
+        .allocator = allocator,
+        .borrowed_kvspace_handle = platform_session->kvspace_handle,
+        .instance_identifier = instance_identifier,
+    };
+    status = runtimec_kvspace_access_create(
+        &access_request, &platform_session->kvspace_access, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        (void)runtimec_platform_release_chain(platform_session,
-                                             &binary_interface);
+        (void)runtimec_platform_release_chain(platform_session);
         (void)runtimec_allocator_deallocate(
             &allocator, platform_session, sizeof(*platform_session),
             _Alignof(runtimec_platform_session_t));
         return status;
     }
-    platform_session->host_services_active = true;
+    platform_session->kvspace_access_active = true;
 
     runtimec_session_t *session = NULL;
-    status = runtimec_session_create(&platform_session->host_services, options,
+    status = runtimec_session_create(platform_session->kvspace_access, options,
                                      &session, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        (void)runtimec_platform_release_chain(platform_session,
-                                             &binary_interface);
+        (void)runtimec_platform_release_chain(platform_session);
         (void)runtimec_allocator_deallocate(
             &allocator, platform_session, sizeof(*platform_session),
             _Alignof(runtimec_platform_session_t));
@@ -259,19 +246,7 @@ runtimec_status_t runtimec_platform_session_destroy(
                                       "invalid platform session destroy request");
     }
     const runtimec_allocator_t allocator = platform_session->allocator;
-    runtimec_kvspace_binary_interface_t binary_interface;
-    runtimec_kvspace_binary_interface_reset(&binary_interface);
-    if (platform_session->library != NULL) {
-        runtimec_kvspace_symbol_resolver_t resolver;
-        resolver.context = platform_session->library;
-        resolver.resolve = runtimec_platform_resolve_symbol;
-        runtimec_error_t ignored;
-        runtimec_error_reset(&ignored);
-        (void)runtimec_kvspace_binary_interface_bind(&resolver,
-                                                     &binary_interface,
-                                                     &ignored);
-    }
-    runtimec_platform_release_chain(platform_session, &binary_interface);
+    runtimec_platform_release_chain(platform_session);
     memset(platform_session, 0, sizeof(*platform_session));
     runtimec_status_t status = runtimec_allocator_deallocate(
         &allocator, platform_session, sizeof(*platform_session),

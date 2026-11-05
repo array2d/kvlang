@@ -17,16 +17,23 @@
  *   /lib/code  nosuchop(a:int64)                        未注册 operation
  */
 
+#define _GNU_SOURCE
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <kvspace/kvspace.h>
 
 #include "binrwir/instruction.h"
 #include "binrwir/program.h"
 #include "binrwir/signature.h"
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "contract/snapshot.h"
 #include "kvspace/xvalue_head.h"
 #include "vmkv/encoder.h"
@@ -44,17 +51,24 @@
         }                                                                      \
     } while (0)
 
-typedef struct fake_entry {
-    char *key;
-    uint8_t *value;
-    size_t size;
-    bool directory;
-} fake_entry_t;
-
+/*
+ * 数据面：真 kvspace（shm）。本用例不再注入函数指针——`kvspace_access` 直连
+ * kvspace ABI，没有实现表可换。
+ *
+ * **造树必须自检**：每条 key 写完立刻读回，不在就红。造树失败而测试仍然绿，
+ * 是本批迁移最容易出现的假信号（key 写错位置 → 编码器走正常路径 → 断言照样过）。
+ *
+ * **清理**：后端把一个 DSN 摊成五份文件（.shm / .garb / .gen / .sbo.data /
+ * .sbo.head），每份可达 128MB。只删 store.shm 会在 /tmp 留下上百 MB，症状是
+ * 「别的测试莫名失败」。store_free 删全五个后缀。
+ */
 typedef struct fake_store {
-    fake_entry_t entries[64];
-    size_t count;
+    void *handle;
+    char directory[256];
 } fake_store_t;
+
+/* 每个 store 一个独立目录：同一进程连两个 DSN 到同一个 shm 文件会让后端崩。 */
+static bool store_open(fake_store_t *store);
 
 static int failures;
 
@@ -72,31 +86,34 @@ static void test_deallocate(void *context, void *allocation, size_t size,
     free(allocation);
 }
 
-static runtimec_status_t fail(runtimec_error_t *error,
-                              runtimec_status_t status, const char *message) {
-    runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_HOST, 0,
-                       runtimec_string_view_from_c_string(message),
-                       RUNTIMEC_PROGRAM_COUNTER_NONE);
-    return status;
-}
-
-static fake_entry_t *find_entry(fake_store_t *store, const char *key,
-                                size_t size) {
-    for (size_t ordinal = 0U; ordinal < store->count; ++ordinal) {
-        const size_t length = strlen(store->entries[ordinal].key);
-        if (length == size && memcmp(store->entries[ordinal].key, key, size) == 0) {
-            return &store->entries[ordinal];
-        }
-    }
-    return NULL;
+static bool store_open(fake_store_t *store) {
+    static int sequence = 0;
+    memset(store, 0, sizeof(*store));
+    snprintf(store->directory, sizeof(store->directory),
+             "/tmp/runtimec-vmkv-encoder-%d-%d", (int)getpid(), sequence++);
+    (void)mkdir(store->directory, 0700);
+    char data_source[360];
+    snprintf(data_source, sizeof(data_source), "shm://%s/store.shm",
+             store->directory);
+    store->handle = kvspaceConnect(data_source);
+    return store->handle != NULL;
 }
 
 static void store_free(fake_store_t *store) {
-    for (size_t ordinal = 0U; ordinal < store->count; ++ordinal) {
-        free(store->entries[ordinal].key);
-        free(store->entries[ordinal].value);
+    if (store->handle != NULL) {
+        kvspaceClose(store->handle);
+        store->handle = NULL;
     }
-    store->count = 0U;
+    static const char *const suffixes[] = {"store.shm", "store.shm.garb",
+                                           "store.shm.gen", "store.shm.sbo.data",
+                                           "store.shm.sbo.head"};
+    char path[512];
+    for (size_t index = 0U; index < sizeof(suffixes) / sizeof(suffixes[0]);
+         index++) {
+        snprintf(path, sizeof(path), "%s/%s", store->directory, suffixes[index]);
+        (void)unlink(path);
+    }
+    (void)rmdir(store->directory);
 }
 
 /* head(长度字段) + body + attr(langtype) 的 wire。 */
@@ -131,33 +148,43 @@ static uint8_t *make_wire(const uint8_t *body, size_t body_size,
 }
 
 /* 只依赖 C11：不用 strdup。 */
-static char *test_duplicate(const char *text) {
-    const size_t size = strlen(text) + 1U;
-    char *copy = malloc(size);
-    if (copy != NULL) {
-        memcpy(copy, text, size);
-    }
-    return copy;
-}
-
 static void store_add(fake_store_t *store, const char *key, const uint8_t *body,
                       size_t body_size, const char *langtype) {
     size_t size = 0U;
     uint8_t *wire = make_wire(body, body_size, langtype, &size);
     EXPECT(wire != NULL);
-    store->entries[store->count].key = test_duplicate(key);
-    store->entries[store->count].value = wire;
-    store->entries[store->count].size = size;
-    store->entries[store->count].directory = false;
-    store->count += 1U;
+    if (wire == NULL) {
+        return;
+    }
+    char error_text[256];
+    error_text[0] = '\0';
+    const int written =
+        kvspaceSetValue(store->handle, key, wire, (uint32_t)size, error_text,
+                        (uint32_t)sizeof(error_text));
+    free(wire);
+    EXPECT(written == 0);
+    if (written != 0) {
+        fprintf(stderr, "store_add failed for %s: %s\n", key, error_text);
+        return;
+    }
+    /* 读回自检：造树失败却不报，测试会「绿着但测不到东西」。 */
+    uint8_t *readback = NULL;
+    uint32_t readback_size = 0U;
+    const bool present =
+        kvspaceGet(store->handle, key, 1, &readback, &readback_size) == 0 &&
+        readback != NULL && readback_size != 0U;
+    EXPECT(present);
+    if (!present) {
+        fprintf(stderr, "store_add self-check failed: %s is not readable\n",
+                key);
+    }
 }
 
 static void store_add_directory(fake_store_t *store, const char *key) {
-    store->entries[store->count].key = test_duplicate(key);
-    store->entries[store->count].value = NULL;
-    store->entries[store->count].size = 0U;
-    store->entries[store->count].directory = true;
-    store->count += 1U;
+    char error_text[256];
+    error_text[0] = '\0';
+    EXPECT(kvspaceMkindex(store->handle, key, 0U, error_text,
+                          (uint32_t)sizeof(error_text)) == 0);
 }
 
 static void counting_header(uint8_t *body, uint16_t reads, uint16_t writes,
@@ -174,6 +201,14 @@ static void key_of(char *buffer, size_t capacity, const char *path, int line,
     snprintf(buffer, capacity, "%s/[%d,%d]", path, line, column);
 }
 
+/* `‥ctime`：source revision 的唯一单调源事实；没有它，编码器打开阶段就失败。 */
+static void add_ctime(fake_store_t *store, const char *path) {
+    char key[192];
+    snprintf(key, sizeof(key), "%s/\xE2\x80\xA5" "ctime", path);
+    uint8_t body[8] = {1, 0, 0, 0, 0, 0, 0, 0};
+    store_add(store, key, body, sizeof(body), "int64");
+}
+
 static void add_function(fake_store_t *store, const char *path, uint16_t reads,
                          uint16_t writes) {
     char key[128];
@@ -184,6 +219,7 @@ static void add_function(fake_store_t *store, const char *path, uint16_t reads,
     counting_header(anchor, reads, writes, 0U);
     key_of(key, sizeof(key), path, 0, 0);
     store_add(store, key, anchor, sizeof(anchor), "rwfunc");
+    add_ctime(store, path);
 }
 
 static void add_parameter(fake_store_t *store, const char *path, int column,
@@ -244,123 +280,39 @@ static void add_inline_literal(fake_store_t *store, const char *path, int line,
     store_add(store, key, body, sizeof(body), type);
 }
 
-static runtimec_status_t fake_read_header(void *context,
-                                          const runtimec_snapshot_t *snapshot,
-                                          runtimec_key_view_t key,
-                                          runtimec_host_value_header_t *output,
-                                          runtimec_error_t *error) {
-    fake_store_t *store = context;
-    (void)snapshot;
-    runtimec_host_value_header_reset(output);
-    fake_entry_t *entry = find_entry(store, key.data, key.size);
-    if (entry == NULL || entry->directory) {
-        return fail(error, RUNTIMEC_STATUS_UNSUPPORTED, "fake: key missing");
-    }
-    output->value_size = entry->size;
-    output->value_revision = 1U;
-    return RUNTIMEC_STATUS_SUCCESS;
+/*
+ * 造一个 access 实例：直连 harness 的真 kvspace 句柄，**没有函数指针可注入**。
+ * `instance_identifier` 与 expected_snapshot 里的一致（7），否则编码器会判源变了。
+ */
+static bool make_host_services(fake_store_t *store,
+                               runtimec_kvspace_access_t **output,
+                               runtimec_error_t *error) {
+    const runtimec_kvspace_access_request_t request = {
+        .allocator = {.context = NULL,
+                      .allocate = test_allocate,
+                      .deallocate = test_deallocate},
+        .borrowed_kvspace_handle = store->handle,
+        .instance_identifier = UINT64_C(7),
+    };
+    *output = NULL;
+    return runtimec_kvspace_access_create(&request, output, error) ==
+               RUNTIMEC_STATUS_SUCCESS &&
+           *output != NULL;
 }
 
-static runtimec_status_t fake_read(void *context,
-                                   const runtimec_snapshot_t *snapshot,
-                                   runtimec_key_view_t key,
-                                   runtimec_bytes_buffer_t *output,
-                                   runtimec_error_t *error) {
-    fake_store_t *store = context;
-    (void)snapshot;
-    fake_entry_t *entry = find_entry(store, key.data, key.size);
-    if (entry == NULL || entry->directory) {
-        return fail(error, RUNTIMEC_STATUS_UNSUPPORTED, "fake: key missing");
-    }
-    if (output->capacity < entry->size) {
-        return fail(error, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
-                    "fake: capacity");
-    }
-    memcpy(output->data, entry->value, entry->size);
-    output->size = entry->size;
-    return RUNTIMEC_STATUS_SUCCESS;
-}
-
-static runtimec_status_t fake_list(void *context,
-                                   const runtimec_snapshot_t *snapshot,
-                                   runtimec_key_view_t prefix,
-                                   runtimec_host_list_visitor_function_t visitor,
-                                   void *visitor_context,
-                                   runtimec_error_t *error) {
-    fake_store_t *store = context;
-    (void)snapshot;
-    for (size_t ordinal = 0U; ordinal < store->count; ++ordinal) {
-        const fake_entry_t *entry = &store->entries[ordinal];
-        const size_t length = strlen(entry->key);
-        if (length < prefix.size ||
-            memcmp(entry->key, prefix.data, prefix.size) != 0) {
-            continue;
-        }
-        const runtimec_status_t status = visitor(
-            visitor_context, runtimec_key_view_make(entry->key, length), error);
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            return status;
-        }
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
-}
-
-static runtimec_status_t fake_source_revision(void *context,
-                                              runtimec_key_view_t function_key,
-                                              runtimec_source_revision_t *output,
-                                              runtimec_error_t *error) {
-    (void)context;
-    (void)function_key;
-    (void)error;
-    runtimec_source_revision_reset(output);
-    output->instance_identifier = 7U;
-    output->generation = 11U;
-    output->schema_version = 1U;
-    output->instruction_set_version = 1U;
-    return RUNTIMEC_STATUS_SUCCESS;
-}
-
-/* 每个可解引用的 key 给一个稳定且非零的 XValue 基址。 */
-static runtimec_status_t fake_resolve_static_xvalue_address(
-    void *context, const runtimec_snapshot_t *snapshot, runtimec_key_view_t key,
-    runtimec_xvalue_address_t *output_xvalue_address,
-    runtimec_error_t *error) {
-    fake_store_t *store = context;
-    (void)snapshot;
-    *output_xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
-    fake_entry_t *entry = find_entry(store, key.data, key.size);
-    if (entry == NULL || entry->directory) {
-        return fail(error, RUNTIMEC_STATUS_UNSUPPORTED, "fake: key missing");
-    }
-    *output_xvalue_address = UINT64_C(0x10000);
-    return RUNTIMEC_STATUS_SUCCESS;
-}
-
-static runtimec_host_services_t make_host_services(fake_store_t *store) {
-    runtimec_host_services_t services;
-    runtimec_host_services_initialize(&services);
-    services.context = store;
-    services.allocator.allocate = test_allocate;
-    services.allocator.deallocate = test_deallocate;
-    services.read = fake_read;
-    services.read_header = fake_read_header;
-    services.list = fake_list;
-    services.source_revision = fake_source_revision;
-    services.resolve_static_xvalue_address = fake_resolve_static_xvalue_address;
-    return services;
-}
-
-static vmkv_encode_request_t make_request(const runtimec_host_services_t *host,
+static vmkv_encode_request_t make_request(runtimec_kvspace_access_t *host,
                                           const char *path) {
     vmkv_encode_request_t request;
     memset(&request, 0, sizeof(request));
-    request.host_services = host;
+    request.kvspace_access = host;
     request.function_path = runtimec_string_view_from_c_string(path);
     request.expected_snapshot.contract_version = runtimec_contract_version();
     runtimec_source_revision_reset(&request.expected_snapshot.source_revision);
     request.expected_snapshot.source_revision.instance_identifier = 7U;
-    request.expected_snapshot.source_revision.generation = 11U;
-    request.expected_snapshot.source_revision.schema_version = 1U;
+    /* 真后端首次取 revision 即推进一次 ⇒ generation 从 1 起算；旧假存储直接吐 11。
+     * instruction_set_version 来自 `‥ctime` body（本 harness 写 1）。 */
+    request.expected_snapshot.source_revision.generation = 1U;
+    request.expected_snapshot.source_revision.schema_version = 0U;
     request.expected_snapshot.source_revision.instruction_set_version = 1U;
     request.expected_snapshot.function_key =
         runtimec_key_view_from_c_string(path);
@@ -420,7 +372,7 @@ static void test_canonical_copy(test_canonical_t *target,
 }
 
 /* canonical 指令的符号池与字面量池下标需要一个 builder 才能分配。 */
-static bool make_builder(const runtimec_host_services_t *host,
+static bool make_builder(const runtimec_kvspace_access_t *host,
                          binrwir_program_builder_t **output_builder) {
     const binrwir_program_identity_t identity = {
         .snapshot_generation = 11U,
@@ -446,20 +398,20 @@ static runtimec_status_t encode_instruction_at(
     function.next_operand_argument_index = function.read_parameter_count +
                                            function.write_parameter_count;
     binrwir_program_builder_t *builder = NULL;
-    if (!make_builder(request->host_services, &builder)) {
+    if (!make_builder(request->kvspace_access, &builder)) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
     vmkv_function_source_t *source = NULL;
     runtimec_snapshot_t snapshot;
     runtimec_snapshot_reset(&snapshot);
     runtimec_status_t status = vmkv_source_open_function(
-        request->host_services, request->function_path, &source, &snapshot,
+        request->kvspace_access, request->function_path, &source, &snapshot,
         error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
     vmkv_local_types_t *local_types = NULL;
-    status = vmkv_local_types_collect(source, request->host_services->allocator,
+    status = vmkv_local_types_collect(source, request->kvspace_access->allocator,
                                       &local_types, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         binrwir_program_builder_destroy(builder);
@@ -491,7 +443,7 @@ static runtimec_status_t encode_instruction_at(
         vmkv_rwir_reader_destroy(reader);
     }
     vmkv_local_types_destroy(local_types,
-                             request->host_services->allocator);
+                             request->kvspace_access->allocator);
     binrwir_program_builder_destroy(builder);
     vmkv_source_close_function(source);
     return status;
@@ -518,14 +470,25 @@ static void build_add_function(fake_store_t *store, const char *path,
 
 static void test_alias_resolution_and_type_convergence(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     build_add_function(&store, "/lib/enc", "add");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/enc");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/enc");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
 
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
@@ -557,27 +520,38 @@ static void test_alias_resolution_and_type_convergence(void) {
     EXPECT(instruction.arguments[instruction.instruction.read_arguments.count + 0].payload == 0U);
 
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* `+` 与 `add` 必须解析到同一个能力行、同一个 opid。 */
 static void test_plus_and_add_share_one_operation_identifier(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     build_add_function(&store, "/lib/enc", "add");
     build_add_function(&store, "/lib/plus", "+");
-    runtimec_host_services_t host = make_host_services(&store);
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        store_free(&store);
+        return;
+    }
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
                                        .write_parameter_count = 1U};
     test_canonical_t add_instruction;
     test_canonical_t plus_instruction;
-    vmkv_encode_request_t add_request = make_request(&host, "/lib/enc");
-    vmkv_encode_request_t plus_request = make_request(&host, "/lib/plus");
+    vmkv_encode_request_t add_request = make_request(host, "/lib/enc");
+    vmkv_encode_request_t plus_request = make_request(host, "/lib/plus");
     EXPECT(encode_instruction_at(
         encoder, &add_request, 0U, function,
                                     &add_instruction,
@@ -589,25 +563,37 @@ static void test_plus_and_add_share_one_operation_identifier(void) {
     EXPECT(add_instruction.instruction.operation_identifier ==
            plus_instruction.instruction.operation_identifier);
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* 并集参数声明：BinRWIR 只接受单一具体类型。 */
 static void test_union_parameter_is_rejected(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/union", 1U, 1U);
     add_parameter(&store, "/lib/union", -1, "a", "int64|float64");
     add_parameter(&store, "/lib/union", 1, "R", "int64");
     add_opcode(&store, "/lib/union", 1, 1U, 1U, "add");
     add_reference(&store, "/lib/union", 1, -1, "*[0,-1]", "int64|float64");
     add_reference(&store, "/lib/union", 1, 1, "*[0,1]", "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/union");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/union");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     vmkv_encode_function_t function = {.read_parameter_count = 1U,
                                        .write_parameter_count = 1U};
@@ -622,6 +608,7 @@ static void test_union_parameter_is_rejected(void) {
            RUNTIMEC_STATUS_UNSUPPORTED);
     EXPECT(program == NULL);
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
@@ -631,19 +618,30 @@ static void test_union_parameter_is_rejected(void) {
  */
 static void test_concrete_operand_type_wins_over_declaration(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/concrete", 1U, 1U);
     add_parameter(&store, "/lib/concrete", -1, "a", "int8|int16");
     add_parameter(&store, "/lib/concrete", 1, "R", "int16");
     add_opcode(&store, "/lib/concrete", 1, 1U, 1U, "abs");
     add_reference(&store, "/lib/concrete", 1, -1, "*[0,-1]", "int16");
     add_reference(&store, "/lib/concrete", 1, 1, "*[0,1]", "int16");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/concrete");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/concrete");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     vmkv_encode_function_t function = {.read_parameter_count = 1U,
                                        .write_parameter_count = 1U};
@@ -655,13 +653,17 @@ static void test_concrete_operand_type_wins_over_declaration(void) {
     /* SAME_FIRST：写参类型就是读参的具体类型。 */
     EXPECT(view_equals(instruction.instruction.write_parameter_types[0], "int16"));
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* alias policy：declared 的行（`=` 即 copy）产生 (read, write) MAY_ALIAS 对。 */
 static void test_alias_policy_becomes_signature_rule(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/copyfn", 1U, 1U);
     add_parameter(&store, "/lib/copyfn", -1, "a", "int64");
     add_parameter(&store, "/lib/copyfn", 1, "R", "int64");
@@ -669,13 +671,20 @@ static void test_alias_policy_becomes_signature_rule(void) {
     add_reference(&store, "/lib/copyfn", 1, -1, "*[0,-1]", "int64");
     add_reference(&store, "/lib/copyfn", 1, 1, "*[0,1]", "int64");
     build_add_function(&store, "/lib/enc", "add");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t copy_request = make_request(&host, "/lib/copyfn");
-    vmkv_encode_request_t add_request = make_request(&host, "/lib/enc");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t copy_request = make_request(host, "/lib/copyfn");
+    vmkv_encode_request_t add_request = make_request(host, "/lib/enc");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
 
     binrwir_program_t *program = NULL;
@@ -711,25 +720,37 @@ static void test_alias_policy_becomes_signature_rule(void) {
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* 指针参数：langtype 文本推不出指针性，本阶段一律 UNSUPPORTED，不猜。 */
 static void test_pointer_parameter_is_unsupported(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/ptraddr", 1U, 1U);
     add_parameter(&store, "/lib/ptraddr", -1, "a", "int64");
     add_parameter(&store, "/lib/ptraddr", 1, "R", "int64");
     add_opcode(&store, "/lib/ptraddr", 1, 1U, 1U, "kvlang·abs");
     add_reference(&store, "/lib/ptraddr", 1, -1, "*[0,-1]", "int64");
     add_reference(&store, "/lib/ptraddr", 1, 1, "*[0,1]", "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/ptraddr");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/ptraddr");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     vmkv_encode_function_t function = {.read_parameter_count = 1U,
                                        .write_parameter_count = 1U};
@@ -739,13 +760,17 @@ static void test_pointer_parameter_is_unsupported(void) {
                                     &error) == RUNTIMEC_STATUS_UNSUPPORTED);
     EXPECT(error.code == 25);
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* 混合符号算术：矩阵裁决为拒绝。 */
 static void test_mixed_signed_unsigned_is_rejected(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/mix", 2U, 1U);
     add_parameter(&store, "/lib/mix", -1, "a", "int64");
     add_parameter(&store, "/lib/mix", -2, "b", "uint64");
@@ -754,12 +779,20 @@ static void test_mixed_signed_unsigned_is_rejected(void) {
     add_reference(&store, "/lib/mix", 1, -1, "*[0,-1]", "int64");
     add_reference(&store, "/lib/mix", 1, -2, "*[0,-2]", "uint64");
     add_reference(&store, "/lib/mix", 1, 1, "*[0,1]", "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/mix");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/mix");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
                                        .write_parameter_count = 1U};
@@ -769,6 +802,7 @@ static void test_mixed_signed_unsigned_is_rejected(void) {
                                     &error) == RUNTIMEC_STATUS_ERROR);
     EXPECT(error.code == 27);
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
@@ -778,7 +812,10 @@ static void test_mixed_signed_unsigned_is_rejected(void) {
  */
 static void test_not_equal_specialization_selects_dedicated_row(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/noteq", 2U, 1U);
     add_parameter(&store, "/lib/noteq", -1, "a", "bool");
     add_parameter(&store, "/lib/noteq", -2, "b", "bool");
@@ -787,12 +824,20 @@ static void test_not_equal_specialization_selects_dedicated_row(void) {
     add_reference(&store, "/lib/noteq", 1, -1, "*[0,-1]", "bool");
     add_reference(&store, "/lib/noteq", 1, -2, "*[0,-2]", "bool");
     add_reference(&store, "/lib/noteq", 1, 1, "*[0,1]", "bool");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/noteq");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/noteq");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
                                        .write_parameter_count = 1U};
@@ -804,13 +849,17 @@ static void test_not_equal_specialization_selects_dedicated_row(void) {
     EXPECT(instruction.instruction.operation_identifier == 0x002BU);
     EXPECT(view_equals(instruction.instruction.write_parameter_types[0], "bool"));
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* 内联字面量：LITERAL + 池序号，参数类型取字面量自己的类型。 */
 static void test_inline_literal_uses_literal_reference(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/lit", 2U, 1U);
     add_parameter(&store, "/lib/lit", -1, "a", "int64");
     add_parameter(&store, "/lib/lit", -2, "b", "int64");
@@ -819,12 +868,20 @@ static void test_inline_literal_uses_literal_reference(void) {
     add_reference(&store, "/lib/lit", 1, -1, "*[0,-1]", "int64");
     add_inline_literal(&store, "/lib/lit", 1, -2, 1, "int64");
     add_reference(&store, "/lib/lit", 1, 1, "*[0,1]", "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/lit");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/lit");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
                                        .write_parameter_count = 1U};
@@ -840,13 +897,17 @@ static void test_inline_literal_uses_literal_reference(void) {
     EXPECT(view_equals(instruction.instruction.read_parameter_types[1], "int64"));
     EXPECT(view_equals(instruction.instruction.write_parameter_types[0], "int64"));
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* 绝对路径实参：STATIC + host 基址推导出的 body 地址。 */
 static void test_static_path_derives_body_address(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/abs", 2U, 1U);
     add_parameter(&store, "/lib/abs", -1, "a", "int64");
     add_parameter(&store, "/lib/abs", -2, "b", "int64");
@@ -856,12 +917,20 @@ static void test_static_path_derives_body_address(void) {
     add_reference(&store, "/lib/abs", 1, -2, "/v/x", "int64");
     add_reference(&store, "/lib/abs", 1, 1, "*[0,1]", "int64");
     store_add(&store, "/v/x", (const uint8_t *)"\0\0\0\0\0\0\0\0", 8U, "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/abs");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/abs");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
                                        .write_parameter_count = 1U};
@@ -872,8 +941,18 @@ static void test_static_path_derives_body_address(void) {
     EXPECT(instruction.arguments[1].reference_kind ==
            BINRWIR_REFERENCE_STATIC);
     EXPECT(instruction.arguments[1].argument_index == 3U);
-    EXPECT(instruction.arguments[1].payload ==
-           UINT64_C(0x10000) + KVSPACE_XVALUE_HEAD_LEN);
+    /* 基址由**真后端**给出（不再固定 0x10000）：判据是「payload 恰为该基址 +
+     * 固定头长度」，即目标是值体地址而不是 wire 起点。把基址读回来再比，
+     * 断言才不依赖某个假存储的返回值。 */
+    {
+        uint8_t *wire = NULL;
+        uint32_t wire_size = 0U;
+        EXPECT(kvspaceGet(store.handle, "/v/x", 1, &wire, &wire_size) == 0);
+        EXPECT(wire != NULL);
+        const uint64_t base = (uint64_t)(uintptr_t)wire;
+        EXPECT(instruction.arguments[1].payload ==
+               base + KVSPACE_XVALUE_HEAD_LEN);
+    }
     /* STATIC 的 slot 是符号池下标：vmbin 按 key 访问的依据。 */
     EXPECT(instruction.arguments[1].slot == 0U);
 
@@ -893,13 +972,17 @@ static void test_static_path_derives_body_address(void) {
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* 具名帧槽：裸标识符是帧局部变量名，登进 Program 符号池（LOCAL）并带类型。 */
 static void test_named_frame_slot_becomes_local_symbol(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/local", 2U, 1U);
     add_parameter(&store, "/lib/local", -1, "a", "int64");
     add_parameter(&store, "/lib/local", -2, "b", "int64");
@@ -912,12 +995,20 @@ static void test_named_frame_slot_becomes_local_symbol(void) {
     add_reference(&store, "/lib/local", 2, -1, "temporary", "int64");
     add_reference(&store, "/lib/local", 2, -2, "*[0,-2]", "int64");
     add_reference(&store, "/lib/local", 2, 1, "*[0,1]", "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/local");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/local");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     vmkv_encode_function_t function = {.read_parameter_count = 2U,
                                        .write_parameter_count = 1U};
@@ -947,13 +1038,17 @@ static void test_named_frame_slot_becomes_local_symbol(void) {
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* 帧内槽表达式 `*[d,±k]`（d 非 0）：没有可编译的槽契约 → UNSUPPORTED。 */
 static void test_framed_slot_expression_is_unsupported(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/framed", 2U, 1U);
     add_parameter(&store, "/lib/framed", -1, "a", "int64");
     add_parameter(&store, "/lib/framed", -2, "b", "int64");
@@ -962,18 +1057,27 @@ static void test_framed_slot_expression_is_unsupported(void) {
     add_reference(&store, "/lib/framed", 1, -1, "*[0,-1]", "int64");
     add_reference(&store, "/lib/framed", 1, -2, "*[1,-1]", "int64");
     add_reference(&store, "/lib/framed", 1, 1, "*[0,1]", "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/framed");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/framed");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     binrwir_program_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
            RUNTIMEC_STATUS_UNSUPPORTED);
     EXPECT(program == NULL);
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
@@ -983,7 +1087,10 @@ static void test_framed_slot_expression_is_unsupported(void) {
  */
 static void test_unknown_operation_becomes_foreign(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/code", 1U, 1U);
     add_parameter(&store, "/lib/code", -1, "a", "int64");
     add_parameter(&store, "/lib/code", 1, "R", "int64");
@@ -995,12 +1102,20 @@ static void test_unknown_operation_becomes_foreign(void) {
     add_opcode(&store, "/lib/code", 1, 1U, 1U, "ext·probe");
     add_reference(&store, "/lib/code", 1, -1, "*[0,-1]", "int64");
     add_reference(&store, "/lib/code", 1, 1, "*[0,1]", "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/code");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/code");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     vmkv_encode_function_t function = {.read_parameter_count = 1U,
                                        .write_parameter_count = 1U};
@@ -1030,6 +1145,7 @@ static void test_unknown_operation_becomes_foreign(void) {
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
@@ -1041,7 +1157,10 @@ static void test_unknown_operation_becomes_foreign(void) {
  */
 static void test_missing_source_program_counter_fails_in_reader(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/gap", 1U, 1U);
     add_parameter(&store, "/lib/gap", -1, "a", "int64");
     add_parameter(&store, "/lib/gap", 1, "R", "int64");
@@ -1049,12 +1168,20 @@ static void test_missing_source_program_counter_fails_in_reader(void) {
     add_opcode(&store, "/lib/gap", 2, 1U, 1U, "=");
     add_reference(&store, "/lib/gap", 2, -1, "*[0,-1]", "int64");
     add_reference(&store, "/lib/gap", 2, 1, "*[0,1]", "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/gap");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/gap");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     binrwir_program_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
@@ -1063,20 +1190,32 @@ static void test_missing_source_program_counter_fails_in_reader(void) {
     EXPECT(error.code == 8);
     EXPECT(program == NULL);
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* 全函数编码：Program 的签名、opid、参数与 canonical 指令逐字段一致。 */
 static void test_program_encoding_matches_canonical_instruction(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     build_add_function(&store, "/lib/enc", "add");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/enc");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/enc");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     binrwir_program_t *program = NULL;
     const runtimec_status_t status = vmkv_encode(encoder, &request, &program,
@@ -1107,21 +1246,33 @@ static void test_program_encoding_matches_canonical_instruction(void) {
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* 请求快照与源 revision 不一致：拒绝，不产生 Program。 */
 static void test_stale_snapshot_is_rejected(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     build_add_function(&store, "/lib/enc", "add");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/enc");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/enc");
     request.expected_snapshot.source_revision.generation = 12U;
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     binrwir_program_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
@@ -1129,6 +1280,7 @@ static void test_stale_snapshot_is_rejected(void) {
     EXPECT(program == NULL);
     EXPECT(error.code == 33);
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
@@ -1141,7 +1293,10 @@ static void test_stale_snapshot_is_rejected(void) {
  */
 static void test_symbol_pool_normalization_remaps_every_reference(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/two", 2U, 1U);
     add_parameter(&store, "/lib/two", -1, "a", "int64");
     add_parameter(&store, "/lib/two", -2, "b", "int64");
@@ -1156,12 +1311,20 @@ static void test_symbol_pool_normalization_remaps_every_reference(void) {
     add_reference(&store, "/lib/two", 2, 1, "*[0,1]", "int64");
     store_add(&store, "/v/x", (const uint8_t *)"\0\0\0\0\0\0\0\0", 8U,
               "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/two");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/two");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     binrwir_program_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
@@ -1191,6 +1354,7 @@ static void test_symbol_pool_normalization_remaps_every_reference(void) {
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
@@ -1206,18 +1370,29 @@ static void test_symbol_pool_normalization_remaps_every_reference(void) {
  */
 static void test_call_target_becomes_function_symbol(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/callfn", 1U, 0U);
     add_parameter(&store, "/lib/callfn", -1, "a", "int64");
     add_opcode_with_langtype(&store, "/lib/callfn", 1, 1U, 0U, "/lib/add1",
                              "rwfunc");
     add_inline_literal(&store, "/lib/callfn", 1, -1, 41, "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/callfn");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/callfn");
     vmkv_encoder_t *encoder = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(vmkv_encoder_create(host.allocator, &encoder, &error) ==
+    EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     vmkv_encode_function_t function = {.read_parameter_count = 1U,
                                        .write_parameter_count = 0U};
@@ -1245,6 +1420,7 @@ static void test_call_target_becomes_function_symbol(void) {
         EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
@@ -1258,7 +1434,7 @@ static runtimec_status_t collect_local_types(
     runtimec_snapshot_t snapshot;
     runtimec_snapshot_reset(&snapshot);
     runtimec_status_t status = vmkv_source_open_function(
-        request->host_services, request->function_path, output_source, &snapshot,
+        request->kvspace_access, request->function_path, output_source, &snapshot,
         error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
@@ -1271,7 +1447,10 @@ static runtimec_status_t collect_local_types(
 /* 同一局部在两条指令被写成同一类型：采集成功，类型唯一。 */
 static void test_local_types_collects_unique_write_type(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/uniq", 1U, 1U);
     add_parameter(&store, "/lib/uniq", -1, "a", "int64");
     add_parameter(&store, "/lib/uniq", 1, "R", "int64");
@@ -1281,13 +1460,21 @@ static void test_local_types_collects_unique_write_type(void) {
     add_opcode(&store, "/lib/uniq", 2, 1U, 1U, "=");
     add_reference(&store, "/lib/uniq", 2, -1, "*[0,-1]", "int64");
     add_reference(&store, "/lib/uniq", 2, 1, "x", "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/uniq");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/uniq");
     vmkv_local_types_t *local_types = NULL;
     vmkv_function_source_t *source = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(collect_local_types(&request, host.allocator, &local_types, &source,
+    EXPECT(collect_local_types(&request, host->allocator, &local_types, &source,
                                &error) == RUNTIMEC_STATUS_SUCCESS);
     runtimec_string_view_t langtype = runtimec_string_view_make(NULL, 0U);
     EXPECT(vmkv_local_types_find(local_types,
@@ -1297,15 +1484,19 @@ static void test_local_types_collects_unique_write_type(void) {
     EXPECT(!vmkv_local_types_find(local_types,
                                   runtimec_string_view_from_c_string("nope"),
                                   &langtype));
-    (void)vmkv_local_types_destroy(local_types, host.allocator);
+    (void)vmkv_local_types_destroy(local_types, host->allocator);
     vmkv_source_close_function(source);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* 同一局部被写成两种类型：编译期失败，不选其一、不做提升。 */
 static void test_local_types_conflict_is_rejected(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/conflict", 1U, 1U);
     add_parameter(&store, "/lib/conflict", -1, "a", "int64");
     add_parameter(&store, "/lib/conflict", 1, "R", "int64");
@@ -1315,24 +1506,36 @@ static void test_local_types_conflict_is_rejected(void) {
     add_opcode(&store, "/lib/conflict", 2, 1U, 1U, "=");
     add_reference(&store, "/lib/conflict", 2, -1, "*[0,-1]", "float64");
     add_reference(&store, "/lib/conflict", 2, 1, "x", "float64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/conflict");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/conflict");
     vmkv_local_types_t *local_types = NULL;
     vmkv_function_source_t *source = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(collect_local_types(&request, host.allocator, &local_types, &source,
+    EXPECT(collect_local_types(&request, host->allocator, &local_types, &source,
                                &error) == RUNTIMEC_STATUS_ERROR);
     EXPECT(error.code == 41);
     EXPECT(local_types == NULL);
     vmkv_source_close_function(source);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* 只读不写的局部：没有定值就没有槽大小，失败封闭。 */
 static void test_local_types_read_only_is_rejected(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/readonly", 2U, 1U);
     add_parameter(&store, "/lib/readonly", -1, "a", "int64");
     add_parameter(&store, "/lib/readonly", -2, "b", "int64");
@@ -1341,41 +1544,62 @@ static void test_local_types_read_only_is_rejected(void) {
     add_reference(&store, "/lib/readonly", 1, -1, "x", "int64");
     add_reference(&store, "/lib/readonly", 1, -2, "*[0,-2]", "int64");
     add_reference(&store, "/lib/readonly", 1, 1, "*[0,1]", "int64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/readonly");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/readonly");
     vmkv_local_types_t *local_types = NULL;
     vmkv_function_source_t *source = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(collect_local_types(&request, host.allocator, &local_types, &source,
+    EXPECT(collect_local_types(&request, host->allocator, &local_types, &source,
                                &error) == RUNTIMEC_STATUS_UNSUPPORTED);
     EXPECT(error.code == 42);
     EXPECT(local_types == NULL);
     vmkv_source_close_function(source);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 
 /* 写位置的类型不具体（并集）：推不出槽大小，失败封闭。 */
 static void test_local_types_non_concrete_write_is_rejected(void) {
     fake_store_t store;
-    memset(&store, 0, sizeof(store));
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
     add_function(&store, "/lib/ambiguous", 1U, 1U);
     add_parameter(&store, "/lib/ambiguous", -1, "a", "int64");
     add_parameter(&store, "/lib/ambiguous", 1, "R", "int64");
     add_opcode(&store, "/lib/ambiguous", 1, 1U, 1U, "=");
     add_reference(&store, "/lib/ambiguous", 1, -1, "*[0,-1]", "int64");
     add_reference(&store, "/lib/ambiguous", 1, 1, "x", "int64|float64");
-    runtimec_host_services_t host = make_host_services(&store);
-    vmkv_encode_request_t request = make_request(&host, "/lib/ambiguous");
+    runtimec_kvspace_access_t *host = NULL;
+    runtimec_error_t host_error;
+    runtimec_error_reset(&host_error);
+    EXPECT(make_host_services(&store, &host, &host_error));
+    if (host == NULL) {
+        (void)runtimec_kvspace_access_destroy(host, &host_error);
+    store_free(&store);
+        return;
+    }
+    vmkv_encode_request_t request = make_request(host, "/lib/ambiguous");
     vmkv_local_types_t *local_types = NULL;
     vmkv_function_source_t *source = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    EXPECT(collect_local_types(&request, host.allocator, &local_types, &source,
+    EXPECT(collect_local_types(&request, host->allocator, &local_types, &source,
                                &error) == RUNTIMEC_STATUS_UNSUPPORTED);
     EXPECT(error.code == 43);
     EXPECT(local_types == NULL);
     vmkv_source_close_function(source);
+    (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
 }
 

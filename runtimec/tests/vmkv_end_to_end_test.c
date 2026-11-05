@@ -29,10 +29,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "contract/host_services.h"
+#include <kvspace/kvspace.h>
+
+#include "contract/kvspace_access.h"
 #include "contract/view.h"
-#include "host/kvspace_adapter.h"
-#include "host/kvspace_binary_interface.h"
 #include "vmkv/encoder.h"
 
 #define SKIP_RETURN_CODE 77
@@ -65,12 +65,6 @@ static void test_deallocate(void *context, void *allocation, size_t size,
     free(allocation);
 }
 
-static runtimec_kvspace_symbol_address_t resolve_symbol(void *context,
-                                                        const char *name) {
-    void *symbol = dlsym(context, name);
-    return (runtimec_kvspace_symbol_address_t)(uintptr_t)symbol;
-}
-
 /* 写一个临时 .kv 文件；失败返回 false。 */
 static bool write_source(const char *path, const char *text) {
     FILE *file = fopen(path, "wb");
@@ -87,10 +81,9 @@ static bool write_source(const char *path, const char *text) {
 typedef struct test_environment {
     void *layout_library;
     layout_file_function_t layout_file;
-    void *kvspace_library;
-    runtimec_kvspace_binary_interface_t binary_interface;
+    /* kvspace 是链接期依赖：不再 dlopen、不再解析符号。 */
     void *kvspace_handle;
-    runtimec_host_services_t services;
+    runtimec_kvspace_access_t *services;
     char directory[256];
     char data_source[320];
 } test_environment_t;
@@ -110,22 +103,8 @@ static bool environment_open(test_environment_t *environment,
         fprintf(stderr, "SKIP: layout library has no kvlangLayoutFile\n");
         return false;
     }
-    environment->kvspace_library = dlopen(kvspace_path, RTLD_NOW | RTLD_LOCAL);
-    if (environment->kvspace_library == NULL) {
-        fprintf(stderr, "SKIP: cannot load kvspace %s: %s\n", kvspace_path,
-                dlerror());
-        return false;
-    }
-    runtimec_kvspace_symbol_resolver_t resolver = {
-        .context = environment->kvspace_library, .resolve = resolve_symbol};
+    (void)kvspace_path;
     runtimec_error_t error;
-    if (runtimec_kvspace_binary_interface_bind(&resolver,
-                                               &environment->binary_interface,
-                                               &error) !=
-        RUNTIMEC_STATUS_SUCCESS) {
-        fprintf(stderr, "SKIP: kvspace bind failed\n");
-        return false;
-    }
     /*
      * 临时目录：优先 TMPDIR（ctest 会设），否则用构建目录下的 .，都不硬编码 /tmp。
      * 收尾在 environment_close 里整套删掉（store + 测试写的 .kv），不留残留——
@@ -141,21 +120,22 @@ static bool environment_open(test_environment_t *environment,
     snprintf(environment->data_source, sizeof(environment->data_source),
              "shm://%s/store.shm", environment->directory);
     environment->kvspace_handle =
-        environment->binary_interface.connect(environment->data_source);
+        kvspaceConnect(environment->data_source);
     if (environment->kvspace_handle == NULL) {
         fprintf(stderr, "SKIP: cannot connect %s\n", environment->data_source);
         return false;
     }
-    runtimec_kvspace_adapter_request_t request = {
+    const runtimec_kvspace_access_request_t request = {
         .allocator = {.context = NULL,
                       .allocate = test_allocate,
                       .deallocate = test_deallocate},
         .borrowed_kvspace_handle = environment->kvspace_handle,
         .instance_identifier = UINT64_C(1),
     };
-    if (runtimec_kvspace_adapter_create_services(
-            &request, &environment->binary_interface, &environment->services,
-            &error) != RUNTIMEC_STATUS_SUCCESS) {
+    if (runtimec_kvspace_access_create(
+            &request, &environment->services,
+            &error) != RUNTIMEC_STATUS_SUCCESS ||
+        environment->services == NULL) {
         fprintf(stderr, "SKIP: adapter create failed\n");
         return false;
     }
@@ -166,12 +146,8 @@ static bool environment_open(test_environment_t *environment,
 static runtimec_status_t environment_close(test_environment_t *environment) {
     if (environment->kvspace_handle != NULL) {
         runtimec_error_t error;
-        (void)runtimec_kvspace_adapter_destroy_services(&environment->services,
-                                                        &error);
-        environment->binary_interface.close(environment->kvspace_handle);
-    }
-    if (environment->kvspace_library != NULL) {
-        dlclose(environment->kvspace_library);
+        (void)runtimec_kvspace_access_destroy(environment->services, &error);
+        kvspaceClose(environment->kvspace_handle);
     }
     if (environment->layout_library != NULL) {
         dlclose(environment->layout_library);
@@ -266,7 +242,7 @@ static bool encode_and_report(test_environment_t *environment,
     runtimec_error_t error;
     runtimec_error_reset(&error);
     vmkv_encoder_t *encoder = NULL;
-    if (vmkv_encoder_create(environment->services.allocator, &encoder, &error) !=
+    if (vmkv_encoder_create(environment->services->allocator, &encoder, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
         fprintf(stderr, "encoder create failed\n");
         return false;
@@ -296,7 +272,7 @@ static bool encode_and_report(test_environment_t *environment,
                  function_path);
         uint8_t *raw = NULL;
         uint32_t raw_size = 0U;
-        const int raw_status = environment->binary_interface.get(
+        const int raw_status = kvspaceGet(
             environment->kvspace_handle, ctime_key, 1, &raw, &raw_size);
         fprintf(stderr,
                 "  [probe1] key='%s' rc=%d null=%d size=%u",
@@ -329,7 +305,7 @@ static bool encode_and_report(test_environment_t *environment,
         snprintf(slot_key, sizeof(slot_key), "%s/[1,1]", function_path);
         uint8_t *raw = NULL;
         uint32_t raw_size = 0U;
-        const int raw_status = environment->binary_interface.get(
+        const int raw_status = kvspaceGet(
             environment->kvspace_handle, slot_key, 1, &raw, &raw_size);
         fprintf(stderr, "  [probe4] key='%s' rc=%d size=%u text='",
                 slot_key, raw_status, (unsigned)raw_size);
@@ -346,8 +322,8 @@ static bool encode_and_report(test_environment_t *environment,
         fprintf(stderr, "'\n");
     }
     runtimec_error_reset(&error);
-    const runtimec_status_t revision_status = environment->services.source_revision(
-        environment->services.context,
+    const runtimec_status_t revision_status = runtimec_kvspace_access_source_revision(
+        environment->services,
         runtimec_key_view_from_c_string(function_path),
         &snapshot.source_revision, &error);
     fprintf(stderr, "  [probe3] source_revision status=%d code=%lld msg='%.*s'\n",
@@ -364,7 +340,7 @@ static bool encode_and_report(test_environment_t *environment,
     }
 
     const vmkv_encode_request_t request = {
-        .host_services = &environment->services,
+        .kvspace_access = environment->services,
         .function_path = runtimec_string_view_from_c_string(function_path),
         .expected_snapshot = snapshot,
     };

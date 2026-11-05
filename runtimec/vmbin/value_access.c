@@ -10,9 +10,12 @@
 
 #include "value_access.h"
 
+#include <stdlib.h>
 #include <string.h>
 
+#include "binrwir/frame_bindings.h"
 #include "frame_slot.h"
+#include "frame_target_key.h"
 #include "kvspace/kvspace.h"
 #include "kvspace/xvalue_head.h"
 
@@ -80,13 +83,12 @@ runtimec_status_t vmbin_value_access_locate(
             runtimec_string_view_t key_text = runtimec_string_view_make(NULL, 0U);
             runtimec_string_view_t key_langtype;
             runtimec_xvalue_address_t resolved = RUNTIMEC_XVALUE_ADDRESS_NONE;
-            if (frame->host_services == NULL ||
-                frame->host_services->resolve_static_xvalue_address == NULL ||
+            if (frame->kvspace_access == NULL ||
                 binrwir_program_get_symbol(frame->program, argument->slot,
                                            &key_text, &key_langtype) !=
                     RUNTIMEC_STATUS_SUCCESS ||
-                frame->host_services->resolve_static_xvalue_address(
-                    frame->host_services->context, &frame->snapshot,
+                runtimec_kvspace_access_resolve_static_xvalue_address(
+                    frame->kvspace_access, &frame->snapshot,
                     runtimec_key_view_make(key_text.data, key_text.size),
                     &resolved, error) != RUNTIMEC_STATUS_SUCCESS ||
                 resolved == RUNTIMEC_XVALUE_ADDRESS_NONE) {
@@ -303,6 +305,92 @@ runtimec_status_t vmbin_value_access_read_body(
  * 由 `locate_body` 的解析分支失败封闭（消息里带 key 名），不在这里补建。
  */
 
+
+/*
+ * **写一个尚未绑定的局部 ⇒ 建值 + 绑定**（写路径唯一的一处创建规则）。
+ *
+ * 为什么这条规则只在写入原语里：今天撞见的是 `copy`，明天会是 `map·get`、
+ * 容器返回值、`compactarray·at`……给每条指令各加一个「目标未绑定就创建」的
+ * 分支，同一条规则就散落在 N 处，漏掉一处就退化成 `UNBOUND_SLOT`，而那种缺陷
+ * 只有特定数据流才能触发。
+ *
+ * **读写不对称是刻意的**：读一个没建过的局部 = 使用未初始化（错，仍是
+ * `UNBOUND_SLOT`）；写它 = 初始化它（对，就地建出来）。两者本来就不同。
+ *
+ * 只对 LOCAL 生效：STATIC 绝对 key 的存在性是运行时前提，写一个不存在的绝对 key
+ * 必须继续失败封闭（「指令不创造 key」对绝对 key 仍然成立）。
+ *
+ * 已绑定 ⇒ 什么都不做，维持「与当前值体等长」的直写规则，不重复创建。
+ */
+static runtimec_status_t vmbin_value_access_create_unbound_local(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, runtimec_bytes_view_t value,
+    runtimec_error_t *error) {
+    const binrwir_frame_binding_t *binding = NULL;
+    runtimec_string_view_t declared;
+    runtimec_key_view_t target_key;
+    char langtype_text[256];
+    char key_text[512];
+    char message[256];
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    uint16_t binding_slot = BINRWIR_FRAME_BINDING_SLOT_NONE;
+    runtimec_status_t status;
+
+    if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    if (frame->bindings == NULL || frame->kvspace_access == NULL) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    if (vmbin_frame_slot_of_argument(frame->program, argument, &binding_slot) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    if (binrwir_frame_bindings_get(frame->bindings, binding_slot,
+                                   frame->snapshot_generation,
+                                   &binding) == RUNTIMEC_STATUS_SUCCESS) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    status = vmbin_value_access_langtype(frame, argument, &declared, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    if (declared.size + 1U > sizeof(langtype_text)) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE,
+            "declared langtype does not fit the frame slot");
+    }
+    memcpy(langtype_text, declared.data, declared.size);
+    langtype_text[declared.size] = '\0';
+    status = vmbin_frame_target_key(frame, argument, key_text, sizeof(key_text));
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "local slot key cannot be built");
+    }
+    if (kvspaceXvalueHeadNewSlack(value.data, (uint64_t)value.size,
+                                  (uint64_t)value.size, langtype_text, &wire,
+                                  &wire_size) != 0 ||
+        wire == NULL || wire_size > UINT32_MAX) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_ERROR, VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
+            "written value cannot be encoded as an XValue");
+    }
+    message[0] = '\0';
+    if (kvspaceSetValue(frame->kvspace_handle, key_text, wire,
+                        (uint32_t)wire_size, message, sizeof(message)) != 0) {
+        free(wire);
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_ERROR, VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "local slot could not be created in storage");
+    }
+    free(wire);
+    target_key = runtimec_key_view_make(key_text, strlen(key_text));
+    return vmbin_value_access_bind_write_target(frame, argument, target_key,
+                                                error);
+}
+
 runtimec_status_t vmbin_value_access_write_body(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
@@ -314,6 +402,11 @@ runtimec_status_t vmbin_value_access_write_body(
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_INVALID,
             VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST, "invalid write value");
+    }
+    status = vmbin_value_access_create_unbound_local(frame, argument, value,
+                                                     error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
     }
     status = vmbin_value_access_locate_body(frame, argument, &location, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -530,6 +623,78 @@ runtimec_status_t vmbin_value_access_reference_kind(
                 "value head carries an unknown reference byte");
         }
         *output_reference = head->ptr;
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+runtimec_status_t vmbin_value_access_bind_write_target(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, runtimec_key_view_t target_key,
+    runtimec_error_t *error) {
+    uint16_t binding_slot = BINRWIR_FRAME_BINDING_SLOT_NONE;
+    runtimec_xvalue_address_t xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+    uint64_t generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
+    runtimec_status_t status;
+
+    if (frame == NULL || frame->program == NULL || argument == NULL ||
+        frame->bindings == NULL || frame->kvspace_access == NULL ||
+        !runtimec_key_view_is_valid(target_key) || target_key.size == 0U ||
+        error == NULL) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "invalid bind-write-target request");
+    }
+    /*
+     * STATIC 写目标不绑：值访问对静态 key 每次按 key 解析地址，绑定表里没有它的
+     * 槽。这里返回成功不是「跳过失败」，是「该种类本来就没有这一步」。
+     */
+    if (argument->reference_kind == BINRWIR_REFERENCE_STATIC) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE,
+            "only local slots are bound after creation");
+    }
+    if (frame->snapshot_generation == BINRWIR_FRAME_BINDING_GENERATION_NONE) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "frame has no storage generation");
+    }
+    if (vmbin_frame_slot_of_argument(frame->program, argument, &binding_slot) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE,
+            "local slot index is not in the program pool");
+    }
+    status = runtimec_kvspace_access_resolve_frame_xvalue_address(
+        frame->kvspace_access, &frame->snapshot, target_key, &xvalue_address,
+        &generation, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    /*
+     * 刚创建出来的值必须与帧属于同一份存储快照。不一致说明建值与绑帧之间存储
+     * 被换过——那正是绑定表 generation 存在的理由，不是可以继续的情形。
+     */
+    if (xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE ||
+        generation != frame->snapshot_generation) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "created value is not in the frame storage generation");
+    }
+    if (binrwir_frame_bindings_bind(frame->bindings, binding_slot, target_key,
+                                    target_key, xvalue_address,
+                                    generation) != RUNTIMEC_STATUS_SUCCESS) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "created value could not be bound to its slot");
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }

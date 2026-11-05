@@ -19,7 +19,7 @@
 #include "binrwir/argument.h"
 #include "binrwir/execution_frame.h"
 #include "contract/error.h"
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "contract/status.h"
 #include "contract/view.h"
 
@@ -180,6 +180,25 @@ runtimec_status_t vmbin_value_access_read_body(
 runtimec_status_t vmbin_value_access_write_body(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
+    runtimec_error_t *error);
+
+/*
+ * **创建型算子的第二步：绑定刚建出来的值。**
+ *
+ * 容器/结构体局部在帧准备阶段不建也不绑（它们的创建源是源码里的 `·new`），所以
+ * 「建值」与「绑定」必须在同一处完成：值写进存储之后立刻解析地址并写进绑定表。
+ * 只建不绑的结果是存储里有、表里没有——执行期读它就是 `UNBOUND_SLOT`，而那条
+ * 硬错本来是留给「`·new` 之前就访问」的，不能被实现缺陷借用。
+ *
+ * 只有 LOCAL 槽需要绑：STATIC 目标每次按 key 解析，绑定表里没有它的槽（返回
+ * SUCCESS 表示「该种类没有这一步」，不是失败被吞）。
+ *
+ * `target_key` 是本次写入用的绝对 key；绑定表**自己复制**它，调用方可以立即
+ * 释放自己的缓冲。
+ */
+runtimec_status_t vmbin_value_access_bind_write_target(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, runtimec_key_view_t target_key,
     runtimec_error_t *error);
 
 #ifdef __cplusplus

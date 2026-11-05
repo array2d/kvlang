@@ -139,7 +139,6 @@ function(runtimec_add_component target_name)
 endfunction()
 
 runtimec_add_component(runtimec_contract contract)
-runtimec_add_component(runtimec_host host)
 runtimec_add_component(runtimec_binrwir binrwir)
 runtimec_add_component(runtimec_vmkv vmkv)
 runtimec_add_component(runtimec_binrwir_compiler binrwir_compiler)
@@ -168,7 +167,7 @@ foreach(temporary_component vmbin vmkv engine)
     target_compile_definitions(${temporary_target}
         PRIVATE RUNTIMEC_TEMP_PRINTLN=1)
     target_link_libraries(${temporary_target}
-        PUBLIC runtimec_contract runtimec_host runtimec_binrwir)
+        PUBLIC runtimec_contract runtimec_binrwir)
     add_library(kvlang::kv_runner_${temporary_component}
         ALIAS ${temporary_target})
 endforeach()
@@ -203,7 +202,7 @@ target_include_directories(capability_probe PRIVATE
     "${RUNTIMEC_INCLUDE_DIRECTORY}"
     "${KVLANG_INCLUDE_DIRECTORY}")
 target_link_libraries(capability_probe PRIVATE
-    runtimec_contract runtimec_host runtimec_vmbin runtimec_engine
+    runtimec_contract runtimec_vmbin runtimec_engine
     "${CMAKE_DL_LIBS}")
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(capability_probe PRIVATE
@@ -245,8 +244,10 @@ target_include_directories(runtimec_contract
     PUBLIC
         "$<BUILD_INTERFACE:${RUNTIMEC_INCLUDE_DIRECTORY}>"
         "$<BUILD_INTERFACE:${KVSPACE_INCLUDE_DIRECTORY}>")
-target_link_libraries(runtimec_host
-    PRIVATE runtimec_contract)
+# contract/kvspace_access 直接调 kvspace C ABI（用户裁决：不对 ABI 二次封装，
+# 句柄就是 `void *`）。它原来是 host 层经二进制符号表间接调用；现在没有那一层。
+target_link_libraries(runtimec_contract
+    PRIVATE "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
 target_link_libraries(runtimec_binrwir
     PRIVATE runtimec_contract)
 target_link_libraries(runtimec_vmkv
@@ -261,14 +262,16 @@ target_link_libraries(runtimec_binrwir_compiler
 target_link_libraries(runtimec_vmbin
     PRIVATE runtimec_contract runtimec_binrwir
             "${RUNTIMEC_KVSPACE_LIBRARY_PATH}" m)
+# engine 是**组合根**：它连接 kvspace 拿到句柄，再借给 `contract/kvspace_access`。
+# 与 vmbin 链 kvspace 的理由不同（那是 handler 直调 ABI），但两者都必须链真库。
 target_link_libraries(runtimec_engine
     PRIVATE
         runtimec_contract
-        runtimec_host
         runtimec_binrwir
         runtimec_vmkv
         runtimec_binrwir_compiler
-        runtimec_vmbin)
+        runtimec_vmbin
+        "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
 target_compile_definitions(runtimec_binrwir_compiler
     PRIVATE RUNTIMEC_ENABLE_JIT=$<BOOL:${RUNTIMEC_ENABLE_JIT}>)
 target_compile_definitions(runtimec_engine
@@ -314,7 +317,6 @@ elseif(UNIX)
 endif()
 
 add_library(kvlang::runtimec_contract ALIAS runtimec_contract)
-add_library(kvlang::runtimec_host ALIAS runtimec_host)
 add_library(kvlang::runtimec_binrwir ALIAS runtimec_binrwir)
 add_library(kvlang::runtimec_vmkv ALIAS runtimec_vmkv)
 add_library(kvlang::runtimec_binrwir_compiler ALIAS runtimec_binrwir_compiler)

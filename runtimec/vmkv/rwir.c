@@ -11,6 +11,7 @@
 
 #include <string.h>
 
+#include "contract/kvspace_access.h"
 #include "vmkv/vmkv_internal.h"
 
 /* 参数槽自身 key 的容纳上限：函数路径 + `[4294967295,-2147483648]`。 */
@@ -52,6 +53,69 @@ static bool vmkv_rwir_langtype_is(const vmkv_source_slot_t *slot,
     const size_t length = strlen(kind);
     return slot->langtype.size == length &&
            memcmp(slot->langtype.data, kind, length) == 0;
+}
+
+/*
+ * 从裸 body 取算子名。与下面 `vmkv_rwir_read_opcode` 共用同一套布局判断，
+ * 只是不要求 `vmkv_source_slot_t`——上层（engine）手里只有读回来的字节。
+ */
+bool vmkv_rwir_key_is_member(runtimec_key_view_t key) {
+    /*
+     * `·` 是 U+00B7，UTF-8 两字节 `0xC2 0xB7`。**必须按完整序列匹配**：
+     * 只判 `0xC2` 会把任何以它开头的其他字符也当成成员符。
+     */
+    static const char separator[] = "\xC2\xB7";
+    if (key.data == NULL || key.size < 2U) {
+        return false;
+    }
+    for (size_t offset = 0U; offset + 2U <= key.size; ++offset) {
+        if (key.data[offset] == separator[0] &&
+            key.data[offset + 1U] == separator[1]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+runtimec_status_t vmkv_rwir_operation_name_from_wire(
+    const uint8_t *wire, size_t wire_size,
+    runtimec_string_view_t *output_operation, runtimec_error_t *error) {
+    if (output_operation != NULL) {
+        *output_operation = runtimec_string_view_make(NULL, 0U);
+    }
+    if (wire == NULL || output_operation == NULL) {
+        return vmkv_rwir_fail(error, RUNTIMEC_STATUS_INVALID,
+                              VMKV_DIAG_INVALID_REQUEST,
+                              "operation name request is invalid", NULL, 0U);
+    }
+    /* body 视图由 contract 切：`runtimec_xvalue_body_from_wire` 与
+     * `runtimec_xvalue_body_address` 是同一处偏移算术的两个入口（一个从地址推、
+     * 一个从字节切）。本层**不写偏移算术**——门禁
+     * `body-address-derivation-outside-contract` 拦的就是那个。
+     *
+     * 分工：counts 布局归 vmkv（本函数），头长度归 contract。 */
+    const runtimec_string_view_t body = runtimec_xvalue_body_from_wire(
+        runtimec_bytes_view_make(wire, wire_size));
+    if (body.data == NULL || body.size <= VMKV_COUNTS_HEADER_SIZE) {
+        return vmkv_rwir_fail(error, RUNTIMEC_STATUS_UNSUPPORTED,
+                              VMKV_DIAG_MISSING_OPCODE,
+                              "instruction body has no operation name", NULL, 0U);
+    }
+    /* dynamic 字节只允许 0/1：别的值说明这不是一条指令槽。 */
+    if ((uint8_t)body.data[4] > 1U) {
+        return vmkv_rwir_fail(error, RUNTIMEC_STATUS_UNSUPPORTED,
+                              VMKV_DIAG_MISSING_OPCODE,
+                              "instruction body is not an opcode slot", NULL, 0U);
+    }
+    const size_t text_size = body.size - VMKV_COUNTS_HEADER_SIZE;
+    const char *text = body.data + VMKV_COUNTS_HEADER_SIZE;
+    if (memchr(text, '\0', text_size) != NULL) {
+        return vmkv_rwir_fail(error, RUNTIMEC_STATUS_UNSUPPORTED,
+                              VMKV_DIAG_MISSING_OPCODE,
+                              "operation name carries a type suffix", NULL, 0U);
+    }
+    *output_operation = runtimec_string_view_make(text, text_size);
+    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 /* operation name：opcode 槽的 `rwir`/`rwfunc` body（counts + 文本）。 */
@@ -257,7 +321,7 @@ runtimec_status_t vmkv_rwir_reader_create(
                               VMKV_DIAG_INVALID_REQUEST,
                               "vmkv rwir: invalid reader request", NULL, 0U);
     }
-    const runtimec_allocator_t allocator = function->host_services.allocator;
+    const runtimec_allocator_t allocator = function->kvspace_access->allocator;
     vmkv_rwir_reader_t *reader = vmkv_source_allocate(
         function, sizeof(*reader), _Alignof(vmkv_rwir_reader_t));
     if (reader == NULL) {

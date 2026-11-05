@@ -45,7 +45,7 @@ void *vmkv_source_allocate(vmkv_function_source_t *function, size_t size,
                                     ? 8U
                                     : function->allocation_capacity * 2U;
         vmkv_allocation_t *grown = runtimec_allocator_allocate(
-            &function->host_services.allocator,
+            &function->kvspace_access->allocator,
             capacity * sizeof(*grown), _Alignof(vmkv_allocation_t));
         if (grown == NULL) {
             return NULL;
@@ -56,7 +56,7 @@ void *vmkv_source_allocate(vmkv_function_source_t *function, size_t size,
         }
         if (function->allocations != NULL) {
             (void)runtimec_allocator_deallocate(
-                &function->host_services.allocator, function->allocations,
+                &function->kvspace_access->allocator, function->allocations,
                 function->allocation_capacity * sizeof(*grown),
                 _Alignof(vmkv_allocation_t));
         }
@@ -64,7 +64,7 @@ void *vmkv_source_allocate(vmkv_function_source_t *function, size_t size,
         function->allocation_capacity = capacity;
     }
     void *pointer = runtimec_allocator_allocate(
-        &function->host_services.allocator, size, alignment);
+        &function->kvspace_access->allocator, size, alignment);
     if (pointer == NULL) {
         return NULL;
     }
@@ -122,13 +122,13 @@ bool vmkv_source_split_wire(const uint8_t *wire, size_t wire_size,
 static runtimec_status_t vmkv_source_read_value(
     vmkv_source_build_t *build, runtimec_key_view_t key,
     const uint8_t **output_wire, size_t *output_size, runtimec_error_t *error) {
-    const runtimec_host_services_t *host = &build->function->host_services;
+    runtimec_kvspace_access_t *host = build->function->kvspace_access;
     const runtimec_snapshot_t *snapshot = &build->function->snapshot;
 
-    runtimec_host_value_header_t header;
-    runtimec_host_value_header_reset(&header);
-    runtimec_status_t status = host->read_header(
-        host->context, snapshot, key, &header, error);
+    runtimec_kvspace_value_header_t header;
+    runtimec_kvspace_value_header_reset(&header);
+    runtimec_status_t status = runtimec_kvspace_access_read_header(
+        host, snapshot, key, &header, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -148,7 +148,7 @@ static runtimec_status_t vmkv_source_read_value(
     output.data = buffer;
     output.size = 0U;
     output.capacity = size;
-    status = host->read(host->context, snapshot, key, &output, error);
+    status = runtimec_kvspace_access_read(host, snapshot, key, &output, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -544,7 +544,7 @@ static runtimec_status_t vmkv_source_release(
 }
 
 runtimec_status_t vmkv_source_open_function(
-    const runtimec_host_services_t *host_services,
+    runtimec_kvspace_access_t *kvspace_access,
     runtimec_string_view_t function_path,
     vmkv_function_source_t **output_function,
     runtimec_snapshot_t *output_snapshot,
@@ -556,7 +556,7 @@ runtimec_status_t vmkv_source_open_function(
         runtimec_snapshot_reset(output_snapshot);
     }
     runtimec_error_reset(error);
-    if (!runtimec_host_services_is_valid(host_services) ||
+    if (kvspace_access == NULL ||
         !runtimec_string_view_is_valid(function_path) ||
         function_path.size == 0U || output_function == NULL ||
         output_snapshot == NULL || error == NULL) {
@@ -564,16 +564,7 @@ runtimec_status_t vmkv_source_open_function(
                                 VMKV_DIAG_INVALID_REQUEST,
                                 "vmkv source: invalid open request");
     }
-    if (host_services->read == NULL || host_services->read_header == NULL ||
-        host_services->list == NULL ||
-        host_services->source_revision == NULL) {
-        return vmkv_source_fail(
-            error, RUNTIMEC_STATUS_NOT_IMPLEMENTED,
-            VMKV_DIAG_HOST_CAPABILITY_MISSING,
-            "vmkv source: host capability is missing");
-    }
-
-    const runtimec_allocator_t allocator = host_services->allocator;
+    const runtimec_allocator_t allocator = kvspace_access->allocator;
     vmkv_function_source_t *function = runtimec_allocator_allocate(
         &allocator, sizeof(*function), _Alignof(vmkv_function_source_t));
     if (function == NULL) {
@@ -582,7 +573,7 @@ runtimec_status_t vmkv_source_open_function(
                                 "vmkv source: allocation failed");
     }
     memset(function, 0, sizeof(*function));
-    function->host_services = *host_services;
+    function->kvspace_access = kvspace_access;
 
     vmkv_source_build_t build = {
         .function = function,
@@ -595,8 +586,8 @@ runtimec_status_t vmkv_source_open_function(
     runtimec_snapshot_reset(&function->snapshot);
     function->snapshot.function_key =
         runtimec_key_view_make(function_path.data, function_path.size);
-    runtimec_status_t status = host_services->source_revision(
-        host_services->context, function->snapshot.function_key,
+    runtimec_status_t status = runtimec_kvspace_access_source_revision(
+        kvspace_access, function->snapshot.function_key,
         &function->snapshot.source_revision, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         (void)vmkv_source_release(function, &allocator);
@@ -662,9 +653,10 @@ runtimec_status_t vmkv_source_open_function(
     memset(function->write_parameters, 0,
            write_capacity * sizeof(*function->write_parameters));
 
-    status = host_services->list(host_services->context, &function->snapshot,
-                                 runtimec_key_view_make(prefix, prefix_size),
-                                 vmkv_source_list_visit, &build, error);
+    status = runtimec_kvspace_access_list(
+        kvspace_access, &function->snapshot,
+        runtimec_key_view_make(prefix, prefix_size), vmkv_source_list_visit,
+        &build, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         (void)vmkv_source_release(function, &allocator);
         return status;
@@ -828,7 +820,7 @@ runtimec_status_t vmkv_source_close_function(vmkv_function_source_t *function) {
     if (function == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    const runtimec_allocator_t allocator = function->host_services.allocator;
+    const runtimec_allocator_t allocator = function->kvspace_access->allocator;
     return vmkv_source_release(function, &allocator);
 }
 

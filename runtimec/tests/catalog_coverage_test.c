@@ -59,13 +59,13 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <kvspace/kvspace.h>
+
 #include "binrwir/instruction.h"
 #include "binrwir/registry.h"
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "contract/status.h"
 #include "engine/session.h"
-#include "host/kvspace_adapter.h"
-#include "host/kvspace_binary_interface.h"
 #include "vmkv/rwir_manifest.h"
 #include "vmbin/core_operations.h"
 
@@ -83,12 +83,6 @@ static void test_deallocate(void *context, void *allocation, size_t size,
     (void)size;
     (void)alignment;
     free(allocation);
-}
-
-static runtimec_kvspace_symbol_address_t resolve_symbol(void *context,
-                                                        const char *name) {
-    void *symbol = dlsym(context, name);
-    return (runtimec_kvspace_symbol_address_t)(uintptr_t)symbol;
 }
 
 /*
@@ -158,11 +152,7 @@ typedef struct declared_gap {
 } declared_gap_t;
 
 static const declared_gap_t kDeclaredGaps[] = {
-    {0x0100U, "compactarray·copy", "看板 §九 B 线容器"},
-    {0x0105U, "compactarray·dim", "看板 §九 B 线容器"},
     {0x0106U, "compactarray·shape", "看板 §九 B 线容器"},
-    {0x010BU, "compactarray·langtype", "看板 §九 B 线容器"},
-    {0x010CU, "compactarray·bodylen", "看板 §九 B 线容器"},
     {0x0130U, "xv·at", "容器线 coding4"},
     {0x0131U, "xv·set", "容器线 coding4"},
     {0x0132U, "xv·reshape", "容器线 coding4"},
@@ -194,8 +184,6 @@ static const declared_gap_t kDeclaredGaps[] = {
     /* 安装签名族：读侧零操作数、写侧有值、`result_rule = IDENTITY`。
      * 特化表里连一行都没有是**必然**（特化是「按操作数类型选行」，它们没有
      * 操作数），不是遗漏。补实现时不能照 `scalar_transcendental` 模板。 */
-    {0x01A0U, "map·new", "容器线（§九 B 线）"},
-    {0x01A1U, "struct·new", "容器线（§九 B 线）"},
     /* `&x` 会被 layout emit 成真指令（dump 实测 `[2,0] kvlang·abs`），
      * 所以不是「从不执行」；它属指针一等值那次双侧改动。 */
     {0x01A2U, "kvlang·abs", "指针一等值立项"},
@@ -263,21 +251,9 @@ int main(int argument_count, char **arguments) {
         return SKIP_RETURN_CODE;
     }
 
-    runtimec_kvspace_symbol_resolver_t resolver = {
-        .context = library,
-        .resolve = resolve_symbol,
-    };
-    runtimec_kvspace_binary_interface_t binary_interface;
-    runtimec_error_t error;
+        runtimec_error_t error;
 
     runtimec_error_reset(&error);
-    if (runtimec_kvspace_binary_interface_bind(&resolver, &binary_interface,
-                                               &error) !=
-        RUNTIMEC_STATUS_SUCCESS) {
-        fprintf(stderr, "SKIP: bind failed: %.*s\n", (int)error.message.size,
-                error.message.data != NULL ? error.message.data : "");
-        return SKIP_RETURN_CODE;
-    }
 
     snprintf(directory, sizeof(directory),
              "/home/peng.li24/github.com/array2d/kvlang/workspace/tmp/coding2/"
@@ -286,7 +262,7 @@ int main(int argument_count, char **arguments) {
     (void)mkdir(directory, 0700);
     snprintf(data_source_name, sizeof(data_source_name), "shm://%s/store.shm",
              directory);
-    void *handle = binary_interface.connect(data_source_name);
+    void *handle = kvspaceConnect(data_source_name);
     if (handle == NULL) {
         fprintf(stderr, "SKIP: cannot connect %s\n", data_source_name);
         return SKIP_RETURN_CODE;
@@ -297,14 +273,13 @@ int main(int argument_count, char **arguments) {
         .allocate = test_allocate,
         .deallocate = test_deallocate,
     };
-    runtimec_kvspace_adapter_request_t adapter_request = {
+    const runtimec_kvspace_access_request_t adapter_request = {
         .allocator = allocator,
         .borrowed_kvspace_handle = handle,
         .instance_identifier = UINT64_C(1),
     };
-    runtimec_host_services_t host_services;
-    if (runtimec_kvspace_adapter_create_services(
-            &adapter_request, &binary_interface, &host_services, &error) !=
+    runtimec_kvspace_access_t *access = NULL;
+    if (runtimec_kvspace_access_create(&adapter_request, &access, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
         fprintf(stderr, "FAIL: adapter create failed\n");
         return 1;
@@ -318,12 +293,12 @@ int main(int argument_count, char **arguments) {
     options.machine_code_capacity = 0U;
     options.enable_jit = false;
     runtimec_session_t *session = NULL;
-    if (runtimec_session_create(&host_services, &options, &session, &error) !=
+    if (runtimec_session_create(access, &options, &session, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
         fprintf(stderr, "FAIL: session create failed: %.*s\n",
                 (int)error.message.size,
                 error.message.data != NULL ? error.message.data : "");
-        runtimec_kvspace_adapter_destroy_services(&host_services, &error);
+        runtimec_kvspace_access_destroy(access, &error);
         return 1;
     }
 
@@ -340,7 +315,7 @@ int main(int argument_count, char **arguments) {
         components.builtin_registry == NULL) {
         fprintf(stderr, "FAIL: session exposes no builtin registry\n");
         runtimec_session_destroy(session);
-        runtimec_kvspace_adapter_destroy_services(&host_services, &error);
+        runtimec_kvspace_access_destroy(access, &error);
         return 1;
     }
     const binrwir_registry_t *registry = components.builtin_registry;
@@ -469,8 +444,8 @@ int main(int argument_count, char **arguments) {
            missing_count, stale_count);
 
     runtimec_session_destroy(session);
-    runtimec_kvspace_adapter_destroy_services(&host_services, &error);
-    binary_interface.close(handle);
+    runtimec_kvspace_access_destroy(access, &error);
+    kvspaceClose(handle);
 
     if (missing_count != 0U) {
         fprintf(stderr,

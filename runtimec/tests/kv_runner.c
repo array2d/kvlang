@@ -78,12 +78,15 @@
 
 #include "binrwir/execution_exit.h"
 #include "binrwir/instruction.h"
+#include "binrwir/frame_bindings.h"
 #include "binrwir/program.h"
 #include "binrwir_compiler/compiler.h"
 #include "binrwir/specialize.h"
 #include "engine/execution_window.h"
 #include "engine/session.h"
-#include "host/kvspace_adapter.h"
+#include <kvspace/kvspace.h>
+
+#include "contract/kvspace_access.h"
 #include "vmkv/encoder.h"
 #include "vmkv/rwir_manifest.h"
 
@@ -151,6 +154,7 @@ static blocked_entry_t g_blocked[MAX_BLOCKED];
 static size_t g_blocked_count;
 
 
+
 /* ── 分配器（与 end_to_end 同形：malloc/free 包装） ────────────────── */
 
 static void *test_allocate(void *context, size_t size, size_t alignment) {
@@ -179,11 +183,6 @@ static void runtimec_deallocate(void *context, void *allocation, size_t size,
     (void)size;
     (void)alignment;
     free(allocation);
-}
-
-static runtimec_kvspace_symbol_address_t resolve_symbol(void *context,
-                                                        const char *name) {
-    return (runtimec_kvspace_symbol_address_t)(uintptr_t)dlsym(context, name);
 }
 
 /* ── 运行环境 ─────────────────────────────────────────────────────── */
@@ -215,8 +214,7 @@ typedef enum frame_outcome {
 typedef struct runner_environment {
     void *layout_library;
     layout_file_function_t layout_file;
-    void *kvspace_library;
-    runtimec_kvspace_binary_interface_t binary_interface;
+    /* kvspace 走链接期依赖，不再 dlopen；layout 仍走 dlopen（可选构建产物，与本次改动无关）。 */
     /* ── 以下**每条用例**重建 ──────────────────────────────────────
      *
      * store 不能整批共用：上一条用例 layout 进去的 `/lib` 会留在同一个 store 里，
@@ -227,7 +225,7 @@ typedef struct runner_environment {
      * 因此这三项由 `case_store_open` / `case_store_close` 按用例序号建/拆，
      * 路径带上序号，不共用。 */
     void *kvspace_handle;
-    runtimec_host_services_t services;
+    runtimec_kvspace_access_t *kvspace_access;
     runtimec_session_t *session;
     char directory[256];
     char data_source[320];
@@ -250,22 +248,7 @@ static bool environment_open(runner_environment_t *environment,
         fprintf(stderr, "SKIP: layout library has no kvlangLayoutFile\n");
         return false;
     }
-    environment->kvspace_library = dlopen(kvspace_path, RTLD_NOW | RTLD_LOCAL);
-    if (environment->kvspace_library == NULL) {
-        fprintf(stderr, "SKIP: cannot load kvspace %s: %s\n", kvspace_path,
-                dlerror());
-        return false;
-    }
-    runtimec_kvspace_symbol_resolver_t resolver = {
-        .context = environment->kvspace_library, .resolve = resolve_symbol};
-    runtimec_error_t error;
-    if (runtimec_kvspace_binary_interface_bind(&resolver,
-                                               &environment->binary_interface,
-                                               &error) !=
-        RUNTIMEC_STATUS_SUCCESS) {
-        fprintf(stderr, "SKIP: kvspace bind failed\n");
-        return false;
-    }
+    (void)kvspace_path;
     return true;
 }
 
@@ -324,23 +307,22 @@ static bool case_store_open(runner_environment_t *environment,
     }
     snprintf(environment->data_source, sizeof(environment->data_source),
              "shm://%s/store.shm", environment->directory);
-    environment->kvspace_handle =
-        environment->binary_interface.connect(environment->data_source);
+    environment->kvspace_handle = kvspaceConnect(environment->data_source);
     if (environment->kvspace_handle == NULL) {
         fprintf(stderr, "case store: cannot connect %s\n",
                 environment->data_source);
         return false;
     }
-    runtimec_kvspace_adapter_request_t request = {
+    runtimec_kvspace_access_request_t request = {
         .allocator = {.context = NULL,
                       .allocate = test_allocate,
                       .deallocate = test_deallocate},
         .borrowed_kvspace_handle = environment->kvspace_handle,
         .instance_identifier = UINT64_C(1),
     };
-    if (runtimec_kvspace_adapter_create_services(
-            &request, &environment->binary_interface, &environment->services,
-            &error) != RUNTIMEC_STATUS_SUCCESS) {
+    if (runtimec_kvspace_access_create(&request,
+                                       &environment->kvspace_access,
+                                       &error) != RUNTIMEC_STATUS_SUCCESS) {
         fprintf(stderr, "case store: adapter create failed\n");
         return false;
     }
@@ -350,13 +332,15 @@ static bool case_store_open(runner_environment_t *environment,
     options.allocator.context = NULL;
     options.allocator.allocate = runtimec_allocate;
     options.allocator.deallocate = runtimec_deallocate;
+    /* session 从 options 借句柄（它不 connect、不关闭）。 */
+    options.kvspace_handle = environment->kvspace_handle;
     options.compilation_cache_capacity = 64U;
     /* enable_jit=false 时 machine_code_capacity **必须为 0**：
      * session 把「不开 JIT 却要机器码空间」判为非法请求（session.c:92-93）。
      * 骨架阶段只用解释档。 */
     options.machine_code_capacity = 0U;
     options.enable_jit = false;
-    if (runtimec_session_create(&environment->services, &options,
+    if (runtimec_session_create(environment->kvspace_access, &options,
                                 &environment->session,
                                 &error) != RUNTIMEC_STATUS_SUCCESS) {
         fprintf(stderr, "case store: session create failed: status=%d %s\n",
@@ -382,12 +366,16 @@ static runtimec_status_t case_store_close(runner_environment_t *environment) {
     }
     if (environment->kvspace_handle != NULL) {
         runtimec_error_t error;
-        if (runtimec_kvspace_adapter_destroy_services(&environment->services,
-                                                      &error) !=
-            RUNTIMEC_STATUS_SUCCESS) {
-            status = RUNTIMEC_STATUS_ERROR;
+        /* 顺序不可交换：先解借（access 里登记着句柄），再关闭句柄。 */
+        if (environment->kvspace_access != NULL) {
+            if (runtimec_kvspace_access_destroy(environment->kvspace_access,
+                                                &error) !=
+                RUNTIMEC_STATUS_SUCCESS) {
+                status = RUNTIMEC_STATUS_ERROR;
+            }
+            environment->kvspace_access = NULL;
         }
-        environment->binary_interface.close(environment->kvspace_handle);
+        kvspaceClose(environment->kvspace_handle);
         environment->kvspace_handle = NULL;
     }
     if (environment->directory[0] != '\0') {
@@ -406,7 +394,7 @@ static runtimec_status_t case_store_close(runner_environment_t *environment) {
  * `‥status` 就返回——**它本来就不负责推进**。驱动是缺的那一环。
  *
  * ── 四条依据（每条都能指到代码，不是约定）────────────────────────
- * 1. **不写 `‥lib`**：`host/kvspace_adapter.c:791-794` 的 `ensure_frame` 已在写，
+ * 1. **不写 `‥lib`**：`contract/kvspace_access.c` 的 `ensure_frame` 已在写，
  *    驱动再写就是同一事实两个写方（两边写同一个值不会报错，直到有一边改了）。
  * 2. **被调入口 pc = 1**：见 `KVRUN_CALLEE_ENTRY_SOURCE_PC` 的注释。
  * 3. **不自己 encode**：`execution_window.c:545-560` 在编译仓库未命中时会
@@ -424,14 +412,19 @@ static runtimec_status_t case_store_close(runner_environment_t *environment) {
  */
 static frame_outcome_t execute_frame_until_done(
     runner_environment_t *environment, const char *function_path,
-    uint32_t source_pc, int32_t depth,
+    uint32_t source_pc, int32_t depth, const char *frame_segment,
     const char *vthread_identifier,
     const runtimec_argument_description_t *arguments, size_t argument_count,
     unsigned *out_callee_depth, binrwir_execution_exit_t *out_exit) {
     char frame_path[128];
+    /*
+     * 目录名带唯一序号：`/vthread/{vid}/[{depth}.#{serial}]`。
+     * `depth` 保留在最前面，读的人仍能一眼看出层级；序号保证同深度多次调用
+     * 不共用目录（见 `g_frame_serial` 的注释）。
+     */
     const int frame_length =
-        snprintf(frame_path, sizeof(frame_path), "/vthread/%s/[%d]",
-                 vthread_identifier, (int)depth);
+        snprintf(frame_path, sizeof(frame_path), "/vthread/%s/[%s]",
+                 vthread_identifier, frame_segment);
     if (frame_length < 0 || (size_t)frame_length >= sizeof(frame_path)) {
         return FRAME_OUTCOME_INVALID;
     }
@@ -446,8 +439,6 @@ static frame_outcome_t execute_frame_until_done(
     request.arguments = arguments;
     request.argument_count = argument_count;
 
-    char store_error[256];
-    store_error[0] = '\0';
     runtimec_execution_window_result_t result;
     memset(&result, 0, sizeof(result));
     runtimec_error_t error;
@@ -536,19 +527,15 @@ static frame_outcome_t execute_frame_until_done(
          * `add1(41)` 是跨帧 rwfunc 调用，`*int64 $x` 是指针绑定需要一个 key，
          * 所以 `41` 必须物化。落点是新帧目录下，所以这里先建目录。
          */
-        char callee_frame_path[128];
-        const int callee_frame_length =
-            snprintf(callee_frame_path, sizeof(callee_frame_path),
-                     "/vthread/%s/[%d]", vthread_identifier, (int)depth + 1);
-        if (callee_frame_length < 0 ||
-            (size_t)callee_frame_length >= sizeof(callee_frame_path)) {
-            return FRAME_OUTCOME_ERROR;
-        }
-        if (environment->binary_interface.mkindex(
-                environment->kvspace_handle, callee_frame_path, 0U,
-                store_error, (uint32_t)sizeof(store_error)) != 0) {
-            return FRAME_OUTCOME_ERROR;
-        }
+        /*
+         * **不在这里预建子帧目录**：帧路径由 `execute_frame_until_done` 自己算
+         * （含唯一序号 `g_frame_serial`），执行窗口的 `ensure_frame` 会建它。
+         *
+         * 曾经在这里按 `/[depth+1]` 先 mkindex：那时两处算的是同一个名字，所以
+         * 看不出问题；加了序号之后两处算法不一致，预建的目录和实际用的对不上，
+         * 而 `ensure_frame` 又会因「帧上已有另一个函数」被拒——正是它要修的那个
+         * 症状。**同一件事两个地方算，就是这个下场。**
+         */
         /* 取出 call 指令的读参项（跳过最前的 FUNCTION 那个）。 */
         uint32_t call_instruction_identifier = 0U;
         binrwir_instruction_view_t call_instruction;
@@ -647,6 +634,75 @@ static frame_outcome_t execute_frame_until_done(
              ++ordinal) {
             const binrwir_argument_t *argument =
                 &call_instruction.write_arguments.data[ordinal];
+            /*
+             * 写槽可以是**局部**（`add1(41) -> v`），也可以是**本帧自己的形参写位置**
+             * （`fib(n1) -> (*a, *b)`）。后者是递归的形态：写回的不是新变量，
+             * 而是调用方签名里那个 `*T $name`。
+             *
+             * 两者的 key **不同形**（见 `binrwir_frame_bindings.h`）：
+             *   局部  `/vthread/<vid>/[<depth>]/<name>`
+             *   形参  `/vthread/<vid>/[<depth>]/[0,+<ordinal+1>]`
+             * 所以这里按 kind 分派，但 key 一律由 `binrwir_frame_*_key` 拼——
+             * 拼法只有一处，本驱动不自己拼。
+             */
+            if (argument->reference_kind == BINRWIR_REFERENCE_PARAMETER_WRITE) {
+                /*
+                 * 形参写位置：key 由 helper 拼，本驱动不自己拼。
+                 * `slot` 是**该方向内的序号**（argidx），从 0 起。
+                 */
+                char frame_path[128];
+                const int frame_length = snprintf(
+                    frame_path, sizeof(frame_path), "/vthread/%s/[%s]",
+                    vthread_identifier, frame_segment);
+                if (frame_length < 0 ||
+                    (size_t)frame_length >= sizeof(frame_path)) {
+                    return FRAME_OUTCOME_ERROR;
+                }
+                const size_t parameter_key_size = binrwir_frame_parameter_key(
+                    runtimec_string_view_from_c_string(frame_path),
+                    argument->slot, true,
+                    write_target_keys[callee_argument_count],
+                    sizeof(write_target_keys[callee_argument_count]));
+                if (parameter_key_size == SIZE_MAX) {
+                    return FRAME_OUTCOME_ERROR;
+                }
+                /*
+                 * 形参的 langtype 只能从**调用方 Program 的签名**取：
+                 * `slot` 是该方向内的序号，签名表里就是它。
+                 */
+                runtimec_string_view_t parameter_type =
+                    runtimec_string_view_make(NULL, 0U);
+                {
+                    binrwir_program_view_t view;
+                    if (binrwir_program_get_view(frame_program, &view) !=
+                            RUNTIMEC_STATUS_SUCCESS ||
+                        (size_t)argument->slot >=
+                            view.signature.write_parameter_count) {
+                        return FRAME_OUTCOME_ERROR;
+                    }
+                    parameter_type =
+                        view.signature.write_parameter_types[argument->slot];
+                }
+                const int type_written = snprintf(
+                    write_target_langtypes[callee_argument_count],
+                    sizeof(write_target_langtypes[callee_argument_count]),
+                    "%.*s", (int)parameter_type.size, parameter_type.data);
+                if (type_written < 0 ||
+                    (size_t)type_written >=
+                        sizeof(write_target_langtypes[callee_argument_count])) {
+                    return FRAME_OUTCOME_ERROR;
+                }
+                callee_arguments[callee_argument_count].source =
+                    RUNTIMEC_ARGUMENT_SOURCE_WRITE_TARGET;
+                callee_arguments[callee_argument_count].key =
+                    runtimec_string_view_from_c_string(
+                        write_target_keys[callee_argument_count]);
+                callee_arguments[callee_argument_count].literal_langtype =
+                    runtimec_string_view_from_c_string(
+                        write_target_langtypes[callee_argument_count]);
+                callee_argument_count += 1U;
+                continue;
+            }
             if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL) {
                 return FRAME_OUTCOME_ERROR;
             }
@@ -702,11 +758,45 @@ static frame_outcome_t execute_frame_until_done(
          * 调用方会读到**上一次**的 exit —— 那是「以看起来合理的值失败」。 */
         binrwir_execution_exit_t callee_exit;
         memset(&callee_exit, 0, sizeof(callee_exit));
+        /*
+         * 子帧段 = `<depth+1>.<call_site_pc>`。
+         *
+         * 帧身份必须来自**调用链**，不是计数器：
+         *   - 同一调用点重复调用 ⇒ 同一段 ⇒ 复用同一帧（不增长）；
+         *   - 不同调用点 ⇒ call_site_pc 不同 ⇒ 区分得开；
+         *   - 递归 ⇒ depth 不同 ⇒ 区分得开；
+         *   - 跑两遍 ⇒ 完全一样（帧路径可寻址，崩溃恢复靠的就是它）。
+         *
+         * 曾经只用 `<depth>`：同一深度先后调两个不同函数会撞同一帧路径，
+         * `ensure_frame` 因「帧上已有另一个函数」拒绝（detail=13）。改用全局
+         * 计数器是错的——不可确定、无法复用、无限增长。
+         */
+        char callee_frame_segment[64];
+        const int callee_segment_length = snprintf(
+            callee_frame_segment, sizeof(callee_frame_segment), "%d.%u",
+            (int)depth + 1,
+            (unsigned)result.execution_exit.logical_program_counter);
+        if (callee_segment_length < 0 ||
+            (size_t)callee_segment_length >= sizeof(callee_frame_segment)) {
+            return FRAME_OUTCOME_ERROR;
+        }
         const frame_outcome_t callee_outcome = execute_frame_until_done(
             environment, callee_path, KVRUN_CALLEE_ENTRY_SOURCE_PC,
-            depth + 1, vthread_identifier, callee_arguments,
-            callee_argument_count, NULL, &callee_exit);
+            depth + 1, callee_frame_segment, vthread_identifier,
+            callee_arguments, callee_argument_count, NULL, &callee_exit);
         if (callee_outcome != FRAME_OUTCOME_DONE) {
+            /*
+             * 子帧没跑完（ERROR / HANDOFF / INVALID）：**必须把它的 exit 交出去**。
+             *
+             * 曾经这里直接 `return callee_outcome;`——`out_exit` 一个字节都没写，
+             * 于是调用方拿到的是**本帧自己那条 CALL 的 exit**（`kind=2 status=0`），
+             * 子帧的失败被整个吞掉。症状看起来像「跑到一条 call 就没人接了」，
+             * 实际是「子帧失败了，但从没被报告上去」。
+             *
+             * 实测（2026-11-05）：`fib` 第三层报 `kind=6 status=3 detail=9`，
+             * 父帧拿到的却是 `kind=2 status=0`。
+             */
+            *out_exit = callee_exit;
             return callee_outcome;
         }
         /* 被调回来了：回到调用方的 resume 点。
@@ -728,7 +818,8 @@ static frame_outcome_t execute_frame_until_done(
         return execute_frame_until_done(
             environment, function_path,
             result.execution_exit.resume_logical_program_counter, depth,
-            vthread_identifier, arguments, argument_count, NULL, out_exit);
+            frame_segment, vthread_identifier, arguments, argument_count,
+            NULL, out_exit);
     }
     default:
         return FRAME_OUTCOME_INVALID;
@@ -815,7 +906,7 @@ static void operation_name_at(runner_environment_t *environment,
     buffer.capacity = sizeof(storage);
     runtimec_error_t error;
     memset(&error, 0, sizeof(error));
-    if (environment->services.read(environment->services.context, snapshot,
+    if (runtimec_kvspace_access_read(environment->kvspace_access, snapshot,
                                    runtimec_key_view_from_c_string(key),
                                    &buffer, &error) != RUNTIMEC_STATUS_SUCCESS) {
         return;
@@ -843,13 +934,11 @@ static void operation_name_at(runner_environment_t *environment,
 }
 
 /* 生命周期收尾与其它组件一致：返回状态而不是 void。清理要继续走完，错误先记下。 */
-/* 进程级收尾：只拆 dlopen 的库。store/session 归 `case_store_close` 管——
- * 两者生命周期不同（库整批共用，store 每条用例一换），混在一起写就会漏拆。 */
+/* 进程级收尾：只拆 dlopen 的 layout 库。kvspace 是链接期依赖，无需拆。
+ * store/session 归 `case_store_close` 管——两者生命周期不同（库整批共用、
+ * store 每条用例一换），混在一起写就会漏拆。 */
 static runtimec_status_t environment_close(runner_environment_t *environment) {
     runtimec_status_t status = RUNTIMEC_STATUS_SUCCESS;
-    if (environment->kvspace_library != NULL) {
-        dlclose(environment->kvspace_library);
-    }
     if (environment->layout_library != NULL) {
         dlclose(environment->layout_library);
     }
@@ -1355,7 +1444,7 @@ int main(int argument_count, char **arguments) {
             runtimec_error_t encode_error;
             memset(&encode_request, 0, sizeof(encode_request));
             memset(&encode_error, 0, sizeof(encode_error));
-            encode_request.host_services = &environment.services;
+            encode_request.kvspace_access = environment.kvspace_access;
             encode_request.function_path =
                 runtimec_string_view_from_c_string(function_path);
             encode_request.expected_snapshot.contract_version =
@@ -1371,8 +1460,8 @@ int main(int argument_count, char **arguments) {
              * 与执行位置 `runtimec_program_counter_t` 不是同一个概念。 */
             encode_request.expected_snapshot.source_position_text =
                 runtimec_string_view_from_c_string("[1,0]");
-            if (environment.services.source_revision(
-                    environment.services.context,
+            if (runtimec_kvspace_access_source_revision(
+                    environment.kvspace_access,
                     encode_request.expected_snapshot.function_key,
                     &encode_request.expected_snapshot.source_revision,
                     &encode_error) != RUNTIMEC_STATUS_SUCCESS) {
@@ -1476,7 +1565,7 @@ int main(int argument_count, char **arguments) {
                 redirect_stream_to(FILENO_STDOUT, output_path,
                                    sizeof(output_path), &saved_stdout);
             const frame_outcome_t frame_outcome = execute_frame_until_done(
-                &environment, function_path, 1U, 1,
+                &environment, function_path, 1U, 1, "1",
                 vthread_identifier, NULL, 0U, NULL, &frame_exit);
             if (capturing_stdout) {
                 restore_stream(FILENO_STDOUT, saved_stdout, output_path,

@@ -36,8 +36,7 @@
 
 #include "contract/error.h"
 #include "contract/status.h"
-#include "host/kvspace_adapter.h"
-#include "host/kvspace_binary_interface.h"
+#include <kvspace/kvspace.h>
 #include "kvspace/xvalue_head.h"
 
 #define SKIP_RETURN_CODE 77
@@ -57,12 +56,6 @@ static int failures;
                     #condition);                                              \
         }                                                                     \
     } while (0)
-
-static runtimec_kvspace_symbol_address_t resolve_symbol(void *context,
-                                                        const char *name) {
-    void *symbol = dlsym(context, name);
-    return (runtimec_kvspace_symbol_address_t)(uintptr_t)symbol;
-}
 
 /* wire → body 视图。head 16 字节，body 紧随其后。 */
 static const uint8_t *wire_body(const uint8_t *wire, size_t wire_size,
@@ -91,15 +84,14 @@ static const uint8_t *wire_body(const uint8_t *wire, size_t wire_size,
  * durable 读缓存），在下一次覆盖/删除/关句柄之前有效。free 它会让 glibc 报
  * `free(): invalid size` 并中止——那不是被测代码的错，是用例自己越界释放。
  */
-static bool read_wire(runtimec_kvspace_binary_interface_t *binary_interface,
-                      void *handle, const char *key, uint8_t **output_wire,
+static bool read_wire(void *handle, const char *key, uint8_t **output_wire,
                       uint32_t *output_size) {
     uint8_t *wire = NULL;
     uint32_t wire_size = 0U;
 
     *output_wire = NULL;
     *output_size = 0U;
-    if (binary_interface->get(handle, key, 1, &wire, &wire_size) != 0) {
+    if (kvspaceGet(handle, key, 1, &wire, &wire_size) != 0) {
         return false;
     }
     *output_wire = wire;
@@ -197,13 +189,11 @@ static const char *xvalue_langtype(const uint8_t *wire, size_t wire_size,
 }
 
 /* 判据 4 的独立函数：读指令行签名槽，断言类型串不含 `...`。 */
-static void check_instruction_signature_slot(
-    runtimec_kvspace_binary_interface_t *binary_interface, void *handle,
-    const char *key) {
+static void check_instruction_signature_slot(void *handle, const char *key) {
     uint8_t *wire = NULL;
     uint32_t wire_size = 0U;
 
-    EXPECT(read_wire(binary_interface, handle, key, &wire, &wire_size));
+    EXPECT(read_wire(handle, key, &wire, &wire_size));
     if (wire == NULL) {
         fprintf(stderr, "DIAG: %s is missing or unreadable\n", key);
         return;
@@ -275,22 +265,21 @@ int main(int argument_count, char **arguments) {
      */
     static const char parameter_path[] = "/lib/f.[0,-1]";
     static const char instruction_signature_path[] = "/lib/f/[1,-1]";
-    const char *kvspace_library =
-        argument_count > 1 ? arguments[1] : NULL;
+    /* 第一个实参位（kvspace 库路径）已废弃：kvspace 走链接期。保留 argument 2
+     * 的位置不变，免得命令行与 CMake 两边同时改。 */
     const char *layout_library = argument_count > 2 ? arguments[2] : NULL;
     char directory[256];
     char data_source_name[320];
 
-    if (kvspace_library == NULL || layout_library == NULL) {
-        fprintf(stderr, "SKIP: need kvspace and layout library paths\n");
+    /* kvspace 现在是**链接期依赖**：缺库在构建阶段就失败，不再有运行时 SKIP。
+     * layout 仍是运行期 dlopen——它是另一个仓的产物，不属于本次迁移。 */
+    if (layout_library == NULL) {
+        fprintf(stderr, "SKIP: need layout library path\n");
         return SKIP_RETURN_CODE;
     }
-
-    void *kvspace_handle_library =
-        dlopen(kvspace_library, RTLD_NOW | RTLD_LOCAL);
     void *layout_handle_library = dlopen(layout_library, RTLD_NOW | RTLD_LOCAL);
-    if (kvspace_handle_library == NULL || layout_handle_library == NULL) {
-        fprintf(stderr, "SKIP: cannot load the libraries\n");
+    if (layout_handle_library == NULL) {
+        fprintf(stderr, "SKIP: cannot load the layout library\n");
         return SKIP_RETURN_CODE;
     }
 
@@ -305,30 +294,13 @@ int main(int argument_count, char **arguments) {
         return SKIP_RETURN_CODE;
     }
 
-    runtimec_kvspace_symbol_resolver_t resolver = {
-        .context = kvspace_handle_library,
-        .resolve = resolve_symbol,
-    };
-    runtimec_kvspace_binary_interface_t binary_interface;
-    runtimec_error_t error;
-
-    runtimec_error_reset(&error);
-    if (runtimec_kvspace_binary_interface_bind(&resolver, &binary_interface,
-                                               &error) !=
-        RUNTIMEC_STATUS_SUCCESS) {
-        fprintf(stderr, "SKIP: bind failed: %.*s\n", (int)error.message.size,
-                error.message.data != NULL ? error.message.data : "");
-        return SKIP_RETURN_CODE;
-    }
-
     snprintf(directory, sizeof(directory),
-             "/home/peng.li24/github.com/array2d/kvlang/workspace/tmp/coding2/"
-             "variadic-%d",
+             "/tmp/runtimec-variadic-%d",
              (int)getpid());
     (void)mkdir(directory, 0700);
     snprintf(data_source_name, sizeof(data_source_name), "shm://%s/store.shm",
              directory);
-    void *handle = binary_interface.connect(data_source_name);
+    void *handle = kvspaceConnect(data_source_name);
     if (handle == NULL) {
         fprintf(stderr, "SKIP: cannot connect %s\n", data_source_name);
         return SKIP_RETURN_CODE;
@@ -358,7 +330,7 @@ int main(int argument_count, char **arguments) {
         uint8_t *wire = NULL;
         uint32_t wire_size = 0U;
 
-        EXPECT(read_wire(&binary_interface, handle, anchor_path, &wire,
+        EXPECT(read_wire(handle, anchor_path, &wire,
                          &wire_size));
         if (wire != NULL) {
             size_t body_size = 0U;
@@ -393,7 +365,7 @@ int main(int argument_count, char **arguments) {
         uint8_t *wire = NULL;
         uint32_t wire_size = 0U;
 
-        EXPECT(read_wire(&binary_interface, handle, parameter_path, &wire,
+        EXPECT(read_wire(handle, parameter_path, &wire,
                          &wire_size));
         if (wire != NULL) {
             size_t body_size = 0U;
@@ -446,10 +418,9 @@ int main(int argument_count, char **arguments) {
      * 只断言其中一个，就放过了「两边都写」。这条是架构师要求的通用规矩：
      * 凡「同一事实有两个可能落点」的，都要断言**另一个落点为空**。
      */
-    check_instruction_signature_slot(&binary_interface, handle,
-                                     instruction_signature_path);
+    check_instruction_signature_slot(handle, instruction_signature_path);
 
-    binary_interface.close(handle);
+    kvspaceClose(handle);
     if (failures != 0) {
         fprintf(stderr, "variadic_purity_test: %d failure(s)\n", failures);
         return 1;

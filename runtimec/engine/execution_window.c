@@ -29,6 +29,7 @@
 #include "vmbin/frame_slot.h"
 #include "vmbin/interpreter.h"
 #include "vmkv/encoder.h"
+#include "vmkv/rwir.h"
 #include "vmkv/rwir_manifest.h"
 
 typedef enum runtimec_execution_window_diagnostic_t {
@@ -54,7 +55,15 @@ typedef enum runtimec_execution_window_diagnostic_t {
     /* 字面量描述缺 bytes 或 langtype。 */
     RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_LITERAL_INVALID = 19,
     /* 物化本身失败（写不进去、key 放不下）。 */
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_MATERIALIZE_FAILED = 20
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_MATERIALIZE_FAILED = 20,
+    /*
+     * 特化失败（编码成功之后、编译之前）。
+     *
+     * **必须与 5（编码失败）分开**：一个码两个成因，看日志的人就只能靠第二个通道
+     * （比如「runner 有没有打 encode 的 message」）去分诊，而那个通道一换就失效，
+     * 失效时还不报错。诊断码本身要说得出「死在哪一步」。
+     */
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_SPECIALIZE_FAILED = 21
 } runtimec_execution_window_diagnostic_t;
 
 static void runtimec_execution_window_reset_result(runtimec_execution_window_result_t *result,
@@ -147,7 +156,7 @@ static runtimec_program_counter_t runtimec_execution_window_make_program_counter
 
 /* 解析一个绝对槽键并写进绑定表；代数必须与本次快照一致且非零。 */
 static runtimec_status_t runtimec_execution_window_bind_slot(
-    const runtimec_host_services_t *host, const runtimec_snapshot_t *snapshot,
+    runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
     binrwir_frame_bindings_t *bindings, uint16_t binding_slot,
     runtimec_string_view_t key_text, uint64_t *generation_in_out,
     runtimec_execution_window_diagnostic_t *output_detail, runtimec_error_t *error) {
@@ -155,8 +164,9 @@ static runtimec_status_t runtimec_execution_window_bind_slot(
     uint64_t generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
     const runtimec_key_view_t slot_key =
         runtimec_key_view_make(key_text.data, key_text.size);
-    runtimec_status_t status = host->resolve_frame_xvalue_address(
-        host->context, snapshot, slot_key, &xvalue_address, &generation, error);
+    runtimec_status_t status =
+        runtimec_kvspace_access_resolve_frame_xvalue_address(
+            host, snapshot, slot_key, &xvalue_address, &generation, error);
 
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_UNRESOLVED;
@@ -198,7 +208,7 @@ static runtimec_status_t runtimec_execution_window_bind_slot(
  * 输出 key 借用自 `scratch`（调用方给的足够大的缓冲数组），生存期到本次绑定结束。
  */
 static runtimec_status_t runtimec_execution_window_materialize_argument(
-    const runtimec_host_services_t *host, const runtimec_snapshot_t *snapshot,
+    runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
     const runtimec_execution_window_request_t *request,
     const runtimec_argument_description_t *description, size_t ordinal,
     char *scratch, size_t scratch_capacity, runtimec_string_view_t *output_key,
@@ -247,8 +257,8 @@ static runtimec_status_t runtimec_execution_window_materialize_argument(
         /* 用现有的 `host->write`——**没有 `ensure_literal` 这种能力，
          * 不要发明**。`write` 的 value 是整条 wire（XValue head + body + attr），
          * 而 `literal_bytes` 正是那个形状（`binrwir/argument.h` 的 LITERAL 约定）。 */
-        if (host->write == NULL ||
-            host->write(host->context, snapshot,
+        if (runtimec_kvspace_access_write(
+                host, snapshot,
                         runtimec_key_view_make(scratch, strlen(scratch)),
                         runtimec_bytes_view_make(description->literal_bytes.data,
                                                  description->literal_bytes.size),
@@ -270,7 +280,8 @@ static runtimec_status_t runtimec_execution_window_materialize_argument(
         }
         /* **唯一创建入口**：`ensure_zero_value`。驱动不许直接 `set_value`——
          * 绕过会让地址重定位而 `source_revision` 不跟随，绑定期就失配。 */
-        if (host->ensure_zero_value(host->context, snapshot,
+        if (runtimec_kvspace_access_ensure_zero_value(
+                host, snapshot,
                                     runtimec_key_view_make(description->key.data,
                                                            description->key.size),
                                     description->literal_langtype,
@@ -302,7 +313,7 @@ static runtimec_status_t runtimec_execution_window_materialize_argument(
  * 引用注释当结论前，先看它下面 300 行内有没有实现。
  */
 static runtimec_status_t runtimec_execution_window_bind_parameters(
-    const runtimec_host_services_t *host, const runtimec_snapshot_t *snapshot,
+    runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
     const binrwir_program_t *program, const runtimec_execution_window_request_t *request,
     binrwir_frame_bindings_t *bindings, uint64_t *output_generation,
     runtimec_execution_window_diagnostic_t *output_detail, runtimec_error_t *error) {
@@ -393,6 +404,53 @@ static runtimec_status_t runtimec_execution_window_bind_parameters(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+/*
+ * FOREIGN 指令的**算子名**。
+ *
+ * FOREIGN（`0xFFFE`）是结构标记，**不携带任何信息**（`binrwir/instruction.h:28-37`：
+ * 「不执行任何操作、不携带操作数、不写存储」），所以名字不能从它身上取。
+ *
+ * 但它的 `source_logical_program_counter` 指向 layout 写下的源槽
+ * `<function_path>/[<pc>,0]`，**那个槽的 body 里有名字**（counts 头 + 文本）。
+ * handoff 请求的 `operation` 字段就填它。
+ *
+ * **不新增依赖**：本函数本来就调 `vmkv_encode` 读同一个 store（编译仓库未命中时），
+ * 这里只是再多读一个槽。
+ *
+ * **解析归 vmkv**：counts 头的布局是 vmkv 的格式知识，由
+ * `vmkv_rwir_operation_name_from_wire` 解析。本层只负责拼 key 与读字节——
+ * 自己跳过 5 字节等于把格式复制一份到上层，而那份复制不会随格式变化更新。
+ */
+static runtimec_status_t runtimec_execution_window_operation_name(
+    runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
+    const char *function_path, uint32_t source_program_counter,
+    char *output_key, size_t key_capacity,
+    runtimec_string_view_t *output_operation, runtimec_error_t *error) {
+    *output_operation = runtimec_string_view_make(NULL, 0U);
+    const int key_length = snprintf(output_key, key_capacity, "%s/[%u,0]",
+                                    function_path, source_program_counter);
+    if (key_length < 0 || (size_t)key_length >= key_capacity) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    /* 读回来的 wire = 16 字节 head + body。取出 body 段交给 vmkv 解析。 */
+    uint8_t storage[512];
+    runtimec_bytes_buffer_t buffer;
+    memset(&buffer, 0, sizeof(buffer));
+    buffer.data = storage;
+    buffer.capacity = sizeof(storage);
+    runtimec_status_t status = runtimec_kvspace_access_read(
+        host, snapshot,
+        runtimec_key_view_make(output_key, (size_t)key_length), &buffer, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    /* 整个 wire 交给 vmkv 解析：**body 偏移归 contract，切分归 vmkv**。
+     * 本层只是把读回来的字节原样递过去，不写任何偏移算术——
+     * 门禁 `body-address-derivation-outside-contract` 正是拦这个。 */
+    return vmkv_rwir_operation_name_from_wire(buffer.data, buffer.size,
+                                              output_operation, error);
+}
+
 /* 只有写已落到存储的退出才提交；resume pc 为空表示没有可恢复位置。 */
 static runtimec_string_view_t runtimec_execution_window_persistent_status(
     uint16_t exit_kind) {
@@ -413,7 +471,7 @@ static runtimec_string_view_t runtimec_execution_window_persistent_status(
 }
 
 static runtimec_status_t runtimec_execution_window_commit_checkpoint(
-    runtimec_session_t *session, const runtimec_host_services_t *host,
+    runtimec_session_t *session, runtimec_kvspace_access_t *host,
     const runtimec_snapshot_t *snapshot,
     const runtimec_execution_window_request_t *request,
     const binrwir_execution_exit_t *execution_exit, runtimec_error_t *error) {
@@ -465,7 +523,7 @@ static runtimec_status_t runtimec_execution_window_commit_checkpoint(
     checkpoint.persistent_status =
         runtimec_execution_window_persistent_status(execution_exit->kind);
     checkpoint.outcome = execution_exit->status;
-    return host->checkpoint(host->context, &checkpoint, error);
+    return runtimec_kvspace_access_checkpoint(host, &checkpoint, error);
 }
 
 /*
@@ -486,7 +544,7 @@ static runtimec_status_t runtimec_execution_window_commit_checkpoint(
  * 幂等交给 host：同宽已存在即成功，不重复写。失败即整体失败，一条指令都不执行。
  */
 static runtimec_status_t runtimec_execution_window_materialize_locals(
-    const runtimec_host_services_t *host, const runtimec_snapshot_t *snapshot,
+    runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
     const binrwir_program_t *program,
     const runtimec_execution_window_request_t *request,
     binrwir_frame_bindings_t *bindings, size_t binding_capacity,
@@ -506,6 +564,21 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
             RUNTIMEC_STATUS_SUCCESS) {
         *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED;
         return RUNTIMEC_STATUS_INVALID;
+    }
+    /*
+     * 帧的 generation 先取：它属于**帧**，不属于「恰好第一个被绑上的槽」。
+     *
+     * 若拿第一个绑成功的槽当来源，一个只有容器局部的帧就永远没有 generation
+     * ——而容器恰恰是唯一由 handler 在执行期懒绑定的一类。同一个 generation
+     * 后面还要写进 frame->snapshot_generation，供那些懒绑定使用。
+     */
+    status = runtimec_kvspace_access_frame_generation(
+        host, snapshot, runtimec_key_view_make(request->frame_path.data,
+                                               request->frame_path.size),
+        generation_in_out, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED;
+        return status;
     }
     if (symbol_count == 0U) {
         return RUNTIMEC_STATUS_SUCCESS;
@@ -576,6 +649,18 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
             *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED;
             return RUNTIMEC_STATUS_INVALID;
         }
+        /*
+         * 容器/结构体局部**不建、不绑**：它们的创建源是源码里的 `·new`
+         * （`struct·new` / `map·new` / `compactarray·new` …），创建型 handler
+         * 建值后当场绑定。帧准备建它们既没有零值可写（长度由内容决定），
+         * 又会制造一个「存储有、表里也有」但值不是源码要的那份的假状态。
+         *
+         * 在 `·new` 之前读它 ⇒ 绑定表里没有 ⇒ `UNBOUND_SLOT` 硬错。这是正确
+         * 行为，不为它加兜底。
+         */
+        if (!runtimec_kvspace_access_langtype_has_fixed_zero_width(langtype)) {
+            continue;
+        }
         key_size = request->frame_path.size + 1U + name.size;
         key_text = (char *)runtimec_allocator_allocate(
             &host->allocator, key_size + 1U, 1U);
@@ -593,7 +678,8 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
 
         const runtimec_key_view_t slot_key =
             runtimec_key_view_make(key_text, key_size);
-        status = host->ensure_zero_value(host->context, snapshot, slot_key,
+        status = runtimec_kvspace_access_ensure_zero_value(
+            host, snapshot, slot_key,
                                          langtype, error);
         if (status == RUNTIMEC_STATUS_SUCCESS) {
             /*
@@ -619,8 +705,9 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
                 *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED;
             }
             if (status == RUNTIMEC_STATUS_SUCCESS) {
-                status = host->resolve_frame_xvalue_address(
-                    host->context, snapshot, slot_key, &xvalue_address,
+                status =
+                    runtimec_kvspace_access_resolve_frame_xvalue_address(
+                        host, snapshot, slot_key, &xvalue_address,
                     &generation, error);
             }
             if (status == RUNTIMEC_STATUS_SUCCESS) {
@@ -630,9 +717,6 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
                     *output_detail =
                         RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED;
                     status = RUNTIMEC_STATUS_INVALID;
-                } else if (*generation_in_out ==
-                           BINRWIR_FRAME_BINDING_GENERATION_NONE) {
-                    *generation_in_out = generation;
                 } else if (*generation_in_out != generation) {
                     /* 绑到一半存储换代：这一帧的局部不再属于同一份快照。 */
                     *output_detail =
@@ -687,7 +771,7 @@ static runtimec_status_t runtimec_execution_window_find_instruction(
 /* 未命中的完整编译链：编码 → 编译 → 入仓库并取租约。 */
 static runtimec_status_t runtimec_execution_window_compile_and_insert(
     const runtimec_session_runtime_components_t *components,
-    const runtimec_host_services_t *host, const runtimec_execution_window_request_t *request,
+    runtimec_kvspace_access_t *host, const runtimec_execution_window_request_t *request,
     const runtimec_snapshot_t *snapshot,
     const runtimec_compilation_repository_key_t *key,
     runtimec_compilation_repository_lease_t *output_lease,
@@ -697,7 +781,7 @@ static runtimec_status_t runtimec_execution_window_compile_and_insert(
     binrwir_compilation_t *compilation = NULL;
     runtimec_status_t status;
 
-    encode_request.host_services = host;
+    encode_request.kvspace_access = host;
     encode_request.function_path = request->function_path;
     encode_request.expected_snapshot = *snapshot;
     status = vmkv_encode(components->vmkv_encoder, &encode_request, &program,
@@ -717,8 +801,10 @@ static runtimec_status_t runtimec_execution_window_compile_and_insert(
      * 「每份 Program 一次」，绝不放进 `vmbin_execute`——那里每条指令执行前都会
      * 走到，复制一份 Program 的代价与其大小成正比。
      *
-     * **失败不回退**：特化失败就当编码失败处理。半特化的 Program 比不特化更糟——
-     * 一部分 opid 改了、一部分没改，而注册表只认其中一套。
+     * **失败不回退**：特化失败同样让本次执行失败，没有「回落到未特化」这条路——
+     * 半特化的 Program 比不特化更糟：一部分 opid 改了、一部分没改，而注册表只认
+     * 其中一套。失败本身与编码失败同样是**失败封闭**，但**诊断码分开**（21），
+     * 这样日志能直接说出死在特化而不是编码。
      */
     {
         binrwir_program_t *specialized = NULL;
@@ -727,7 +813,7 @@ static runtimec_status_t runtimec_execution_window_compile_and_insert(
                                             &specialized, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             (void)binrwir_program_destroy(program);
-            *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_ENCODE_FAILED;
+            *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_SPECIALIZE_FAILED;
             return status;
         }
         /* 特化产新 Program，旧的那份由本层销毁——它是 `vmkv_encode` 给的，
@@ -758,7 +844,7 @@ static runtimec_status_t runtimec_execution_window_compile_and_insert(
 runtimec_status_t runtimec_execution_window_execute(
     runtimec_session_t *session, const runtimec_execution_window_request_t *request,
     runtimec_execution_window_result_t *output_result, runtimec_error_t *error) {
-    const runtimec_host_services_t *host = NULL;
+    runtimec_kvspace_access_t *host = NULL;
     runtimec_session_runtime_components_t components;
     runtimec_snapshot_t snapshot;
     runtimec_compilation_repository_key_t key;
@@ -804,16 +890,11 @@ runtimec_status_t runtimec_execution_window_execute(
             RUNTIMEC_EXECUTION_WINDOW_DIAG_INVALID_REQUEST,
             "invalid execution window request");
     }
-    if (runtimec_session_get_host_services(session, &host) !=
+    if (runtimec_session_get_kvspace_access(session, &host) !=
             RUNTIMEC_STATUS_SUCCESS ||
         host == NULL ||
         runtimec_session_get_runtime_components(session, &components) !=
             RUNTIMEC_STATUS_SUCCESS ||
-        host->source_revision == NULL ||
-        host->resolve_frame_xvalue_address == NULL ||
-        host->ensure_frame == NULL ||
-        host->ensure_zero_value == NULL ||
-        host->checkpoint == NULL ||
         !runtimec_allocator_is_valid(&host->allocator)) {
         return runtimec_execution_window_fail(
             output_result, error, RUNTIMEC_STATUS_NOT_IMPLEMENTED,
@@ -838,7 +919,8 @@ runtimec_status_t runtimec_execution_window_execute(
     snapshot.contract_version = runtimec_contract_version();
     snapshot.function_key =
         runtimec_key_view_make(request->function_path.data, request->function_path.size);
-    status = host->source_revision(host->context, snapshot.function_key,
+    status = runtimec_kvspace_access_source_revision(
+        host, snapshot.function_key,
                                    &snapshot.source_revision, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return runtimec_execution_window_fail(output_result, error, status,
@@ -944,8 +1026,8 @@ runtimec_status_t runtimec_execution_window_execute(
      * 「这一帧在跑哪个函数」的事实（`‥lib`）也只有这里写。失败即整体失败，
      * 一条指令都不执行。
      */
-    status = host->ensure_frame(
-        host->context, &snapshot,
+    status = runtimec_kvspace_access_ensure_frame(
+        host, &snapshot,
         runtimec_key_view_make(request->frame_path.data,
                                request->frame_path.size),
         request->function_path, error);
@@ -1004,7 +1086,7 @@ runtimec_status_t runtimec_execution_window_execute(
      * （复用 `ensure_zero_value`，零值规则的唯一实现），以及执行期解析 STATIC
      * 且 payload 为 NONE 的写目标。帧只借用这两样，不拥有。
      */
-    frame.host_services = host;
+    frame.kvspace_access = host;
     frame.snapshot = snapshot;
     /*
      * 帧路径原样借用——不重新拼接。重新拼就是第二份地址来源，一旦与请求里
@@ -1029,6 +1111,55 @@ runtimec_status_t runtimec_execution_window_execute(
     }
     output_result->execution_exit = execution_exit;
     output_result->status = execution_exit.status;
+    /*
+     * 撞到 FOREIGN 就地停下（`EXIT_HANDOFF`）时，**把活挂进队列**。
+     *
+     * 不挂的话，`‥status` 写成 `waiting` 就返回了，而后台没有任何认领方——
+     * 调用方等一个永远不来的结果，且现象是「执行成功但什么都没发生」。
+     *
+     * 顺序要紧：**先提交 checkpoint（把 pc 落到 `‥pc`），再挂 handoff**。
+     * 反过来的话，扩展可能在 pc 还没落盘时就认领，从旧 pc 续跑。
+     */
+    if (status == RUNTIMEC_STATUS_SUCCESS &&
+        execution_exit.kind == BINRWIR_EXECUTION_EXIT_HANDOFF) {
+        char function_path_text[512];
+        char operation_key[512];
+        runtimec_string_view_t operation;
+        const int function_path_length =
+            snprintf(function_path_text, sizeof(function_path_text), "%.*s",
+                     (int)request->function_path.size,
+                     request->function_path.data);
+        if (function_path_length < 0 ||
+            (size_t)function_path_length >= sizeof(function_path_text)) {
+            status = RUNTIMEC_STATUS_INVALID;
+        } else {
+            status = runtimec_execution_window_operation_name(
+                host, &snapshot, function_path_text,
+                execution_exit.logical_program_counter, operation_key,
+                sizeof(operation_key), &operation, error);
+        }
+        if (status == RUNTIMEC_STATUS_SUCCESS) {
+            runtimec_handoff_request_t handoff_request;
+            memset(&handoff_request, 0, sizeof(handoff_request));
+            handoff_request.operation = operation;
+            runtimec_checkpoint_reset(&handoff_request.checkpoint);
+            handoff_request.checkpoint.source_revision = snapshot.source_revision;
+            handoff_request.checkpoint.vthread_identifier =
+                request->vthread_identifier;
+            handoff_request.checkpoint.frame_identifier = request->frame_path;
+            handoff_request.checkpoint.persistent_status =
+                runtimec_execution_window_persistent_status(execution_exit.kind);
+            handoff_request.checkpoint.outcome = execution_exit.status;
+            status = runtimec_kvspace_access_handoff(
+                host, &handoff_request, error);
+        }
+        /* 挂不进去就把这次失败**当执行失败上报**：停在 waiting 却没进队列，
+         * 与「跑完了」无法区分，那是「以看起来合理的值失败」。 */
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            output_result->status = status;
+            output_result->execution_exit.status = status;
+        }
+    }
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         /* 所选入口失败就沿这条路径上报，不切换到另一个执行器。
          *

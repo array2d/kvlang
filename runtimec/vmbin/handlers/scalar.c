@@ -8,7 +8,7 @@
  *       （签名的具体 langtype、字面量池、符号池），不猜、不从 body 长度反推
  *       有符号性与浮点性。
  *
- * ── 文件内导航（34 条注册，按共用实现体分组）────────────────────────────
+ * ── 文件内导航（26 条注册，按共用实现体分组）────────────────────────────
  *
  * 每条 handler 都是薄包装（宏展开后 8~10 行），真正的逻辑在「实现体」里。
  * 分组依据**语义族**，不是 langtype：实现体内没有按 langtype 的 switch，
@@ -16,7 +16,6 @@
  *
  * | 实现体 | 行数 | 覆盖的算子 | 分叉判据 |
  * |---|---:|---|---|
- * | `scalar_binary`     | 171 | add sub mul div mod bitand bitor bitxor | 位运算 vs 算术；signed/unsigned/float |
  * | `scalar_min_max`    |  82 | max min | NaN 让位于数（matrix:69） |
  * | `scalar_unary_integer` | 64 | abs neg sign | 整数回绕（matrix:31/60） |
  * | `scalar_transcendental` | 46 | sqrt exp log | 无分叉，结果恒 float64（matrix:70） |
@@ -297,22 +296,6 @@ static runtimec_status_t scalar_result_type(const scalar_type_t *left,
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-typedef enum scalar_operation {
-    SCALAR_OPERATION_ADD = 0,
-    SCALAR_OPERATION_SUB = 1,
-    SCALAR_OPERATION_MUL = 2,
-    SCALAR_OPERATION_DIV = 3,
-    SCALAR_OPERATION_MOD = 4,
-    SCALAR_OPERATION_BIT_AND = 5,
-    SCALAR_OPERATION_BIT_OR = 6,
-    SCALAR_OPERATION_BIT_XOR = 7
-} scalar_operation_t;
-
-/* 位运算只接受 int64 / uint64，且两侧同类（catalog 掩码 0x00000088）。 */
-static int scalar_operation_is_bitwise(scalar_operation_t operation) {
-    return operation >= SCALAR_OPERATION_BIT_AND;
-}
-
 static runtimec_status_t scalar_fail(runtimec_error_t *error, int64_t code,
                                      const char *message) {
     runtimec_error_set(error, RUNTIMEC_STATUS_INVALID,
@@ -345,221 +328,7 @@ static runtimec_status_t scalar_read_operand(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/*
- * 8 条标量的唯一实现体。读两个操作数 → 按 operation 计算 → 写回一个结果。
- * 整数路径从不经 double：位运算、mod、整数加减都走整数分支。
- */
-static runtimec_status_t scalar_binary(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction, scalar_operation_t operation,
-    runtimec_error_t *error) {
-    uint8_t left_bytes[SCALAR_BODY_CAPACITY];
-    uint8_t right_bytes[SCALAR_BODY_CAPACITY];
-    uint8_t result_bytes[SCALAR_BODY_CAPACITY];
-    scalar_type_t left_type;
-    scalar_type_t right_type;
-    scalar_type_t result_type;
-    int64_t left_signed = 0;
-    int64_t right_signed = 0;
-    uint64_t left_unsigned = 0U;
-    uint64_t right_unsigned = 0U;
-    double left_float = 0.0;
-    double right_float = 0.0;
-    int64_t result_signed = 0;
-    uint64_t result_unsigned = 0U;
-    double result_float = 0.0;
-    runtimec_status_t status;
 
-    if (instruction->read_arguments.count != 2U ||
-        instruction->write_arguments.count != 1U) {
-        return scalar_fail(error, 3,
-                           "scalar handler: expected two reads and one write");
-    }
-    status = scalar_read_operand(frame, &instruction->read_arguments.data[0],
-                                 left_bytes, &left_type, error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return status;
-    }
-    status = scalar_read_operand(frame, &instruction->read_arguments.data[1],
-                                 right_bytes, &right_type, error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return status;
-    }
-    scalar_load(left_bytes, &left_type, &left_signed, &left_unsigned,
-                &left_float);
-    scalar_load(right_bytes, &right_type, &right_signed, &right_unsigned,
-                &right_float);
-
-    if (scalar_operation_is_bitwise(operation)) {
-        /* catalog 掩码只给 int64/uint64；混用有符号与无符号一律 INVALID。 */
-        if (left_type.width != 8U || right_type.width != 8U ||
-            left_type.scalar_class != right_type.scalar_class) {
-            return scalar_fail(
-                error, 4,
-                "scalar handler: bitwise operands must both be int64 or both "
-                "be uint64");
-        }
-        result_type = left_type;
-        if (left_type.scalar_class == SCALAR_CLASS_UNSIGNED) {
-            switch (operation) {
-            case SCALAR_OPERATION_BIT_AND:
-                result_unsigned = left_unsigned & right_unsigned;
-                break;
-            case SCALAR_OPERATION_BIT_OR:
-                result_unsigned = left_unsigned | right_unsigned;
-                break;
-            default:
-                result_unsigned = left_unsigned ^ right_unsigned;
-                break;
-            }
-        } else {
-            switch (operation) {
-            case SCALAR_OPERATION_BIT_AND:
-                result_signed = left_signed & right_signed;
-                break;
-            case SCALAR_OPERATION_BIT_OR:
-                result_signed = left_signed | right_signed;
-                break;
-            default:
-                result_signed = left_signed ^ right_signed;
-                break;
-            }
-        }
-    } else {
-        status = scalar_result_type(&left_type, &right_type, &result_type);
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            return scalar_fail(
-                error, 5,
-                "scalar handler: signed and unsigned operands cannot mix");
-        }
-        if (result_type.scalar_class == SCALAR_CLASS_FLOAT) {
-            /* 浮点路径：除零算出来，是 IEEE inf/nan，不报错（matrix:29）。 */
-            switch (operation) {
-            case SCALAR_OPERATION_ADD:
-                result_float = left_float + right_float;
-                break;
-            case SCALAR_OPERATION_SUB:
-                result_float = left_float - right_float;
-                break;
-            case SCALAR_OPERATION_MUL:
-                result_float = left_float * right_float;
-                break;
-            case SCALAR_OPERATION_DIV:
-                result_float = left_float / right_float;
-                break;
-            default:
-                /* catalog 的 mod 掩码只含整数，浮点不会走到这里。 */
-                return scalar_fail(
-                    error, 6,
-                    "scalar handler: mod is defined for integers only");
-            }
-        } else if (result_type.scalar_class == SCALAR_CLASS_UNSIGNED) {
-            switch (operation) {
-            case SCALAR_OPERATION_ADD:
-                result_unsigned = left_unsigned + right_unsigned;
-                break;
-            case SCALAR_OPERATION_SUB:
-                result_unsigned = left_unsigned - right_unsigned;
-                break;
-            case SCALAR_OPERATION_MUL:
-                result_unsigned = left_unsigned * right_unsigned;
-                break;
-            case SCALAR_OPERATION_DIV:
-                if (right_unsigned == 0U) {
-                    return scalar_fail(
-                        error, 7,
-                        "scalar handler: integer division by zero");
-                }
-                result_unsigned = left_unsigned / right_unsigned;
-                break;
-            default:
-                if (right_unsigned == 0U) {
-                    return scalar_fail(
-                        error, 8, "scalar handler: integer remainder by zero");
-                }
-                /* 余数随被除数符号；无符号即其本身（matrix:68）。 */
-                result_unsigned = left_unsigned % right_unsigned;
-                break;
-            }
-        } else {
-            switch (operation) {
-            case SCALAR_OPERATION_ADD:
-                result_signed = left_signed + right_signed;
-                break;
-            case SCALAR_OPERATION_SUB:
-                result_signed = left_signed - right_signed;
-                break;
-            case SCALAR_OPERATION_MUL:
-                result_signed = left_signed * right_signed;
-                break;
-            case SCALAR_OPERATION_DIV:
-                if (right_signed == 0) {
-                    return scalar_fail(
-                        error, 9,
-                        "scalar handler: integer division by zero");
-                }
-                /*
-                 * `INT64_MIN / -1` 在 C 里是未定义行为（x86 的 `idiv` 抛 #DE，
-                 * 进程直接死）。裁决（2026-11-05）：二补数**回绕**——
-                 * 商等于被除数本人，和 Go 的 `q = x / -1` 一致。
-                 *
-                 * 这一条必须在这里判，不能只判除零：崩溃点上先崩、再谈值对不对。
-                 * 同一条判据在特化路径（`runtimec_scalar_divide_signed`）里也有，
-                 * 两处都改过——按判据同步，不按报错的那一处改。
-                 */
-                if (left_signed == INT64_MIN && right_signed == -1) {
-                    result_signed = INT64_MIN;
-                    break;
-                }
-                /* C 的截断方向：向零（matrix:22）。 */
-                result_signed = left_signed / right_signed;
-                break;
-            default:
-                if (right_signed == 0) {
-                    return scalar_fail(
-                        error, 10,
-                        "scalar handler: integer remainder by zero");
-                }
-                /* `INT64_MIN % -1` 同理：C 不定义，回绕后余数是 0。 */
-                if (left_signed == INT64_MIN && right_signed == -1) {
-                    result_signed = 0;
-                    break;
-                }
-                /* C 的 % 保留被除数符号（matrix:68）。 */
-                result_signed = left_signed % right_signed;
-                break;
-            }
-        }
-    }
-    memset(result_bytes, 0, sizeof(result_bytes));
-    scalar_store(result_bytes, &result_type, result_signed, result_unsigned,
-                 result_float);
-    return vmbin_value_access_write_body(
-        frame, &instruction->write_arguments.data[0],
-        runtimec_bytes_view_make(result_bytes, result_type.width), error);
-}
-
-#define SCALAR_HANDLER(name, operation)                                       \
-    static runtimec_status_t name(                                            \
-        binrwir_execution_frame_t *frame,                                     \
-        const binrwir_instruction_view_t *instruction,                        \
-        binrwir_execution_exit_t *output_exit) {                              \
-        runtimec_error_t error;                                               \
-        runtimec_status_t status;                                             \
-        (void)output_exit;                                                    \
-        runtimec_error_reset(&error);                                         \
-        status = scalar_binary(frame, instruction, operation, &error);        \
-        return status;                                                       \
-    }
-
-SCALAR_HANDLER(scalar_handle_add, SCALAR_OPERATION_ADD)
-SCALAR_HANDLER(scalar_handle_sub, SCALAR_OPERATION_SUB)
-SCALAR_HANDLER(scalar_handle_mul, SCALAR_OPERATION_MUL)
-SCALAR_HANDLER(scalar_handle_div, SCALAR_OPERATION_DIV)
-SCALAR_HANDLER(scalar_handle_mod, SCALAR_OPERATION_MOD)
-SCALAR_HANDLER(scalar_handle_bitand, SCALAR_OPERATION_BIT_AND)
-SCALAR_HANDLER(scalar_handle_bitor, SCALAR_OPERATION_BIT_OR)
-SCALAR_HANDLER(scalar_handle_bitxor, SCALAR_OPERATION_BIT_XOR)
 
 /*
  * 一元算子：读一个操作数，算完写回同一个形状。
@@ -1894,30 +1663,6 @@ static runtimec_status_t scalar_handle_debugger(
 
 /* 静态存储，进程级生命周期；调用方不得释放。 */
 static const binrwir_registry_entry_t scalar_entries[] = {
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_ADD,
-     .flags = BINRWIR_REGISTRY_FLAG_NONE,
-     .handler = scalar_handle_add},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_SUB,
-     .flags = BINRWIR_REGISTRY_FLAG_NONE,
-     .handler = scalar_handle_sub},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_MUL,
-     .flags = BINRWIR_REGISTRY_FLAG_NONE,
-     .handler = scalar_handle_mul},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_DIV,
-     .flags = BINRWIR_REGISTRY_FLAG_NONE,
-     .handler = scalar_handle_div},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_MOD,
-     .flags = BINRWIR_REGISTRY_FLAG_NONE,
-     .handler = scalar_handle_mod},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_BITWISE_AND,
-     .flags = BINRWIR_REGISTRY_FLAG_NONE,
-     .handler = scalar_handle_bitand},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_BITWISE_OR,
-     .flags = BINRWIR_REGISTRY_FLAG_NONE,
-     .handler = scalar_handle_bitor},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_BITWISE_XOR,
-     .flags = BINRWIR_REGISTRY_FLAG_NONE,
-     .handler = scalar_handle_bitxor},
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_MAX,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
      .handler = scalar_handle_max},

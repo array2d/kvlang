@@ -35,11 +35,12 @@
 #include "binrwir/frame_bindings.h"
 #include "binrwir/program.h"
 #include "contract/error.h"
+#include "contract/kvspace_access.h"
 #include "contract/snapshot.h"
 #include "engine/execution_window.h"
 #include "engine/session.h"
-#include "host/kvspace_adapter.h"
-#include "host/kvspace_binary_interface.h"
+#include <kvspace/kvspace.h>
+
 #include "kvspace/xvalue_head.h"
 #include "vmbin/value_access.h"
 #include "vmkv/encoder.h"
@@ -75,12 +76,6 @@ static void test_deallocate(void *context, void *allocation, size_t size,
     free(allocation);
 }
 
-static runtimec_kvspace_symbol_address_t resolve_symbol(void *context,
-                                                        const char *name) {
-    void *symbol = dlsym(context, name);
-    return (runtimec_kvspace_symbol_address_t)(uintptr_t)symbol;
-}
-
 /* 正向：写一个**已存在**的绝对 key，执行后持有 42。 */
 static void test_write_existing_key_succeeds(const char *layout_path,
                                              const char *kvspace_path) {
@@ -99,17 +94,8 @@ static void test_write_existing_key_succeeds(const char *layout_path,
         fprintf(stderr, "SKIP: layout library lacks kvlangLayoutCode\n");
         return;
     }
-    runtimec_kvspace_symbol_resolver_t resolver = {
-        .context = kvspace_library, .resolve = resolve_symbol};
-    runtimec_kvspace_binary_interface_t binary_interface;
-    runtimec_error_t error;
+        runtimec_error_t error;
     runtimec_error_reset(&error);
-    if (runtimec_kvspace_binary_interface_bind(&resolver, &binary_interface,
-                                               &error) !=
-        RUNTIMEC_STATUS_SUCCESS) {
-        fprintf(stderr, "SKIP: kvspace bind failed\n");
-        return;
-    }
     char directory[256];
     char data_source_name[320];
     snprintf(directory, sizeof(directory),
@@ -118,7 +104,7 @@ static void test_write_existing_key_succeeds(const char *layout_path,
     (void)mkdir(directory, 0700);
     snprintf(data_source_name, sizeof(data_source_name), "shm://%s/store.shm",
              directory);
-    void *handle = binary_interface.connect(data_source_name);
+    void *handle = kvspaceConnect(data_source_name);
     if (handle == NULL) {
         fprintf(stderr, "SKIP: cannot connect store\n");
         return;
@@ -126,13 +112,12 @@ static void test_write_existing_key_succeeds(const char *layout_path,
     const runtimec_allocator_t allocator = {
         .context = NULL, .allocate = test_allocate,
         .deallocate = test_deallocate};
-    runtimec_kvspace_adapter_request_t adapter_request = {
+    const runtimec_kvspace_access_request_t adapter_request = {
         .allocator = allocator,
         .borrowed_kvspace_handle = handle,
         .instance_identifier = UINT64_C(1)};
-    runtimec_host_services_t host_services;
-    EXPECT(runtimec_kvspace_adapter_create_services(
-               &adapter_request, &binary_interface, &host_services, &error) ==
+    runtimec_kvspace_access_t *access = NULL;
+    EXPECT(runtimec_kvspace_access_create(&adapter_request, &access, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     runtimec_session_options_t options;
     memset(&options, 0, sizeof(options));
@@ -141,7 +126,7 @@ static void test_write_existing_key_succeeds(const char *layout_path,
     options.compilation_cache_capacity = 4U;
     options.enable_jit = false;
     runtimec_session_t *session = NULL;
-    EXPECT(runtimec_session_create(&host_services, &options, &session,
+    EXPECT(runtimec_session_create(access, &options, &session,
                                    &error) == RUNTIMEC_STATUS_SUCCESS);
     char entry[128];
     char layout_error[512];
@@ -158,7 +143,7 @@ static void test_write_existing_key_succeeds(const char *layout_path,
     /*
      * 执行前必须先把写目标建出来——指令不创造 key，创建源是源码里的声明。
      *
-     * 这里调 `host_services.ensure_zero_value` 代表的是**那条声明**会做的事
+     * 这里调 `runtimec_kvspace_access_ensure_zero_value` 代表的是**那条声明**会做的事
      * （`v:int32 = …` 建 key、赋值只写），而不是「代表帧准备」：帧准备只是
      * 执行声明的手段，没有声明就没有创建。容器用 `·new` 一族，标量用类型声明，
      * 两者都写在源码里；本用例的源码没有为空 absolute key 写声明，所以由测试
@@ -172,12 +157,11 @@ static void test_write_existing_key_succeeds(const char *layout_path,
     snapshot.contract_version = runtimec_contract_version();
     snapshot.function_key = runtimec_key_view_make("/lib/main",
                                                    sizeof("/lib/main") - 1U);
-    EXPECT(host_services.source_revision(host_services.context,
-                                         snapshot.function_key,
-                                         &snapshot.source_revision,
-                                         &error) == RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(host_services.ensure_zero_value(
-               host_services.context, &snapshot,
+    EXPECT(runtimec_kvspace_access_source_revision(
+               access, snapshot.function_key, &snapshot.source_revision,
+               &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(runtimec_kvspace_access_ensure_zero_value(
+               access, &snapshot,
                runtimec_key_view_make("/abs_write_result",
                                       sizeof("/abs_write_result") - 1U),
                runtimec_string_view_from_c_string("int64"),
@@ -185,7 +169,7 @@ static void test_write_existing_key_succeeds(const char *layout_path,
     /* 目标确实已存在——这是本用例的前提，不是可有可无的旁注。 */
     uint8_t *before = NULL;
     uint32_t before_size = 0U;
-    EXPECT(binary_interface.get(handle, "/abs_write_result", 1, &before,
+    EXPECT(kvspaceGet(handle, "/abs_write_result", 1, &before,
                                 &before_size) == 0);
     EXPECT(before != NULL && before_size >= KVSPACE_XVALUE_HEAD_LEN);
 
@@ -202,7 +186,7 @@ static void test_write_existing_key_succeeds(const char *layout_path,
     EXPECT(execute_status == RUNTIMEC_STATUS_SUCCESS);
     uint8_t *after = NULL;
     uint32_t after_size = 0U;
-    EXPECT(binary_interface.get(handle, "/abs_write_result", 1, &after,
+    EXPECT(kvspaceGet(handle, "/abs_write_result", 1, &after,
                                 &after_size) == 0);
     EXPECT(after != NULL && after_size >= KVSPACE_XVALUE_HEAD_LEN +
                                               sizeof(int64_t));
@@ -215,8 +199,8 @@ static void test_write_existing_key_succeeds(const char *layout_path,
     if (session != NULL) {
         (void)runtimec_session_destroy(session);
     }
-    (void)runtimec_kvspace_adapter_destroy_services(&host_services, &error);
-    binary_interface.close(handle);
+    (void)runtimec_kvspace_access_destroy(access, &error);
+    kvspaceClose(handle);
 }
 
 /*
@@ -245,16 +229,8 @@ static void test_read_missing_key_fails_at_execution(const char *layout_path,
     if (layout_code == NULL) {
         return;
     }
-    runtimec_kvspace_symbol_resolver_t resolver = {
-        .context = kvspace_library, .resolve = resolve_symbol};
-    runtimec_kvspace_binary_interface_t binary_interface;
-    runtimec_error_t error;
+        runtimec_error_t error;
     runtimec_error_reset(&error);
-    if (runtimec_kvspace_binary_interface_bind(&resolver, &binary_interface,
-                                               &error) !=
-        RUNTIMEC_STATUS_SUCCESS) {
-        return;
-    }
     char directory[256];
     char data_source_name[320];
     snprintf(directory, sizeof(directory),
@@ -263,20 +239,19 @@ static void test_read_missing_key_fails_at_execution(const char *layout_path,
     (void)mkdir(directory, 0700);
     snprintf(data_source_name, sizeof(data_source_name), "shm://%s/store.shm",
              directory);
-    void *handle = binary_interface.connect(data_source_name);
+    void *handle = kvspaceConnect(data_source_name);
     if (handle == NULL) {
         return;
     }
     const runtimec_allocator_t allocator = {
         .context = NULL, .allocate = test_allocate,
         .deallocate = test_deallocate};
-    runtimec_kvspace_adapter_request_t adapter_request = {
+    const runtimec_kvspace_access_request_t adapter_request = {
         .allocator = allocator,
         .borrowed_kvspace_handle = handle,
         .instance_identifier = UINT64_C(1)};
-    runtimec_host_services_t host_services;
-    if (runtimec_kvspace_adapter_create_services(
-            &adapter_request, &binary_interface, &host_services, &error) !=
+    runtimec_kvspace_access_t *access = NULL;
+    if (runtimec_kvspace_access_create(&adapter_request, &access, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
         return;
     }
@@ -287,7 +262,7 @@ static void test_read_missing_key_fails_at_execution(const char *layout_path,
     options.compilation_cache_capacity = 4U;
     options.enable_jit = false;
     runtimec_session_t *session = NULL;
-    EXPECT(runtimec_session_create(&host_services, &options, &session,
+    EXPECT(runtimec_session_create(access, &options, &session,
                                    &error) == RUNTIMEC_STATUS_SUCCESS);
     char entry[128];
     char layout_error[512];
@@ -311,8 +286,8 @@ static void test_read_missing_key_fails_at_execution(const char *layout_path,
     if (session != NULL) {
         (void)runtimec_session_destroy(session);
     }
-    (void)runtimec_kvspace_adapter_destroy_services(&host_services, &error);
-    binary_interface.close(handle);
+    (void)runtimec_kvspace_access_destroy(access, &error);
+    kvspaceClose(handle);
 }
 
 /*
@@ -329,16 +304,8 @@ static void test_write_never_creates_key(const char *kvspace_path) {
     if (kvspace_library == NULL) {
         return;
     }
-    runtimec_kvspace_symbol_resolver_t resolver = {
-        .context = kvspace_library, .resolve = resolve_symbol};
-    runtimec_kvspace_binary_interface_t binary_interface;
-    runtimec_error_t error;
+        runtimec_error_t error;
     runtimec_error_reset(&error);
-    if (runtimec_kvspace_binary_interface_bind(&resolver, &binary_interface,
-                                               &error) !=
-        RUNTIMEC_STATUS_SUCCESS) {
-        return;
-    }
     char directory[256];
     char data_source_name[320];
     snprintf(directory, sizeof(directory),
@@ -347,22 +314,21 @@ static void test_write_never_creates_key(const char *kvspace_path) {
     (void)mkdir(directory, 0700);
     snprintf(data_source_name, sizeof(data_source_name), "shm://%s/store.shm",
              directory);
-    void *handle = binary_interface.connect(data_source_name);
+    void *handle = kvspaceConnect(data_source_name);
     if (handle == NULL) {
         return;
     }
     const runtimec_allocator_t allocator = {
         .context = NULL, .allocate = test_allocate,
         .deallocate = test_deallocate};
-    runtimec_kvspace_adapter_request_t adapter_request = {
+    const runtimec_kvspace_access_request_t adapter_request = {
         .allocator = allocator,
         .borrowed_kvspace_handle = handle,
         .instance_identifier = UINT64_C(1)};
-    runtimec_host_services_t host_services;
-    if (runtimec_kvspace_adapter_create_services(
-            &adapter_request, &binary_interface, &host_services, &error) !=
+    runtimec_kvspace_access_t *access = NULL;
+    if (runtimec_kvspace_access_create(&adapter_request, &access, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
-        binary_interface.close(handle);
+        kvspaceClose(handle);
         return;
     }
 
@@ -411,10 +377,10 @@ static void test_write_never_creates_key(const char *kvspace_path) {
            RUNTIMEC_STATUS_SUCCESS);
     frame.bindings = created_bindings;
     /*
-     * 挂上**真实**的 host：这样「若写路径还会创建」，它就会真的建出来并成功——
-     * 传 NULL 会让两类失败都是失败，测不出「删掉的那段」是否回来了。
+     * 挂上**真实**的 kvspace access：这样「若写路径还会创建」，它就会真的建出来并
+     * 成功——传 NULL 会让两类失败都是失败，测不出「删掉的那段」是否回来了。
      */
-    frame.host_services = &host_services;
+    frame.kvspace_access = access;
     runtimec_snapshot_reset(&frame.snapshot);
     frame.snapshot.contract_version = runtimec_contract_version();
 
@@ -440,7 +406,7 @@ static void test_write_never_creates_key(const char *kvspace_path) {
     /* 存储里不能凭空多出这个 key。 */
     uint8_t *stored = NULL;
     uint32_t stored_size = 0U;
-    (void)binary_interface.get(handle, "/abs_never_created", 1, &stored,
+    (void)kvspaceGet(handle, "/abs_never_created", 1, &stored,
                                &stored_size);
     EXPECT(stored == NULL || stored_size == 0U);
 
@@ -448,8 +414,8 @@ static void test_write_never_creates_key(const char *kvspace_path) {
            RUNTIMEC_STATUS_SUCCESS);
     EXPECT(binrwir_execution_frame_destroy(&frame) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
-    (void)runtimec_kvspace_adapter_destroy_services(&host_services, &error);
-    binary_interface.close(handle);
+    (void)runtimec_kvspace_access_destroy(access, &error);
+    kvspaceClose(handle);
 }
 
 int main(int argument_count, char **arguments) {

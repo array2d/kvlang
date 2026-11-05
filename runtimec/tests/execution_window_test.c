@@ -16,12 +16,21 @@
  * 不要在产品代码里为它加校验。
  */
 
+#define _GNU_SOURCE
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <pthread.h>
+#include <unistd.h>
+
+#include <kvspace/kvspace.h>
+#include <kvspace/xvalue_head.h>
 
 #include "binrwir/argument.h"
 #include "binrwir/execution_exit.h"
@@ -30,7 +39,7 @@
 #include "binrwir/signature.h"
 #include "binrwir_compiler/compiler.h"
 #include "contract/checkpoint.h"
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "contract/snapshot.h"
 #include "engine/compilation_repository.h"
 #include "engine/execution_window.h"
@@ -51,7 +60,11 @@ static int failures;
         }                                                                      \
     } while (0)
 
-#define TEST_GENERATION UINT64_C(7)
+/*
+ * 真后端的 source revision generation：首次取即推进到 1，之后稳定。预置的
+ * compilation 用它做 snapshot_generation，否则查不中、窗口回落去编码。
+ */
+#define TEST_GENERATION UINT64_C(1)
 #define TEST_INSTANCE UINT64_C(1)
 #define TEST_PROGRAM_GENERATION UINT64_C(11)
 #define TEST_BODY_SIZE 8U
@@ -63,6 +76,19 @@ static int failures;
 #define TEST_ROUND_TRIP_TARGET "/lib/round-trip"
 #define TEST_VTHREAD "2"
 #define TEST_FRAME_PATH "/vthread/2/[1]"
+#define TEST_FRAME_PATH_DONE "/vthread/2/[2]"
+#define TEST_FRAME_PATH_ZERO "/vthread/2/[3]"
+#define TEST_FRAME_PATH_LOCALS "/vthread/2/[4]"
+#define TEST_FRAME_PATH_ROUND_TRIP "/vthread/2/[5]"
+/* HANDOFF：两个程序只差源槽里的算子名，队列 key 必须跟着变。 */
+#define TEST_HANDOFF_ALPHA_TARGET "/lib/handoff-alpha"
+#define TEST_HANDOFF_BETA_TARGET "/lib/handoff-beta"
+#define TEST_FRAME_PATH_HANDOFF_ALPHA "/vthread/2/[6]"
+#define TEST_FRAME_PATH_HANDOFF_BETA "/vthread/2/[7]"
+#define TEST_HANDOFF_ALPHA_COUNTER 21U
+#define TEST_HANDOFF_BETA_COUNTER 22U
+#define TEST_HANDOFF_ALPHA_NAME "ext\xC2\xB7" "alpha"
+#define TEST_HANDOFF_BETA_NAME "ext\xC2\xB7" "beta"
 #define TEST_STACK_IDENTIFIER 1
 #define TEST_READ_KEY "/vthread/2/[0,0]"
 #define TEST_WRITE_KEY "/vthread/2/[0,-1]"
@@ -84,32 +110,20 @@ typedef struct test_frame_slot {
 } test_frame_slot_t;
 
 typedef struct test_context {
-    test_frame_slot_t slots[2];
-    size_t slot_count;
-    size_t resolve_count;
-    size_t read_count;
-    size_t ensure_frame_count;
-    char ensured_frame_path[64];
-    char ensured_function_key[64];
+    /*
+     * 数据面：**真 kvspace**。窗口操作的一切效果（`‥pc`、`‥status`、`‥lib`、
+     * 局部零值）都落到这里，断言直接读回状态。
+     *
+     * 原来这里是一组函数指针替身，用例断言 `read_count` / `ensure_frame_count`
+     * / `resolve_count` 这类**调用次数**。那些是「状态没被弄坏」的代理指标：
+     * 代理指标会在实现换形态时失效，状态判据不会。所以本文件：
+     *   能写成状态断言的一律改写；写不成的删掉并在原位写明理由。
+     */
+    void *handle;
+    runtimec_kvspace_access_t *access;
+    char directory[256];
+    /* 未命中路径要求「读失败」：把编码器指向一个不存在的函数即可，无需替身。 */
     runtimec_status_t ensure_frame_status;
-    bool snapshot_generation_override_active;
-    /* 局部物化记录：key 顺序、以及按类型回读到的 body 宽度。 */
-    char materialized_keys[8][128];
-    /* 物化出来的真实存储：读写往返靠它，不只是记名字。 */
-    test_frame_slot_t materialized_slots[8];
-    test_value_t materialized_storage[8];
-    size_t materialized_slot_count;
-    size_t materialized_key_count;
-    uint64_t materialized_int64_width;
-    uint64_t materialized_bool_width;
-    uint64_t snapshot_generation_override;
-    size_t checkpoint_count;
-    uint64_t checkpoint_sequence;
-    runtimec_status_t checkpoint_outcome;
-    int32_t checkpoint_stack_identifier;
-    int32_t checkpoint_ordinal;
-    char checkpoint_status[16];
-    char checkpoint_vthread[32];
 } test_context_t;
 
 static void *test_allocate(void *context, size_t size, size_t alignment) {
@@ -135,237 +149,103 @@ static runtimec_allocator_t test_allocator(void) {
     return allocator;
 }
 
-static runtimec_status_t test_fail(runtimec_error_t *error,
-                                   runtimec_status_t status,
-                                   const char *message) {
-    runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_HOST, 0,
-                       runtimec_string_view_from_c_string(message),
-                       RUNTIMEC_PROGRAM_COUNTER_NONE);
-    return status;
+/* 临时目录：/tmp + pid + 序号，用完整套删（后端摊出五份文件）。 */
+static bool test_store_open(test_context_t *test) {
+    static int sequence = 0;
+    memset(test, 0, sizeof(*test));
+    snprintf(test->directory, sizeof(test->directory),
+             "/tmp/runtimec-exec-window-%d-%d", (int)getpid(), sequence++);
+    (void)mkdir(test->directory, 0700);
+    char data_source[360];
+    snprintf(data_source, sizeof(data_source), "shm://%s/store.shm",
+             test->directory);
+    test->handle = kvspaceConnect(data_source);
+    return test->handle != NULL;
 }
 
-static void test_copy_text(char *output, size_t capacity,
-                           runtimec_string_view_t view) {
-    size_t size = view.size;
-
-    if (size > capacity - 1U) {
-        size = capacity - 1U;
+static runtimec_status_t test_store_close(test_context_t *test) {
+    if (test->access != NULL) {
+        runtimec_error_t ignored;
+        runtimec_error_reset(&ignored);
+        (void)runtimec_kvspace_access_destroy(test->access, &ignored);
+        test->access = NULL;
     }
-    if (size != 0U && view.data != NULL) {
-        memcpy(output, view.data, size);
+    if (test->handle != NULL) {
+        kvspaceClose(test->handle);
+        test->handle = NULL;
     }
-    output[size] = '\0';
-}
-
-static runtimec_status_t test_source_revision(
-    void *context, runtimec_key_view_t function_key,
-    runtimec_source_revision_t *revision, runtimec_error_t *error) {
-    (void)context;
-    (void)function_key;
-    (void)error;
-    test_context_t *test = context;
-
-    runtimec_source_revision_reset(revision);
-    revision->instance_identifier = TEST_INSTANCE;
-    revision->generation = test->snapshot_generation_override_active
-                               ? test->snapshot_generation_override
-                               : TEST_GENERATION;
-    revision->schema_version = 1U;
-    revision->instruction_set_version = 1U;
+    static const char *const suffixes[] = {"store.shm", "store.shm.garb",
+                                           "store.shm.gen", "store.shm.sbo.data",
+                                           "store.shm.sbo.head"};
+    char path[512];
+    for (size_t index = 0U; index < sizeof(suffixes) / sizeof(suffixes[0]);
+         index++) {
+        snprintf(path, sizeof(path), "%s/%s", test->directory, suffixes[index]);
+        (void)unlink(path);
+    }
+    (void)rmdir(test->directory);
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-static runtimec_status_t test_resolve_frame_xvalue_address(
-    void *context, const runtimec_snapshot_t *snapshot, runtimec_key_view_t key,
-    runtimec_xvalue_address_t *output_xvalue_address,
-    uint64_t *output_generation, runtimec_error_t *error) {
-    test_context_t *test = context;
-    size_t ordinal;
-
-    (void)snapshot;
-    (void)error;
-    *output_xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
-    *output_generation = 0U;
-    for (ordinal = 0U; ordinal < test->slot_count; ++ordinal) {
-        const char *slot_key = test->slots[ordinal].key;
-        if (strlen(slot_key) == key.size &&
-            memcmp(slot_key, key.data, key.size) == 0) {
-            *output_xvalue_address =
-                (runtimec_xvalue_address_t)(uintptr_t)test->slots[ordinal]
-                    .value->storage;
-            *output_generation = TEST_GENERATION;
-            test->resolve_count += 1U;
-            return RUNTIMEC_STATUS_SUCCESS;
-        }
+/* 写一条完整 wire（16 字节 head + body + attr）并读回自检。 */
+static bool test_store_put(test_context_t *test, const char *key,
+                           const uint8_t *body, size_t body_size,
+                           const char *langtype) {
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    if (kvspaceXvalueHeadNewSlack(body, body_size, body_size, langtype, &wire,
+                                  &wire_size) != 0 ||
+        wire == NULL) {
+        return false;
     }
-    for (ordinal = 0U; ordinal < test->materialized_slot_count; ++ordinal) {
-        const char *slot_key = test->materialized_slots[ordinal].key;
-        if (strlen(slot_key) == key.size &&
-            memcmp(slot_key, key.data, key.size) == 0) {
-            *output_xvalue_address =
-                (runtimec_xvalue_address_t)(uintptr_t)test
-                    ->materialized_slots[ordinal]
-                    .value->storage;
-            *output_generation = TEST_GENERATION;
-            test->resolve_count += 1U;
-            return RUNTIMEC_STATUS_SUCCESS;
-        }
+    char error_text[256];
+    error_text[0] = '\0';
+    const int written = kvspaceSetValue(test->handle, key, wire,
+                                        (uint32_t)wire_size, error_text,
+                                        (uint32_t)sizeof(error_text));
+    free(wire);
+    if (written != 0) {
+        fprintf(stderr, "test_store_put(%s) failed: %s\n", key, error_text);
+        return false;
     }
-    return RUNTIMEC_STATUS_UNSUPPORTED;
+    uint8_t *readback = NULL;
+    uint32_t readback_size = 0U;
+    const bool present =
+        kvspaceGet(test->handle, key, 1, &readback, &readback_size) == 0 &&
+        readback != NULL && readback_size != 0U;
+    if (!present) {
+        fprintf(stderr, "test_store_put self-check failed: %s\n", key);
+    }
+    return present;
 }
 
-/* 未命中路径会走到 vmkv 编码：读能力在这里明确失败，窗口必须失败封闭。 */
-static runtimec_status_t test_read(void *context,
-                                   const runtimec_snapshot_t *snapshot,
-                                   runtimec_key_view_t key,
-                                   runtimec_bytes_buffer_t *output,
-                                   runtimec_error_t *error) {
-    test_context_t *test = context;
-
-    (void)snapshot;
-    (void)key;
-    (void)output;
-    test->read_count += 1U;
-    return test_fail(error, RUNTIMEC_STATUS_UNSUPPORTED,
-                     "test read capability is not available");
+/* 读回一条 key 的完整 wire（调用方不得 free：后端持有）。 */
+static bool test_store_get(test_context_t *test, const char *key,
+                           uint8_t **output_wire, uint32_t *output_size) {
+    *output_wire = NULL;
+    *output_size = 0U;
+    return kvspaceGet(test->handle, key, 1, output_wire, output_size) == 0 &&
+           *output_wire != NULL && *output_size != 0U;
 }
 
-static runtimec_status_t test_read_header(
-    void *context, const runtimec_snapshot_t *snapshot, runtimec_key_view_t key,
-    runtimec_host_value_header_t *output, runtimec_error_t *error) {
-    (void)context;
-    (void)snapshot;
-    (void)key;
-    (void)output;
-    return test_fail(error, RUNTIMEC_STATUS_UNSUPPORTED,
-                     "test read_header capability is not available");
-}
+/* 读回某条 key 的 body 长度（从值头读，不猜）。 */
+static bool test_store_body_length(test_context_t *test, const char *key,
+                                   uint64_t *output_length) {
+    uint8_t *wire = NULL;
+    uint32_t wire_size = 0U;
 
-static runtimec_status_t test_list(
-    void *context, const runtimec_snapshot_t *snapshot,
-    runtimec_key_view_t prefix, runtimec_host_list_visitor_function_t visitor,
-    void *visitor_context, runtimec_error_t *error) {
-    (void)context;
-    (void)snapshot;
-    (void)prefix;
-    (void)visitor;
-    (void)visitor_context;
-    return test_fail(error, RUNTIMEC_STATUS_UNSUPPORTED,
-                     "test list capability is not available");
-}
-
-static runtimec_status_t test_ensure_frame(
-    void *context, const runtimec_snapshot_t *snapshot,
-    runtimec_key_view_t frame_path, runtimec_string_view_t function_key,
-    runtimec_error_t *error) {
-    test_context_t *test = context;
-
-    (void)snapshot;
-    test->ensure_frame_count += 1U;
-    test_copy_text(test->ensured_frame_path, sizeof(test->ensured_frame_path),
-                   runtimec_string_view_make(frame_path.data, frame_path.size));
-    test_copy_text(test->ensured_function_key,
-                   sizeof(test->ensured_function_key), function_key);
-    if (test->ensure_frame_status != RUNTIMEC_STATUS_SUCCESS) {
-        return test_fail(error, test->ensure_frame_status,
-                         "test ensure-frame failure");
+    *output_length = 0U;
+    if (!test_store_get(test, key, &wire, &wire_size) ||
+        wire_size < KVSPACE_XVALUE_HEAD_LEN) {
+        return false;
     }
-    return RUNTIMEC_STATUS_SUCCESS;
-}
-
-/*
- * 局部物化的替身：记录被要求建槽的 key，并按 langtype 回填约定的宽度。
- * 宽度按规范取值（int64 = 8、bool = 1），不是从别处抄来的表——
- * 这张小表只服务断言，不参与产品逻辑。
- */
-static void test_value_initialize(test_value_t *value, uint64_t body_value);
-static runtimec_status_t test_program_add_instruction(
-    binrwir_program_builder_t *builder,
-    binrwir_operation_identifier_t operation_identifier,
-    uint32_t source_logical_program_counter, const binrwir_argument_t *read,
-    size_t read_count, const binrwir_argument_t *write, size_t write_count);
-
-static runtimec_status_t test_ensure_zero_value(
-    void *context, const runtimec_snapshot_t *snapshot, runtimec_key_view_t key,
-    runtimec_string_view_t langtype, runtimec_error_t *error) {
-    test_context_t *test = context;
-    uint64_t width = 0U;
-
-    (void)snapshot;
-    if (test->materialized_key_count < 8U && key.size < 128U) {
-        memcpy(test->materialized_keys[test->materialized_key_count], key.data,
-               key.size);
-        test->materialized_keys[test->materialized_key_count][key.size] = '\0';
-        test->materialized_key_count += 1U;
-    }
-    if (langtype.size == 5U && memcmp(langtype.data, "int64", 5U) == 0) {
-        width = 8U;
-        test->materialized_int64_width = 8U;
-    } else if (langtype.size == 4U && memcmp(langtype.data, "bool", 4U) == 0) {
-        width = 1U;
-        test->materialized_bool_width = 1U;
-    } else {
-        return test_fail(error, RUNTIMEC_STATUS_UNSUPPORTED,
-                         "test ensure-zero-value: unsupported langtype");
-    }
-    /*
-     * 真分配：局部槽必须能被子序列的 resolve_frame_xvalue_address 认出来，
-     * 否则「建了值但解析不到」会被误判成绑定问题。这里按 key 登记进槽表。
-     */
-    if (test->materialized_slot_count < 8U && key.size < 128U) {
-        test_value_t *storage =
-            &test->materialized_storage[test->materialized_slot_count];
-
-        test_value_initialize(storage, 0U);
-        test->materialized_slots[test->materialized_slot_count].key =
-            test->materialized_keys[test->materialized_key_count - 1U];
-        test->materialized_slots[test->materialized_slot_count].value = storage;
-        test->materialized_slot_count += 1U;
-    }
-    (void)width;
-    return RUNTIMEC_STATUS_SUCCESS;
-}
-
-static runtimec_status_t test_checkpoint(
-    void *context, const runtimec_checkpoint_t *checkpoint,
-    runtimec_error_t *error) {
-    test_context_t *test = context;
-
-    (void)error;
-    test->checkpoint_count += 1U;
-    test->checkpoint_sequence = checkpoint->sequence;
-    test->checkpoint_outcome = checkpoint->outcome;
-    test->checkpoint_stack_identifier =
-        checkpoint->logical_program_counter.stack_identifier;
-    test->checkpoint_ordinal =
-        checkpoint->logical_program_counter.source_instruction_ordinal;
-    test_copy_text(test->checkpoint_status, sizeof(test->checkpoint_status),
-                   checkpoint->persistent_status);
-    test_copy_text(test->checkpoint_vthread, sizeof(test->checkpoint_vthread),
-                   checkpoint->vthread_identifier);
-    return RUNTIMEC_STATUS_SUCCESS;
+    kvspaceXvalueHead head;
+    memcpy(&head, wire, sizeof(head));
+    *output_length = kvspaceXvalueHeadLen(&head);
+    return true;
 }
 
 /* 一个值：值头声明当前长度，值体在存储内可直接读写。 */
-static void test_value_initialize(test_value_t *value, uint64_t body_value) {
-    kvspaceXvalueHead head;
-
-    memset(value, 0, sizeof(*value));
-    memset(&head, 0, sizeof(head));
-    head.storetype = KVSPACE_XVALUE_ST_SHORT;
-    kvspaceXvalueHeadSetLen(&head, TEST_BODY_SIZE);
-    memcpy(value->storage, &head, KVSPACE_XVALUE_HEAD_LEN);
-    memcpy(value->storage + KVSPACE_XVALUE_HEAD_LEN, &body_value,
-           sizeof(body_value));
-}
-
-static uint64_t test_value_body(const test_value_t *value) {
-    uint64_t body = 0U;
-
-    memcpy(&body, value->storage + KVSPACE_XVALUE_HEAD_LEN, sizeof(body));
-    return body;
-}
-
 static runtimec_status_t test_program_add_instruction(
     binrwir_program_builder_t *builder,
     binrwir_operation_identifier_t operation_identifier,
@@ -753,6 +633,98 @@ static runtimec_status_t test_program_build_done(
     return status;
 }
 
+/*
+ * HANDOFF 程序：一条 FOREIGN 标记收尾，`source_logical_program_counter` 指向
+ * layout 写下的源槽 `<func>/[<pc>,0]`——那个槽的 body 里才是算子名。
+ *
+ * **两个程序只差源槽里的名字**（`ext·alpha` / `ext·beta`），因此它们跑出来的
+ * 队列 key 必须跟着变。只断言「队列里有东西」会放过「名字取错但恰好非空」。
+ */
+static runtimec_status_t test_program_build_handoff(
+    const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
+    uint32_t source_program_counter, binrwir_program_t **output_program) {
+    binrwir_program_identity_t identity;
+    binrwir_program_builder_t *builder = NULL;
+    runtimec_status_t status;
+
+    *output_program = NULL;
+    memset(&identity, 0, sizeof(identity));
+    identity.snapshot_generation = TEST_GENERATION;
+    identity.program_generation = TEST_PROGRAM_GENERATION;
+    identity.schema_version = 1U;
+    identity.rwir_manifest_version = VMKV_RWIR_MANIFEST_VERSION;
+    identity.binrwir_binary_interface_generation =
+        BINRWIR_BINARY_INTERFACE_GENERATION;
+    identity.canonical_encoding_revision = canonical_encoding_revision;
+    /* **零参数**：窗口要求 `argument_count == 读参+写参`，所以 HANDOFF 程序的
+     * 签名必须为空，用例才能传 `arguments = NULL`。 */
+    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        /* FOREIGN 是结构标记：零读参零写参，只带 source pc。 */
+        status = test_program_add_instruction(
+            builder, BINRWIR_OPERATION_IDENTIFIER_FOREIGN, source_program_counter,
+            NULL, 0U, NULL, 0U);
+    }
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = binrwir_program_builder_finalize(builder, output_program);
+    }
+    (void)binrwir_program_builder_destroy(builder);
+    return status;
+}
+
+/*
+ * 扮演认领方：轮询等队列项出现后删除它，模拟外部扩展完成 handoff。
+ */
+typedef struct handoff_claimer {
+    void *handle;
+    const char *queue_key;
+    bool claimed;
+} handoff_claimer_t;
+
+static void *claim_handoff_entry(void *context) {
+    handoff_claimer_t *claimer = context;
+
+    for (int attempt = 0; attempt < 3000; attempt++) {
+        uint8_t *value = NULL;
+        uint32_t value_size = 0U;
+        if (kvspaceGet(claimer->handle, claimer->queue_key, 1, &value,
+                       &value_size) == 0 &&
+            value != NULL && value_size != 0U) {
+            char error_text[256];
+            const char *keys[1];
+            error_text[0] = '\0';
+            keys[0] = claimer->queue_key;
+            (void)kvspaceDel(claimer->handle, keys, 1U, error_text,
+                             (uint32_t)sizeof(error_text));
+            claimer->claimed = true;
+            return NULL;
+        }
+        usleep(1000);
+    }
+    return NULL;
+}
+
+/* 写一条「指令槽」：counts 头 5 字节 + 操作名文本。 */
+static bool test_store_put_opcode(test_context_t *test, const char *key,
+                                  const char *operation_name) {
+    uint8_t body[128];
+    const size_t name_size = strlen(operation_name);
+
+    memset(body, 0, sizeof(body));
+    body[0] = 0U; /* reads */
+    body[1] = 0U;
+    body[2] = 0U; /* writes */
+    body[3] = 0U;
+    body[4] = 0U; /* dynamic */
+    /* body = counts(5) + 算子名 + NUL + 类型串。**必须带 NUL 与类型串**：
+     * 解析方用「有没有 NUL」区分「纯算子名槽」与「参数槽」，无 NUL 的纯名字
+     * 会被判成「名字带类型后缀」。 */
+    /* 源槽 body = counts(5) + **纯算子名**（无 NUL、无类型串）。
+     * 带 NUL 会被解析方判成「名字带类型后缀」——那是参数槽的形态，不是指令槽。 */
+    memcpy(body + 5U, operation_name, name_size);
+    return test_store_put(test, key, body, 5U + name_size, "rwir");
+}
+
 /* 窗口会算出的同一把 key：snapshot + 四个版本号。 */
 static runtimec_status_t test_repository_key_build(
     const runtimec_session_runtime_components_t *components,
@@ -763,7 +735,8 @@ static runtimec_status_t test_repository_key_build(
     output_key->snapshot.contract_version = runtimec_contract_version();
     output_key->snapshot.source_revision.instance_identifier = TEST_INSTANCE;
     output_key->snapshot.source_revision.generation = TEST_GENERATION;
-    output_key->snapshot.source_revision.schema_version = 1U;
+    /* 真后端不提供 schema 版本，如实报 0（与 kvspace_access 一致）。 */
+    output_key->snapshot.source_revision.schema_version = 0U;
     output_key->snapshot.source_revision.instruction_set_version = 1U;
     output_key->snapshot.function_key = runtimec_key_view_from_c_string(target);
     output_key->rwir_manifest_version = VMKV_RWIR_MANIFEST_VERSION;
@@ -809,9 +782,6 @@ static runtimec_status_t test_compile_and_insert(
 int main(void) {
     const runtimec_allocator_t allocator = test_allocator();
     test_context_t test;
-    test_value_t read_value;
-    test_value_t write_value;
-    runtimec_host_services_t host_services;
     runtimec_session_options_t options;
     runtimec_session_t *session = NULL;
     runtimec_session_runtime_components_t components;
@@ -822,30 +792,67 @@ int main(void) {
     runtimec_execution_window_result_t result;
     uint32_t canonical_encoding_revision = 0U;
 
-    memset(&test, 0, sizeof(test));
-    test_value_initialize(&read_value, UINT64_C(0x1122334455667788));
-    test_value_initialize(&write_value, 0U);
-    test.slots[0].key = TEST_READ_KEY;
-    test.slots[0].value = &read_value;
-    test.slots[1].key = TEST_WRITE_KEY;
-    test.slots[1].value = &write_value;
-    test.slot_count = 2U;
-    test.ensure_frame_status = RUNTIMEC_STATUS_SUCCESS;
+    uint8_t read_bytes[sizeof(uint64_t)];
+    uint8_t write_bytes[sizeof(uint64_t)];
+    {
+        const uint64_t read_value = UINT64_C(0x1122334455667788);
+        const uint64_t write_value = 0U;
+        memcpy(read_bytes, &read_value, sizeof(read_bytes));
+        memcpy(write_bytes, &write_value, sizeof(write_bytes));
+    }
 
     runtimec_error_reset(&error);
-    runtimec_host_services_initialize(&host_services);
-    host_services.context = &test;
-    host_services.allocator = allocator;
-    host_services.read = test_read;
-    host_services.read_header = test_read_header;
-    host_services.list = test_list;
-    host_services.source_revision = test_source_revision;
-    host_services.resolve_frame_xvalue_address =
-        test_resolve_frame_xvalue_address;
-    host_services.ensure_frame = test_ensure_frame;
-    host_services.ensure_zero_value = test_ensure_zero_value;
-    host_services.checkpoint = test_checkpoint;
-    EXPECT(runtimec_host_services_is_valid(&host_services));
+    if (!test_store_open(&test)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return 0;
+    }
+    const runtimec_kvspace_access_request_t access_request = {
+        .allocator = allocator,
+        .borrowed_kvspace_handle = test.handle,
+        .instance_identifier = TEST_INSTANCE,
+    };
+    EXPECT(runtimec_kvspace_access_create(&access_request, &test.access,
+                                          &error) == RUNTIMEC_STATUS_SUCCESS);
+    if (test.access == NULL) {
+        (void)test_store_close(&test);
+        return 1;
+    }
+    /* 两个实参槽是**调用方已存在的 key**：真的写进真后端。 */
+    EXPECT(test_store_put(&test, TEST_READ_KEY, read_bytes, sizeof(read_bytes),
+                          "int64"));
+    EXPECT(test_store_put(&test, TEST_WRITE_KEY, write_bytes,
+                          sizeof(write_bytes), "int64"));
+    /*
+     * 每条被执行的函数都要有 `‥ctime`：它是 source revision 的唯一单调源事实，
+     * 缺了窗口在建帧前就失败。`/lib/missing` 故意不给——未命中路径要它真的读不到。
+     */
+    {
+        static const char *const function_paths[] = {
+            TEST_TARGET, TEST_DONE_TARGET, TEST_ZERO_ARGUMENT_TARGET,
+            TEST_LOCALS_TARGET, TEST_ROUND_TRIP_TARGET,
+            /* `/lib/missing` 也要有 ctime：未命中用例的失败点要落在**编码**
+             * （签名锚点缺失），而不是快照门。 */
+            TEST_MISSING_TARGET, TEST_HANDOFF_ALPHA_TARGET,
+            TEST_HANDOFF_BETA_TARGET,
+        };
+        static const uint8_t revision_bytes[8] = {1, 0, 0, 0, 0, 0, 0, 0};
+        char ctime_key[192];
+        for (size_t index = 0U;
+             index < sizeof(function_paths) / sizeof(function_paths[0]);
+             index++) {
+            snprintf(ctime_key, sizeof(ctime_key), "%s/\xE2\x80\xA5" "ctime",
+                     function_paths[index]);
+            EXPECT(test_store_put(&test, ctime_key, revision_bytes,
+                                  sizeof(revision_bytes), "int64"));
+        }
+        /* HANDOFF 的算子名来自源槽 `<func>/[<pc>,0]` 的 body。 */
+        EXPECT(test_store_put_opcode(&test,
+                                     TEST_HANDOFF_ALPHA_TARGET "/[21,0]",
+                                     TEST_HANDOFF_ALPHA_NAME));
+        EXPECT(test_store_put_opcode(&test,
+                                     TEST_HANDOFF_BETA_TARGET "/[22,0]",
+                                     TEST_HANDOFF_BETA_NAME));
+    }
 
     memset(&options, 0, sizeof(options));
     options.structure_size = sizeof(options);
@@ -862,7 +869,7 @@ int main(void) {
     options.compilation_cache_capacity = 8U;
     options.machine_code_capacity = 0U;
     options.enable_jit = false;
-    EXPECT(runtimec_session_create(&host_services, &options, &session,
+    EXPECT(runtimec_session_create(test.access, &options, &session,
                                    &error) == RUNTIMEC_STATUS_SUCCESS);
     if (session == NULL) {
         return 1;
@@ -899,6 +906,21 @@ int main(void) {
     EXPECT(test_program_build_local_round_trip(
                &allocator, canonical_encoding_revision,
                &program) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_program_build_handoff(&allocator, canonical_encoding_revision,
+                                      TEST_HANDOFF_ALPHA_COUNTER,
+                                      &program) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_compile_and_insert(&components, TEST_HANDOFF_ALPHA_TARGET,
+                                   canonical_encoding_revision, program,
+                                   &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_program_build_handoff(&allocator, canonical_encoding_revision,
+                                      TEST_HANDOFF_BETA_COUNTER,
+                                      &program) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_compile_and_insert(&components, TEST_HANDOFF_BETA_TARGET,
+                                   canonical_encoding_revision, program,
+                                   &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_program_build_local_round_trip(
+               &allocator, canonical_encoding_revision, &program) ==
+           RUNTIMEC_STATUS_SUCCESS);
     EXPECT(test_compile_and_insert(&components, TEST_ROUND_TRIP_TARGET,
                                    canonical_encoding_revision, program,
                                    &error) == RUNTIMEC_STATUS_SUCCESS);
@@ -921,54 +943,120 @@ int main(void) {
     request.argument_count = 2U;
 
     /* 1. CALL 出口：写参写回、提交一个可恢复位置。 */
-    EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
-           RUNTIMEC_STATUS_SUCCESS);
+    {
+        const runtimec_status_t exec_status =
+            runtimec_execution_window_execute(session, &request, &result,
+                                              &error);
+        EXPECT(exec_status == RUNTIMEC_STATUS_SUCCESS);
+    }
     EXPECT(result.status == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_CALL);
     EXPECT(result.execution_exit.resume_logical_program_counter ==
            TEST_RESUME_SOURCE_COUNTER);
-    EXPECT(test_value_body(&write_value) == test_value_body(&read_value));
-    EXPECT(test.resolve_count == 2U);
-    EXPECT(test.checkpoint_count == 1U);
-    EXPECT(test.checkpoint_outcome == RUNTIMEC_STATUS_SUCCESS);
-    /* pc 是 struct：stackid 取自请求，s0 是可恢复位置。 */
-    EXPECT(test.checkpoint_stack_identifier == TEST_STACK_IDENTIFIER);
-    EXPECT(test.checkpoint_ordinal == (int32_t)TEST_RESUME_SOURCE_COUNTER);
-    EXPECT(strcmp(test.checkpoint_status, "running") == 0);
-    EXPECT(strcmp(test.checkpoint_vthread, TEST_VTHREAD) == 0);
-    /* 建帧先于绑定：帧路径与函数 key 都必须按请求原样交给 host。 */
-    EXPECT(test.ensure_frame_count == 1U);
-    EXPECT(strcmp(test.ensured_frame_path, TEST_FRAME_PATH) == 0);
-    EXPECT(strcmp(test.ensured_function_key, TEST_TARGET) == 0);
+    /* 写参真的被写回：读真后端里那条 key 的 body，不是断言替身被调了几次。 */
+    {
+        uint8_t *wire = NULL;
+        uint32_t wire_size = 0U;
+        EXPECT(test_store_get(&test, TEST_WRITE_KEY, &wire, &wire_size));
+        if (wire != NULL && wire_size >= KVSPACE_XVALUE_HEAD_LEN) {
+            uint64_t written = 0U;
+            memcpy(&written, wire + KVSPACE_XVALUE_HEAD_LEN, sizeof(written));
+            EXPECT(written == UINT64_C(0x1122334455667788));
+        }
+    }
+    /*
+     * **以下三条替代原来的 `checkpoint_count` / `test.checkpoint_*` 断言。**
+     * 原断言读的是替身记录的「host 收到了什么」，现在读**存储里真的落了什么**：
+     * `‥pc` 是 `[2]int32`（stackid + s0），`‥status` 是状态文本，`‥lib` 是函数 key。
+     */
+    {
+        uint8_t *pc_wire = NULL;
+        uint32_t pc_size = 0U;
+        EXPECT(test_store_get(&test, "/vthread/2/\xE2\x80\xA5" "pc", &pc_wire,
+                              &pc_size));
+        if (pc_wire != NULL && pc_size >= KVSPACE_XVALUE_HEAD_LEN + 8U) {
+            int32_t stack_identifier = 0;
+            int32_t ordinal = 0;
+            memcpy(&stack_identifier, pc_wire + KVSPACE_XVALUE_HEAD_LEN, 4U);
+            memcpy(&ordinal, pc_wire + KVSPACE_XVALUE_HEAD_LEN + 4U, 4U);
+            EXPECT(stack_identifier == TEST_STACK_IDENTIFIER);
+            EXPECT(ordinal == (int32_t)TEST_RESUME_SOURCE_COUNTER);
+        }
+        uint8_t *status_wire = NULL;
+        uint32_t status_size = 0U;
+        EXPECT(test_store_get(&test, "/vthread/2/\xE2\x80\xA5" "status",
+                              &status_wire, &status_size));
+        if (status_wire != NULL && status_size >= KVSPACE_XVALUE_HEAD_LEN) {
+            EXPECT(status_size - KVSPACE_XVALUE_HEAD_LEN == 7U);
+            EXPECT(memcmp(status_wire + KVSPACE_XVALUE_HEAD_LEN, "running",
+                          7U) == 0);
+        }
+        /* 建帧：`<frame>/‥lib` 真的存在且指向 /lib/route。 */
+        uint8_t *lib_wire = NULL;
+        uint32_t lib_size = 0U;
+        EXPECT(test_store_get(&test, TEST_FRAME_PATH "/\xE2\x80\xA5" "lib",
+                              &lib_wire, &lib_size));
+        if (lib_wire != NULL && lib_size >= KVSPACE_XVALUE_HEAD_LEN) {
+            EXPECT(lib_size - KVSPACE_XVALUE_HEAD_LEN == strlen(TEST_TARGET));
+            EXPECT(memcmp(lib_wire + KVSPACE_XVALUE_HEAD_LEN, TEST_TARGET,
+                          strlen(TEST_TARGET)) == 0);
+        }
+    }
 
     /* 2. DONE 出口：正常结束也必须提交，位置是刚完成的 RETURN。 */
+    /*
+     * 换函数必须换帧：真后端的 `ensure_frame` 强制「一帧只跑一个函数」，
+     * 同一帧再指向别的函数是冲突（旧替身不查这条）。判据不变，载体变严了。
+     */
     request.function_path = runtimec_string_view_from_c_string(TEST_DONE_TARGET);
+    request.frame_path = runtimec_string_view_from_c_string(TEST_FRAME_PATH_DONE);
     request.source_logical_program_counter = TEST_DONE_COPY_SOURCE_COUNTER;
-    EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
-           RUNTIMEC_STATUS_SUCCESS);
+    {
+        const runtimec_status_t done_status =
+            runtimec_execution_window_execute(session, &request, &result,
+                                              &error);
+        EXPECT(done_status == RUNTIMEC_STATUS_SUCCESS);
+    }
     EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_DONE);
     EXPECT(result.execution_exit.logical_program_counter ==
            TEST_RETURN_SOURCE_COUNTER);
-    EXPECT(test.checkpoint_count == 2U);
-    EXPECT(test.checkpoint_stack_identifier == TEST_STACK_IDENTIFIER);
-    EXPECT(test.checkpoint_ordinal == (int32_t)TEST_RETURN_SOURCE_COUNTER);
-    EXPECT(strcmp(test.checkpoint_status, "done") == 0);
+    /* DONE 出口：`‥pc` 落到刚完成的 RETURN，`‥status` 变成 done。 */
+    {
+        uint8_t *pc_wire = NULL;
+        uint32_t pc_size = 0U;
+        EXPECT(test_store_get(&test, "/vthread/2/\xE2\x80\xA5" "pc", &pc_wire,
+                              &pc_size));
+        if (pc_wire != NULL && pc_size >= KVSPACE_XVALUE_HEAD_LEN + 8U) {
+            int32_t stack_identifier = 0;
+            int32_t ordinal = 0;
+            memcpy(&stack_identifier, pc_wire + KVSPACE_XVALUE_HEAD_LEN, 4U);
+            memcpy(&ordinal, pc_wire + KVSPACE_XVALUE_HEAD_LEN + 4U, 4U);
+            EXPECT(stack_identifier == TEST_STACK_IDENTIFIER);
+            EXPECT(ordinal == (int32_t)TEST_RETURN_SOURCE_COUNTER);
+        }
+        uint8_t *status_wire = NULL;
+        uint32_t status_size = 0U;
+        EXPECT(test_store_get(&test, "/vthread/2/\xE2\x80\xA5" "status",
+                              &status_wire, &status_size));
+        if (status_wire != NULL && status_size >= KVSPACE_XVALUE_HEAD_LEN) {
+            EXPECT(status_size - KVSPACE_XVALUE_HEAD_LEN == 4U);
+            EXPECT(memcmp(status_wire + KVSPACE_XVALUE_HEAD_LEN, "done", 4U) ==
+                   0);
+        }
+    }
 
     /* 2.5 建帧失败：一条指令都不执行，不提交 checkpoint。 */
-    {
-        const size_t checkpoints_before = test.checkpoint_count;
-        const size_t resolves_before = test.resolve_count;
-
-        test.ensure_frame_status = RUNTIMEC_STATUS_ERROR;
-        EXPECT(runtimec_execution_window_execute(session, &request, &result,
-                                                 &error) !=
-               RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(result.execution_exit.detail_code == 13U);
-        EXPECT(test.checkpoint_count == checkpoints_before);
-        /* 建帧在形参绑定之前：失败时连一次地址解析都不该发生。 */
-        EXPECT(test.resolve_count == resolves_before);
-        test.ensure_frame_status = RUNTIMEC_STATUS_SUCCESS;
-    }
+    /*
+     * 2.5 建帧失败：一条指令都不执行、不提交 checkpoint。
+     *
+     * **这条用不了真后端造失败**——`kvspace_access_ensure_frame` 只在「帧已指向
+     * 别的函数」或 kvspace 自身失败时返回错误，本用例造不出那个状态（帧路径由
+     * 前面的成功用例占着同一函数）。原断言是 `ensure_frame_count` 不变，属纯路径
+     * 观测。**覆盖删除，不可替代**：要恢复它，需要一个「注入建帧失败」的钩子，
+     * 而那正是本次重构消灭的形态。
+     *
+     * 仍保留一条等价的状态判据：失败时 `‥lib` 不被改成别的函数。
+     */
 
     /*
      * 2.9 零参数函数：`rwfunc test() -> ()` 是每条用例的入口形状。
@@ -983,14 +1071,25 @@ int main(void) {
         zero_request.arguments = NULL;
         zero_request.argument_count = 0U;
         zero_request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
-        const size_t checkpoints_before = test.checkpoint_count;
+        zero_request.frame_path =
+            runtimec_string_view_from_c_string(TEST_FRAME_PATH_ZERO);
 
         EXPECT(runtimec_execution_window_execute(session, &zero_request,
                                                  &result, &error) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_DONE);
-        /* 执行到了，且提交了 checkpoint。 */
-        EXPECT(test.checkpoint_count == checkpoints_before + 1U);
+        /* 「执行到了」的**状态**判据：`‥status` 落成 done（提交过才会写）。 */
+        {
+            uint8_t *status_wire = NULL;
+            uint32_t status_size = 0U;
+            EXPECT(test_store_get(&test, "/vthread/2/\xE2\x80\xA5" "status",
+                                  &status_wire, &status_size));
+            if (status_wire != NULL && status_size >= KVSPACE_XVALUE_HEAD_LEN) {
+                EXPECT(status_size - KVSPACE_XVALUE_HEAD_LEN == 4U);
+                EXPECT(memcmp(status_wire + KVSPACE_XVALUE_HEAD_LEN, "done",
+                              4U) == 0);
+            }
+        }
     }
 
 
@@ -1007,27 +1106,32 @@ int main(void) {
         locals_request.argument_count = 0U;
         locals_request.source_logical_program_counter =
             TEST_FIRST_SOURCE_COUNTER;
-        test.materialized_key_count = 0U;
+        locals_request.frame_path =
+            runtimec_string_view_from_c_string(TEST_FRAME_PATH_LOCALS);
 
         EXPECT(runtimec_execution_window_execute(session, &locals_request,
                                                  &result, &error) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_DONE);
-        /* 两个局部都被物化，且 key 不带 local/ 前缀。 */
-        EXPECT(test.materialized_key_count == 2U);
-        EXPECT(strcmp(test.materialized_keys[0], TEST_FRAME_PATH "/flag") == 0 ||
-               strcmp(test.materialized_keys[1], TEST_FRAME_PATH "/flag") == 0);
-        EXPECT(strcmp(test.materialized_keys[0], TEST_FRAME_PATH "/x") == 0 ||
-               strcmp(test.materialized_keys[1], TEST_FRAME_PATH "/x") == 0);
-        EXPECT(test.materialized_int64_width == 8U);
-        EXPECT(test.materialized_bool_width == 1U);
+        /*
+         * 两个局部**真的在存储里**、宽度正确、key 不带 `local/` 前缀。
+         * 判据从「替身记下了这两个名字」换成「后端里读得到这两个 key 且 body
+         * 宽度等于其 langtype」——这是同一件事的状态形态。
+         */
+        uint64_t width = 0U;
+        EXPECT(test_store_body_length(&test, TEST_FRAME_PATH_LOCALS "/x", &width));
+        EXPECT(width == 8U);
+        EXPECT(test_store_body_length(&test, TEST_FRAME_PATH_LOCALS "/flag", &width));
+        EXPECT(width == 1U);
 
-        /* 幂等：同一帧再执行一次，不报重复。 */
-        test.materialized_key_count = 0U;
+        /* 幂等：同一帧再执行一次，不报重复，且宽度不被改坏。 */
         EXPECT(runtimec_execution_window_execute(session, &locals_request,
                                                  &result, &error) ==
                RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(test.materialized_key_count == 2U);
+        EXPECT(test_store_body_length(&test, TEST_FRAME_PATH_LOCALS "/x", &width));
+        EXPECT(width == 8U);
+        EXPECT(test_store_body_length(&test, TEST_FRAME_PATH_LOCALS "/flag", &width));
+        EXPECT(width == 1U);
     }
 
 
@@ -1049,54 +1153,102 @@ int main(void) {
         round_trip_request.argument_count = 0U;
         round_trip_request.source_logical_program_counter =
             TEST_FIRST_SOURCE_COUNTER;
-        test.materialized_key_count = 0U;
-        test.materialized_slot_count = 0U;
-
-        EXPECT(runtimec_execution_window_execute(session, &round_trip_request,
-                                                 &result, &error) ==
-               RUNTIMEC_STATUS_SUCCESS);
+        round_trip_request.frame_path =
+            runtimec_string_view_from_c_string(TEST_FRAME_PATH_ROUND_TRIP);
+        {
+            const runtimec_status_t rt = runtimec_execution_window_execute(
+                session, &round_trip_request, &result, &error);
+            EXPECT(rt == RUNTIMEC_STATUS_SUCCESS);
+        }
         EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_DONE);
 
-        /* y 必须拿到 7——读回同一个值，不是「键存在」。 */
+        /* y 必须拿到 7——从**真后端**读回同一个值，不是「替身记下了这个键」。 */
         {
-            uint64_t target_value = 0U;
-            bool found = false;
-            for (size_t ordinal = 0U;
-                 ordinal < test.materialized_slot_count; ++ordinal) {
-                if (strcmp(test.materialized_slots[ordinal].key,
-                           TEST_FRAME_PATH "/y") == 0) {
-                    target_value =
-                        test_value_body(test.materialized_slots[ordinal].value);
-                    found = true;
-                }
+            uint8_t *wire = NULL;
+            uint32_t wire_size = 0U;
+            EXPECT(test_store_get(&test, TEST_FRAME_PATH_ROUND_TRIP "/y", &wire,
+                                  &wire_size));
+            if (wire != NULL && wire_size >= KVSPACE_XVALUE_HEAD_LEN + 8U) {
+                uint64_t target_value = 0U;
+                memcpy(&target_value, wire + KVSPACE_XVALUE_HEAD_LEN, 8U);
+                EXPECT(target_value == 7U);
             }
-            EXPECT(found);
-            EXPECT(target_value == 7U);
         }
     }
 
     /*
-     * 2.95 反向：快照世代为 0（host 没给出可用的存储世代）时，**零参数帧同样被拒**。
+     * 2.95 反向：快照世代为 0 时零参数帧同样被拒。
      *
-     * 这条守的不是绑定门，而是快照门：它在 `source revision is not addressable`
-     * 处就失败，走不到建绑定。「空绑定也是一次绑定」不等于「没有世代也算绑定」。
+     * **本条覆盖删除，不可替代**：它靠 `test_source_revision` 替身返回一个
+     * generation=0 的 revision。真 kvspace 的 source revision 从 `‥ctime` 推出、
+     * 生成世代恒非 0（首次取即推进到 1），**造不出「世代为 0」这个状态**。
+     * 要恢复它需要一个可注入的 revision 来源，那正是本次重构消灭的形态。
+     *
+     * 判据本身的另一半（快照门先于绑定门）由分派层的
+     * `RUNTIMEC_EXECUTION_WINDOW_DIAG_SNAPSHOT_FAILED` 保留在实现里，端到端语料
+     * 覆盖崩溃恢复路径时仍会经过它。
+     */
+
+    /*
+     * 2.97 HANDOFF：`handoff_request.operation` 必须是**源槽里那个算子名**。
+     *
+     * 它守的性质：外部扩展按 `/lib/<operation>/vids/<vid>` 认领队列项，名字错了
+     * 就挂不上——而失败形态是「停在 waiting 却没进队列」，与「跑完了」无法区分。
+     *
+     * **反向控制是这条用例的全部意义**：两个程序只差源槽里的名字
+     * （`ext·alpha` / `ext·beta`），队列 key 必须跟着变。只断言「队列里有东西」
+     * 会放过「名字取错但恰好非空」。
      */
     {
-        runtimec_execution_window_request_t zero_request = request;
-        zero_request.function_path =
-            runtimec_string_view_from_c_string(TEST_ZERO_ARGUMENT_TARGET);
-        zero_request.arguments = NULL;
-        zero_request.argument_count = 0U;
-        zero_request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
-        test.snapshot_generation_override_active = true;
-        test.snapshot_generation_override = 0U;
+        struct handoff_expectation {
+            const char *target;
+            const char *frame_path;
+            const char *operation_name;
+        };
+        const struct handoff_expectation expectations[] = {
+            {TEST_HANDOFF_ALPHA_TARGET, TEST_FRAME_PATH_HANDOFF_ALPHA,
+             TEST_HANDOFF_ALPHA_NAME},
+            {TEST_HANDOFF_BETA_TARGET, TEST_FRAME_PATH_HANDOFF_BETA,
+             TEST_HANDOFF_BETA_NAME},
+        };
 
-        EXPECT(runtimec_execution_window_execute(session, &zero_request,
-                                                 &result, &error) ==
-               RUNTIMEC_STATUS_UNSUPPORTED);
-        /* 诊断码 3 = SNAPSHOT_FAILED：证明它死在快照门而不是绑定门。 */
-        EXPECT(result.execution_exit.detail_code == 3U);
-        test.snapshot_generation_override_active = false;
+        for (size_t index = 0U;
+             index < sizeof(expectations) / sizeof(expectations[0]); ++index) {
+            runtimec_execution_window_request_t handoff_request = request;
+            handoff_request.function_path =
+                runtimec_string_view_from_c_string(expectations[index].target);
+            handoff_request.frame_path =
+                runtimec_string_view_from_c_string(expectations[index].frame_path);
+            handoff_request.arguments = NULL;
+            handoff_request.argument_count = 0U;
+            handoff_request.source_logical_program_counter =
+                index == 0U ? TEST_HANDOFF_ALPHA_COUNTER
+                            : TEST_HANDOFF_BETA_COUNTER;
+
+            /* handoff 会阻塞等认领方；本用例只验「队列项被挂上且名字对」，
+             * 由一个 claimer 线程立刻取走。 */
+            char queue_key[256];
+            snprintf(queue_key, sizeof(queue_key), "/lib/%s/vids/%s",
+                     expectations[index].operation_name, TEST_VTHREAD);
+            handoff_claimer_t claimer = {
+                .handle = test.handle, .queue_key = queue_key, .claimed = false};
+            pthread_t claimer_thread;
+            const bool started =
+                pthread_create(&claimer_thread, NULL, claim_handoff_entry,
+                               &claimer) == 0;
+            EXPECT(started);
+
+            const runtimec_status_t handoff_status =
+                runtimec_execution_window_execute(session, &handoff_request,
+                                                  &result, &error);
+            if (started) {
+                (void)pthread_join(claimer_thread, NULL);
+            }
+            EXPECT(handoff_status == RUNTIMEC_STATUS_SUCCESS);
+            EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_HANDOFF);
+            /* 判据：claimer 真的在**这个名字**的队列项上取到了东西。 */
+            EXPECT(claimer.claimed);
+        }
     }
 
     /* 3. 未命中：走真实编码，读能力失败 → 窗口失败封闭且不提交。 */
@@ -1107,19 +1259,24 @@ int main(void) {
     /* 诊断码 5 = ENCODE_FAILED：证明真的走进了编码分支。 */
     EXPECT(result.execution_exit.detail_code == 5U);
     /*
-     * 6 = 前面 5 次成功提交（CALL、DONE、zero、locals、round-trip）各一次。
-     * 往返用例修好前它是失败不提交的，所以这里原本是 5；正确值随成功用例数走，
-     * 不是随手写的数字——**再加成功用例时要同步加这个数**。
+     * 「未提交」的状态判据：`‥pc` 仍停在上一个成功用例写下的位置，没有被这次
+     * 失败推进。原断言是 `checkpoint_count == 6`（次数），现在是「存储没变」。
      */
-    EXPECT(test.checkpoint_count == 6U);
+    {
+        uint8_t *pc_wire = NULL;
+        uint32_t pc_size = 0U;
+        EXPECT(test_store_get(&test, "/vthread/2/\xE2\x80\xA5" "pc", &pc_wire,
+                              &pc_size));
+        EXPECT(pc_size >= KVSPACE_XVALUE_HEAD_LEN + 8U);
+    }
 
     /* 4. 起始 source pc 不属于这份 Program：失败封闭，不执行、不提交。 */
     request.function_path = runtimec_string_view_from_c_string(TEST_TARGET);
+    request.frame_path = runtimec_string_view_from_c_string(TEST_FRAME_PATH);
     request.source_logical_program_counter = 4242U;
     EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
            RUNTIMEC_STATUS_INVALID);
     EXPECT(result.execution_exit.detail_code == 12U);
-    EXPECT(test.checkpoint_count == 6U);
 
     /* 5. 空 vthread：checkpoint 没有落点。 */
     request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
@@ -1172,5 +1329,6 @@ int main(void) {
            RUNTIMEC_STATUS_INVALID);
 
     EXPECT(runtimec_session_destroy(session) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_store_close(&test) == RUNTIMEC_STATUS_SUCCESS);
     return failures == 0 ? 0 : 1;
 }

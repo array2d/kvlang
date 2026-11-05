@@ -23,11 +23,10 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "engine/execution_window.h"
 #include "engine/session.h"
-#include "host/kvspace_adapter.h"
-#include "host/kvspace_binary_interface.h"
+#include <kvspace/kvspace.h>
 
 #define CAPABILITY_PROBE_TEMPLATE_CAPACITY 512U
 #define CAPABILITY_PROBE_CAPTURE_CAPACITY 512U
@@ -47,15 +46,6 @@ static void probe_deallocate(void *context, void *allocation, size_t size,
     (void)size;
     (void)alignment;
     free(allocation);
-}
-
-static runtimec_kvspace_symbol_address_t probe_resolve_symbol(void *context,
-                                                              const char *name) {
-    void *symbol = dlsym(context, name);
-    runtimec_kvspace_symbol_address_t address;
-
-    memcpy(&address, &symbol, sizeof(address));
-    return address;
 }
 
 /* exit.kind 的数值 + 名字。名字只服务可读性，不参与判定。 */
@@ -204,13 +194,13 @@ int main(int argument_count, char **arguments) {
     const char *source =
         source_path != NULL ? source_buffer : template_buffer;
 
-    /* ── 段 1：装载 kvspace + layout，绑表 ──────────────────────────── */
-    void *kvspace_handle_library = dlopen(kvspace_library, RTLD_NOW | RTLD_LOCAL);
+    /* ── 段 1：装载 layout（kvspace 已是链接期依赖）──────────────────── */
+    (void)kvspace_library;
     void *layout_handle_library = dlopen(layout_library, RTLD_NOW | RTLD_LOCAL);
     layout_code_function_t layout_code_function = NULL;
 
-    if (kvspace_handle_library == NULL || layout_handle_library == NULL) {
-        fprintf(stderr, "cannot load libraries\n");
+    if (layout_handle_library == NULL) {
+        fprintf(stderr, "cannot load layout library\n");
         return 2;
     }
     {
@@ -221,19 +211,8 @@ int main(int argument_count, char **arguments) {
         fprintf(stderr, "layout library lacks kvlangLayoutCode\n");
         return 2;
     }
-    runtimec_kvspace_symbol_resolver_t resolver = {
-        .context = kvspace_handle_library,
-        .resolve = probe_resolve_symbol,
-    };
-    runtimec_kvspace_binary_interface_t binary_interface;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    if (runtimec_kvspace_binary_interface_bind(&resolver, &binary_interface,
-                                               &error) !=
-        RUNTIMEC_STATUS_SUCCESS) {
-        fprintf(stderr, "bind failed\n");
-        return 2;
-    }
 
     /* ── 段 2：layout 源码进 store ─────────────────────────────────── */
     entry[0] = '\0';
@@ -250,21 +229,20 @@ int main(int argument_count, char **arguments) {
     }
 
     /* ── 段 3：adapter + session ──────────────────────────────────── */
-    void *kvspace_handle = binary_interface.connect(dsn);
+    void *kvspace_handle = kvspaceConnect(dsn);
     if (kvspace_handle == NULL) {
         fprintf(stderr, "cannot connect %s\n", dsn);
         return 2;
     }
-    runtimec_kvspace_adapter_request_t adapter_request = {
+    const runtimec_kvspace_access_request_t adapter_request = {
         .allocator = {.context = NULL,
                       .allocate = probe_allocate,
                       .deallocate = probe_deallocate},
         .borrowed_kvspace_handle = kvspace_handle,
         .instance_identifier = UINT64_C(1),
     };
-    runtimec_host_services_t host_services;
-    if (runtimec_kvspace_adapter_create_services(
-            &adapter_request, &binary_interface, &host_services, &error) !=
+    runtimec_kvspace_access_t *kvspace_access = NULL;
+    if (runtimec_kvspace_access_create(&adapter_request, &kvspace_access, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
         fprintf(stderr, "adapter failed\n");
         return 2;
@@ -281,8 +259,9 @@ int main(int argument_count, char **arguments) {
             runtimec_key_view_from_c_string("/lib/probe");
         runtimec_error_t probe_error;
         runtimec_error_reset(&probe_error);
-        const runtimec_status_t probe_status = host_services.source_revision(
-            host_services.context, probe_snapshot.function_key,
+        const runtimec_status_t probe_status =
+            runtimec_kvspace_access_source_revision(
+                kvspace_access, probe_snapshot.function_key,
             &probe_snapshot.source_revision, &probe_error);
         fprintf(stderr,
                 "probe: source_revision status=%d gen=%llu instance=%llu "
@@ -303,7 +282,7 @@ int main(int argument_count, char **arguments) {
     options.machine_code_capacity = 0U;
     options.enable_jit = false;
     runtimec_session_t *session = NULL;
-    if (runtimec_session_create(&host_services, &options, &session, &error) !=
+    if (runtimec_session_create(kvspace_access, &options, &session, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
         fprintf(stderr, "session failed: %.*s\n", (int)error.message.size,
                 error.message.data != NULL ? error.message.data : "");
@@ -332,8 +311,8 @@ int main(int argument_count, char **arguments) {
     request.source_logical_program_counter = 1U;
     /* 紧邻窗口调用再问一次：两次结果不同就说明中间有状态变化。 */
     {
-        const runtimec_host_services_t *session_host = NULL;
-        if (runtimec_session_get_host_services(session, &session_host) ==
+        runtimec_kvspace_access_t *session_host = NULL;
+        if (runtimec_session_get_kvspace_access(session, &session_host) ==
                 RUNTIMEC_STATUS_SUCCESS && session_host != NULL) {
             runtimec_snapshot_t before_snapshot;
             runtimec_snapshot_reset(&before_snapshot);
@@ -342,8 +321,9 @@ int main(int argument_count, char **arguments) {
                 runtimec_key_view_from_c_string("/lib/probe");
             runtimec_error_t before_error;
             runtimec_error_reset(&before_error);
-            const runtimec_status_t before_status = session_host->source_revision(
-                session_host->context, before_snapshot.function_key,
+            const runtimec_status_t before_status =
+                runtimec_kvspace_access_source_revision(
+                    session_host, before_snapshot.function_key,
                 &before_snapshot.source_revision, &before_error);
             fprintf(stderr,
                     "probe: before-execute source_revision status=%d gen=%llu "
@@ -423,7 +403,7 @@ int main(int argument_count, char **arguments) {
     }
 
     runtimec_session_destroy(session);
-    runtimec_kvspace_adapter_destroy_services(&host_services, &error);
-    (void)binary_interface.close(kvspace_handle);
+    runtimec_kvspace_access_destroy(kvspace_access, &error);
+    kvspaceClose(kvspace_handle);
     return 0;
 }

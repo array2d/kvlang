@@ -504,6 +504,31 @@ impl Instruction {
                 }
             }
         }
+        /*
+         * 成员读：`MEMBER_READ_OP(base, seg…)` 是 layout 的**内部记号**，没有对应的
+         * runtime 能力。落盘时必须发成「一个路径文本读参」——`base·seg…`，与**写参
+         * 同形**（写路的写参 key 本来就是 `m·k`，runtime 已能解析这种路径文本）。
+         *
+         * 不这么做的话，`=` 会带着 2 个读参落盘，而 runtime 把 `=` 当 COPY 处理，
+         * 硬要求 1 读 1 写 ⇒ `WRONG_ARITY`。实测：`m·k` 与 `struct·x` 都这样。
+         *
+         * 路径文本的拼法与 `Display`（本文件 413-430）同一规则——**同一事实不写两份**，
+         * 这里直接借它的输出。
+         */
+        if e.op == MEMBER_READ_OP && e.args.len() >= 2 {
+            return ("=".to_string(), vec![e.to_string()]);
+        }
+        /*
+         * 成员读：`MEMBER_READ_OP(base, seg…)` 是 layout 的**内部记号**，没有对应的
+         * runtime 能力。落盘时必须发成「一个路径文本读参」——`base·seg…`，与**写参
+         * 同形**（写路的写参 key 本来就是 `m·k`，runtime 已能解析这种路径文本）。
+         *
+         * 路径文本的拼法与 `Display`（本文件 413-430）同一规则——**同一事实不写两份**，
+         * 这里直接借它的输出。
+         */
+        if e.op == MEMBER_READ_OP && e.args.len() >= 2 {
+            return ("=".to_string(), vec![e.to_string()]);
+        }
         let opcode = e.op.clone();
         let reads: Vec<String> = e
             .args

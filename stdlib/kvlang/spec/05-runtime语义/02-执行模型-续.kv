@@ -13,11 +13,19 @@ lib kvlang/spec/runtime语义/执行模型_续 {
 | `‥returnpc` | 返回后继续的 PC |
 | `‥pc` / `‥status` | **仅根帧**（`/vthread/<vid>/`）持有，记录整个 vthread 的当前 PC 与状态 |
 
-runtime **不得**另存独立的调用栈结构：嵌套帧路径本身即调用链。
+runtime **不得**另存独立的调用栈结构：帧序号本身即调用链（`/vthread/<vid>/[d]`，`d` 递增）。
 
-### `‥pc` / `‥status` 槽编码
+### `‥pc` 槽编码
 
-两者是变长 `char/utf8`，每步都要重写，**必须**用 SLACK 头写：固定头
+`‥pc` 是**执行位置**，langtype `[2]int32`，body 8 字节小端：`[0]` = 帧序号、`[1]` = 该帧内的
+source logical program counter。整值写，热路径不缺省。
+
+`‥callpc`、`‥returnpc` **同编码**，区别只在指向：`‥callpc` 是「哪条指令发起了本帧」，
+`‥returnpc` 是「本帧返回后在调用方继续的位置」。
+
+### `‥status` 槽编码
+
+`‥status` 是变长 `char/utf8`，每步都要重写，**必须**用 SLACK 头写：固定头
 `len=当前字节长`、`storetype=1`、`ptr=0`，body 偏移恒为 8，langtype
 `[<码点数>]char/utf8` 存值内 attr 区（tag 1 记录）。值语义只取前 `len` 字节；物理容量超出
 部分不属于值。

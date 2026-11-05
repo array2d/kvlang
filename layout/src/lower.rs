@@ -1217,36 +1217,122 @@ fn is_cond_simple_slot(inst: &Instruction) -> bool {
 
 // ── 类型推断（对齐 lower/infer.go） ──────────────────────────────────
 
-/// 声明类型表：仅签名与源码写槽注解。推断类型不是声明（[[赋值转换]]），
-/// 故不得进入指令槽的 langtype——否则动态变量会被推断出的静态类型锁死。
-pub fn declared_types(fn_: &Func) -> HashMap<String, String> {
+/// 源级类型表：形参/写参**源码里写的那个类型**（带 `*`/`@`，去 `...`）。
+///
+/// 私有：**表存哪种形态不泄漏到调用点**，只能经下面两个派生函数取。
+/// 判据（`ast.rs:77-114`）：同一个名字有三种互不相同的答案——
+///   源级（本表）  `*int64`、`*/lib/TNode`
+///   `langtype_value`  `int64`、`*/lib/TNode`（标量不可空 / 引用类本身即指针）
+///   `langtype_wire`   `int64`、`/lib/TNode`
+/// 只有源级算得回来，另两个是派生——所以只存源级。
+///
+/// **已生效**：`lower::slot_is_plain_name` 排除 `(*` 之后（coding2 落地），
+/// `(*r)` 这类复合写目标不再被判成普通名，写侧经本表拿到了 `[]char/utf32`。
+/// 实测：`01-basics/strings.kv` 的 `/lib/replace_at` 第 4 条指令，写槽由
+/// `(*r)`（空）变为 `(*r) []char/utf32`。
+pub struct SourceLangtypes {
+    entries: HashMap<String, String>,
+}
+
+impl SourceLangtypes {
+    pub fn new(sig: &ast::FuncSig) -> Self {
+        let mut entries = HashMap::new();
+        for parameter in sig.params.iter().chain(sig.returns.iter()) {
+            if !parameter.ty.is_empty() {
+                entries.insert(parameter.name.clone(), parameter.declared_type());
+            }
+        }
+        Self { entries }
+    }
+
+    /// 列表形态：`declared` 优先，本表补齐——只给 `lower::resolve_slot_type` 这类
+    /// 「按源级类型解析复合槽名」的调用用。
+    pub fn merged_under(&self, declared: &HashMap<String, String>) -> HashMap<String, String> {
+        let mut merged = self.entries.clone();
+        for (name, ty) in declared {
+            merged.insert(name.clone(), ty.clone());
+        }
+        merged
+    }
+
+    /// 值的类型：`*T $x` 的 `*` 是传递方式，不是值类型的一部分——
+    /// （当前唯一消费方在第 5 步「`tm`/`declared` 并入」；那之前允许暂时无人调用。）
+    /// 标量剥掉（`*int64` → `int64`），引用类保留（`*TNode` 的值本身即指针）。
+    pub fn langtype_value(&self, name: &str) -> Option<String> {
+        let source = self.entries.get(name)?;
+        let by_ref_len = source.len() - source.trim_start_matches(['*', '@']).len();
+        let (by_ref, ty) = source.split_at(by_ref_len);
+        if ty.starts_with('/') || ty.starts_with('*') {
+            Some(source.clone())
+        } else if by_ref.is_empty() {
+            Some(ty.to_string())
+        } else {
+            Some(ty.to_string())
+        }
+    }
+
+    /// wire langtype：**不含** `*`/`@`（spec 04-layout语义/03-函数:17：传递方式由帧槽
+    /// 的指针位承载，不进类型串）。
+    pub fn langtype_wire(&self, name: &str) -> Option<String> {
+        let source = self.entries.get(name)?;
+        Some(
+            source
+                .trim_end_matches("...")
+                .trim_start_matches(['*', '@'])
+                .to_string(),
+        )
+    }
+}
+
+
+/// 形参/返回的**值类型**（Value 形态，见 `ast::Param::value_type`）。
+/// 推断类型不是声明（[[赋值转换]]），故不得进入指令槽的 langtype。
+pub fn value_langtypes(fn_: &Func) -> HashMap<String, String> {
+    // 由**源级表**派生，不再各自调 `value_type()`：形态只有一个存储处，
+    // 派生只有一条规则（见 `SourceLangtypes::langtype_value`）。
+    let source = SourceLangtypes::new(&fn_.sig);
     let mut d = HashMap::new();
     for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
         if !p.ty.is_empty() {
-            d.insert(p.name.clone(), p.value_type());
+            if let Some(value) = source.langtype_value(&p.name) {
+                d.insert(p.name.clone(), value);
+            }
         }
     }
+    d
+}
+
+/// 写槽声明的**源级类型**（原样，带 `*`/`@`）。
+pub fn source_level_langtypes(fn_: &Func) -> HashMap<String, String> {
+    let mut d = HashMap::new();
     collect_declared(&fn_.body, &mut d);
     /*
      * 「首次写入为 None」的槽再补一趟：它们的类型只能从后续写入的唯一具体类型推。
-     * 这一处不收集诊断——`declared_types` 是查询接口，没有报错通道；冲突会在
+     * 这一处不收集诊断——本函数是查询接口，没有报错通道；冲突会在
      * `collect_type_sets` 那一趟（有 diags）报出来。
      */
     d
 }
 
+/// **唯一合成点**：把两张**形态不同**的表合成一张「按名字查」的表。
+///
+/// 形参行（Value 形态）**优先于**写槽行（源级形态）：原 `declared_types` 内部先插
+/// 形参、再 `collect_declared`（它用 `entry().or_insert`，写槽插不进去）。
+/// **保持同一优先级是等价性条件，不是巧合**——改了就是行为变化。
+///
+/// **死法：第 5 步把两张表并成单一入口后删除本函数**，届时合成不再需要。
+pub fn declared_langtypes_by_origin(fn_: &Func) -> HashMap<String, String> {
+    let mut declared = source_level_langtypes(fn_);
+    for (name, type_text) in value_langtypes(fn_) {
+        declared.insert(name, type_text);
+    }
+    declared
+}
+
 pub fn infer_types(fn_: &Func) -> HashMap<String, String> {
-    let mut tm = HashMap::new();
-    for p in &fn_.sig.params {
-        if !p.ty.is_empty() {
-            tm.insert(p.name.clone(), p.value_type());
-        }
-    }
-    for p in &fn_.sig.returns {
-        if !p.ty.is_empty() {
-            tm.insert(p.name.clone(), p.value_type());
-        }
-    }
+    // 种子来自**同一个**源级表（Value 形态），不再各写一遍 `value_type()`：
+    // `tm` 只承载**推断**出来的类型，声明类型由表给出。
+    let mut tm = value_langtypes(fn_);
     infer_body(&fn_.body, &mut tm);
     tm
 }
@@ -2660,7 +2746,7 @@ fn struct_lookup<'a>(ty: &str, structs: &'a StructTable) -> Option<&'a ast::Stru
     structs.get(n)
 }
 
-fn slot_is_plain_name(w: &str) -> bool {
+pub(crate) fn slot_is_plain_name(w: &str) -> bool {
     !w.is_empty()
         && !w.starts_with('/')
         && !w.starts_with('*')
@@ -3694,10 +3780,10 @@ pub fn validate_writes(
     sigs: &SigTable,
 ) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
-    // 用 `pointer_type()`（带传递方式前缀），与 `declared_types()` 同一来源——
+    // 用 `pointer_type()`（带传递方式前缀），与 `declared_langtypes_by_origin()` 同一来源——
     // 这里曾用 `p.ty.clone()`（剥过前缀），于是 `**N $h` 的 `h` 记成 `/lib/N`，
     // 写侧 `*h` 就比读侧少一层 `*`。**同一事实不能有两份构造**。
-    let declared = declared_types(fn_);
+    let declared = declared_langtypes_by_origin(fn_);
     walk_writes(&fn_.body, sigs, tm, structs, &declared, &mut diags);
     diags
 }
@@ -3714,6 +3800,30 @@ mod union_match_tests {
         assert!(!value_matches("int64|float64", "int32"));
         assert!(value_matches("int64|float64", "int64|float64"));
         assert!(!value_matches("int64", "int64|float64"));
+    }
+
+    /// 第 5 步的对照用例：形参 `*int64 $p` 的**源级** `*int64` 与**值** `int64`
+    /// 在 `value_matches` 上行为不同，而且**值形态才是对的**。
+    ///
+    ///   `value_matches("*int64", "int64") == false` —— 源级会把「实参是 int64」的
+    ///       合法调用判成不匹配（`split_prefix` 让 `*` 前缀必须两边一致）；
+    ///   `value_matches("int64",  "int64") == true` —— 这才是「实参值 vs 形参要求的值」。
+    ///
+    /// 依据：spec `04-layout语义/03-函数:17`（wire langtype 不含 `*`/`@`，传递方式由
+    /// 帧槽指针位承载）与 `03-类型系统/16-ptr`（`*T $x` 的 `*` 是传递方式，不是值类型
+    /// 的一部分）。调用点因此先 `deref_value_type(&param.pointer_type())` 再比
+    /// （见 `check_call_shapes` 与 `walk_inst` 的两处）。
+    ///
+    /// **第 5 步的含义**：把 `tm` 并入统一入口时，喂给 `value_matches` /
+    /// `check_assignable` 的必须是 `TypeForm::Value`，不是源级——否则合法调用会被拒。
+    #[test]
+    fn value_form_is_what_assignment_checks_need() {
+        // 源级喂进来：合法调用被判不匹配。
+        assert!(!value_matches("*int64", "int64"));
+        // 值形态喂进来：匹配。
+        assert!(value_matches("int64", "int64"));
+        // 引用类两者相同（`*TNode` 的值本身即指针），所以这条差异只在标量上出现。
+        assert!(value_matches("*TNode", "*TNode"));
     }
 
     #[test]

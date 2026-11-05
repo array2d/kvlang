@@ -27,11 +27,9 @@
 
 #include <sys/stat.h>
 
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "engine/execution_window.h"
 #include "engine/session.h"
-#include "host/kvspace_adapter.h"
-#include "host/kvspace_binary_interface.h"
 
 #define SKIP_RETURN_CODE 77
 
@@ -94,27 +92,27 @@ static runtimec_status_t publish_def_rwir(
     snprintf(route_key, sizeof(route_key), "/lib/%s", opcode);
     snprintf(signature_key, sizeof(signature_key), "/lib/%s/[0,-1]", opcode);
     error_text[0] = '\0';
-    if (binary_interface->mkindex(handle, "/lib/", 0U, error_text,
+    if (kvspaceMkindex(handle, "/lib/", 0U, error_text,
                                   (uint32_t)sizeof(error_text)) != 0) {
         return RUNTIMEC_STATUS_ERROR;
     }
-    if (binary_interface->new_slack(body, sizeof(body), sizeof(body),
+    if (kvspaceXvalueHeadNewSlack(body, sizeof(body), sizeof(body),
                                     "def rwir", &wire, &wire_size) != 0) {
         return RUNTIMEC_STATUS_ERROR;
     }
     error_text[0] = '\0';
-    if (binary_interface->set_value(handle, route_key, wire,
+    if (kvspaceSetValue(handle, route_key, wire,
                                     (uint32_t)wire_size, error_text,
                                     (uint32_t)sizeof(error_text)) != 0) {
         return RUNTIMEC_STATUS_ERROR;
     }
-    if (binary_interface->new_slack((const uint8_t *)signature,
+    if (kvspaceXvalueHeadNewSlack((const uint8_t *)signature,
                                     strlen(signature), strlen(signature),
                                     "def langtype", &wire, &wire_size) != 0) {
         return RUNTIMEC_STATUS_ERROR;
     }
     error_text[0] = '\0';
-    if (binary_interface->set_value(handle, signature_key, wire,
+    if (kvspaceSetValue(handle, signature_key, wire,
                                     (uint32_t)wire_size, error_text,
                                     (uint32_t)sizeof(error_text)) != 0) {
         return RUNTIMEC_STATUS_ERROR;
@@ -174,7 +172,7 @@ int main(int argument_count, char **arguments) {
     (void)mkdir(directory, 0700);
     snprintf(data_source_name, sizeof(data_source_name), "shm://%s/store.shm",
              directory);
-    void *handle = binary_interface.connect(data_source_name);
+    void *handle = kvspaceConnect(data_source_name);
     if (handle == NULL) {
         fprintf(stderr, "SKIP: cannot connect %s\n", data_source_name);
         return SKIP_RETURN_CODE;
@@ -202,7 +200,7 @@ int main(int argument_count, char **arguments) {
         .borrowed_kvspace_handle = handle,
         .instance_identifier = UINT64_C(1),
     };
-    runtimec_host_services_t host_services;
+    runtimec_kvspace_access_t host_services;
     if (runtimec_kvspace_adapter_create_services(
             &adapter_request, &binary_interface, &host_services,
             &error) != RUNTIMEC_STATUS_SUCCESS) {

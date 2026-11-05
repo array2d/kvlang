@@ -39,7 +39,6 @@ ALLOWED_DEPENDENCIES = {
 }
 EXPECTED_COMPONENT_ORDER = (
     ("runtimec_contract", "contract"),
-    ("runtimec_host", "host"),
     ("runtimec_binrwir", "binrwir"),
     ("runtimec_vmkv", "vmkv"),
     ("runtimec_binrwir_compiler", "binrwir_compiler"),
@@ -48,13 +47,12 @@ EXPECTED_COMPONENT_ORDER = (
 )
 EXPECTED_TARGET_DEPENDENCIES = {
     "runtimec_contract": set(),
-    "runtimec_host": {"runtimec_contract"},
     "runtimec_binrwir": {"runtimec_contract"},
     "runtimec_vmkv": {"runtimec_contract", "runtimec_binrwir"},
     "runtimec_binrwir_compiler": {"runtimec_contract", "runtimec_binrwir"},
     "runtimec_vmbin": {"runtimec_contract", "runtimec_binrwir"},
     "runtimec_engine": {
-        "runtimec_contract", "runtimec_host", "runtimec_binrwir",
+        "runtimec_contract", "runtimec_binrwir",
         "runtimec_vmkv", "runtimec_binrwir_compiler", "runtimec_vmbin",
     },
     "runtimec_interface": {"runtimec_contract", "runtimec_engine"},
@@ -124,15 +122,13 @@ JIT_EXCLUSIVE_STORAGE_PATTERN = re.compile(
     r"spill[ _]?slot|spill[ _]?state|spilled?[ _]?register)",
     re.IGNORECASE,
 )
-# 二进制接口版本不写死具体数字：头文件定义与契约测试的 pin 必须一致。
-BINARY_INTERFACE_VERSION_DEFINITION = re.compile(
-    r"#define\s+RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION\s+(\d+)U\b"
-)
+# 合同只有**一个定义点**：`contract/kvspace_access.h`。二进制接口版本宏随
+# `contract/host_services.h` 一起删除——那张函数指针表没了，就没有「表版本」这件
+# 事可 pin。判据从「版本一致」换成「唯一锚点存在且被唯一实现在 .c」。
+CONTRACT_HEADER = ("contract", "kvspace_access.h")
+CONTRACT_IMPLEMENTATION = ("contract", "kvspace_access.c")
 BODY_OFFSET_DEFINITION = re.compile(
     r"#define\s+RUNTIMEC_XVALUE_BODY_OFFSET_BYTES\s+(\S+)")
-BINARY_INTERFACE_VERSION_PIN = re.compile(
-    r"RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION\s*==\s*(\d+)U\b"
-)
 # 裁决 decision-vmbin-data-path §2：+8 只有一处实现，在合同里。
 CONTRACT_BODY_ADDRESS_FUNCTION = "runtimec_xvalue_body_address("
 CONTRACT_BODY_ADDRESS_DERIVATION = "xvalue_address + RUNTIMEC_XVALUE_BODY_OFFSET_BYTES"
@@ -178,8 +174,7 @@ AUDIT_RULES = (
     "forbidden-layer-edge",
     "forbidden-tree-include",
     "hardcoded-body-address-derivation-outside-contract",
-    "host-services-version",
-    "host-services-version-pin",
+    "contract-anchor-missing",
     "jit-storage-outside-jit",
     "missing-addressed-binrwir-file",
     "missing-build-file",
@@ -513,45 +508,27 @@ def audit_addressed_binrwir_model(
                 "`body_address` must not appear",
             ))
 
-    host_services = runtimec_root / "contract" / "host_services.h"
-    host_text = host_services.read_text(encoding="utf-8") \
-        if host_services.is_file() else ""
-    version = BINARY_INTERFACE_VERSION_DEFINITION.search(host_text)
-    if version is None:
+    contract_header = runtimec_root.joinpath(*CONTRACT_HEADER)
+    contract_source = runtimec_root.joinpath(*CONTRACT_IMPLEMENTATION)
+    contract_anchor = contract_header
+    host_text = contract_header.read_text(encoding="utf-8") \
+        if contract_header.is_file() else ""
+    # 锚点必须存在：文件没了，下面每一条偏移判据都会退化成「找不到就跳过」，
+    # 那是最安静的失效方式。这里先把它变成一条显式 finding。
+    if not host_text:
         findings.append(Finding(
-            relative_display(host_services, repository_root), 1,
-            "host-services-version",
-            "an explicit unsigned binary interface version is required",
+            relative_display(contract_header, repository_root), 1,
+            "contract-anchor-missing",
+            "the contract header is the single anchor for body-offset "
+            "arithmetic; it must exist",
         ))
-    else:
-        pins = {}
-        tests_directory = runtimec_root / "tests"
-        for path in sorted(tests_directory.glob("*.c")):
-            for match in BINARY_INTERFACE_VERSION_PIN.finditer(
-                    c_code_without_comments_or_literals(
-                        path.read_text(encoding="utf-8"))):
-                pins.setdefault(match.group(1), []).append(
-                    relative_display(path, repository_root))
-        if not pins:
-            findings.append(Finding(
-                relative_display(host_services, repository_root), 1,
-                "host-services-version-pin",
-                "a contract test must pin the declared binary interface version",
-            ))
-        for pinned, places in sorted(pins.items()):
-            if pinned != version.group(1):
-                findings.append(Finding(
-                    places[0], 1, "host-services-version-pin",
-                    f"contract test pins version {pinned} while the header "
-                    f"declares {version.group(1)}",
-                ))
     # 判据是「偏移等于值头长度」，不是一个会过期的数字：头从 8 长到 16 时，
     # `== 8U` 会变成假红，而真正的不变量没变。
     offset_definition = BODY_OFFSET_DEFINITION.search(host_text)
     if offset_definition is None or \
             offset_definition.group(1) != "KVSPACE_XVALUE_HEAD_LEN":
         findings.append(Finding(
-            relative_display(host_services, repository_root), 1,
+            relative_display(contract_anchor, repository_root), 1,
             "xvalue-body-address-contract",
             "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES must be defined as "
             "KVSPACE_XVALUE_HEAD_LEN, never as a numeric literal",
@@ -559,7 +536,7 @@ def audit_addressed_binrwir_model(
     for token in ("resolve_static_xvalue_address",):
         if token not in host_text:
             findings.append(Finding(
-                relative_display(host_services, repository_root), 1,
+                relative_display(contract_anchor, repository_root), 1,
                 "xvalue-body-address-contract", token,
             ))
 
@@ -574,7 +551,7 @@ def audit_addressed_binrwir_model(
     # 裁决 decision-vmbin-data-path §2：`+8` 的唯一实现在合同里，vmkv 与 vmbin 都调用
     # `runtimec_xvalue_body_address`。判据按宏的出现位置：任何产品源只要自己写偏移
     # 算术就是违规，调用函数不算——调用式里根本不出现这个宏。
-    contract_implementation = runtimec_root / "contract" / "host_services.c"
+    contract_implementation = contract_source
     contract_code = code_by_path.get(contract_implementation, "")
     if CONTRACT_BODY_ADDRESS_FUNCTION not in contract_code:
         findings.append(Finding(
@@ -585,7 +562,7 @@ def audit_addressed_binrwir_model(
     if CONTRACT_BODY_ADDRESS_FUNCTION not in c_code_without_comments_or_literals(
             host_text):
         findings.append(Finding(
-            relative_display(host_services, repository_root), 1,
+            relative_display(contract_anchor, repository_root), 1,
             "contract-body-address-derivation",
             f"the contract must declare {CONTRACT_BODY_ADDRESS_FUNCTION[:-1]}",
         ))
@@ -610,7 +587,7 @@ def audit_addressed_binrwir_model(
                     f"{CONTRACT_BODY_ADDRESS_FUNCTION[:-1]}, found {occurrences}",
                 ))
     for path, code in code_by_path.items():
-        if path in (host_services, contract_implementation):
+        if path in (contract_anchor, contract_implementation):
             continue
         if "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES" in code:
             findings.append(Finding(
@@ -619,7 +596,7 @@ def audit_addressed_binrwir_model(
                     "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES")) + 1,
                 "body-address-derivation-outside-contract",
                 "the XValue body offset arithmetic belongs to "
-                f"{CONTRACT_BODY_ADDRESS_FUNCTION[:-1]} in contract/host_services.c",
+                f"{CONTRACT_BODY_ADDRESS_FUNCTION[:-1]} in " + "/".join(CONTRACT_IMPLEMENTATION),
             ))
         for match in HARDCODED_XVALUE_BODY_OFFSET_PATTERN.finditer(code):
             findings.append(Finding(
@@ -843,7 +820,6 @@ SELFTEST_CMAKE = """\
 cmake_minimum_required(VERSION 3.20)
 project(runtimec_selftest LANGUAGES C)
 runtimec_add_component(runtimec_contract contract)
-runtimec_add_component(runtimec_host host)
 runtimec_add_component(runtimec_binrwir binrwir)
 runtimec_add_component(runtimec_vmkv vmkv)
 runtimec_add_component(runtimec_binrwir_compiler binrwir_compiler)
@@ -853,12 +829,11 @@ add_library(runtimec_interface STATIC interface/public_interface.c)
 add_library(runtimec_product SHARED interface/public_interface.c)
 target_link_options(runtimec_product PRIVATE "LINKER:--version-script=exports.map")
 target_link_libraries(runtimec_contract PUBLIC)
-target_link_libraries(runtimec_host PUBLIC runtimec_contract)
 target_link_libraries(runtimec_binrwir PUBLIC runtimec_contract)
 target_link_libraries(runtimec_vmkv PUBLIC runtimec_contract runtimec_binrwir)
 target_link_libraries(runtimec_binrwir_compiler PUBLIC runtimec_contract runtimec_binrwir)
 target_link_libraries(runtimec_vmbin PUBLIC runtimec_contract runtimec_binrwir)
-target_link_libraries(runtimec_engine PUBLIC runtimec_contract runtimec_host runtimec_binrwir runtimec_vmkv runtimec_binrwir_compiler runtimec_vmbin)
+target_link_libraries(runtimec_engine PUBLIC runtimec_contract runtimec_binrwir runtimec_vmkv runtimec_binrwir_compiler runtimec_vmbin)
 target_link_libraries(runtimec_interface PUBLIC runtimec_contract runtimec_engine)
 """
 
@@ -899,16 +874,17 @@ typedef struct binrwir_jit_lowering_plan_options_t {
 } binrwir_jit_lowering_plan_options_t;
 """
 
-SELFTEST_HOST_HEADER = """\
-#define RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION 4U
+SELFTEST_CONTRACT_HEADER = """\
 #define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES KVSPACE_XVALUE_HEAD_LEN
 static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U, "offset");
 runtimec_value_body_address_t
 runtimec_xvalue_body_address(runtimec_xvalue_address_t xvalue_address);
-runtimec_host_address_t resolve_static_xvalue_address(runtimec_host_address_t host);
+runtimec_status_t
+runtimec_kvspace_access_resolve_static_xvalue_address(
+    runtimec_kvspace_access_t *access, runtimec_xvalue_address_t *output);
 """
 
-SELFTEST_HOST_SOURCE = """\
+SELFTEST_CONTRACT_SOURCE = """\
 runtimec_value_body_address_t
 runtimec_xvalue_body_address(runtimec_xvalue_address_t xvalue_address) {
     if (xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE ||
@@ -983,8 +959,8 @@ def selftest_base_tree() -> dict[str, str]:
     return {
         "CMakeLists.txt": SELFTEST_CMAKE,
         "interface/public_interface.c": "int runtimec_public_interface(void) { return 0; }\n",
-        "contract/host_services.h": SELFTEST_HOST_HEADER,
-        "contract/host_services.c": SELFTEST_HOST_SOURCE,
+        "contract/kvspace_access.h": SELFTEST_CONTRACT_HEADER,
+        "contract/kvspace_access.c": SELFTEST_CONTRACT_SOURCE,
         "binrwir/argument.h": SELFTEST_ARGUMENT_HEADER,
         "binrwir/argument.c": (
             "int binrwir_argument_validate(void) {\n"
@@ -1049,8 +1025,8 @@ SELFTEST_CASES = (
                  write=((("CMakeLists.txt"),
                          SELFTEST_CMAKE.replace(
                              "runtimec_add_component(runtimec_contract contract)\n"
-                             "runtimec_add_component(runtimec_host host)\n",
-                             "runtimec_add_component(runtimec_host host)\n"
+                             "runtimec_add_component(runtimec_binrwir binrwir)\n",
+                             "runtimec_add_component(runtimec_binrwir binrwir)\n"
                              "runtimec_add_component(runtimec_contract contract)\n")),)),
     SelftestCase("interface-component-missing", ("missing-interface-component",),
                  write=(("CMakeLists.txt",
@@ -1129,44 +1105,39 @@ SELFTEST_CASES = (
                              "    uint32_t code_generation_revision;\n",
                              "    uint32_t code_generation_revision;\n"
                              "    uint32_t optional_flag;\n")),)),
-    SelftestCase("host-services-version-missing", ("host-services-version",),
-                 write=(("contract/host_services.h",
-                         SELFTEST_HOST_HEADER.replace(
-                             "#define RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION "
-                             "4U\n", "")),)),
-    SelftestCase("host-services-version-pin-drift",
-                 ("host-services-version-pin",),
-                 write=(("tests/contracts_test.c",
-                         "_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION "
-                         "== 5U, \"version\");\n"),)),
+    # 新增：锚点文件缺失必须报，不许因为「读不到就跳过」而静默。
+    SelftestCase("contract-anchor-missing", ("contract-anchor-missing",),
+                 delete=("contract/kvspace_access.h",)),
     # 头从 8 长到 16：偏移定义不改形，规则不得因为数字变了而红。
     SelftestCase("xvalue-body-offset-follows-head-length",
                  forbid=("xvalue-body-address-contract",),
-                 write=(("contract/host_services.h",
-                         SELFTEST_HOST_HEADER.replace(
+                 write=(("contract/kvspace_access.h",
+                         SELFTEST_CONTRACT_HEADER.replace(
                              "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U",
                              "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 16U")),)),
     # 偏移被写成数字字面量 —— 数字一旦被写死，换头长就没人能证明两者还相等。
     SelftestCase("xvalue-body-offset-numeric-literal",
                  ("xvalue-body-address-contract",),
-                 write=(("contract/host_services.h",
-                         SELFTEST_HOST_HEADER.replace(
+                 write=(("contract/kvspace_access.h",
+                         SELFTEST_CONTRACT_HEADER.replace(
                              "#define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES "
                              "KVSPACE_XVALUE_HEAD_LEN",
                              "#define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES 8U")),)),
     SelftestCase("xvalue-body-contract-token-missing",
                  ("xvalue-body-address-contract",),
-                 write=(("contract/host_services.h",
-                         SELFTEST_HOST_HEADER.replace(
-                             "runtimec_host_address_t resolve_static_xvalue_address"
-                             "(runtimec_host_address_t host);\n", "")),)),
+                 write=(("contract/kvspace_access.h",
+                         SELFTEST_CONTRACT_HEADER.replace(
+                             "runtimec_status_t\n"
+                             "runtimec_kvspace_access_resolve_static_xvalue_address(\n"
+                             "    runtimec_kvspace_access_t *access, "
+                             "runtimec_xvalue_address_t *output);\n", "")),)),
     SelftestCase("contract-derivation-missing",
                  ("contract-body-address-derivation",),
-                 write=(("contract/host_services.c", "int contract_placeholder;\n"),)),
+                 write=(("contract/kvspace_access.c", "int contract_placeholder;\n"),)),
     SelftestCase("contract-derivation-zero-address-removed",
                  ("contract-body-address-derivation",),
-                 write=(("contract/host_services.c",
-                         SELFTEST_HOST_SOURCE.replace(
+                 write=(("contract/kvspace_access.c",
+                         SELFTEST_CONTRACT_SOURCE.replace(
                              "    if (xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE ||\n"
                              "        xvalue_address > UINT64_MAX - "
                              "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) {\n",
@@ -1175,7 +1146,7 @@ SELFTEST_CASES = (
     # 已知陷阱：注释与字面量里的诱饵既不能让定位器认错函数，也不能冒充计数。
     SelftestCase("contract-derivation-comment-decoy",
                  ("contract-body-address-derivation",),
-                 write=(("contract/host_services.c",
+                 write=(("contract/kvspace_access.c",
                          "/* runtimec_xvalue_body_address( { { */\n"
                          "runtimec_value_body_address_t\n"
                          "runtimec_xvalue_body_address(runtimec_xvalue_address_t "
@@ -1190,9 +1161,9 @@ SELFTEST_CASES = (
     # 正例：注释里有诱饵，但真实实现完整 —— 不得报。
     SelftestCase("contract-derivation-decoy-clean",
                  forbid=("contract-body-address-derivation",),
-                 write=(("contract/host_services.c",
+                 write=(("contract/kvspace_access.c",
                          "/* runtimec_xvalue_body_address( { { */\n" +
-                         SELFTEST_HOST_SOURCE),)),
+                         SELFTEST_CONTRACT_SOURCE),)),
     SelftestCase("body-offset-arithmetic-outside-contract",
                  ("body-address-derivation-outside-contract",),
                  write=(("vmbin/value_access.c",
@@ -1224,8 +1195,8 @@ SELFTEST_CASES = (
                          '#include "runtime/legacy.h"\n' + SELFTEST_EXECUTION_WINDOW),)),
     # kvspace 头只存在于 kvspace 仓自己的 include/；runtimec 源引用它是正常依赖。
     SelftestCase("kvspace-include-resolves", forbid=("unresolved-private-include",),
-                 write=(("contract/host_services.h",
-                         '#include "kvspace/xvalue_head.h"\n' + SELFTEST_HOST_HEADER),
+                 write=(("contract/kvspace_access.h",
+                         '#include "kvspace/xvalue_head.h"\n' + SELFTEST_CONTRACT_HEADER),
                         ("../../kvspace/include/kvspace/xvalue_head.h",
                          "#define KVSPACE_XVALUE_HEAD_LEN 16u\n"))),
     SelftestCase("unresolved-private-include", ("unresolved-private-include",),
@@ -1234,7 +1205,7 @@ SELFTEST_CASES = (
     SelftestCase("forbidden-layer-edge", ("forbidden-layer-edge",),
                  write=(("contract/status.h", "int status_layer;\n"),
                         ("contract/status.c",
-                         '#include "host/host_services.h"\n' + "int status_layer;\n"))),
+                         '#include "binrwir/program.h"\n' + "int status_layer;\n"))),
     SelftestCase("binrwir-owned-by-vmbin", ("binrwir-owned-by-vmbin",),
                  write=(("vmbin/value.c", "int binrwir_value_copy;\n"),)),
     SelftestCase("policy-merge-non-owner", ("policy-merge-outside-owner",),

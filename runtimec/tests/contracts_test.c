@@ -1,6 +1,7 @@
 /* Freeze only compact cross-component contracts selected by the design. */
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -12,7 +13,7 @@
 #include "binrwir/instruction.h"
 #include "binrwir/program.h"
 #include "binrwir/signature.h"
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "kvspace/xvalue_head.h"
 
 _Static_assert(RUNTIMEC_STATUS_SUCCESS == 0, "success must remain zero");
@@ -28,9 +29,6 @@ _Static_assert(RUNTIMEC_STATUS_ERROR == 7, "error status changed");
 _Static_assert(RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY == 8,
                "insufficient-capacity status changed");
 
-/* 版本 pin：接口每次变更都必须在这里显式改一次，其余断言从宏推导。 */
-_Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION == 8U,
-               "host services binary interface must remain version 8");
 _Static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 16U,
                "V.body must start sixteen bytes after the XValue base");
 _Static_assert(sizeof(runtimec_xvalue_address_t) == 8U,
@@ -324,14 +322,198 @@ static void test_xvalue_head_sixteen_byte_layout(void) {
     RUNTIMEC_EXPECT(kvspaceXvalueHeadTotalLen(&padded) == 0U);
 }
 
-static void test_host_services_version(void) {
-    runtimec_host_services_t services;
 
-    runtimec_host_services_initialize(&services);
-    RUNTIMEC_EXPECT(services.binary_interface_version ==
-                    RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION);
-    services.binary_interface_version = 2U;
-    RUNTIMEC_EXPECT(!runtimec_host_services_is_valid(&services));
+/* ── storetype 4（定容量变长）矩阵 ────────────────────────────────────
+ *
+ * 三方各实现一份（`kvspace-durable` Rust / `kvspace-c` / `runtimec`），没有共享
+ * ABI 符号，一致性只能靠「同一组输入 → 同一组输出」。这张表就是那组输入输出。
+ *
+ * **`runtimec_value_body_length` 没有错误通道**：畸形 wire 与「长度本来就是 0」
+ * 都返回 `0`。所以第 2 组（`reallen == 0` 合法）**不能靠返回值证明** —— 它和
+ * 第 3/4/6/7 组在返回值上无法区分。这一点写成显式断言（`contracts_test_varlen_ambiguity`），
+ * 因为它是 J-5 之前必须补一条带状态码入口的理由；不写进测试就没人看得见。
+ */
+
+/* 造一条 storetype 4 wire：`capacity` 字节体 + 可选 tag 2（reallen）+ 可选的
+ * 重复 / 畸形 / 尾部残余。数值一律从 `KVSPACE_XVALUE_*` 取，不写死 2 或 4。 */
+static uint8_t *contracts_make_varlen(uint64_t capacity, int64_t reallen,
+                                      int duplicate, int malformed_length,
+                                      size_t trailing_bytes) {
+    /* 一条 tag 2 记录 = tag(1) + 长度(2) + 值(8) = 11；畸形那条只占 3+4=7。 */
+    const size_t record_size = 3U + 8U;
+    const size_t malformed_size = 3U + 4U;
+    uint64_t attrs_length = 0U;
+    if (reallen >= 0) {
+        attrs_length += malformed_length ? malformed_size : record_size;
+    }
+    if (duplicate) {
+        attrs_length += record_size;
+    }
+    attrs_length += trailing_bytes;
+    const uint64_t total =
+        KVSPACE_XVALUE_HEAD_LEN + capacity + attrs_length;
+    uint8_t *wire = (uint8_t *)calloc(1, (size_t)total);
+
+    if (wire == NULL) {
+        return NULL;
+    }
+    kvspaceXvalueHead head;
+    memset(&head, 0, sizeof(head));
+    head.storetype = KVSPACE_XVALUE_ST_VARLEN;
+    head.ptr = KVSPACE_XVALUE_PTR_INLINE;
+    kvspaceXvalueHeadSetLen(&head, capacity);
+    kvspaceXvalueHeadSetAttrsLen(&head, (uint32_t)attrs_length);
+    memcpy(wire, &head, sizeof(head));
+    uint8_t *attrs = wire + KVSPACE_XVALUE_HEAD_LEN + capacity;
+    if (reallen >= 0) {
+        attrs[0] = KVSPACE_XVALUE_ATTR_TAG_REALLEN;
+        attrs[1] = (uint8_t)(malformed_length ? 4U : 8U);
+        attrs[2] = 0U;
+        if (!malformed_length) {
+            for (size_t index = 0U; index < 8U; ++index) {
+                attrs[3U + index] = (uint8_t)((uint64_t)reallen >> (8U * index));
+            }
+        }
+        attrs += malformed_length ? malformed_size : record_size;
+    }
+    if (duplicate) {
+        attrs[0] = KVSPACE_XVALUE_ATTR_TAG_REALLEN;
+        attrs[1] = 8U;
+        attrs[2] = 0U;
+        for (size_t index = 0U; index < 8U; ++index) {
+            attrs[3U + index] = (uint8_t)((uint64_t)reallen >> (8U * index));
+        }
+        attrs += record_size;
+    }
+    /* 尾部残余：填非零垃圾，证明它**被忽略**而不是恰好是零。 */
+    for (size_t index = 0U; index < trailing_bytes; ++index) {
+        attrs[index] = 0xABU;
+    }
+    return wire;
+}
+
+static runtimec_value_body_address_t contracts_varlen_body(const uint8_t *wire) {
+    return (runtimec_value_body_address_t)(uintptr_t)wire +
+           RUNTIMEC_XVALUE_BODY_OFFSET_BYTES;
+}
+
+/* 1 闭环：capacity=32、reallen=5 → 5。 */
+static void contracts_test_varlen_reallen_below_capacity(void) {
+    uint8_t *wire = contracts_make_varlen(32U, 5, 0, 0, 0U);
+    RUNTIMEC_EXPECT(wire != NULL);
+    RUNTIMEC_EXPECT(runtimec_value_body_length(contracts_varlen_body(wire)) ==
+                    5U);
+    free(wire);
+}
+
+/* 1b reallen == 容量：满了，没有余量 → 容量值。 */
+static void contracts_test_varlen_reallen_equals_capacity(void) {
+    uint8_t *wire = contracts_make_varlen(16U, 16, 0, 0, 0U);
+    RUNTIMEC_EXPECT(wire != NULL);
+    RUNTIMEC_EXPECT(runtimec_value_body_length(contracts_varlen_body(wire)) ==
+                    16U);
+    free(wire);
+}
+
+/* 2 reallen == 0：**合法空值**（容量已分配、无内容）→ 0。 */
+static void contracts_test_varlen_reallen_zero_is_legal(void) {
+    uint8_t *wire = contracts_make_varlen(16U, 0, 0, 0, 0U);
+    RUNTIMEC_EXPECT(wire != NULL);
+    RUNTIMEC_EXPECT(runtimec_value_body_length(contracts_varlen_body(wire)) ==
+                    0U);
+    free(wire);
+}
+
+/* 3 缺 tag 2 → 不可信 → 0。 */
+static void contracts_test_varlen_missing_tag(void) {
+    uint8_t *wire = contracts_make_varlen(8U, -1, 0, 0, 0U);
+    RUNTIMEC_EXPECT(wire != NULL);
+    RUNTIMEC_EXPECT(runtimec_value_body_length(contracts_varlen_body(wire)) ==
+                    0U);
+    free(wire);
+}
+
+/* 4 reallen > 容量 → 0。 */
+static void contracts_test_varlen_reallen_over_capacity(void) {
+    uint8_t *wire = contracts_make_varlen(8U, 9, 0, 0, 0U);
+    RUNTIMEC_EXPECT(wire != NULL);
+    RUNTIMEC_EXPECT(runtimec_value_body_length(contracts_varlen_body(wire)) ==
+                    0U);
+    free(wire);
+}
+
+/* 6 重复 tag 2 → 两个事实源 → 0。 */
+static void contracts_test_varlen_duplicate_tag(void) {
+    uint8_t *wire = contracts_make_varlen(8U, 3, 1, 0, 0U);
+    RUNTIMEC_EXPECT(wire != NULL);
+    RUNTIMEC_EXPECT(runtimec_value_body_length(contracts_varlen_body(wire)) ==
+                    0U);
+    free(wire);
+}
+
+/* 7 tag 2 记录长度 ≠ 8 → 畸形 → 0。 */
+static void contracts_test_varlen_malformed_record_length(void) {
+    uint8_t *wire = contracts_make_varlen(8U, 3, 0, 1, 0U);
+    RUNTIMEC_EXPECT(wire != NULL);
+    RUNTIMEC_EXPECT(runtimec_value_body_length(contracts_varlen_body(wire)) ==
+                    0U);
+    free(wire);
+}
+
+/* 8 尾部残余不足一条记录（2 字节）：**必须被忽略**，不改变结果。
+ *
+ * 判据是「扫描按 `left >= 3`」，所以 <3 的尾巴自然不参与。填 0xAB 而非零，
+ * 是为了排除「恰好是 0 所以看起来没事」这种假绿。 */
+static void contracts_test_varlen_trailing_bytes_ignored(void) {
+    uint8_t *wire = contracts_make_varlen(32U, 5, 0, 0, 2U);
+    RUNTIMEC_EXPECT(wire != NULL);
+    RUNTIMEC_EXPECT(runtimec_value_body_length(contracts_varlen_body(wire)) ==
+                    5U);
+    free(wire);
+}
+
+/* 8b 非 storetype 4、无 tag 2 → 取 bodylen（与今天行为一致）。 */
+static void contracts_test_non_varlen_uses_body_length(void) {
+    uint8_t slack_wire[KVSPACE_XVALUE_HEAD_LEN + 8U];
+    kvspaceXvalueHead head;
+
+    memset(slack_wire, 0, sizeof(slack_wire));
+    memset(&head, 0, sizeof(head));
+    head.storetype = KVSPACE_XVALUE_ST_SLACK;
+    kvspaceXvalueHeadSetLen(&head, 8U);
+    memcpy(slack_wire, &head, sizeof(head));
+    RUNTIMEC_EXPECT(runtimec_value_body_length(
+                        (runtimec_value_body_address_t)(uintptr_t)slack_wire +
+                        RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) == 8U);
+}
+
+/*
+ * `reallen == 0`（合法空值）与全部畸形组在返回值上**无法区分**——都返回 0。
+ *
+ * 这条不是重复上面任何一组，它断言的正是「分不出来」这件事本身。写成显式断言，
+ * 是因为它是 J-5（`‥status` 成为 storetype 4 的第一个消费者）之前必须先补一条
+ * 带状态码入口的理由。理由只写在头注释里没人看得见，写进测试里才有人会读。
+ *
+ * 若有一天本函数能区分「空」与「坏」，这条断言会**失败**——那时应当删掉它并
+ * 更新 `kvspace_access.h` 的契约注释，而不是放宽它。
+ */
+static void contracts_test_varlen_ambiguity_is_known(void) {
+    uint8_t *legal_empty = contracts_make_varlen(16U, 0, 0, 0, 0U);
+    uint8_t *missing_tag = contracts_make_varlen(8U, -1, 0, 0, 0U);
+    uint8_t *over_capacity = contracts_make_varlen(8U, 9, 0, 0, 0U);
+
+    RUNTIMEC_EXPECT(legal_empty != NULL && missing_tag != NULL &&
+                    over_capacity != NULL);
+    const uint32_t legal_length =
+        runtimec_value_body_length(contracts_varlen_body(legal_empty));
+    RUNTIMEC_EXPECT(legal_length ==
+                    runtimec_value_body_length(contracts_varlen_body(missing_tag)));
+    RUNTIMEC_EXPECT(legal_length ==
+                    runtimec_value_body_length(
+                        contracts_varlen_body(over_capacity)));
+    free(legal_empty);
+    free(missing_tag);
+    free(over_capacity);
 }
 
 int main(void) {
@@ -346,6 +528,15 @@ int main(void) {
     test_value_body_length();
     test_xvalue_address_from_value_body();
     test_xvalue_head_sixteen_byte_layout();
-    test_host_services_version();
+    contracts_test_varlen_reallen_below_capacity();
+    contracts_test_varlen_reallen_equals_capacity();
+    contracts_test_varlen_reallen_zero_is_legal();
+    contracts_test_varlen_missing_tag();
+    contracts_test_varlen_reallen_over_capacity();
+    contracts_test_varlen_duplicate_tag();
+    contracts_test_varlen_malformed_record_length();
+    contracts_test_varlen_trailing_bytes_ignored();
+    contracts_test_non_varlen_uses_body_length();
+    contracts_test_varlen_ambiguity_is_known();
     return failures == 0 ? 0 : 1;
 }

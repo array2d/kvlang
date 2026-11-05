@@ -33,7 +33,7 @@ typedef struct vmkv_encoder_t vmkv_encoder_t;
 
 /* 一次等价编码请求。RWIR 验证是强制步骤，不提供绕过开关。 */
 typedef struct vmkv_encode_request_t {
-    const runtimec_host_services_t *host_services;
+    runtimec_kvspace_access_t *kvspace_access;
     runtimec_string_view_t function_path;
     runtimec_snapshot_t expected_snapshot;
 } vmkv_encode_request_t;

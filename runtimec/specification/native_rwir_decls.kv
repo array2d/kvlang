@@ -6,7 +6,7 @@
 //       tools/architecture/generate_rwir_catalog.py 生成并由同一脚本校验。
 // 约束：不让 layout 运行期访问 kvspace 读 /lib/<op>；也不在 layout 里手写第二份。
 // 语法：与 rwfunc 同形的 rwir 声明，只差函数体——兑现方是 runtime。
-//       空 kindexpr（`name:`）表示该参数/返回值不声明类型。
+//       每个参数/返回值必须带类型；裸 `$name` 与旧写法 `name:` 都被拒绝。
 // 统计：22 条声明（其余行的签名由 TypeSet 位或安装签名给出）。
 
 rwir time·now() -> (*time $result0)

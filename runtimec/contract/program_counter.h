@@ -6,7 +6,7 @@
  * 作用：执行位置的值形态。pc 是**两个整数**，不是路径文本——比较、递增、范围
  *       判断全部是整数运算，这是优化的依赖型。checkpoint 与 error 都用它，
  *       所以单独成头，避免 error ↔ checkpoint 的循环依赖。
- * 联系：engine/execution_window 产出，host/kvspace_adapter 落存储，读方在 layout。
+ * 联系：engine/execution_window 产出，contract/kvspace_access 落存储，读方在 layout。
  * 约束：进程内表示就是这个结构体，不是字符串；线程身份（vid）由存放路径给出，
  *       不进本结构；函数身份由帧的 `‥lib` 给出，也不进。
  */

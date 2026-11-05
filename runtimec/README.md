@@ -355,6 +355,39 @@ BinRWIR Compiler 也不得把它改写为运行时 key lookup 或借 JIT 绕过�
 `+16` 溢出、非 16 字节 XValue head ABI 或无法证明地址生命周期同样必须在 Program 产生前
 失败封闭。
 
+### 10.1 诊断信息沿调用链**递减**：上层不许覆盖下层的具体消息
+
+一条失败穿过 编码 → 编译 → 执行窗口 → route 时，**越上层越不知道原因**：
+上层只知道「这一步失败了」，下层才知道「为什么失败」。所以：
+
+> **从下层带上来的具体消息，上层不许用通用消息覆盖。**
+> 上层可以补自己的分类（`detail`、状态），但消息必须让位给更精确的那一条。
+
+反例（2026-11-05 实测）：`execution_window_fail` 曾无条件 `runtimec_error_set`，
+把编码器的
+
+```
+vmkv local types: local '_16' is written with a non-concrete langtype ('')
+```
+
+覆盖成
+
+```
+compilation was not produced
+```
+
+于是排障只能看到「编译没产出」和一个 `detail`。根因在链上被通用消息擦掉了。
+
+配套的两个约束：
+
+1. **保留的前提是「下层本次确实说过话」**——接收 error 的入口必须**每次清空** `error`，
+   否则「保留」会变成「沿用上一次调用的消息」，而那看起来完全正常。
+2. **分类与消息各归其位**：`detail` 回答「哪一步」，`message` 回答「为什么」；
+   保留消息不等于放弃本层分类，两者写在不同字段。
+
+同族判据：`runtimec/tests/kv_runner.c` 抓失败输出时跳过 `info:` 行、只取 `error:` 行——
+**报错必须贴真正把流程拦下来的那一行**。
+
 ## 11. 五语言决策矩阵
 
 `specification/five-language-behavior-matrix.md` 是语言行为决策的唯一事实源。

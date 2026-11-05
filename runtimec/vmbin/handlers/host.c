@@ -500,6 +500,13 @@ static runtimec_status_t runtimec_host_random_below(
  * 经 `kvlangVthreadNextPc` 同时写 pc 与 status，那需要 runtimec 侧尚未具备的
  * PC 后继计算；只写 status 不会让程序停在错的位置，而写错 pc 会。
  */
+/*
+ * `vthread·setstatus(text)`：把状态文本写进当前帧的 `/‥status`。
+ *
+ * 与其它 host 算子不同：key 不是 static key、而是**从 `frame_path` 拼出来**的
+ * （`<frame>/‥status`），所以 `prepare_call` 的「取绝对路径」不适用——这里取的
+ * 是「当前帧的状态槽」，不是调用方给的路径。
+ */
 static runtimec_status_t runtimec_host_vthread_setstatus(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
@@ -510,7 +517,6 @@ static runtimec_status_t runtimec_host_vthread_setstatus(
     vmbin_value_location_t status_location;
     void *handle = NULL;
     runtimec_error_t error;
-    runtimec_status_t status;
 
     runtimec_error_reset(&error);
     *output_exit = (binrwir_execution_exit_t){0};
@@ -518,25 +524,25 @@ static runtimec_status_t runtimec_host_vthread_setstatus(
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                                   source_program_counter);
     }
-    status = runtimec_vthread_status_handle(frame, &handle);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_vthread_status_key(
+    if (runtimec_vthread_status_handle(frame, &handle) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        runtimec_vthread_status_key(
             frame->frame_path, runtimec_string_view_from_c_string("/‥status"),
-            status_key, sizeof(status_key));
+            status_key, sizeof(status_key)) != RUNTIMEC_STATUS_SUCCESS ||
+        vmbin_value_access_locate_body(frame,
+                                       &instruction->read_arguments.data[0],
+                                       &status_location,
+                                       &error) != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  source_program_counter);
     }
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = vmbin_value_access_locate_body(frame, &instruction->read_arguments.data[0],
-                                           &status_location, &error);
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
-    }
-    status = runtimec_vthread_status_write(
-        handle, status_key,
-        runtimec_bytes_view_make(status_location.read_bytes,
-                                 status_location.size));
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
+    if (runtimec_vthread_status_write(
+            handle, status_key,
+            runtimec_bytes_view_make(status_location.read_bytes,
+                                     status_location.size)) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                                  source_program_counter);
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }
@@ -551,39 +557,29 @@ static runtimec_status_t runtimec_host_vthread_setstatus(
  * quiesce）。runtimec 这一版没有 view quiesce 这一层，睡眠期间不改视图状态。
  * 这是有意的：没有那层就不假装有。
  */
+/* `vthread·sleep(nanoseconds)`：非正值立即返回，不睡。 */
 static runtimec_status_t runtimec_host_vthread_sleep(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
         instruction->source_logical_program_counter;
-    vmbin_value_location_t duration_location;
-    int64_t duration_nanoseconds = 0;
-    runtimec_error_t error;
-    runtimec_status_t status;
+    uint64_t duration_nanoseconds = 0U;
 
-    runtimec_error_reset(&error);
     *output_exit = (binrwir_execution_exit_t){0};
     if (instruction->read_arguments.count != 1U) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                                   source_program_counter);
     }
-    status = vmbin_value_access_locate_body(frame, &instruction->read_arguments.data[0],
-                                       &duration_location, &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
+    if (!runtimec_host_read_uint64(frame, &instruction->read_arguments.data[0],
+                                   &duration_nanoseconds, output_exit,
+                                   source_program_counter)) {
+        return RUNTIMEC_STATUS_ERROR;
     }
-    if (duration_location.read_bytes == NULL ||
-        duration_location.size != sizeof(duration_nanoseconds)) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
-    }
-    memcpy(&duration_nanoseconds, duration_location.read_bytes,
-           sizeof(duration_nanoseconds));
-    if (duration_nanoseconds > 0) {
+    if (duration_nanoseconds > 0U) {
         const struct timespec interval = {
-            .tv_sec = (time_t)(duration_nanoseconds / INT64_C(1000000000)),
-            .tv_nsec = (long)(duration_nanoseconds % INT64_C(1000000000)),
+            .tv_sec = (time_t)(duration_nanoseconds / UINT64_C(1000000000)),
+            .tv_nsec = (long)(duration_nanoseconds % UINT64_C(1000000000)),
         };
 
         nanosleep(&interval, NULL);

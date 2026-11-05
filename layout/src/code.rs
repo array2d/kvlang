@@ -200,7 +200,9 @@ fn analyze_func(
     let mut shape_diags = lower::check_call_shapes(&src, sigs);
     let mut fn_ = lower::lower_func(&src)?;
     let type_map = lower::infer_types(&fn_);
-    let declared = lower::declared_types(&fn_);
+    // 合成表：形参行是 Value 形态、写槽行是源级形态；优先级见
+    // `lower::declared_langtypes_by_origin` 的注释（形参优先，等价性条件）。
+    let declared = lower::declared_langtypes_by_origin(&fn_);
     let type_sets = lower::infer_type_sets(&fn_);
     let mut diags = std::mem::take(&mut shape_diags);
     diags.extend(lower::validate_writes(&fn_, &type_map, structs, sigs));
@@ -940,7 +942,7 @@ pub fn write_func(
 
     /* 源级类型表：复合写目标（`(*r)`、`x·y`）与写槽兜底都按**源级**类型解析。
      * 私有结构 + 派生函数，别在调用点直接拿 entries。 */
-    let source_langtypes = SourceLangtypes::new(&fn_.sig);
+    let source_langtypes = lower::SourceLangtypes::new(&fn_.sig);
     let declared_source = source_langtypes.merged_under(declared);
 
     let ctime_key = format!("{func_dir}/‥ctime");
@@ -1013,6 +1015,7 @@ pub fn write_func(
             structs,
             &param_coord,
             &param_langtype,
+            &source_langtypes,
             stable,
             local_funcs,
             sigs,
@@ -1047,7 +1050,16 @@ pub fn write_func(
                 continue;
             }
             for r in &reads {
-                let mut ty = read_slot_type(r, &param_langtype, declared, type_sets, stable);
+                let mut ty = read_slot_type(
+                    r,
+                    &param_langtype,
+                    &source_langtypes,
+                    declared,
+                    &declared_source,
+                    type_sets,
+                    structs,
+                    stable,
+                );
                 if ty.is_empty() {
                     ty = lower::literal_slot_type(r);
                 }
@@ -1056,7 +1068,7 @@ pub fn write_func(
             for (j, w) in inst.writes.iter().enumerate() {
                 record(
                     &op,
-                    write_slot_type(inst, j, w, &param_langtype, declared, &declared_source, type_sets, structs, stable),
+                    write_slot_type(inst, j, w, &param_langtype, &source_langtypes, declared, &declared_source, type_sets, structs, stable),
                     true,
                 );
             }
@@ -1284,70 +1296,13 @@ fn check_jumps(seq: &[Instruction], labels: &HashMap<String, i32>) -> Result<(),
     Ok(())
 }
 
-/// 源级类型表：形参/写参**源码里写的那个类型**（带 `*`/`@`，去 `...`）。
-///
-/// 私有：**表存哪种形态不泄漏到调用点**，只能经下面两个派生函数取。
-/// 判据（`ast.rs:77-114`）：同一个名字有三种互不相同的答案——
-///   源级（本表）  `*int64`、`*/lib/TNode`
-///   `langtype_value`  `int64`、`*/lib/TNode`（标量不可空 / 引用类本身即指针）
-///   `langtype_wire`   `int64`、`/lib/TNode`
-/// 只有源级算得回来，另两个是派生——所以只存源级。
-///
-/// **本表在 `lower::slot_is_plain_name` 排除 `(*` 之后才真正生效**：在那之前，
-/// `(*r)` 这类复合写目标会被判成普通名，走 plain 分支查不到，接上本表**不会改变
-/// 任何输出**（实测：接上前后的全语料 dump 逐条相同）。看到「接了但没效果」时，
-/// 先查那一行，不是这里漏了什么。
-struct SourceLangtypes {
-    entries: HashMap<String, String>,
-}
-
-impl SourceLangtypes {
-    fn new(sig: &ast::FuncSig) -> Self {
-        let mut entries = HashMap::new();
-        for parameter in sig.params.iter().chain(sig.returns.iter()) {
-            if !parameter.ty.is_empty() {
-                entries.insert(parameter.name.clone(), parameter.declared_type());
-            }
-        }
-        Self { entries }
-    }
-
-    /// 列表形态：`declared` 优先，本表补齐——只给 `lower::resolve_slot_type` 这类
-    /// 「按源级类型解析复合槽名」的调用用。
-    fn merged_under(&self, declared: &HashMap<String, String>) -> HashMap<String, String> {
-        let mut merged = self.entries.clone();
-        for (name, ty) in declared {
-            merged.insert(name.clone(), ty.clone());
-        }
-        merged
-    }
-
-    /// 值的类型：`*T $x` 的 `*` 是传递方式，不是值类型的一部分——
-    /// 标量剥掉（`*int64` → `int64`），引用类保留（`*TNode` 的值本身即指针）。
-    fn langtype_value(&self, name: &str) -> Option<String> {
-        let source = self.entries.get(name)?;
-        let by_ref_len = source.len() - source.trim_start_matches(['*', '@']).len();
-        let (by_ref, ty) = source.split_at(by_ref_len);
-        if ty.starts_with('/') || ty.starts_with('*') {
-            Some(source.clone())
-        } else if by_ref.is_empty() {
-            Some(ty.to_string())
-        } else {
-            Some(ty.to_string())
-        }
-    }
-
-    /// wire langtype：**不含** `*`/`@`（spec 04-layout语义/03-函数:17：传递方式由帧槽
-    /// 的指针位承载，不进类型串）。
-    fn langtype_wire(&self, name: &str) -> Option<String> {
-        let source = self.entries.get(name)?;
-        Some(
-            source
-                .trim_end_matches("...")
-                .trim_start_matches(['*', '@'])
-                .to_string(),
-        )
-    }
+/// wire 形态：**不含** `*`/`@` 与 `...`（spec 04-layout语义/03-函数:17）。
+/// 与 `SourceLangtypes::langtype_wire` 同一条规则，这里供「从任意类型串转 wire」用，
+/// 两处必须一致——它们是同一条规则的两个入口，不是两套规则。
+fn to_wire(ty: &str) -> String {
+    ty.trim_end_matches("...")
+        .trim_start_matches(['*', '@'])
+        .to_string()
 }
 
 /// 操作数槽的静态类型：**可证明的具体 kind** → 形参/返回声明 → 源码声明 →
@@ -1359,8 +1314,11 @@ impl SourceLangtypes {
 fn slot_static_type(
     name: &str,
     param_langtype: &HashMap<String, String>,
+    source_langtypes: &lower::SourceLangtypes,
     declared: &HashMap<String, String>,
+    declared_source: &HashMap<String, String>,
     type_sets: &HashMap<String, Vec<String>>,
+    structs: &lower::StructTable,
     stable: &HashMap<String, String>,
 ) -> String {
     // 两张表的键与值形态不同，不能混用：
@@ -1369,6 +1327,18 @@ fn slot_static_type(
     //
     // `*p` 的槽类型是解引用**一层**的结果：从 `declared` 取值剥一层最直接；
     // 从 `param_langtype` 取值时那一层已经在入表时剥掉了，不能再剥。
+    // 复合槽名（`(*r)`、`x·y`）不在这四张表里按原名出现：交给**同一个**解析器
+    // `lower::resolve_slot_type`（不在这里再写一份）。它按源级类型解析，返回的是
+    // **值**类型；读槽要的是 wire 形态，故过 `to_wire`。
+    if !lower::slot_is_plain_name(name) {
+        if let Some(resolved) = lower::resolve_slot_type(name, declared_source, structs, declared_source)
+        {
+            let wire = to_wire(&resolved);
+            if !wire.is_empty() {
+                return narrow_union(wire, name, stable);
+            }
+        }
+    }
     let lookup_name = name.strip_prefix('*').unwrap_or(name);
     let is_deref = lookup_name.len() != name.len();
     let declared_any = declared.get(lookup_name).filter(|t| !t.is_empty());
@@ -1380,6 +1350,13 @@ fn slot_static_type(
         };
         if !value.is_empty() {
             return narrow_union(value.to_string(), lookup_name, stable);
+        }
+    }
+    // 形参类型**经表的 wire 派生**取（表是唯一存储形态；`param_langtype` 只作兜底，
+    // 两者同源：wire = 源级去 `*`/`@`/`...`）。
+    if let Some(t) = source_langtypes.langtype_wire(lookup_name) {
+        if !t.is_empty() {
+            return narrow_union(t, lookup_name, stable);
         }
     }
     if let Some(t) = param_langtype.get(lookup_name).filter(|t| !t.is_empty()) {
@@ -1396,11 +1373,23 @@ fn slot_static_type(
 fn read_slot_type(
     name: &str,
     param_langtype: &HashMap<String, String>,
+    source_langtypes: &lower::SourceLangtypes,
     declared: &HashMap<String, String>,
+    declared_source: &HashMap<String, String>,
     type_sets: &HashMap<String, Vec<String>>,
+    structs: &lower::StructTable,
     stable: &HashMap<String, String>,
 ) -> String {
-    slot_static_type(name, param_langtype, declared, type_sets, stable)
+    slot_static_type(
+        name,
+        param_langtype,
+        source_langtypes,
+        declared,
+        declared_source,
+        type_sets,
+        structs,
+        stable,
+    )
 }
 
 /// 给线性化后的指令补写槽类型（lower 之后、写 kvspace 之前）。
@@ -1586,6 +1575,7 @@ fn write_slot_type(
     j: usize,
     orig: &str,
     param_langtype: &HashMap<String, String>,
+    source_langtypes: &lower::SourceLangtypes,
     declared: &HashMap<String, String>,
     declared_source: &HashMap<String, String>,
     type_sets: &HashMap<String, Vec<String>>,
@@ -1607,7 +1597,16 @@ fn write_slot_type(
     if let Some(t) = lower::resolve_slot_type(orig, declared_source, structs, declared_source) {
         return narrow_union(t, orig, stable);
     }
-    slot_static_type(orig, param_langtype, declared, type_sets, stable)
+    slot_static_type(
+        orig,
+        param_langtype,
+        source_langtypes,
+        declared,
+        declared_source,
+        type_sets,
+        structs,
+        stable,
+    )
 }
 
 /// 声明的 def langtype 可能是并集；若赋值来源能证明唯一具体 kind，并且该 kind
@@ -1653,6 +1652,7 @@ fn write_linear_inst(
     structs: &lower::StructTable,
     params: &HashMap<String, String>,
     param_langtype: &HashMap<String, String>,
+    source_langtypes: &lower::SourceLangtypes,
     stable: &HashMap<String, String>,
     local_funcs: &HashSet<String>,
     sigs: &lower::SigTable,
@@ -1695,7 +1695,16 @@ fn write_linear_inst(
             let other = reads
                 .get(if index == 0 { 1 } else { 0 })
                 .ok_or_else(|| format!("{opcode}: None 比较缺少另一侧操作数"))?;
-            let other_type = read_slot_type(other, param_langtype, declared, type_sets, stable);
+            let other_type = read_slot_type(
+                other,
+                param_langtype,
+                source_langtypes,
+                declared,
+                declared_source,
+                type_sets,
+                structs,
+                stable,
+            );
             if other_type.is_empty() {
                 return Err(format!(
                     "{opcode}: 无法判定空引用比较的类型——另一侧 `{other}` 没有具体类型"
@@ -1720,7 +1729,7 @@ fn write_linear_inst(
             parameter.ty.trim_start_matches(['*', '@']).to_string()
         } else if s.writes.len() == 1 {
             let declared_type =
-                write_slot_type(s, 0, &s.writes[0], param_langtype, declared, declared_source, type_sets, structs, stable);
+                write_slot_type(s, 0, &s.writes[0], param_langtype, source_langtypes, declared, declared_source, type_sets, structs, stable);
             if declared_type.is_empty() || declared_type.contains('|') {
                 return Err(format!(
                     "{} -> {}: 无法判定 None 的类型——写槽没有具体声明类型",
@@ -1771,14 +1780,23 @@ fn write_linear_inst(
             pairs.push((format!("{prefix}/[{n},-{}]", j + 1), context_type, wire));
             continue;
         }
-        let ty = read_slot_type(r, param_langtype, declared, type_sets, stable);
+        let ty = read_slot_type(
+            r,
+            param_langtype,
+            source_langtypes,
+            declared,
+            declared_source,
+            type_sets,
+            structs,
+            stable,
+        );
         let (wire, lt) = typed_slot_value(rv, &ty, target_char)?;
         pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
     }
     for (j, w) in s.writes.iter().enumerate() {
         let orig = w.as_str();
         let wv = param_slot(params, orig);
-        let ty = write_slot_type(s, j, orig, param_langtype, declared, declared_source, type_sets, structs, stable);
+        let ty = write_slot_type(s, j, orig, param_langtype, source_langtypes, declared, declared_source, type_sets, structs, stable);
         let (wire, lt) = typed_slot_value(wv, &ty, "")?;
         pairs.push((format!("{prefix}/[{n},{}]", j + 1), lt, wire));
     }

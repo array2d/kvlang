@@ -13,7 +13,7 @@
  *       不得留下函数源。
  */
 
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "contract/snapshot.h"
 #include "contract/status.h"
 
@@ -26,7 +26,7 @@ typedef struct vmkv_function_source_t vmkv_function_source_t;
 
 /* 打开函数源；失败时输出保持明确无效。 */
 runtimec_status_t vmkv_source_open_function(
-    const runtimec_host_services_t *host_services,
+    runtimec_kvspace_access_t *kvspace_access,
     runtimec_string_view_t function_path,
     vmkv_function_source_t **output_function,
     runtimec_snapshot_t *output_snapshot,

@@ -81,7 +81,39 @@ typedef enum vmkv_rwir_read_result_t {
 
 typedef struct vmkv_rwir_reader_t vmkv_rwir_reader_t;
 
+/*
+ * 从一条指令槽的 **body 字节**取出算子名（counts 头之后的那段文本）。
+ *
+ * **为什么这个函数在 vmkv**：counts 头的布局（`VMKV_COUNTS_HEADER_SIZE`，
+ * 5 字节 = 读参数 / 写参数 / dynamic）是 vmkv 的格式知识。上层要读算子名时，
+ * 若自己跳过 5 字节，就等于把这份格式复制了一份到上层——**而那份复制不会
+ * 随格式变化更新**，`counts` 一旦多一个字段，上层只会从中间截断名字，
+ * 看起来像一个不存在的算子名。
+ *
+ * 判据：**谁拥有格式，谁解析。**
+ *
+ * `body` 是完整 body（不含 XValue head）。成功时 `output_operation` 指向
+ * `body` 内部，借用，不复制。
+ */
+runtimec_status_t vmkv_rwir_operation_name_from_wire(
+    const uint8_t *wire, size_t wire_size, runtimec_string_view_t *output_operation,
+    runtimec_error_t *error);
+
 /* 在函数源上创建顺序读取器；不拥有 function。 */
+/*
+ * 该 key 文本是不是**容器成员键**（含 `·`，U+00B7，UTF-8 两字节 `0xC2 0xB7`）。
+ *
+ * spec `05-runtime语义/03-成员访问`：成员 `base·name` 是**独立物理 key**，
+ * kvspace 按 `base·` 前缀枚举，不维护 memindex 矩阵。所以成员键与局部变量的
+ * 区别不是「谁声明的」，而是「它是不是一段路径」：
+ *   - 局部变量：帧根下的一个槽，由 `materialize_locals` 建，要求「先写后读」；
+ *   - 成员键：`<帧根>/<base·name>`，**本来就不必先被写过**——读不存在的成员是
+ *     确定的失败，不是「变量未定义」。
+ *
+ * **按完整字节序列匹配，不判首字节**：`0xC2` 单独出现是别的字符的前半。
+ */
+bool vmkv_rwir_key_is_member(runtimec_key_view_t key);
+
 runtimec_status_t vmkv_rwir_reader_create(
     vmkv_function_source_t *function,
     vmkv_rwir_reader_t **output_reader,

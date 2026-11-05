@@ -11,7 +11,7 @@
 #include <string.h>
 
 #include "contract/error.h"
-#include "contract/host_services.h"
+#include "contract/kvspace_access.h"
 #include "contract/view.h"
 #include "vmkv/local_types.h"
 #include "vmkv/parameter_type.h"
@@ -96,7 +96,7 @@ static runtimec_program_counter_t vmkv_encoder_set_program_counter(
 
 static bool vmkv_encoder_request_is_valid(const vmkv_encode_request_t *request) {
     return request != NULL &&
-           runtimec_host_services_is_valid(request->host_services) &&
+           request->kvspace_access != NULL &&
            runtimec_string_view_is_valid(request->function_path) &&
            request->function_path.size != 0U &&
            runtimec_snapshot_is_valid(&request->expected_snapshot);
@@ -528,18 +528,10 @@ static runtimec_status_t vmkv_encode_static_argument_into(
                                  "vmkv encoder: dynamic key is unsupported",
                                  RUNTIMEC_PROGRAM_COUNTER_NONE);
     }
-    if (request->host_services->resolve_static_xvalue_address == NULL) {
-        return vmkv_encoder_fail(
-            error, RUNTIMEC_STATUS_NOT_IMPLEMENTED,
-            VMKV_ENCODER_DIAG_HOST_CAPABILITY_MISSING,
-            "vmkv encoder: host cannot resolve static xvalue addresses",
-            RUNTIMEC_PROGRAM_COUNTER_NONE);
-    }
-
     runtimec_xvalue_address_t xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
     runtimec_status_t status =
-        request->host_services->resolve_static_xvalue_address(
-            request->host_services->context, &request->expected_snapshot,
+        runtimec_kvspace_access_resolve_static_xvalue_address(
+            request->kvspace_access, &request->expected_snapshot,
             source_argument->key, &xvalue_address, error);
     /*
      * key 是否**存在**不是可静态判定的属性：程序自己会创建 key（同一函数内
@@ -669,9 +661,15 @@ static runtimec_status_t vmkv_encoder_map_argument(
         source_argument->key.data, source_argument->key.size);
     runtimec_string_view_t symbol_type =
         source_argument->parameter_type_name;
-    if (!function_target) {
-        /* 局部槽的大小由 route 按这里登记的类型创建，所以类型必须来自
-         * 「该名字在写位置被赋予的那一个类型」，不是本条指令的用法。 */
+    /*
+     * **成员键不是局部变量**，不查「写位置赋予的类型」（spec `05-runtime语义/
+     * 03-成员访问`：`base·name` 是独立物理 key，不是帧里的变量槽）。
+     * 它的槽类型就取**本条指令声明的类型**——读成员得到的是那个成员的值类型。
+     *
+     * 而局部变量必须查：局部槽的大小由 route 按写位置的类型创建，用本条指令的
+     * 用法会让同一变量在不同指令处建成不同大小。
+     */
+    if (!function_target && !vmkv_rwir_key_is_member(source_argument->key)) {
         if (local_types == NULL ||
             !vmkv_local_types_find(local_types, name, &symbol_type)) {
             return vmkv_encoder_fail(
@@ -1485,7 +1483,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
     runtimec_snapshot_t snapshot;
     runtimec_snapshot_reset(&snapshot);
     runtimec_status_t status = vmkv_source_open_function(
-        request->host_services, request->function_path, &function, &snapshot,
+        request->kvspace_access, request->function_path, &function, &snapshot,
         error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
