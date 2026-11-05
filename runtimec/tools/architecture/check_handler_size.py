@@ -199,8 +199,8 @@ def handlers_table_files(source_root: Path):
 
 
 def scan_file(path: Path, display: str,
-              registered: set[str]) -> list[tuple[str, str, int, int, int]]:
-    """返回 [(display, name, line_number, lines, limit)]，只含**已注册**且超限的。"""
+              registered: set[str]) -> list[tuple[str, str, int, int, int, str]]:
+    """返回 [(display, name, line_number, lines, limit, note)]，只含**已注册**且超限的。"""
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError):
@@ -208,11 +208,44 @@ def scan_file(path: Path, display: str,
     code = c_code_without_comments(text)
     limit = limit_for(path)
     # 索引全部函数定义，供薄封装跳转与宏逻辑函数查找。
+    # `definition_starts` 记定义处字符下标：共享 helper 要报在**它自己**的行号上。
     definitions: dict[str, tuple[int, int]] = {}
+    definition_starts: dict[str, int] = {}
     for match in HANDLER_DEFINITION_PATTERN.finditer(code):
         span = find_definition_span(code, match.end() - 1)
         if span is not None:
             definitions[match.group("name")] = span
+            definition_starts[match.group("name")] = match.start()
+
+    def line_of(character_index: int) -> int:
+        return code.count("\n", 0, character_index) + 1
+
+    def thin_callee(name: str) -> str | None:
+        """该 handler 若是薄壳（`return f(...)`），返回被调的 f。"""
+        span = definitions.get(name)
+        if span is None:
+            return None
+        if count_body_lines(code, *span) > 2:
+            return None
+        thin = THIN_WRAPPER_PATTERN.search(code[span[0]:span[1]])
+        return None if thin is None else thin.group("callee")
+
+    # 共享 helper：被 ≥2 个**不同的** registered handler 当薄壳目标调用。
+    #
+    # 判据是「不同的 handler 个数」，不是调用次数——同一个 handler 里出现两次
+    # 仍算一个。按次数算会把「一个壳里写两遍」误判成共享。
+    shared_users: dict[str, set[str]] = {}
+    for match in HANDLER_DEFINITION_PATTERN.finditer(code):
+        name = match.group("name")
+        if name not in registered:
+            continue
+        callee = thin_callee(name)
+        # callee 自己就是 handler 时不按共享 helper 处理：它会作为 handler 被量一次。
+        if callee is None or callee in registered:
+            continue
+        shared_users.setdefault(callee, set()).add(name)
+    shared_callees = {callee for callee, users in shared_users.items()
+                      if len(users) >= 2}
 
     def measure(name: str, seen: frozenset[str]) -> tuple[int, int] | None:
         """量真正的逻辑体：薄封装跟到被调的 f，宏形态跟到逻辑函数。"""
@@ -224,12 +257,15 @@ def scan_file(path: Path, display: str,
         body_start, body_end = span
         lines = count_body_lines(code, body_start, body_end)
         # 薄封装：一句 `return f(...)` 时改量 f。
+        # **共享 helper 不跟进去**：它会被单独量一次并报在自己名下，跟进去就又是
+        # 每个壳各报一遍——这正是要修的重复计数。壳本身 1~2 行，自然合规。
         thin = THIN_WRAPPER_PATTERN.search(code[body_start:body_end])
         if thin is not None and lines <= 2:
             callee = thin.group("callee")
-            followed = measure(callee, seen | {name})
-            if followed is not None:
-                return followed
+            if callee not in shared_callees:
+                followed = measure(callee, seen | {name})
+                if followed is not None:
+                    return followed
         return lines, definitions[name][0]
 
     findings = []
@@ -244,8 +280,8 @@ def scan_file(path: Path, display: str,
             continue
         lines, _ = measured
         if lines > limit and name not in REVIEWED_OVERSIZE:
-            line_number = code.count("\n", 0, match.start()) + 1
-            findings.append((display, name, line_number, lines, limit))
+            findings.append((display, name, line_of(match.start()), lines, limit,
+                             ""))
 
     # 宏形态：handler 名由宏生成，不在 definitions 里；量它的逻辑函数实参。
     for match in HANDLER_MACRO_PATTERN.finditer(code):
@@ -257,9 +293,27 @@ def scan_file(path: Path, display: str,
             continue
         lines, _ = measured
         if lines > limit and logic not in REVIEWED_OVERSIZE:
-            line_number = code.count("\n", 0, match.start()) + 1
-            findings.append((display, f"{handler}({logic})", line_number, lines,
-                             limit))
+            findings.append((display, f"{handler}({logic})",
+                             line_of(match.start()), lines, limit, ""))
+
+    # 共享 helper：以自己的名字量一次，报在**它自己的定义行**。
+    for callee in sorted(shared_callees):
+        users = shared_users[callee]
+        note = f"（共享 helper，被 {len(users)} 个 handler 引用，只计一次）"
+        start = definition_starts.get(callee)
+        if start is None:
+            # 报出来，不要静默跳过：静默跳过意味着这个共享 helper 从此不受量，
+            # 比重复计数更糟。用它第一个引用者的行号，并写明为什么量不了。
+            first_user = sorted(users)[0]
+            findings.append((display, callee,
+                             line_of(definition_starts.get(first_user, 0)), 0,
+                             limit,
+                             note + " 无法度量：定义不在 HANDLER_DEFINITION_PATTERN "
+                             "的返回类型族内（runtimec_status_t / int / void）"))
+            continue
+        lines = count_body_lines(code, *definitions[callee])
+        if lines > limit and callee not in REVIEWED_OVERSIZE:
+            findings.append((display, callee, line_of(start), lines, limit, note))
     return findings
 
 
@@ -373,9 +427,9 @@ def audit_entry_tables(source_root: Path) -> list[str]:
     return problems
 
 
-def audit(source_root: Path) -> tuple[list[tuple[str, str, int, int, int]], int]:
+def audit(source_root: Path) -> tuple[list[tuple[str, str, int, int, int, str]], int]:
     handlers_root = source_root / HANDLERS_DIRECTORY
-    findings: list[tuple[str, str, int, int, int]] = []
+    findings: list[tuple[str, str, int, int, int, str]] = []
     scanned = 0
     if not handlers_root.is_dir():
         return findings, scanned
@@ -440,7 +494,7 @@ def selftest() -> int:
         findings, _ = audit(root)
         # 按函数名索引，不按行号猜——行号随 fixture 文本变化，写死会让自测
         # 因为「改了 fixture 的排版」而假红，那种红与判据无关。
-        by_name = {name: lines for _, name, _, lines, _ in findings}
+        by_name = {name: lines for _, name, _, lines, _, _ in findings}
         # 3 行的那个必须**不**出现；4 行的那个必须出现且 lines == 4。
         if "scalar_three" in by_name:
             failures.append(
@@ -509,7 +563,7 @@ def selftest() -> int:
         for stale in ("scalar.c",):
             (handlers / stale).unlink(missing_ok=True)
         extended, _ = audit(root)
-        reported = {name for _, name, _, _, _ in extended}
+        reported = {name for _, name, _, _, _, _ in extended}
         # 报出来的名字是**壳名**（`thin_handler`），量的是被调函数 `thin_logic` 的行数。
         if "thin_handler" not in reported:
             failures.append(
@@ -573,6 +627,33 @@ def selftest() -> int:
                     f"reviewed-oversize zombie: `{allowed}` is still exempted "
                     f"but now only {definition} lines — remove it from the list")
 
+        # ⑥ 共享 helper 只计一次：两个 handler 共用同一个 10 行 helper。
+        #
+        # 反向控制的规格：把「共享 helper 不跟进、只按自己量一次」这条去掉，
+        # 这条断言必须红——否则改坏了也全绿。
+        for stale in list(handlers.glob("*.c")) + list(handlers.glob("*.h")):
+            stale.unlink()
+        (handlers / "shared.c").write_text(
+            "static runtimec_status_t shared_logic(void) {\n"
+            + "".join(f"    int s{i} = {i};\n" for i in range(9))
+            + "    return s0;\n}\n"
+            "static runtimec_status_t shared_one(void) {\n"
+            "    return shared_logic();\n}\n"
+            "static runtimec_status_t shared_two(void) {\n"
+            "    return shared_logic();\n}\n"
+            "static const binrwir_registry_entry_t shared_entries[] = {\n"
+            "    {.operation_identifier = 1U, .flags = 0U, .handler = shared_one},\n"
+            "    {.operation_identifier = 2U, .flags = 0U, .handler = shared_two},\n"
+            "};\n", encoding="utf-8")
+        shared_findings, _ = audit(root)
+        shared_names = [name for _, name, _, _, _, _ in shared_findings]
+        if shared_names != ["shared_logic"]:
+            failures.append(
+                f"shared helper: two handlers wrap the same 10-line helper, "
+                f"expected exactly 1 finding (`shared_logic`), got "
+                f"{shared_names or 'nothing'} — one function must be audited "
+                f"once, and at least once")
+
     for failure in failures:
         print(f"[selftest] {failure}")
     if failures:
@@ -609,9 +690,9 @@ def main(arguments: list[str] | None = None) -> int:
         print(f"[note] {notice}")
 
     findings, scanned = audit(source_root)
-    for display, name, line_number, lines, limit in findings:
+    for display, name, line_number, lines, limit, note in findings:
         print(f"{display}:{line_number}: {name}: {lines} lines "
-              f"(limit {limit}) — 需人工审查")
+              f"(limit {limit}) — 需人工审查{note}")
     if findings or table_problems or family_findings:
         print(f"check_handler_size: FAIL ({len(findings)} function(s) exceed "
               f"limit, {len(table_problems)} entry-table problem(s), "
