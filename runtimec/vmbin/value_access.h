@@ -17,6 +17,7 @@
 #include <stdint.h>
 
 #include "binrwir/argument.h"
+#include "contract/diagnostic_band.h"
 #include "binrwir/execution_frame.h"
 #include "contract/error.h"
 #include "contract/kvspace_access.h"
@@ -37,15 +38,27 @@ extern "C" {
  * 编号只增不改：已报出的码值会出现在下游日志里。
  */
 typedef enum vmbin_value_access_diagnostic {
-    VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST = 1,
-    VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE = 2,
-    VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT = 3,
-    VMBIN_VALUE_ACCESS_DIAG_MISSING_LITERAL = 4,
-    VMBIN_VALUE_ACCESS_DIAG_LITERAL_IS_READ_ONLY = 5,
-    VMBIN_VALUE_ACCESS_DIAG_SIZE_MISMATCH = 6,
-    VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE = 7,
-    VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE = 8
+    VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST = UINT32_C(0x4400) + 1U,
+    VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE = UINT32_C(0x4400) + 2U,
+    VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT = UINT32_C(0x4400) + 3U,
+    VMBIN_VALUE_ACCESS_DIAG_MISSING_LITERAL = UINT32_C(0x4400) + 4U,
+    VMBIN_VALUE_ACCESS_DIAG_LITERAL_IS_READ_ONLY = UINT32_C(0x4400) + 5U,
+    VMBIN_VALUE_ACCESS_DIAG_SIZE_MISMATCH = UINT32_C(0x4400) + 6U,
+    VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE = UINT32_C(0x4400) + 7U,
+    VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE = UINT32_C(0x4400) + 8U
 } vmbin_value_access_diagnostic_t;
+
+/*
+ * 段断言：本模块的码必须落在自己的段内。
+ *
+ * 迁移前五个模块各自从 1 开始编号，同一个 `3` 同时是「解释器的指令非法」与
+ * 「println 的值格式非法」。那造成过一整晚的误判——**不是细心能解决的，是
+ * 命名空间缺失**。这两条断言把「漏加偏移」变成编译期错误。
+ */
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE, RUNTIMEC_DIAGNOSTIC_BAND_VALUE_ACCESS),
+               "VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE must stay inside its diagnostic band");
+/* 本枚举没有 `NONE = 0`：值访问不产生「没有诊断」的出口。 */
+
 
 /*
  * 一个参数项解析出的位置：可读写值体，或只读的池内字面量。

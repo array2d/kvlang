@@ -605,14 +605,23 @@ static frame_outcome_t execute_frame_until_done(
                     local_name.size == 0U) {
                     return FRAME_OUTCOME_ERROR;
                 }
-                const int local_key_written = snprintf(
-                    read_local_keys[callee_argument_count],
-                    sizeof(read_local_keys[callee_argument_count]),
-                    "/vthread/%s/[%d]/%.*s", vthread_identifier, (int)depth,
-                    (int)local_name.size, local_name.data);
-                if (local_key_written < 0 ||
-                    (size_t)local_key_written >=
-                        sizeof(read_local_keys[callee_argument_count])) {
+                /*
+                 * key 用**本帧自己的 `frame_path`**，不用 `depth` 重算。
+                 *
+                 * `depth` 是帧号，`frame_path` 才是地址——引入子帧段
+                 * `<depth+1>.<call_site_pc>`（`[2.1]` 这种）之后，两者
+                 * **不再是同一个东西**。此处曾按 depth 重算 ``/<vid>/[depth]/<name>``，
+                 * 于是 key 指向 `[2]/n1` 而真实是 `[1]/n1`——一个不存在的帧，
+                 * `bind_slot` 解析失败（`ARGUMENT_UNRESOLVED`），所有带局部
+                 * 实参的调用全挂。
+                 */
+                if (binrwir_frame_local_key(
+                        runtimec_string_view_from_c_string(frame_path),
+                        runtimec_string_view_make(local_name.data,
+                                                  local_name.size),
+                        read_local_keys[callee_argument_count],
+                        sizeof(read_local_keys[callee_argument_count])) ==
+                    SIZE_MAX) {
                     return FRAME_OUTCOME_ERROR;
                 }
                 callee_arguments[callee_argument_count].source =
@@ -717,14 +726,14 @@ static frame_outcome_t execute_frame_until_done(
                 local_name.size == 0U) {
                 return FRAME_OUTCOME_ERROR;
             }
-            const int key_written = snprintf(
-                write_target_keys[callee_argument_count],
-                sizeof(write_target_keys[callee_argument_count]),
-                "/vthread/%s/[%d]/%.*s", vthread_identifier, (int)depth,
-                (int)local_name.size, local_name.data);
-            if (key_written < 0 ||
-                (size_t)key_written >=
-                    sizeof(write_target_keys[callee_argument_count])) {
+            /* 同读参：key 用本帧 `frame_path`，不用 `depth` 重算。 */
+            if (binrwir_frame_local_key(
+                    runtimec_string_view_from_c_string(frame_path),
+                    runtimec_string_view_make(local_name.data,
+                                              local_name.size),
+                    write_target_keys[callee_argument_count],
+                    sizeof(write_target_keys[callee_argument_count])) ==
+                SIZE_MAX) {
                 return FRAME_OUTCOME_ERROR;
             }
             const int langtype_written = snprintf(

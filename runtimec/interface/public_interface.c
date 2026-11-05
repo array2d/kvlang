@@ -192,6 +192,24 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_execute(
      * 0 是合法的固定值——本入口不承载续跑，不需要唯一化。 */
     static const char entry_vthread[] = "0";
     static const char entry_frame[] = "/vthread/0/[1]";
+    /*
+     * `entry_name` 是**裸函数名**（`"test"`），不是 key。
+     *
+     * 本层无条件补 `/lib/` 前缀。若放一个已经带前缀的名字进来，拼出来就是
+     * `/lib//lib/test`——**双前缀**。而 kvspace 对缺失 key 返回
+     * `rc=0 + out=NULL`，**不报错**，于是这个错只表现为下游那句
+     * 「function has no readable source revision key」，真因被埋掉。
+     *
+     * ⇒ **一个名字只许一种含义**（p0）：以 `/` 开头一律 INVALID，不走前缀。
+     * 不提供「两种形态都收」的兼容——那正是「一个名字两种含义」。
+     */
+    if (request->entry_name[0] == '/') {
+        return kvlang_runtime_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            "entry name must be a bare function name, e.g. \"test\"; "
+            "got a key starting with '/' (this entry adds the /lib/ prefix "
+            "itself)");
+    }
     char function_path[512];
     const int function_length =
         snprintf(function_path, sizeof(function_path), "/lib/%s",

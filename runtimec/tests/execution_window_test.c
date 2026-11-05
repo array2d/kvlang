@@ -1256,8 +1256,14 @@ int main(void) {
         runtimec_string_view_from_c_string(TEST_MISSING_TARGET);
     EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) !=
            RUNTIMEC_STATUS_SUCCESS);
-    /* 诊断码 5 = ENCODE_FAILED：证明真的走进了编码分支。 */
-    EXPECT(result.execution_exit.detail_code == 5U);
+    /*
+     * 用具名常量而不是裸数字 5。
+     *
+     * 2026-11-05 之前五个模块各自从 1 开始编号，同一个 `5` 同时是「窗口的编码失败」
+     * 与「解释器的目标不可解码」。断言写裸数字时，改编号不会红、改语义也不会红。
+     */
+    EXPECT(result.execution_exit.detail_code ==
+           (uint32_t)RUNTIMEC_EXECUTION_WINDOW_DIAG_ENCODE_FAILED);
     /*
      * 「未提交」的状态判据：`‥pc` 仍停在上一个成功用例写下的位置，没有被这次
      * 失败推进。原断言是 `checkpoint_count == 6`（次数），现在是「存储没变」。
@@ -1276,7 +1282,8 @@ int main(void) {
     request.source_logical_program_counter = 4242U;
     EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
            RUNTIMEC_STATUS_INVALID);
-    EXPECT(result.execution_exit.detail_code == 12U);
+    EXPECT(result.execution_exit.detail_code ==
+           (uint32_t)RUNTIMEC_EXECUTION_WINDOW_DIAG_PROGRAM_COUNTER_NOT_FOUND);
 
     /* 5. 空 vthread：checkpoint 没有落点。 */
     request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
@@ -1318,7 +1325,8 @@ int main(void) {
                                                      &error) ==
                    RUNTIMEC_STATUS_INVALID);
             /* 必须是「请求非法」，不是撞到后面某条路径才失败。 */
-            EXPECT(result.execution_exit.detail_code == 1U);
+            EXPECT(result.execution_exit.detail_code ==
+                   (uint32_t)RUNTIMEC_EXECUTION_WINDOW_DIAG_INVALID_REQUEST);
         }
     }
 

@@ -15,6 +15,7 @@
 #include <stdint.h>
 
 #include "binrwir/execution_exit.h"
+#include "contract/diagnostic_band.h"
 #include "binrwir/registry.h"
 #include "contract/status.h"
 
@@ -57,6 +58,11 @@ typedef enum runtimec_scalar_diagnostic {
     /* 值不是合法 Unicode 标量（> U+10FFFF 或落在代理区）。 */
     RUNTIMEC_SCALAR_DIAG_NOT_A_SCALAR_VALUE = 0x4C09
 } runtimec_scalar_diagnostic_t;
+
+/* 段断言：本模块的码必须落在自己的段内（见 contract/diagnostic_band.h）。 */
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(RUNTIMEC_SCALAR_DIAG_NOT_A_SCALAR_VALUE, RUNTIMEC_DIAGNOSTIC_BAND_SCALAR),
+               "RUNTIMEC_SCALAR_DIAG_NOT_A_SCALAR_VALUE must stay inside its diagnostic band");
+
 
 /*
  * handler 级失败原语：只写结构化出口，**不返回状态**。

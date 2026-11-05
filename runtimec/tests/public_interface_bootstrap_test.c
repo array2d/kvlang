@@ -128,6 +128,41 @@ int main(void) {
         EXPECT(value[0] == '\0');
         EXPECT(program_counter[0] == '\0');
 
+        /*
+         * 2b. `entry_name` 是**裸函数名**，不是 key。
+         *
+         * 本入口自己补 `/lib/` 前缀。放一个已带前缀的名字进来会拼成
+         * `/lib//lib/test`（双前缀），而 kvspace 对缺失 key 返回
+         * `rc=0 + out=NULL`、**不报错**，于是真因被下游那句
+         * 「没有 source revision key」埋掉。
+         *
+         * **一个名字只许一种含义**（p0）：以 `/` 开头一律 INVALID。
+         */
+        {
+            kvlang_runtime_execute_request_t key_request = execute_request;
+            key_request.entry_name = "/lib/example";
+            char key_value[32] = "dirty";
+            char key_pc[32] = "dirty";
+            kvlang_runtime_execute_result_t key_result;
+            memset(&key_result, 0, sizeof(key_result));
+            key_result.value.data = key_value;
+            key_result.value.capacity = sizeof(key_value);
+            key_result.program_counter.data = key_pc;
+            key_result.program_counter.capacity = sizeof(key_pc);
+            error = prepare_error(error_text, sizeof(error_text));
+            const runtimec_status_t key_status = kvlang_runtime_execute(
+                runtime, &key_request, &key_result, &error);
+            /* 必须是请求非法，不是走到下游才失败。 */
+            EXPECT(key_status == RUNTIMEC_STATUS_INVALID);
+            /* 消息必须点明正确用法，而不是让人去猜。 */
+            EXPECT(strstr(error_text, "bare function name") != NULL);
+            /* 失败封闭：输出一个字节都不留。 */
+            EXPECT(key_result.value.length == 0U);
+            EXPECT(key_result.program_counter.length == 0U);
+            EXPECT(key_value[0] == '\0');
+            EXPECT(key_pc[0] == '\0');
+        }
+
         /* 3. destroy 释放整条链路。 */
         error = prepare_error(error_text, sizeof(error_text));
         EXPECT(kvlang_runtime_destroy(runtime, &error) ==

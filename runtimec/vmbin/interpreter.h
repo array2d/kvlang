@@ -23,6 +23,7 @@
 #include "binrwir/execution_plan.h"
 #include "binrwir/program.h"
 #include "binrwir/registry.h"
+#include "contract/diagnostic_band.h"
 #include "contract/status.h"
 #include "profile.h"
 
@@ -40,25 +41,40 @@ extern "C" {
  * 编号都会让下游的判据错位。
  */
 typedef enum vmbin_interpreter_diagnostic {
-    VMBIN_INTERPRETER_DIAG_INVALID_REQUEST = 1,
-    VMBIN_INTERPRETER_DIAG_INVALID_CURSOR = 2,
-    VMBIN_INTERPRETER_DIAG_INVALID_INSTRUCTION = 3,
-    VMBIN_INTERPRETER_DIAG_WRONG_ARITY = 4,
-    VMBIN_INTERPRETER_DIAG_UNDECODABLE_TARGET = 5,
-    VMBIN_INTERPRETER_DIAG_UNRESOLVED_TARGET = 6,
-    VMBIN_INTERPRETER_DIAG_VALUE_ACCESS = 7,
-    VMBIN_INTERPRETER_DIAG_HANDLER_FAILED = 8,
-    VMBIN_INTERPRETER_DIAG_OUT_OF_MEMORY = 9,
+    VMBIN_INTERPRETER_DIAG_INVALID_REQUEST = UINT32_C(0x4100) + 1U,
+    VMBIN_INTERPRETER_DIAG_INVALID_CURSOR = UINT32_C(0x4100) + 2U,
+    VMBIN_INTERPRETER_DIAG_INVALID_INSTRUCTION = UINT32_C(0x4100) + 3U,
+    VMBIN_INTERPRETER_DIAG_WRONG_ARITY = UINT32_C(0x4100) + 4U,
+    VMBIN_INTERPRETER_DIAG_UNDECODABLE_TARGET = UINT32_C(0x4100) + 5U,
+    VMBIN_INTERPRETER_DIAG_UNRESOLVED_TARGET = UINT32_C(0x4100) + 6U,
+    VMBIN_INTERPRETER_DIAG_VALUE_ACCESS = UINT32_C(0x4100) + 7U,
+    VMBIN_INTERPRETER_DIAG_HANDLER_FAILED = UINT32_C(0x4100) + 8U,
+    VMBIN_INTERPRETER_DIAG_OUT_OF_MEMORY = UINT32_C(0x4100) + 9U,
     /* 表被绕过 append 写坏（条目 handler 为空）。与 INVALID_INSTRUCTION
      * （表里没有这个 opid）必须分开：前者是 bug，后者是编译期与执行期的表不一致。 */
-    VMBIN_INTERPRETER_DIAG_CORRUPT_REGISTRY = 10,
+    VMBIN_INTERPRETER_DIAG_CORRUPT_REGISTRY = UINT32_C(0x4100) + 10U,
     /*
      * 两个通道自相矛盾：结构化退出说失败（kind = ERROR），返回状态却说成功。
      * 这是实现 bug——handler 置了错却报了成功。不做静默对齐，用这条码暴露它，
      * 否则调用方按返回状态判成败，会把一次失败当成成功原样拷贝下去。
      */
-    VMBIN_INTERPRETER_DIAG_CONTRADICTORY_EXIT = 11
+    VMBIN_INTERPRETER_DIAG_CONTRADICTORY_EXIT = UINT32_C(0x4100) + 11U
 } vmbin_interpreter_diagnostic_t;
+
+/*
+ * 段断言：本模块的码必须落在自己的段内。
+ *
+ * 迁移前五个模块各自从 1 开始编号，同一个 `3` 同时是「解释器的指令非法」与
+ * 「println 的值格式非法」。那造成过一整晚的误判——**不是细心能解决的，是
+ * 命名空间缺失**。这两条断言把「漏加偏移」变成编译期错误。
+ */
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_INTERPRETER_DIAG_CONTRADICTORY_EXIT, RUNTIMEC_DIAGNOSTIC_BAND_INTERPRETER),
+               "VMBIN_INTERPRETER_DIAG_CONTRADICTORY_EXIT must stay inside its diagnostic band");
+/*
+ * 本枚举**没有** `NONE = 0` 条目：解释器不产生「没有诊断」的出口，
+ * `exit.detail_code == 0` 只出现在成功路径（`*output_exit = {0}` 清零后未再写）。
+ */
+
 
 /*
  * 「没有 opid」。值必须与写侧同源——这里曾写成自定字面量 `UINT32_C(0)`，

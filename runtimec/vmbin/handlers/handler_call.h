@@ -65,6 +65,7 @@
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
+#include "contract/diagnostic_band.h"
 #include "binrwir/execution_frame.h"
 #include "binrwir/instruction.h"
 #include "contract/error.h"
@@ -107,6 +108,11 @@ typedef enum vmbin_handler_call_diagnostic {
     /* 造 wire 或写存储失败。 */
     VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED = 0x4A05
 } vmbin_handler_call_diagnostic_t;
+
+/* 段断言：本模块的码必须落在自己的段内（见 contract/diagnostic_band.h）。 */
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_HANDLER_CALL_DIAG_LITERAL_IS_READ_ONLY, RUNTIMEC_DIAGNOSTIC_BAND_HANDLER_CALL),
+               "VMBIN_HANDLER_CALL_DIAG_LITERAL_IS_READ_ONLY must stay inside its diagnostic band");
+
 
 /*
  * thunk 的失败出口：只做一件事——把结构化 exit 置成 ERROR。
@@ -217,6 +223,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
     char message[256];
+    runtimec_key_view_t target_key;
 
     runtimec_error_reset(&error);
     status = vmbin_value_access_langtype(
@@ -248,6 +255,30 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
         }
     }
     free(wire);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        vmbin_handler_fail(output_exit, status,
+                           VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
+                           instruction->source_logical_program_counter);
+        return RUNTIMEC_STATUS_ERROR;
+    }
+    /*
+     * **写进存储只是「存储里有了」，必须紧接着绑定**——与
+     * `vmbin_value_access_create_unbound_local`（`value_access.c`）末尾同一步。
+     *
+     * 少了这一步：容器的写槽按 A-3 **不由帧准备物化**（没有定宽零值），
+     * 于是它唯一的绑定来源就是「第一次写」。写成功却不绑定 ⇒ 绑定表里没有这个槽
+     * ⇒ 后续任何读它的 handler 报 `0x4A02 LOCATE_FAILED`（`UNBOUND_SLOT`）。
+     *
+     * **`array_append.kv` 就是这条**：`compactarray·new` 建出 `a` 却没绑，
+     * `scatterarray·newscatter(a)` 读 `a` 直接失败。
+     *
+     * 「写新建值」这件事曾有两处实现：`create_unbound_local`（带绑定）与本函数
+     * （漏了）。不是难写，是两处各自演化——今晚反复治的「同一事实两个来源」。
+     */
+    target_key = runtimec_key_view_make(
+        key_buffer, strlen(key_buffer));
+    status = vmbin_value_access_bind_write_target(
+        frame, &instruction->write_arguments.data[0], target_key, &error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         vmbin_handler_fail(output_exit, status,
                            VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,

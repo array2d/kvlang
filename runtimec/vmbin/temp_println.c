@@ -19,6 +19,7 @@
 #ifdef RUNTIMEC_TEMP_PRINTLN
 
 #include "temp_println.h"
+#include "contract/diagnostic_band.h"
 
 #include <float.h>
 #include <stdio.h>
@@ -37,9 +38,9 @@
 #define RUNTIMEC_TEMP_PRINTLN_SCRATCH_CAPACITY 64U
 
 typedef enum runtimec_temp_println_diagnostic {
-    RUNTIMEC_TEMP_PRINTLN_DIAG_VALUE_ACCESS = 1,
-    RUNTIMEC_TEMP_PRINTLN_DIAG_UNSUPPORTED_TYPE = 2,
-    RUNTIMEC_TEMP_PRINTLN_DIAG_MALFORMED_VALUE = 3
+    RUNTIMEC_TEMP_PRINTLN_DIAG_VALUE_ACCESS = UINT32_C(0x4500) + 1U,
+    RUNTIMEC_TEMP_PRINTLN_DIAG_UNSUPPORTED_TYPE = UINT32_C(0x4500) + 2U,
+    RUNTIMEC_TEMP_PRINTLN_DIAG_MALFORMED_VALUE = UINT32_C(0x4500) + 3U
 } runtimec_temp_println_diagnostic_t;
 
 static runtimec_status_t runtimec_temp_println_fail(

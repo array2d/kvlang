@@ -14,6 +14,8 @@
 
 #include "vmbin/handlers/host.h"
 
+#include "contract/diagnostic_band.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -71,12 +73,46 @@ static runtimec_status_t runtimec_host_static_key(
 }
 
 /* 统一的失败出口：把状态写进结构化 exit，不推进游标。 */
+
+/*
+ * host 的失败细节码。**每个码对应一个确定的成因**，不设「其它」类。
+ *
+ * 让调用方给码而不是出口自己编：本文件有 27 个失败调用点，一个统一出口若自己
+ * 编个笼统码，产出的就是「失败但没原因」——语料里那三条 `detail=0` 正是这么来的。
+ */
+typedef enum runtimec_host_diagnostic {
+    RUNTIMEC_HOST_DIAG_NONE = 0,
+    /* 读参或写参个数与算子形状不符。 */
+    RUNTIMEC_HOST_DIAG_ARITY = 0x4601,
+    /* 取不到 kvspace 句柄（本 session 不接存储）。 */
+    RUNTIMEC_HOST_DIAG_MISSING_HANDLE = 0x4602,
+    /* 取不到绝对路径键（形参不是 STATIC/LOCAL，或键文本超长）。 */
+    RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED = 0x4603,
+    /* 后端调用失败（kvspaceGet/Set/Watch/List 等返回非 0）。 */
+    RUNTIMEC_HOST_DIAG_BACKEND_FAILED = 0x4604,
+    /* 读参的值体无法定位，或宽度与声明不符。 */
+    RUNTIMEC_HOST_DIAG_OPERAND_INVALID = 0x4605,
+    /* 写参不可写，或写入长度与当前值体不符。 */
+    RUNTIMEC_HOST_DIAG_WRITE_FAILED = 0x4606,
+    /* 值头几何不可逆（body 地址推不出 XValue 基址）。 */
+    RUNTIMEC_HOST_DIAG_MALFORMED_WIRE = 0x4607,
+    /* 本执行器不兑现这个算子（能力缺口，不是错误）。 */
+    RUNTIMEC_HOST_DIAG_UNSUPPORTED = 0x4608
+} runtimec_host_diagnostic_t;
+
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(RUNTIMEC_HOST_DIAG_UNSUPPORTED,
+                                           RUNTIMEC_DIAGNOSTIC_BAND_HOST),
+               "host diagnostic must stay inside its band");
+_Static_assert(RUNTIMEC_HOST_DIAG_NONE == 0,
+               "0 is reserved for \"unset\"; failure paths must never report it");
+
 static runtimec_status_t runtimec_host_fail(
     binrwir_execution_exit_t *output_exit, runtimec_status_t status,
-    uint32_t source_program_counter) {
+    uint32_t detail_code, uint32_t source_program_counter) {
     *output_exit = (binrwir_execution_exit_t){0};
     output_exit->kind = BINRWIR_EXECUTION_EXIT_ERROR;
     output_exit->status = status;
+    output_exit->detail_code = detail_code;
     output_exit->logical_program_counter = source_program_counter;
     output_exit->resume_logical_program_counter = source_program_counter;
     return status;
@@ -102,7 +138,7 @@ static bool runtimec_host_prepare_call(
     *output_exit = (binrwir_execution_exit_t){0};
     if (instruction->read_arguments.count != expected_reads) {
         runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                           source_program_counter);
+                           RUNTIMEC_HOST_DIAG_ARITY, source_program_counter);
         return false;
     }
     status = runtimec_vthread_status_handle(frame, output_handle);
@@ -114,7 +150,7 @@ static bool runtimec_host_prepare_call(
             RUNTIMEC_HOST_KEY_CAPACITY);
     }
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_host_fail(output_exit, status, source_program_counter);
+        runtimec_host_fail(output_exit, status, RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED, source_program_counter);
         return false;
     }
     return true;
@@ -126,7 +162,7 @@ static runtimec_status_t runtimec_host_finish_call(
     uint32_t source_program_counter) {
     if (operation_status != 0) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_BACKEND_FAILED, source_program_counter);
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }
@@ -157,7 +193,7 @@ static bool runtimec_host_read_uint64(
             RUNTIMEC_STATUS_SUCCESS ||
         location.read_bytes == NULL || location.size != sizeof(*output_value)) {
         runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                           source_program_counter);
+                           RUNTIMEC_HOST_DIAG_OPERAND_INVALID, source_program_counter);
         return false;
     }
     memcpy(output_value, location.read_bytes, sizeof(*output_value));
@@ -181,7 +217,7 @@ static runtimec_status_t runtimec_host_store_int64(
             runtimec_bytes_view_make(&value, sizeof(value)),
             &error) != RUNTIMEC_STATUS_SUCCESS) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_WRITE_FAILED, source_program_counter);
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }
@@ -208,7 +244,7 @@ static runtimec_status_t runtimec_host_store_read_value(
             runtimec_bytes_view_make(value, (size_t)value_size),
             &error) != RUNTIMEC_STATUS_SUCCESS) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_WRITE_FAILED, source_program_counter);
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }
@@ -235,7 +271,7 @@ static runtimec_status_t runtimec_host_kvspace_get(
     }
     if (kvspaceGet(handle, keys[0], 1, &value, &value_size) != 0) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_BACKEND_FAILED, source_program_counter);
     }
     return runtimec_host_store_read_value(frame, instruction, value, value_size,
                                           output_exit, source_program_counter);
@@ -272,7 +308,7 @@ static bool runtimec_host_whole_wire(
     if (vmbin_value_access_locate(frame, argument, &location, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
         runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                           source_program_counter);
+                           RUNTIMEC_HOST_DIAG_OPERAND_INVALID, source_program_counter);
         return false;
     }
     if (location.is_whole_wire) {
@@ -290,7 +326,7 @@ static bool runtimec_host_whole_wire(
 
         if (xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE) {
             runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                               source_program_counter);
+                               RUNTIMEC_HOST_DIAG_MALFORMED_WIRE, source_program_counter);
             return false;
         }
         head = (const kvspaceXvalueHead *)(uintptr_t)xvalue_address;
@@ -323,7 +359,7 @@ static runtimec_status_t runtimec_host_kvspace_set(
     if (instruction->read_arguments.count != 2U) {
         *output_exit = (binrwir_execution_exit_t){0};
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_ARITY, source_program_counter);
     }
     *output_exit = (binrwir_execution_exit_t){0};
     if (runtimec_vthread_status_handle(frame, &handle) !=
@@ -370,7 +406,7 @@ static runtimec_status_t runtimec_host_kvspace_watch(
     if (instruction->read_arguments.count != 2U ||
         instruction->write_arguments.count != 1U) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_ARITY, source_program_counter);
     }
     status = runtimec_vthread_status_handle(frame, &handle);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
@@ -383,20 +419,20 @@ static runtimec_status_t runtimec_host_kvspace_watch(
             &error);
     }
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
+        return runtimec_host_fail(output_exit, status, RUNTIMEC_HOST_DIAG_OPERAND_INVALID, source_program_counter);
     }
     if (kvspaceWatch(handle, key, expected_location.read_bytes,
                      (uint32_t)expected_location.size, UINT64_C(1000000),
                      &observed, &observed_size) != 0) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_BACKEND_FAILED, source_program_counter);
     }
     if (observed != NULL && observed_size != 0U) {
         status = vmbin_value_access_write(
             frame, &instruction->write_arguments.data[0],
             runtimec_bytes_view_make(observed, (size_t)observed_size), &error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
-            return runtimec_host_fail(output_exit, status, source_program_counter);
+            return runtimec_host_fail(output_exit, status, RUNTIMEC_HOST_DIAG_WRITE_FAILED, source_program_counter);
         }
     }
     return RUNTIMEC_STATUS_SUCCESS;
@@ -437,7 +473,7 @@ static runtimec_status_t runtimec_host_random_unsigned_64(
     *output_exit = (binrwir_execution_exit_t){0};
     if (instruction->write_arguments.count != 1U) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_ARITY, source_program_counter);
     }
     return runtimec_host_store_int64(frame, instruction,
                                      (int64_t)runtimec_host_random_u64(),
@@ -456,7 +492,7 @@ static runtimec_status_t runtimec_host_random_signed_63(
     *output_exit = (binrwir_execution_exit_t){0};
     if (instruction->write_arguments.count != 1U) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_ARITY, source_program_counter);
     }
     return runtimec_host_store_int64(
         frame, instruction, (int64_t)(runtimec_host_random_u64() >> 1U),
@@ -481,7 +517,7 @@ static runtimec_status_t runtimec_host_random_below(
     if (instruction->read_arguments.count != 1U ||
         instruction->write_arguments.count != 1U) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_ARITY, source_program_counter);
     }
     if (!runtimec_host_read_uint64(frame, &instruction->read_arguments.data[0],
                                    &bound, output_exit,
@@ -522,7 +558,7 @@ static runtimec_status_t runtimec_host_vthread_setstatus(
     *output_exit = (binrwir_execution_exit_t){0};
     if (instruction->read_arguments.count != 1U) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_ARITY, source_program_counter);
     }
     if (runtimec_vthread_status_handle(frame, &handle) !=
             RUNTIMEC_STATUS_SUCCESS ||
@@ -534,7 +570,7 @@ static runtimec_status_t runtimec_host_vthread_setstatus(
                                        &status_location,
                                        &error) != RUNTIMEC_STATUS_SUCCESS) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_OPERAND_INVALID, source_program_counter);
     }
     if (runtimec_vthread_status_write(
             handle, status_key,
@@ -542,7 +578,7 @@ static runtimec_status_t runtimec_host_vthread_setstatus(
                                      status_location.size)) !=
         RUNTIMEC_STATUS_SUCCESS) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_BACKEND_FAILED, source_program_counter);
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }
@@ -569,7 +605,7 @@ static runtimec_status_t runtimec_host_vthread_sleep(
     *output_exit = (binrwir_execution_exit_t){0};
     if (instruction->read_arguments.count != 1U) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED, source_program_counter);
     }
     if (!runtimec_host_read_uint64(frame, &instruction->read_arguments.data[0],
                                    &duration_nanoseconds, output_exit,
@@ -602,6 +638,7 @@ static runtimec_status_t runtimec_host_vthread_not_implemented(
     binrwir_execution_exit_t *output_exit) {
     (void)frame;
     return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_UNSUPPORTED,
+                              RUNTIMEC_HOST_DIAG_UNSUPPORTED,
                               instruction->source_logical_program_counter);
 }
 
@@ -818,7 +855,7 @@ static runtimec_status_t runtimec_host_kvspace_list_at(
     if (instruction->read_arguments.count != 2U ||
         instruction->write_arguments.count != 1U) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_UNSUPPORTED, source_program_counter);
     }
     status = runtimec_vthread_status_handle(frame, &handle);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
@@ -830,12 +867,12 @@ static runtimec_status_t runtimec_host_kvspace_list_at(
             frame, &instruction->read_arguments.data[1], &index_location, &error);
     }
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
+        return runtimec_host_fail(output_exit, status, RUNTIMEC_HOST_DIAG_ARITY, source_program_counter);
     }
     if (index_location.read_bytes == NULL ||
         index_location.size != sizeof(index)) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
+                                  RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED, source_program_counter);
     }
     memcpy(&index, index_location.read_bytes, sizeof(index));
     if (index >= 0) {
@@ -850,7 +887,7 @@ static runtimec_status_t runtimec_host_kvspace_list_at(
                 runtimec_bytes_view_make(name, (size_t)name_length), &error);
             if (status != RUNTIMEC_STATUS_SUCCESS) {
                 return runtimec_host_fail(output_exit, status,
-                                          source_program_counter);
+                                          RUNTIMEC_HOST_DIAG_ARITY, source_program_counter);
             }
         }
     }

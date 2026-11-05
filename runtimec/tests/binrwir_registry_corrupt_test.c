@@ -27,6 +27,7 @@
 #include "contract/allocator.h"
 #include "contract/status.h"
 #include "binrwir/registry.h"
+#include "contract/diagnostic_band.h"
 #include "vmbin/interpreter.h"
 
 static int failures;
@@ -170,7 +171,14 @@ int main(void) {
     /* ⑧ 诊断码必须互不相等：这是「两种失败可区分」的机器判据。 */
     EXPECT(VMBIN_INTERPRETER_DIAG_CORRUPT_REGISTRY !=
            VMBIN_INTERPRETER_DIAG_INVALID_INSTRUCTION);
-    EXPECT(VMBIN_INTERPRETER_DIAG_CORRUPT_REGISTRY == 10);
+    /*
+     * 具名常量 + 段断言，不写裸 `10`。
+     *
+     * 迁移前解释器的码从 1 开始，与窗口/println 撞号；现在每个模块一个段，
+     * 这条同时钉住「码本身」与「它在解释器段内」。
+     */
+    EXPECT(VMBIN_INTERPRETER_DIAG_CORRUPT_REGISTRY ==
+           RUNTIMEC_DIAGNOSTIC_BAND_INTERPRETER + 10U);
 
     /*
      * ⑨ 结构标记不得注册。FOREIGN 由解释器 switch 直接分派，NONE 表示「没有

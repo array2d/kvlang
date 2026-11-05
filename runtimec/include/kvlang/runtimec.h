@@ -80,6 +80,14 @@ typedef enum kvlang_runtime_entry_kind {
 
 typedef struct kvlang_runtime_execute_request {
     kvlang_runtime_entry_kind_t entry_kind;
+    /*
+     * 进入哪个函数，**裸函数名**（`"test"`），不是 key。
+     *
+     * 本入口自己补 `/lib/` 前缀。**一个名字只许一种含义**：以 `/` 开头的值
+     * （例如 `"/lib/test"`）一律拒绝并返回 INVALID——它不是「换个写法」，
+     * 拼出来会变成 `/lib//lib/test`。而 kvspace 对缺失 key 返回成功 + 空值，
+     * 于是双前缀的错误只会表现为下游一句误导性的「没有 source revision key」。
+     */
     const char *entry_name;
     const char *const *arguments;
     size_t argument_count;

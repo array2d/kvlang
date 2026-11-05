@@ -44,6 +44,7 @@
 #include <stdint.h>
 
 #include "contract/status.h"
+#include "contract/diagnostic_band.h"
 #include "contract/view.h"
 
 #include "binrwir/registry.h"
@@ -109,6 +110,11 @@ typedef enum runtimec_container_diagnostic {
      */
     RUNTIMEC_CONTAINER_DIAG_RESHAPE_SIZE_MISMATCH = 0x4305
 } runtimec_container_diagnostic_t;
+
+/* 段断言：本模块的码必须落在自己的段内（见 contract/diagnostic_band.h）。 */
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(RUNTIMEC_CONTAINER_DIAG_RESHAPE_SIZE_MISMATCH, RUNTIMEC_DIAGNOSTIC_BAND_CONTAINER),
+               "RUNTIMEC_CONTAINER_DIAG_RESHAPE_SIZE_MISMATCH must stay inside its diagnostic band");
+
 
 /*
  * 一个 compact 数组的声明 langtype 解析结果：基种类 + 元素字节宽 + 维数。

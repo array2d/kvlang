@@ -21,6 +21,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "contract/status.h"
+#include "contract/diagnostic_band.h"
 #include "contract/view.h"
 #include "engine/session.h"
 #include "binrwir/execution_exit.h"
@@ -29,6 +30,46 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef enum runtimec_execution_window_diagnostic_t {
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_INVALID_REQUEST = UINT32_C(0x4000) + 1U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_MISSING_HOST_CAPABILITY = UINT32_C(0x4000) + 2U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_SNAPSHOT_FAILED = UINT32_C(0x4000) + 3U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_REPOSITORY_FAILED = UINT32_C(0x4000) + 4U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_ENCODE_FAILED = UINT32_C(0x4000) + 5U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_COMPILE_FAILED = UINT32_C(0x4000) + 6U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_COMPILATION_INVALID = UINT32_C(0x4000) + 7U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_COUNT = UINT32_C(0x4000) + 8U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_UNRESOLVED = UINT32_C(0x4000) + 9U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED = UINT32_C(0x4000) + 10U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED = UINT32_C(0x4000) + 11U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_PROGRAM_COUNTER_NOT_FOUND = UINT32_C(0x4000) + 12U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_ENSURE_FAILED = UINT32_C(0x4000) + 13U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_EXECUTION_FAILED = UINT32_C(0x4000) + 14U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_CHECKPOINT_FAILED = UINT32_C(0x4000) + 15U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED = UINT32_C(0x4000) + 16U,
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY = UINT32_C(0x4000) + 17U,
+    /* 实参描述的 key 不合法（空、不可解析）。 */
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_KEY_INVALID = UINT32_C(0x4000) + 18U,
+    /* 字面量描述缺 bytes 或 langtype。 */
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_LITERAL_INVALID = UINT32_C(0x4000) + 19U,
+    /* 物化本身失败（写不进去、key 放不下）。 */
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_MATERIALIZE_FAILED = UINT32_C(0x4000) + 20U,
+    /*
+     * 特化失败（编码成功之后、编译之前）。
+     *
+     * **必须与 5（编码失败）分开**：一个码两个成因，看日志的人就只能靠第二个通道
+     * （比如「runner 有没有打 encode 的 message」）去分诊，而那个通道一换就失效，
+     * 失效时还不报错。诊断码本身要说得出「死在哪一步」。
+     */
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_SPECIALIZE_FAILED = UINT32_C(0x4000) + 21U
+} runtimec_execution_window_diagnostic_t;
+
+/* 段断言：窗口的码必须在自己的段内（见 contract/diagnostic_band.h）。 */
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(
+                   RUNTIMEC_EXECUTION_WINDOW_DIAG_SPECIALIZE_FAILED,
+                   RUNTIMEC_DIAGNOSTIC_BAND_EXECUTION_WINDOW),
+               "window diagnostic must stay inside its band");
 
 /* 一个实参的来源。判据是「执行窗口要不要创建它」，不是「谁声明的它」。 */
 typedef enum runtimec_argument_source {

@@ -13,6 +13,7 @@
  */
 
 #include "engine/execution_window.h"
+#include "contract/diagnostic_band.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -32,39 +33,6 @@
 #include "vmkv/rwir.h"
 #include "vmkv/rwir_manifest.h"
 
-typedef enum runtimec_execution_window_diagnostic_t {
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_INVALID_REQUEST = 1,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_MISSING_HOST_CAPABILITY = 2,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_SNAPSHOT_FAILED = 3,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_REPOSITORY_FAILED = 4,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_ENCODE_FAILED = 5,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_COMPILE_FAILED = 6,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_COMPILATION_INVALID = 7,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_COUNT = 8,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_UNRESOLVED = 9,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED = 10,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED = 11,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_PROGRAM_COUNTER_NOT_FOUND = 12,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_ENSURE_FAILED = 13,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_EXECUTION_FAILED = 14,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_CHECKPOINT_FAILED = 15,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED = 16,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY = 17,
-    /* 实参描述的 key 不合法（空、不可解析）。 */
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_KEY_INVALID = 18,
-    /* 字面量描述缺 bytes 或 langtype。 */
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_LITERAL_INVALID = 19,
-    /* 物化本身失败（写不进去、key 放不下）。 */
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_MATERIALIZE_FAILED = 20,
-    /*
-     * 特化失败（编码成功之后、编译之前）。
-     *
-     * **必须与 5（编码失败）分开**：一个码两个成因，看日志的人就只能靠第二个通道
-     * （比如「runner 有没有打 encode 的 message」）去分诊，而那个通道一换就失效，
-     * 失效时还不报错。诊断码本身要说得出「死在哪一步」。
-     */
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_SPECIALIZE_FAILED = 21
-} runtimec_execution_window_diagnostic_t;
 
 static void runtimec_execution_window_reset_result(runtimec_execution_window_result_t *result,
                                         runtimec_status_t status,
