@@ -191,11 +191,15 @@ fn analyze_func(
     // Annotate call-site return types from `sigs` before lowering.
     let mut src = func.clone();
     lower::annotate_call_returns(&mut src, sigs);
+    // 形状校验必须在 lower **之前**：`flatten_expr` 会把 `f([1,2,3,4])` 的实参
+    // 物化成临时槽，此后容器字面量不复存在，形状再也比不了。
+    let mut shape_diags = lower::check_call_shapes(&src, sigs);
     let mut fn_ = lower::lower_func(&src)?;
     let type_map = lower::infer_types(&fn_);
     let declared = lower::declared_types(&fn_);
     let type_sets = lower::infer_type_sets(&fn_);
-    let mut diags = lower::validate_writes(&fn_, &type_map, structs, sigs);
+    let mut diags = std::mem::take(&mut shape_diags);
+    diags.extend(lower::validate_writes(&fn_, &type_map, structs, sigs));
     /* 推断必须在 specialize 之前算一次，且只算一次：specialize 只改 e.op 的字形
      * （`+` → `add`）与 `operator`/`operand_kind`，不改赋值来源与类型，所以两处
      * 结果相同；在它之后重算既多余，又逼着 `exact_kind` 同时认两种 op 形态。
@@ -289,9 +293,46 @@ pub fn format(src: &str) -> Result<String, String> {
 
 /// 校验源码是否可 layout（parse + lower），但不写入 kvspace。
 /// 供运行时 vet 闸门：LLM 生成的 kv 代码先过此关，失败不污染 /lib。
+///
+/// **不覆盖依赖 `/lib` 既有声明的检查**（`check_call_names` 的「裸名是否已被声明为 rwir」）——
+/// 没有 store 就无从判定。要那份结论请用 [`vet_with_store`]。这条差别必须显式存在：
+/// 否则「vet 通过」会被当成「能编译」，而 `println` 这类由 runtime 在 boot 时发布 def rwir
+/// 的算子，在 `vet` 下与 `compile` 下会给出**相反**的结论。
 pub fn vet(src: &str) -> Result<(), String> {
     // Shares `analyze_file` with `compile`; state-dependent checks run only in `compile`.
     analyze_file(src).map(|_| ())
+}
+
+/// 带 store 的校验：在 [`vet`] 的纯检查之上，再跑一遍与 `compile` **同一条**调用名检查。
+///
+/// `store` 里必须有被调算子的声明（如 runtime boot 时发布的 `def rwir`），
+/// 否则结论与 `compile` 相同——两者用同一个 `check_call_names`，不另立判据。
+pub fn vet_with_store(kv: &mut Kv, src: &str) -> Result<(), String> {
+    let checked = analyze_file(src)?;
+    let file = &checked.file;
+    let local_funcs: HashSet<String> = file
+        .funcs
+        .iter()
+        .map(|f| {
+            let pkg = if f.pkg.is_empty() {
+                &file.package
+            } else {
+                &f.pkg
+            };
+            if pkg.is_empty() {
+                f.sig.name.clone()
+            } else {
+                format!("{pkg}{}{name}", keytree::MEMBER_SEP, name = f.sig.name)
+            }
+        })
+        .collect();
+    for a in &checked.funcs {
+        check_call_names(kv, &a.pkg, &a.seq, &local_funcs)?;
+    }
+    if let Some(a) = &checked.top_init {
+        check_call_names(kv, "", &a.seq, &local_funcs)?;
+    }
+    Ok(())
 }
 
 /// printlib：把 /lib 子树重构为可运行的 kvlang 源码（**只看 layout 结果，不读 `.src`**：

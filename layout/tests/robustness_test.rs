@@ -339,3 +339,96 @@ fn deref_of_expression_does_not_panic() {
     assert!(vet(src2).is_ok());
     compile(&mut store().kv, src2).unwrap();
 }
+
+/// `rwfunc` 的参数与返回值必须是单一类型：并集会让调用方无从推出类型。
+///
+/// 反向控制同样重要：`rwir` 声明**保留**并集能力（算子由编译期特化器收敛），
+/// 若没有这一条，把判据写成「所有签名都不许并集」也能让上面三条全绿。
+#[test]
+fn rwfunc_signature_rejects_union_but_rwir_declaration_keeps_it() {
+    let single = "rwfunc f(int64 $a) -> (int64 $r) {\n\t*a -> $r\n}\n";
+    assert!(
+        errors(single).iter().all(|(_, _, m)| !m.contains("single type")),
+        "{:?}",
+        errors(single)
+    );
+
+    let param_union = "rwfunc f(int64|float64 $a) -> (int64 $r) {\n\t*a -> $r\n}\n";
+    assert!(
+        errors(param_union)
+            .iter()
+            .any(|(_, _, m)| m.contains("rwfunc parameter must be a single type")),
+        "{:?}",
+        errors(param_union)
+    );
+
+    let return_union = "rwfunc f(int64 $a) -> (int64|float64 $r) {\n\t*a -> $r\n}\n";
+    assert!(
+        errors(return_union)
+            .iter()
+            .any(|(_, _, m)| m.contains("rwfunc return type must be a single type")),
+        "{:?}",
+        errors(return_union)
+    );
+
+    // 反向控制：同样的并集写在 rwir 声明处必须**不**被这条规则拦下。
+    let rwir_union = "rwir demo·pick(*int64|float64 $a) -> (*int64|float64 $r)\n";
+    assert!(
+        errors(rwir_union).iter().all(|(_, _, m)| !m.contains("single type")),
+        "{:?}",
+        errors(rwir_union)
+    );
+}
+
+/// 参数变参（spec 03-类型系统/08「参数变参」）：一个参数位吸收 0..N 个同型实参。
+///
+/// 判据是「**arity** 开放」——`...` 是**签名层**的 arity 属性，不是类型的一部分：
+/// 它落签名行锚点 `[0,0]` 的 `dynamic` 字节，参数 langtype 子串保持纯净。
+/// 所以放开的是**个数**，不是**类型**：`f(1)` 对 `*[]char/utf32 $s...` 仍须报
+/// `cannot pass int64`（见下面的反向控制）。
+///
+/// 这条放在 layout 的 Rust 用例里、不放 kv 语料，是因为语料用例的定义是
+/// 「给全能力集后能跑完并产出期望输出」。一条「本来就不打算执行」的用例会让
+/// blocked 从「能力缺口计数」变成「作者心情计数」——blocked 不许当免责通道。
+#[test]
+fn variadic_parameter_accepts_any_arity() {
+    for arity in [0usize, 1, 4] {
+        let args = vec!["1"; arity].join(", ");
+        let src = format!(
+            "rwfunc f(*int64... $x) -> () {{\n}}\nrwfunc g() -> () {{\n\tf({args})\n}}\n"
+        );
+        assert!(vet(&src).is_ok(), "arity {arity}: {:?}", errors(&src));
+    }
+}
+
+/// 反向控制：变参放开的是 arity，不是类型。
+///
+/// 若实现把 `...` 理解成「这一位什么都收」，下面第一条会绿——那就不是 arity 多态，
+/// 而是类型检查被关掉了。
+///
+/// **判据用 `vet` 不用 `errors()`**：实参类型检查在 lower 层（`check_call_args`/
+/// `check_call_shapes`），而 `errors()` 只跑 `parser::parse_code`，看不到那条诊断。
+/// 拿 `errors()` 判会得到一个恒真的「无诊断」——今天在别处踩过同形的坑。
+#[test]
+fn variadic_parameter_still_checks_type() {
+    let bad = "rwfunc f(*[]char/utf32 $s...) -> () {\n}\nrwfunc g() -> () {\n\tf(1, 2)\n}\n";
+    // `vet` 的 `Err` 只带汇总串（`type: error-level diagnostics — refusing to load`），
+    // 具体诊断在 stderr。这里判「被拒」；消息内容由 CLI 层验（`kvlang_layout_file`
+    // 的 stderr 含 `cannot pass int64`，见 workspace/622/coding3/shape-matching-fix.md）。
+    assert!(vet(bad).is_err(), "变参位把 int64 当字符串收了");
+
+    // 同类型的多实参必须放行——与上一条配对，证明拒绝的是类型不是个数。
+    let ok =
+        "rwfunc f(*[]char/utf32 $s...) -> () {\n}\nrwfunc g() -> () {\n\tf(\"a\", \"b\", \"c\")\n}\n";
+    assert!(vet(ok).is_ok(), "{:?}", errors(ok));
+}
+
+/// `...` 只属于**末**读参：写在非末位必须报错。
+#[test]
+fn variadic_marker_must_be_last() {
+    let src = "rwfunc f(*int64... $a, *int64 $b) -> () {\n}\n";
+    assert!(
+        !errors(src).is_empty(),
+        "非末位的 `...` 应被拒绝，实际无诊断"
+    );
+}

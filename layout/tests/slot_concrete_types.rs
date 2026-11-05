@@ -102,22 +102,19 @@ fn union_declaration_with_single_assignment_kind_is_narrowed() {
     // 循环累加：boot 从字面量 0 点火，再由算术来源接上。
     let (_dir2, mut kv2) = compile(
         "loop",
-        "lib p {\n\trwfunc s(*int64 $n) -> (*int64|float64 $r) {\n\t\ttotal:int64|float64 = 0\n\t\ti = 0\n\t\twhile (i < *n) {\n\t\t\ttotal = total + i\n\t\t\ti = i + 1\n\t\t}\n\t\ttotal -> *r\n\t}\n}\n",
+        "lib p {\n\trwfunc s(*int64 $n) -> () {\n\t\ttotal:int64|float64 = 0\n\t\ti = 0\n\t\twhile (i < *n) {\n\t\t\ttotal = total + i\n\t\t\ti = i + 1\n\t\t}\n\t}\n}\n",
     );
     // `while (i < *n)` 里的 `*n` 展开成一条拷贝指令，循环体因此右移到第 7 行。
     assert_eq!(read_slot_type(&mut kv2, "/lib/p·s/[7,-1]"), "int64");
 }
 
 /// 验收 2b：推不出具体类型时保留并集，交给 encoder 拒绝。
+///
+/// 旧版本还有一条「参数本身是并集」的用例；`rwfunc` 参数禁止并集之后
+/// （spec 03-类型系统/05-langtype签名类型表达式）它不再是合法 kvlang，
+/// 覆盖由下面这条「两条路径写不同 kind」承担。
 #[test]
 fn unresolvable_union_is_preserved() {
-    // 参数本身是并集：没有任何赋值来源能证明它具体是哪一支。
-    let (_dir, mut kv) = compile(
-        "param",
-        "lib p {\n\trwfunc g(*int64|float64 $x) -> (*float64 $r) {\n\t\t*x + 1.0 -> *r\n\t}\n}\n",
-    );
-    assert_eq!(read_slot_type(&mut kv, "/lib/p·g/[1,-1]"), "int64|float64");
-
     // 两条路径写不同 kind：真动态，保留并集。
     let (_dir2, mut kv2) = compile(
         "branch",

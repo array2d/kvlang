@@ -41,6 +41,18 @@ pub fn parse_code(src: &str) -> Result<(ast::File, Vec<Diagnostic>), String> {
 
 // ── parser 结构体 ─────────────────────────────────────────────────────
 
+/// 签名出现在哪种定义处。两者文法相同，但**参数多态的能力不同**：
+///
+/// - `rwfunc`：参数与返回值必须是**单一类型**（不得含并集）——调用方只能从声明推类型；
+/// - `rwir` 声明：允许并集，算子由编译期特化器按实参类型收敛成唯一 opid。
+///
+/// 见 `stdlib/kvlang/spec/03-类型系统/05-langtype签名类型表达式.kv`。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SignatureSite {
+    Rwfunc,
+    RwDeclaration,
+}
+
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
@@ -431,7 +443,7 @@ impl Parser {
 
     fn parse_func(&mut self) -> Func {
         let sig = self.parse_func_sig();
-        self.check_param_types(&sig);
+        self.check_param_types(&sig, SignatureSite::Rwfunc);
         self.check_variadic(&sig);
         self.check_param_dup(&sig);
         // 指针参数的判据：显式 `*`/`@` 前缀（`by_ref`），或类型本身是值容器
@@ -504,7 +516,7 @@ impl Parser {
                 self.expect(Kind::RParen);
             }
         }
-        self.check_param_types(&decl.sig);
+        self.check_param_types(&decl.sig, SignatureSite::RwDeclaration);
         self.check_variadic(&decl.sig);
         self.check_param_dup(&decl.sig);
         decl
@@ -800,7 +812,7 @@ impl Parser {
         params
     }
 
-    fn check_param_types(&mut self, sig: &FuncSig) {
+    fn check_param_types(&mut self, sig: &FuncSig, site: SignatureSite) {
         // 值容器类型必须写 `*`：map langtype（含 `·`）与 structref（`/` 开头）的成员落在兄弟槽
         // `{key}·`，单槽不是完备值，没有可拷贝的"值"，只能按地址传。
         //
@@ -908,6 +920,22 @@ impl Parser {
                     src_file: String::new(),
                     src_name: String::new(),
                 });
+            } else if site == SignatureSite::Rwfunc && crate::langtype::has_union(ty) {
+                // rwfunc 的参数是帧槽的**唯一**类型：并集会让调用方无从推出实参类型。
+                // rwir 算子的并集由编译期特化器收敛，不受此约束（见 [[langtype签名类型表达式]]）。
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    message: format!(
+                        "func {}: param {:?}: rwfunc parameter must be a single type, \
+                         a union is not allowed (got {:?})",
+                        sig.name, param.name, param.ty
+                    ),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
             }
         }
         for ret in &sig.returns {
@@ -922,6 +950,20 @@ impl Parser {
                         ret.name,
                         type_error(&ret.ty),
                         ret.ty
+                    ),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+            } else if site == SignatureSite::Rwfunc && crate::langtype::has_union(ty) {
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    message: format!(
+                        "func {}: return value {:?}: rwfunc return type must be a single type, \
+                         a union is not allowed (got {:?})",
+                        sig.name, ret.name, ret.ty
                     ),
                     warn: false,
                     info: false,

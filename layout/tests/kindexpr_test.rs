@@ -2,7 +2,9 @@ use kvlanglayout::parser::{self};
 
 #[test]
 fn parse_type_expression_signature() {
-    let src = "rwfunc f(*int64|float64 $A, *[2,3]float32 $B, *[?,768]float32 $C) -> (*[]float32 $D) {\n    *A -> *D\n}\n";
+    // 并集不在此用例里：`rwfunc` 的参数/返回值必须是单一类型（spec 03-类型系统/
+    // 05-langtype签名类型表达式）；并集的接受面由 `robustness_test` 的 rwir 反向控制覆盖。
+    let src = "rwfunc f(*int64 $A, *[2,3]float32 $B, *[?,768]float32 $C) -> (*[]float32 $D) {\n    *A -> *D\n}\n";
     let (file, diags) = parser::parse_code(src).unwrap();
     let msgs: Vec<String> = diags.iter().map(|d| d.message.clone()).collect();
     assert!(!parser::has_errors(&diags), "unexpected errors: {:?}", msgs);
@@ -10,7 +12,7 @@ fn parse_type_expression_signature() {
     let sig = &file.funcs[0].sig;
     assert_eq!(sig.name, "f");
     let tys: Vec<&str> = sig.params.iter().map(|p| p.ty.as_str()).collect();
-    assert_eq!(tys, vec!["int64|float64", "[2,3]float32", "[?,768]float32"]);
+    assert_eq!(tys, vec!["int64", "[2,3]float32", "[?,768]float32"]);
     let rets: Vec<&str> = sig.returns.iter().map(|p| p.ty.as_str()).collect();
     assert_eq!(rets, vec!["[]float32"]);
 }

@@ -87,9 +87,18 @@ def convert_signature_item(item: str) -> str:
     值类型本身是 `*T` 的参数」。新写法的传递方式是 `*`、值类型是 `*T`，合起来
     必须写 `**T $name`——**不是** `*T $name`。少写一层，写侧就会把指针当值。
     """
-    name, ty, _ = parse_item(item)
+    name, ty, original = parse_item(item)
+    # 已迁移（含 `$`）：**原样返回**，不得再叠一层传递方式。
+    # 旧版把 `$` 项的 `ty` 送进下面「旧形态 `name:*T`」那条分支，于是 `*int64 $x` 被加成
+    # `**int64 $x`——对已迁移的 152 个文件再跑一次 --write 就会让签名全部多一层 `*`，
+    # 而且**不报错**，看起来像「迁移没做对」。
+    if "$" in item:
+        # 前导空白由 `convert_params` 单独保留，这里必须剥掉——否则会变成 `,  *int64`（两个空格）。
+        return original.lstrip()
     if not ty:
-        return f"* ${name}"
+        # 空 kindexpr 在**参数位**是非法（现行 spec：参数与返回值必须有类型）。
+        # 旧版工具把它迁成 `* $name`，那是把一个错误迁成另一个错误——拒绝迁移，交人工。
+        raise ValueError(f"参数/返回值 {name!r} 没有类型：现行 spec 禁止空 kindexpr，需人工处理")
     # 旧形态 `name:*T`：`*` 属于**值类型**，不是传递方式；再叠一层传递方式 `*`。
     if ty.startswith("*"):
         return f"*{ty} ${name}"
@@ -117,9 +126,16 @@ def convert_params(raw: str) -> str:
 
 
 def body_span(text: str, start: int) -> tuple[int, int]:
-    """从签名结束处找到函数体 `{…}` 的范围（花括号配对，跳过字符串与注释）。"""
-    i = text.find("{", start)
-    if i < 0:
+    """从签名结束处找到函数体 `{…}` 的范围（花括号配对，跳过字符串与注释）。
+
+    **签名之后只允许跳过空白**：`rwfunc` 的 `{` 紧随其后（同一行或下一行），而 `rwir` 声明
+    根本没有函数体。早先直接 `find("{")` 会把**下一个函数**的花括号当成自己的函数体，
+    于是 `rwir` 声明后面被插进一段重复的函数体（HEAD 版工具即有此 bug）。
+    """
+    i = start
+    while i < len(text) and text[i].isspace():
+        i += 1
+    if i >= len(text) or text[i] != "{":
         return start, start
     depth = 0
     while i < len(text):
@@ -204,7 +220,11 @@ def convert_text(text: str) -> tuple[str, list[str]]:
     conflicts: list[str] = []
     for match in SIGNATURE.finditer(text):
         keyword, fname, params, returns = match.groups()
-        signature = f"{keyword} {fname}({convert_params(params)}) -> ({convert_params(returns)})"
+        try:
+            signature = f"{keyword} {fname}({convert_params(params)}) -> ({convert_params(returns)})"
+        except ValueError as error:
+            conflicts.append(f"{fname}: {error}")
+            continue
         out.append(text[pos:match.start()])
         out.append(signature)
 
@@ -217,11 +237,20 @@ def convert_text(text: str) -> tuple[str, list[str]]:
         }
         _, body_end = body_span(text, match.end())
         body = text[match.end():body_end]
+        # 签名**未变** = 该文件已迁移：函数体一个字都不动。
+        # 否则会把 `slow = head`（指针值复制）改写成 `slow = *head`（取指针指向的值）——
+        # 那是语义改写，不是迁移。幂等不止于签名，也止于函数体。
+        if signature == text[match.start():match.end()]:
+            out.append(body)
+            pos = body_end
+            continue
         if pointer_names and body:
             masked = mask_noncode(body)
             collisions = find_local_collisions(masked, pointer_names)
             if collisions:
-                conflicts.append(f"{fname}: {', '.join(sorted(collisions))}")
+                conflicts.append(
+                    f"{fname}: {', '.join(sorted(collisions))} —— 局部变量与指针形参同名，手工处理"
+                )
                 out.append(body)
             else:
                 out.append(rewrite_body(body, pointer_names))
@@ -247,7 +276,7 @@ def main() -> int:
         if conflicts:
             failed = True
             for conflict in conflicts:
-                print(f"CONFLICT {path}: {conflict} —— 局部变量与指针形参同名，手工处理",
+                print(f"CONFLICT {path}: {conflict}",
                       file=sys.stderr)
             continue
         if migrated == original:

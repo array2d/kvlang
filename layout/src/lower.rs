@@ -3133,6 +3133,7 @@ fn check_struct_literal(e: &Expr, structs: &StructTable, diags: &mut Vec<Diagnos
 fn check_call_args(
     e: &Expr,
     sigs: &SigTable,
+    tm: &HashMap<String, String>,
     declared: &HashMap<String, String>,
     diags: &mut Vec<Diagnostic>,
 ) {
@@ -3165,27 +3166,37 @@ fn check_call_args(
         if raw.is_empty() || raw.starts_with('@') {
             continue;
         }
-        // union 形参此前被直接跳过（类型空洞）：按成员匹配可证明的实参类型，
-        // 不在成员集内即报错（与具体类型检查同一诊断级别）。
-        //
         // `*` 作用于**整个类型表达式**（spec [[ptr]]：`*` 是传递方式，不是类型的
         // 一部分）。`*int64|float64` 读作「指向 (int64|float64) 的指针」，比对的是
-        // 剥掉 `*` 之后的 union；逐成员写 `*A|*B` 非法，由参数声明处拒绝。
-        let union = deref_value_type(&raw).to_string();
-        if union.contains('|') {
-            if let Some(vt) = provable_arg_type(arg, declared) {
-                if !value_matches(&union, &vt) {
-                    // 报**值类型**不报 `*T`：`*` 是传递方式，不是实参要满足的类型。
+        // 剥掉 `*` 之后的声明类型；逐成员写 `*A|*B` 非法，由参数声明处拒绝。
+        let declared_value_type = deref_value_type(&raw).to_string();
+        // **形状与并集判定不在这里**：它在 `check_call_shapes`（lower 之前的 AST 上），
+        // 因为 `flatten_expr` 到这一层已经把 `f([1,2,3,4])` 的实参物化成临时槽，
+        // 容器字面量不复存在。这里只做**变量实参**的具体类型检查——那是
+        // `check_call_shapes` 拿不到 `declared` 而做不了的那部分。
+        //
+        // 写这段时踩过两次：①只按「含不含 `|`」分流，非并集从不走形状匹配；
+        // ②把形状检查也放这里，于是同一错误在两处各报一条（并集实参重复报）。
+        // 判据的归属要按**能看见什么**分：AST 层看得见字面量，写槽层看得见变量。
+        if is_matchable_kindexpr(&declared_value_type) {
+            if let Some(vt) = provable_arg_type(arg, declared, tm) {
+                // **归属按能看见什么分**：
+                //  · 字面量（含容器字面量）——`check_call_shapes` 在 AST 层已判过，
+                //    这里跳过，否则同一错误报两条（并集坏实参重复报，实测过）；
+                //  · 变量——只有这里看得见 `declared`，必须在这里按**同一条**
+                //    `value_matches` 判。否则会落到下面 `check_assignable` 的字符串
+                //    相等，把 `[?]int64` 收到 `[3]int64` 判成不等（量词全被误伤，实测过）。
+                if is_variable_arg(arg) && !value_matches(&declared_value_type, &vt) {
                     push_write_diag(
                         diags,
                         format!(
-                            "TypeError: cannot pass {vt} to {union} (parameter {})",
+                            "TypeError: cannot pass {vt} to {declared_value_type} (parameter {})",
                             param.name
                         ),
                     );
                 }
+                continue;
             }
-            continue;
         }
         // 只对可静态信任的实参做检查：字面量，或已声明类型的变量。
         // 推断类型可能不准（如 &t·1 的成员取址），不能作为拒绝依据。
@@ -3224,11 +3235,77 @@ fn check_call_args(
     }
 }
 
+/// 该实参是不是**变量引用**（裸名且不是字面量文本）。
+///
+/// 用来区分两种实参的归属：字面量在 AST 层由 `check_call_shapes` 判，变量在此处判。
+/// 两者共用 `value_matches`，只是**看得见的东西不同**——不是两套判据。
+///
+/// 不能靠 `e.lit` 判断：`flatten_expr` 把字面量统一重建为 `ast::leaf`，那里
+/// `lit` 恒为 `LitNone`（`ast.rs:315`），类型信息在**文本**里（`"true"`、`"42"`）。
+/// 判据只能与 `literal_slot_type` 同源，否则 `true` 会被当成变量（实测过：
+/// 并集坏实参因此报两条）。
+fn is_variable_arg(e: &Expr) -> bool {
+    e.is_leaf()
+        && e.quote == 0
+        && !e.val.is_empty()
+        && literal_slot_type(&e.val).is_empty()
+}
+
+/// 该声明类型能不能用 `value_matches` 匹配（即它是不是一条 kindexpr）。
+///
+/// 排除两类：structref（`/lib/…`）与 mapexpr（含 `·`）——它们的相等性由
+/// `atom_matches` 的字符串比对承担，进 `match_langtype` 只会得到一个假确定。
+/// 空串（空 kindexpr，不约束）返回 false：那种形参不该被调用点拦。
+fn is_matchable_kindexpr(ty: &str) -> bool {
+    !ty.is_empty()
+        && !ty.starts_with("/lib/")
+        && !ty.contains(keytree::MEMBER_SEP)
+        && ty != "stringkeymap"
+}
+
+/// 容器字面量的类型：`[a, b, c]` → `[3]K`，K 是元素的一致 kind。
+///
+/// **只推导 compact 数组字面量**（`compactarray·new`）。散 key `{…}` 与 struct 字面量
+/// 返回 None：它们的类型取决于写目标（`{}` 是 struct 还是 map 由声明决定，见
+/// spec 03-类型系统/17-struct），从字面量本身推不出来——硬推会造出第二个事实源。
+///
+/// 与 `derive_kind` 的 `compactarray·new` 分支同一规则：元素 kind 全一致才产 `[N]K`。
+fn container_literal_type(e: &Expr, tm: &HashMap<String, String>) -> Option<String> {
+    if e.op != "compactarray·new" || e.args.is_empty() {
+        return None;
+    }
+    let mut kind = String::new();
+    for element in &e.args {
+        let t = provable_arg_type(element, &HashMap::new(), tm)?;
+        let t = t.trim().to_string();
+        if !builtin::is_num_kind(&t) && t != "bool" {
+            return None;
+        }
+        if kind.is_empty() {
+            kind = t;
+        } else if kind != t {
+            return None;
+        }
+    }
+    Some(format!("[{}]{}", e.args.len(), kind))
+}
+
 /// 可证明的实参类型：字面量按自身 kind，已声明变量按声明类型；其余 None（不猜）。
 fn provable_arg_type(
     e: &Expr,
     declared: &HashMap<String, String>,
+    tm: &HashMap<String, String>,
 ) -> Option<String> {
+    // 容器字面量不是叶子，但它的类型**可推导**：`[1,2,3,4]` 是 `[4]int64`。
+    // 不推导就得返回 None，而 None 会让调用点整段 `continue`——那正是
+    // 「`[3]int64` 收到长度 4 却不报错」的成因（spec 03-类型系统/08 的匹配语义
+    // 只管并集形参，非并集形参从未走到那条判定）。
+    //
+    // 复用 `derive_kind` 的那条推导（`compactarray·new` → `[N]K`），不新建第二套：
+    // 元素 kind 不一致或元素不是数值/布尔时推导失败，返回 None 照旧不猜。
+    if let Some(t) = container_literal_type(e, tm) {
+        return Some(t);
+    }
     if !e.is_leaf() {
         return None;
     }
@@ -3263,7 +3340,7 @@ fn walk_inst(
     diags: &mut Vec<Diagnostic>,
 ) {
     let Some(e) = &s.expr else { return };
-    check_call_args(e, sigs, declared, diags);
+    check_call_args(e, sigs, tm, declared, diags);
     check_implicit_deref_member(e, tm, declared, diags);
     if e.op == format!("struct{}new", keytree::MEMBER_SEP) {
         check_struct_literal(e, structs, diags);
@@ -3324,6 +3401,122 @@ fn walk_inst(
                 .is_some_and(|t| t.starts_with('*'));
             check_rhs(&ty, e, &rhs, nullable, diags);
         }
+    }
+}
+
+/// 调用实参**形状**校验：在 `lower_func` **之前**、在 AST 上做。
+///
+/// 为什么不能放在 `validate_writes` 里：`flatten_expr`（本文件 993 行附近）会把
+/// 嵌套表达式物化成临时槽——`f([1,2,3,4])` 到那时实参只剩 `_1`，容器字面量已经
+/// 不存在了，`provable_arg_type` 只能返回 None。于是「`[3]int64` 收到长度 4」永远
+/// 走不到 `value_matches`，形状被完全忽略。
+///
+/// 这一趟只看**能在源码层面证明类型**的实参：字面量与容器字面量。变量实参留给
+/// `validate_writes`（那里有 `declared`/`tm`）——两处**共用** `provable_arg_type`
+/// 与 `value_matches`，不各写一套判据。
+///
+/// **失败开放，不是失败封闭**：证明不了类型就放行，不拒绝。所以
+/// `x = 1; f(x)`（无注解推断变量）**不会**被形状检查拦——`x` 不在 `declared` 里，
+/// `provable_arg_type` 返回 `None`。这是有意的：实参类型推不出来时拒绝，会把每个
+/// 没写注解的调用都误拒。要收紧必须先有可靠的局部类型推断，那是另一件事。
+/// **不要**把这里改成「推不出来就报错」——那是把不确定当成证据。
+///
+/// 已知限制：嵌套容器字面量（`[[1,2],[3,4]]`）推导不出来（`container_literal_type`
+/// 要求元素是数值/布尔），于是整段跳过。那是**没判**，不是判过——spec 尚未规定嵌套
+/// 字面量的形状，属 spec 缺口（见 workspace/622/coding3/shape-matching-fix.md §六）。
+pub fn check_call_shapes(
+    fn_: &Func,
+    sigs: &SigTable,
+) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    let empty = HashMap::new();
+    walk_call_shapes(&fn_.body, sigs, &empty, &mut diags);
+    diags
+}
+
+fn walk_call_shapes(
+    body: &[Stmt],
+    sigs: &SigTable,
+    tm: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => {
+                if let Some(e) = &s.expr {
+                    check_one_call_shape(e, sigs, tm, diags);
+                }
+            }
+            Stmt::Scope(s) => walk_call_shapes(&s.body, sigs, tm, diags),
+            Stmt::If(s) => {
+                if let Some(c) = &s.cond {
+                    if let Some(e) = &c.expr {
+                        check_one_call_shape(e, sigs, tm, diags);
+                    }
+                }
+                walk_call_shapes(&s.then_, sigs, tm, diags);
+                walk_call_shapes(&s.else_, sigs, tm, diags);
+            }
+            Stmt::While(s) => {
+                if let Some(c) = &s.cond {
+                    if let Some(e) = &c.expr {
+                        check_one_call_shape(e, sigs, tm, diags);
+                    }
+                }
+                walk_call_shapes(&s.body, sigs, tm, diags);
+            }
+            Stmt::For(s) => walk_call_shapes(&s.body, sigs, tm, diags),
+            _ => {}
+        }
+    }
+}
+
+fn check_one_call_shape(
+    e: &Expr,
+    sigs: &SigTable,
+    tm: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let Some(sig) = sig_lookup(sigs, &e.op) else {
+        return;
+    };
+    let np = sig.params.len();
+    for (i, arg) in e.args.iter().enumerate() {
+        let param = if i < np {
+            &sig.params[i]
+        } else if np > 0 && sig.params[np - 1].ty.ends_with("...") {
+            &sig.params[np - 1]
+        } else {
+            break;
+        };
+        let raw = param
+            .pointer_type()
+            .trim_end_matches("...")
+            .trim()
+            .to_string();
+        if raw.is_empty() || raw.starts_with('@') {
+            continue;
+        }
+        let declared_value_type = deref_value_type(&raw).to_string();
+        if !is_matchable_kindexpr(&declared_value_type) {
+            continue;
+        }
+        let Some(vt) = provable_arg_type(arg, &HashMap::new(), tm) else {
+            continue;
+        };
+        if !value_matches(&declared_value_type, &vt) {
+            push_write_diag(
+                diags,
+                format!(
+                    "TypeError: cannot pass {vt} to {declared_value_type} (parameter {})",
+                    param.name
+                ),
+            );
+        }
+    }
+    // 实参里也可能嵌着调用：`f(g([1,2,3]))`。
+    for arg in &e.args {
+        check_one_call_shape(arg, sigs, tm, diags);
     }
 }
 

@@ -284,9 +284,11 @@ fn deref_does_not_assign_to_pointer_slot() {
 /// 正例：`*(A|B)` 是「指向 A|B 的 kvlang 指针」，与逐成员写法区分开。
 #[test]
 fn parenthesized_union_pointer_is_allowed() {
+    // `rwfunc` 参数禁止并集（2026-11-05）后，这条语法规则改由 `rwir` 声明承载：
+    // 括号包住的并集仍是**一个**类型表达式，`*` 作用于它整体，而不是逐成员各加一个 `*`。
     assert_ok(
         "union-paren",
-        "rwfunc f(*(int64|float64) $x) -> (int64 $r) {\n\t1 -> r\n}\n",
+        "rwir f(*(int64|float64) $x) -> (*int64 $r)\n",
     );
 }
 
