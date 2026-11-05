@@ -261,6 +261,25 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
             // layout 失败的**唯一**可豁免原因是本机没装那条能力（`未定义函数 X`）：
             // 那时 layout 根本没产出指令，谈不上计数不符。除它之外一律红。
             let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+            /*
+             * 已知红项（不是教程写错）：`tutorial/byteseek-stdlib/07-lib/walk_lib.kv`
+             * 用 `/tmp/walk_lib_leaf -> v` + `v == None` 做**存在性判定**，v 的类型
+             * 是运行期才知道的。当前严格规则要求空引用比较的左值类型可静态确定，
+             * 于是 layout 报「无法判定空引用比较的类型」。
+             *
+             * 根因是**缺 `nonnull` / `nonnull·not` 能力行**（存在性判定对任意类型
+             * 成立），已由架构师定为独立立项，排在条目甲/乙之后。此处保持红、
+             * 不加白名单：红要红得有根因，但不能用放宽规则换绿。
+             *
+             * **`nonnull` 落地后的预期（已实测验证）**：把该文件里的
+             * `if (v == None)` 换成等价的非 None 形状后，`vet` 与 layout **都成功**，
+             * 没有第二个 layout 阻塞点。所以 `nonnull` 到位后**本测试应变绿**
+             * （它只做 layout + 槽位计数一致性，不做执行）。
+             *
+             * 注意区分：该文件**在运行期仍会失败**——它用了容器局部
+             * （`ms:[int64]·[]char/utf32` 等）与动态成员读，属「动态 key」批次，
+             * 与 `nonnull` 无关。也就是说：本测试绿 ≠ 这个教程能跑。
+             */
             assert!(
                 stderr.contains("未定义函数"),
                 "{}: layout 失败且不是缺能力：{stderr}",
@@ -299,4 +318,52 @@ fn function_dirs(kv: &mut Kv, prefix: &str) -> Vec<String> {
         out.push(key);
     }
     out
+}
+
+/// **缺口（已知、文档化）**：同一槽的类型事实存在两份——
+/// `tm`（`infer_types`，lowering 之前）与 `stable`/`derived`（lowering 之后）。
+/// 数字族算子（`%`/`×`/`+`）只查 `tm`；由成员读产生的局部（`(*p)·x -> nv`）在
+/// `tm` 里不存在，于是算子保持**字面符号**、写槽没有类型。
+///
+/// 这不是回归测试，是**提醒修复者的测试**：
+/// - A 形态（操作数是普通局部）：算子已归一成 `mod`，结果有类型；
+/// - B 形态（操作数来自成员读）：算子仍是 `%`，结果空。
+///
+/// **修好后**：B 形态应与其他算术一样归一成 `mod`（并带 int64）。那时把 B 的断言
+/// 从 `"%"` 改成 `"mod"`——它变红就是在提醒你改这一行，**不是回归**。
+#[test]
+fn numeric_op_after_member_read_is_a_known_gap() {
+    // A 形态：操作数是普通局部（`infer_types` 认识它）。
+    let (_dir_a, mut kv_a) = compile(
+        "numop-a",
+        "rwfunc f() -> () {\n\toperand = 5\n\tq = operand % 2\n}\n",
+    );
+    let op_a = slot_text(&mut kv_a, "/lib/f", 2, 0);
+    assert_eq!(op_a, "mod", "A 形态：算子应已归一成 mod（实测 {op_a:?}）");
+
+    // B 形态：操作数由成员读产生（`infer_types` 不认识它，类型在 lowering 后才出现）。
+    let (_dir_b, mut kv_b) = compile(
+        "numop-b",
+        "struct P {\n\tx:int64=0\n}\n\
+         rwfunc f(*P $p) -> () {\n\t(*p)·x -> nv\n\tq = nv % 2\n}\n",
+    );
+    let op_b = slot_text(&mut kv_b, "/lib/f", 3, 0);
+    assert_eq!(
+        op_b, "%",
+        "B 形态当前是缺口：成员读产生的局部在 tm 里不存在，算子保持字面符号。\
+         若这里变成 \"mod\"，说明缺口已修——请改本断言的期望值为 \"mod\" 并删掉本测试头部的缺口说明。"
+    );
+}
+
+/// 取 `[i,j]` 槽的文本（opcode 槽与字面量槽都是纯文本 body）。
+fn slot_text(kv: &mut Kv, dir: &str, instruction: usize, column: i32) -> String {
+    let wire = kv.get_one(&format!("{dir}/[{instruction},{column}]"));
+    let text: String = wire
+        .iter()
+        .map(|byte| if byte.is_ascii_graphic() || *byte == b' ' { *byte as char } else { ' ' })
+        .collect();
+    text.split_whitespace()
+        .filter(|piece| *piece != "rwir" && *piece != "rwfunc")
+        .collect::<Vec<_>>()
+        .join(" ")
 }

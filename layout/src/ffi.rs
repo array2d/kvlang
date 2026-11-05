@@ -608,6 +608,17 @@ pub fn new_char_byte(bytes: &[u8]) -> Result<Vec<u8>, String> {
     })
 }
 
+/// 空值字面量 `None` 的 wire：长度 0 的短内联头（空 body、无 langtype，16 字节）。
+///
+/// **不是零字节**——存储层以 `invalid XValue` 拒绝零字节值（实测见
+/// `workspace/tmp/coding1/none_wire_probe.c`）。也不要手拼这 16 字节：
+/// 头布局的唯一来源是 kvspace 的 `kvspaceXvalueHeadNewNone`。
+pub fn new_none() -> Result<Vec<u8>, String> {
+    call_codec64("HeadNewNone", |out, out_len| unsafe {
+        kvspaceXvalueHeadNewNone(out, out_len)
+    })
+}
+
 pub fn new_bool(v: bool) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     call_codec("NewBool", |out, out_len| unsafe { kvspaceNewBool(v as u8, empty, out, out_len) })

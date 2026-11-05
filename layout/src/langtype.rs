@@ -234,6 +234,24 @@ pub fn expand_struct_refs(s: &str) -> String {
 }
 
 fn expand_atom(s: &str) -> String {
+    /*
+     * 变参 `...` 是**签名层 arity**，不是 langtype 的一部分：它最终落计数头的
+     * dynamic 字节，类型串要「纯净、不含 `...`」（spec `03-类型系统/22`）。
+     *
+     * 但**不能在这里删掉它**：`Instruction::dynamic()` 与 `langtype_list()` 都
+     * 靠 `p.ty` 的尾缀识别变参；在此删掉，dynamic 字节会静默变 0，变参被当成
+     * 普通参数。所以这里只保证「判种类时看剥掉 `...` 的基名」，返回值仍保留标记；
+     * 由 `ast.rs:langtype_list()` 在落 wire 前剥。
+     *
+     * 修的是：`int64...` 不在种类表里，直接进 `known_kind` 会落进「裸名 →
+     * `/lib/<名>`」，把 `int64` 展开成 `/lib/int64`——类型名字全错且不报错。
+     */
+    if let Some(base) = s.strip_suffix("...") {
+        if base.is_empty() || known_kind(base) {
+            return s.to_string();
+        }
+        return format!("{}...", expand_atom(base));
+    }
     if let Some(rest) = s.strip_prefix('*') {
         return format!("*{}", expand_atom(rest));
     }

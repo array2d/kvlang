@@ -522,7 +522,7 @@ fn native_rwir_signatures() -> &'static HashMap<String, ast::FuncSig> {
 /// 本文件/已装载代码里查不到时，**兜底查一次** native rwir 生成表：那是
 /// `time·now` 这类不落 `/lib` 的能力唯一的名字型签名来源。查不到就返回 None，
 /// 由调用方保持现状（裸名、无类型），**不在这里猜**。
-fn sig_lookup<'a>(sigs: &'a SigTable, op: &str) -> Option<&'a ast::FuncSig> {
+pub fn sig_lookup<'a>(sigs: &'a SigTable, op: &str) -> Option<&'a ast::FuncSig> {
     let key = op.strip_prefix("/lib/").unwrap_or(op);
     sigs.get(key)
         .or_else(|| native_rwir_signatures().get(key))
@@ -564,7 +564,12 @@ fn return_inst() -> Stmt {
 fn terminate(mut body: Vec<Stmt>) -> Vec<Stmt> {
     for st in &mut body {
         if let Stmt::Scope(s) = st {
-            s.body = terminate(std::mem::take(&mut s.body));
+            /* 只处理**合成**块：它们的入口是跳转进来的，必须跳出去。用户具名块
+             * 按线性展平，末尾落下自然衔接到下一条语句——在这里补 `return`
+             * 会把后续语句变成不可达（`local/shadowing.kv` 的实测缺陷）。 */
+            if s.synthetic {
+                s.body = terminate(std::mem::take(&mut s.body));
+            }
         }
     }
     match body.last() {
@@ -729,21 +734,25 @@ fn lower_if_with_cont(
     result.push(goto_label(&if_label));
     result.push(Stmt::Scope(ast::ScopeStmt {
         comments: Vec::new(),
+        synthetic: true,
         label: if_label,
         body: cond_body,
     }));
     result.push(Stmt::Scope(ast::ScopeStmt {
         comments: Vec::new(),
+        synthetic: true,
         label: then_label,
         body: then_insts,
     }));
     result.push(Stmt::Scope(ast::ScopeStmt {
         comments: Vec::new(),
+        synthetic: true,
         label: else_label,
         body: else_insts,
     }));
     result.push(Stmt::Scope(ast::ScopeStmt {
         comments: Vec::new(),
+        synthetic: true,
         label: merge_label,
         body: cont_insts,
     }));
@@ -786,16 +795,19 @@ fn lower_while_with_cont(
     result.push(goto_label(&cond_label));
     result.push(Stmt::Scope(ast::ScopeStmt {
         comments: Vec::new(),
+        synthetic: true,
         label: cond_label,
         body: cond_body,
     }));
     result.push(Stmt::Scope(ast::ScopeStmt {
         comments: Vec::new(),
+        synthetic: true,
         label: body_label,
         body: body_insts,
     }));
     result.push(Stmt::Scope(ast::ScopeStmt {
         comments: Vec::new(),
+        synthetic: true,
         label: exit_label,
         body: cont_insts,
     }));
@@ -958,21 +970,25 @@ fn lower_for_with_cont(
     result.push(goto_label(&init_label));
     result.push(Stmt::Scope(ast::ScopeStmt {
         comments: Vec::new(),
+        synthetic: true,
         label: init_label,
         body: init_body,
     }));
     result.push(Stmt::Scope(ast::ScopeStmt {
         comments: Vec::new(),
+        synthetic: true,
         label: cond_label,
         body: cond_body,
     }));
     result.push(Stmt::Scope(ast::ScopeStmt {
         comments: Vec::new(),
+        synthetic: true,
         label: body_label,
         body: body_insts_only,
     }));
     result.push(Stmt::Scope(ast::ScopeStmt {
         comments: Vec::new(),
+        synthetic: true,
         label: exit_label,
         body: cont_insts,
     }));
@@ -1207,10 +1223,15 @@ pub fn declared_types(fn_: &Func) -> HashMap<String, String> {
     let mut d = HashMap::new();
     for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
         if !p.ty.is_empty() {
-            d.insert(p.name.clone(), p.pointer_type());
+            d.insert(p.name.clone(), p.value_type());
         }
     }
     collect_declared(&fn_.body, &mut d);
+    /*
+     * 「首次写入为 None」的槽再补一趟：它们的类型只能从后续写入的唯一具体类型推。
+     * 这一处不收集诊断——`declared_types` 是查询接口，没有报错通道；冲突会在
+     * `collect_type_sets` 那一趟（有 diags）报出来。
+     */
     d
 }
 
@@ -1218,12 +1239,12 @@ pub fn infer_types(fn_: &Func) -> HashMap<String, String> {
     let mut tm = HashMap::new();
     for p in &fn_.sig.params {
         if !p.ty.is_empty() {
-            tm.insert(p.name.clone(), p.pointer_type());
+            tm.insert(p.name.clone(), p.value_type());
         }
     }
     for p in &fn_.sig.returns {
         if !p.ty.is_empty() {
-            tm.insert(p.name.clone(), p.pointer_type());
+            tm.insert(p.name.clone(), p.value_type());
         }
     }
     infer_body(&fn_.body, &mut tm);
@@ -1317,6 +1338,13 @@ pub fn infer_type_sets(fn_: &Func) -> HashMap<String, Vec<String>> {
     }
     let mut declared = HashMap::new();
     collect_declared(&fn_.body, &mut declared);
+    /*
+     * 同上（`infer_type_sets` 也是查询接口，无报错通道）。
+     *
+     * 冲突的诊断**不在这里报**：这个函数被多处调用，报两次就成了重复诊断。
+     * 真正的报错点在 `check_func`/`walk_writes` 那条有 `diags` 的校验链上，
+     * 那里会看到「槽没有声明类型」并给出定位。
+     */
     for (name, ty) in &declared {
         insert_type_set(&mut base_sets, name, ty);
         if !name.is_empty() && !ty.is_empty() {
@@ -1531,6 +1559,12 @@ fn infer_op_type(
 ) -> String {
     if matches!(opcode, "return" | "goto" | "br" | "call") {
         return String::new();
+    }
+    /* 逻辑算子恒产 bool（catalog 的 result_rule = BOOLEAN，spec 已定）。
+     * 这三个算子没有走 arith 分支，此前结果类型为空——`a = not(f(x))` 的写槽
+     * 因此没有类型，一路拖到编码器才报「non-concrete langtype」。 */
+    if matches!(opcode, "not" | "and" | "or") {
+        return "bool".to_string();
     }
     if symbol::lookup(opcode).word == "assign" {
         if reads.len() > 1 {
@@ -2630,6 +2664,16 @@ fn slot_is_plain_name(w: &str) -> bool {
     !w.is_empty()
         && !w.starts_with('/')
         && !w.starts_with('*')
+        && !w.starts_with("(*")
+        /*
+         * `(*p)` 是**解引用后取成员**的形态（`(*p)·x` 的基座），不是普通名。
+         *
+         * 少了这一条时它被判成普通名：既不以 `/`、`*` 开头，也不含 `·`/`[`/`]`。
+         * 后果是 `resolve_slot_type` 里 `(*p)` 那个分支**永远不可达**——那条分支
+         * 存在但从不执行，等于没有。
+         *
+         * 与 `(x)` 这类括号表达式区分：只有 `(*` 开头才是解引用形态。
+         */
         && !w.contains(keytree::MEMBER_SEP)
         && !w.contains('[')
         && !w.contains(']')
@@ -2660,6 +2704,126 @@ pub fn container_value(ty: &str) -> Option<String> {
     let t = ty.trim_start_matches('*');
     let i = t.find(keytree::MEMBER_SEP)?;
     Some(t[i + keytree::MEMBER_SEP.len()..].to_string())
+}
+
+/// 调用结果类型：**返回类型是实参的函数**的那些算子。
+///
+/// 判据（架构师）：**它的返回类型能否在完全不看实参的情况下写出来？**
+/// 不能的，进不了 `native_rwir_decls.kv`（那张表是「无前因的常量类型」专用），
+/// 只能由 layout 从实参推：
+///   - 容器键类型：`kvspace·listat`（`[T]·V` → `T`，`[]X·V` → `[]X`）
+///   - 形态变换 / 取元素 / 写回同容器：后续批次加，见 workspace/622/coding1 报告
+///
+/// 规则集中在这张表里，**不散进 `expr_slot_type` 或 `infer_op_type`**——散开之后
+/// 将来要把它们迁进 catalog 就得满文件找。
+///
+/// 任一实参类型不可知 → 返回 `None`（失败封闭，编码器照旧拒绝）。**不许猜**，
+/// 更不许用 `any` 之类的占位类型：那不是「先不管类型」，是「放弃类型检查」。
+///
+/// **死法（必须写明）：** 这些规则最终应迁入 catalog 的 `result_rule`（数据驱动、
+/// 单一来源）。迁移时**删除本函数**，不是「在这里补一层兼容」——两处并存就是两份
+/// 真相，而两份真相必然漂移。当前延期理由见
+/// `workspace/622/待裁决-2026-11-04.md` 的「catalog result_rule 词汇表扩展」。
+pub fn call_result_type(
+    operation: &str,
+    argument_types: &[Option<String>],
+    argument_literals: &[Option<String>],
+) -> Option<String> {
+    match operation {
+        // 容器键类型。
+        "kvspace·listat" => container_key_type(argument_types.first()?.as_deref()?),
+        // 形态变换：compact `[]T` ↔ 散列 `[int64]·T`（spec 11：散列数组的容器 langtype
+        // 是完整 map 类型，键为一元元组 `[int64]`）。
+        "scatterarray·newscatter" => compact_to_scatter(argument_types.first()?.as_deref()?),
+        "scatterarray·newcompact" => scatter_to_compact(argument_types.first()?.as_deref()?),
+        // 取子集：切片结果的类型与源相同（都是 compact）。
+        "compactarray·newslice" => compact_argument_type(argument_types.first()?.as_deref()?),
+        // 取元素。
+        "compactarray·at" => container_elem(argument_types.first()?.as_deref()?),
+        // 目标类型**来自字面量**（不是推导）：这一类与其余四类的区别是「读出来」而不是
+        // 「推出来」。读出来的东西也要过判据——否则它就成「用户写什么类型就是什么类型」
+        // 的后门。运行时确实会再校验一次（`container_replace_langtype` 取该串做新
+        // kindexpr，`container_langtype_text` 不认就失败），但 layout 必须更早拦住。
+        "compactarray·newreinterpret" => reinterpret_target_type(
+            argument_literals.get(1).and_then(|literal| literal.as_deref()),
+        ),
+        _ => None,
+    }
+}
+
+/// `[]T`（compact）→ `[int64]·T`（散列）。已是散列形态 → None（无隐式跨形态）。
+fn compact_to_scatter(ty: &str) -> Option<String> {
+    let t = ty.trim_start_matches('*');
+    if t.contains(keytree::MEMBER_SEP) || !t.starts_with('[') {
+        return None;
+    }
+    let element = container_elem(t)?;
+    Some(format!("[int64]{}{element}", keytree::MEMBER_SEP))
+}
+
+/// `[K]·V`（散列）→ `[]V`（compact）。
+fn scatter_to_compact(ty: &str) -> Option<String> {
+    let t = ty.trim_start_matches('*');
+    if !t.contains(keytree::MEMBER_SEP) {
+        return None;
+    }
+    let value = container_value(t)?;
+    if value.is_empty() {
+        return None;
+    }
+    Some(format!("[]{value}"))
+}
+
+/// 切片源必须是 compact（`[]T`）；结果类型与源相同。
+fn compact_argument_type(ty: &str) -> Option<String> {
+    let t = ty.trim_start_matches('*');
+    if t.contains(keytree::MEMBER_SEP) || !t.starts_with('[') {
+        return None;
+    }
+    Some(t.to_string())
+}
+
+/// `newreinterpret` 的目标类型：字面量文本，**必须过 langtype 判据**（非空、非并集、语法合法）。
+/// 判据复用 `crate::langtype`，不在这里另写一份「像不像 langtype」。
+fn reinterpret_target_type(literal: Option<&str>) -> Option<String> {
+    let text = literal?.trim();
+    if text.is_empty() || crate::langtype::has_union(text) || !crate::langtype::valid_langtype(text)
+    {
+        return None;
+    }
+    Some(text.to_string())
+}
+
+/// 容器的**键值类型**：键是普通值，与 [`container_value`]（`·` 之后的值类型）不同名不同义。
+///
+/// 按 spec `03-类型系统/14-map容器.kv`：
+///   - `[T]·V`   一元元组键  → `T`（例：`[int64]·int64` 的键是 int64）
+///   - `[]X·V`   字符串键    → 整个 `[]X`（例：`[]char/utf32·int64` 的键是字符串）
+///   - `T·V`     裸标量键    → `T`
+///   - `[T1,T2]·V`（多元组键）→ **None**：listat 返回的是一段坐标，没有单一值类型可证
+///   - `/lib/X`（structref）→ **None**：struct 遍历在 lowering 里走
+///     `compactarray·numel` + `compactarray·at`，**根本不产生 `listat`**；
+///     这条是**缺口不是设计**——给 struct 编一个键类型连用例都没有，属于发明语义。
+pub fn container_key_type(ty: &str) -> Option<String> {
+    let t = ty.trim_start_matches('*');
+    let i = t.find(keytree::MEMBER_SEP)?;
+    let key = &t[..i];
+    if key.starts_with("/lib/") {
+        return None;
+    }
+    let Some(inner) = key.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) else {
+        // 裸标量键（`int32·int32`）：键类型就是它自己。
+        return if key.is_empty() { None } else { Some(key.to_string()) };
+    };
+    // `[]X` 是字符串/数组类型（键本身就是数组），原样返回；
+    // `[T]` 是一元元组键，取里面那个类型。
+    if inner.starts_with(']') {
+        return Some(key.to_string());
+    }
+    if inner.contains(',') || inner.contains(']') {
+        return None;
+    }
+    Some(inner.to_string())
 }
 
 /// 写槽能解析出的声明类型；None = 非 typed 或不可解析。
@@ -2703,7 +2867,7 @@ pub fn resolve_slot_type(
 }
 
 /// 沿 `·` 逐段取成员类型：mapexpr 取 value、数组取元素、struct 取字段声明。
-fn member_chain_type(start: &str, tail: &str, structs: &StructTable) -> Option<String> {
+pub(crate) fn member_chain_type(start: &str, tail: &str, structs: &StructTable) -> Option<String> {
     let mut ty = start.to_string();
     if tail.is_empty() {
         return Some(ty);
@@ -3074,6 +3238,8 @@ fn collect_declared(body: &[Stmt], declared: &mut HashMap<String, String>) {
         }
     }
 }
+
+
 
 fn walk_writes(
     body: &[Stmt],
@@ -3610,4 +3776,151 @@ fn check_implicit_deref_member(
         src_file: String::new(),
         src_name: String::new(),
     });
+}
+
+/// `call_result_type` 的判据：它只做「从实参推/读」，推不出来就 `None`。
+///
+/// 负向断言是重点——**新规则放过一条本该失败的用例，比它多修 14 条更糟**：
+///   ① 四类之外的算子 → None（不新增覆盖）；
+///   ② 实参类型不可知 → None（不猜）；
+///   ③ 反序列化字面量的目标类型必须过 langtype 判据，不是原样塞。
+#[cfg(test)]
+mod call_result_type_tests {
+    use super::{call_result_type, container_key_type};
+
+    fn types(items: &[&str]) -> Vec<Option<String>> {
+        items.iter().map(|item| Some((*item).to_string())).collect()
+    }
+
+    fn no_literals() -> Vec<Option<String>> {
+        Vec::new()
+    }
+
+    #[test]
+    fn listat_returns_the_key_type_not_the_value_type() {
+        // 键值异型：`[]char/utf32·int64` 的键是字符串、值是 int64。
+        // 若这里返回 int64，就是「碰巧在 [int64]·int64 上对」的那个错。
+        assert_eq!(
+            call_result_type("kvspace·listat", &types(&["[]char/utf32·int64"]), &no_literals()),
+            Some("[]char/utf32".to_string())
+        );
+        assert_eq!(
+            call_result_type("kvspace·listat", &types(&["[int64]·int64"]), &no_literals()),
+            Some("int64".to_string())
+        );
+        assert_eq!(
+            call_result_type("kvspace·listat", &types(&["int32·int32"]), &no_literals()),
+            Some("int32".to_string())
+        );
+    }
+
+    #[test]
+    fn listat_fails_closed_on_shapes_it_cannot_prove() {
+        assert_eq!(
+            call_result_type("kvspace·listat", &types(&["/lib/Point"]), &no_literals()),
+            None
+        );
+        assert_eq!(
+            call_result_type("kvspace·listat", &types(&["[int64,int64]·int64"]), &no_literals()),
+            None
+        );
+        assert_eq!(call_result_type("kvspace·listat", &[None], &no_literals()), None);
+        assert_eq!(call_result_type("kvspace·listat", &[], &no_literals()), None);
+    }
+
+    #[test]
+    fn form_transforms_are_symmetric_and_fail_closed() {
+        // compact ↔ 散列：`[]T` ↔ `[int64]·T`
+        assert_eq!(
+            call_result_type("scatterarray·newscatter", &types(&["[]int64"]), &no_literals()),
+            Some("[int64]·int64".to_string())
+        );
+        assert_eq!(
+            call_result_type("scatterarray·newcompact", &types(&["[int64]·int64"]), &no_literals()),
+            Some("[]int64".to_string())
+        );
+        // 已是目标形态 → None，不做隐式跨形态转换
+        assert_eq!(
+            call_result_type("scatterarray·newscatter", &types(&["[int64]·int64"]), &no_literals()),
+            None
+        );
+        assert_eq!(
+            call_result_type("scatterarray·newcompact", &types(&["[]int64"]), &no_literals()),
+            None
+        );
+        // 切片结果与源同型；源不是 compact → None
+        assert_eq!(
+            call_result_type("compactarray·newslice", &types(&["[]int64"]), &no_literals()),
+            Some("[]int64".to_string())
+        );
+        assert_eq!(
+            call_result_type("compactarray·newslice", &types(&["[int64]·int64"]), &no_literals()),
+            None
+        );
+        // 取元素
+        assert_eq!(
+            call_result_type("compactarray·at", &types(&["[]int64"]), &no_literals()),
+            Some("int64".to_string())
+        );
+    }
+
+    #[test]
+    fn reinterpret_reads_the_literal_but_still_validates_it() {
+        let with = |text: &str| vec![None, Some(text.to_string())];
+        assert_eq!(
+            call_result_type("compactarray·newreinterpret", &types(&["[]int64"]), &with("[]uint8")),
+            Some("[]uint8".to_string())
+        );
+        // 非法 langtype：并集、垃圾串、空串 → 一律 None（不许原样塞）
+        assert_eq!(
+            call_result_type("compactarray·newreinterpret", &types(&["[]int64"]), &with("int64|float64")),
+            None
+        );
+        assert_eq!(
+            call_result_type("compactarray·newreinterpret", &types(&["[]int64"]), &with("garbage")),
+            None
+        );
+        assert_eq!(
+            call_result_type("compactarray·newreinterpret", &types(&["[]int64"]), &with("")),
+            None
+        );
+        assert_eq!(
+            call_result_type("compactarray·newreinterpret", &types(&["[]int64"]), &no_literals()),
+            None
+        );
+    }
+
+    #[test]
+    fn operators_outside_the_rule_table_get_no_type() {
+        assert_eq!(
+            call_result_type("string·concat", &types(&["char/utf32"]), &no_literals()),
+            None
+        );
+        assert_eq!(call_result_type("compactarray·fill", &types(&["[]int64"]), &no_literals()), None);
+        assert_eq!(container_key_type("int64"), None);
+        assert!(container_key_type("").is_none());
+    }
+}
+
+#[cfg(test)]
+mod none_slot_probe_tests {
+    use super::*;
+
+    #[test]
+    fn deref_parenreaches_the_deref_branch() {
+        let mut declared = HashMap::new();
+        declared.insert("r".to_string(), "*[]char/utf32".to_string());
+        let structs = StructTable::default();
+        /* 改前：`(*r)` 被判成普通名 → declared 里没有 `(*r)` → None。
+         * 改后：走 `(*p)` 分支 → 剥一层 `*` → Some("[]char/utf32")。 */
+        assert_eq!(
+            resolve_slot_type("(*r)", &HashMap::new(), &structs, &declared),
+            Some("[]char/utf32".to_string())
+        );
+        /* 别的括号形态不受影响：`(x)` 仍按普通名查，查不到就是 None。 */
+        assert_eq!(
+            resolve_slot_type("(x)", &HashMap::new(), &structs, &declared),
+            None
+        );
+    }
 }

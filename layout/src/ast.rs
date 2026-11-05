@@ -82,6 +82,34 @@ impl Param {
     pub fn pointer_type(&self) -> String {
         format!("{}{}", self.by_ref, self.ty)
     }
+
+    /// 进类型表（`declared` / `infer`）的形态：带传递方式前缀，但**不带变参标记**。
+    ///
+    /// `...` 是签名层 arity，不是类型（spec 03-类型系统/22）。它留在 `ty` 里是
+    /// 为了让 `FuncSig::dynamic()` 能识别；而由它推出的类型一旦进了指令槽，就是
+    /// 「类型串里混进 arity 标记」——槽类型必须纯净。
+    pub fn declared_type(&self) -> String {
+        let ty = self.ty.strip_suffix("...").unwrap_or(&self.ty);
+        format!("{}{ty}", self.by_ref)
+    }
+
+    /// 形参/返回**值的类型**（进 `declared` / 类型集合）。
+    ///
+    /// `*T $x` 的 `*` 是**传递方式**，不是值类型的一部分：
+    ///   - `*int64 $x`：`x` 的值是 `int64`——标量不可空，`x == None` 非法；
+    ///   - `*TNode $root`：`TNode` 是结构体引用，值本身即指针 `*TNode`，`root == None` 合法。
+    ///
+    /// 判据落在「被指向的 T 是不是引用类」：结构体引用（`/lib/…`）或已带 `*` 的类型
+    /// 保留 `*` 前缀，其余标量剥掉。这条直接决定 `None` 判空左值是否合法
+    /// （spec `03-类型系统/16-ptr`「空引用判定的左值」）。
+    pub fn value_type(&self) -> String {
+        let ty = self.ty.strip_suffix("...").unwrap_or(&self.ty);
+        if ty.starts_with('/') || ty.starts_with('*') {
+            format!("{}{ty}", self.by_ref)
+        } else {
+            ty.to_string()
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -699,6 +727,11 @@ pub struct ScopeStmt {
     pub comments: Vec<String>,
     pub label: String,
     pub body: Vec<Stmt>,
+    /// 由 lower 合成（if/while/for 展开）还是用户源码里写的具名块。
+    ///
+    /// 决定「块体末尾是否必须有终结符」：合成块的入口是跳转进来的，必须自己
+    /// 跳出去；用户具名块线性展平后，下一条语句就是它的续接，停下即衔接。
+    pub synthetic: bool,
 }
 
 impl fmt::Display for ScopeStmt {

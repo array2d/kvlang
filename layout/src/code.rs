@@ -56,7 +56,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
         write_struct_decl(kv, decl)?;
     }
     for a in &checked.funcs {
-        write_func(kv, a, &local_funcs, &checked.structs)?;
+        write_func(kv, a, &local_funcs, &checked.structs, &checked.sigs)?;
         if a.is_init {
             inits.push(init_fn_name(&a.pkg));
         }
@@ -65,7 +65,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
         write_rwir_decl(kv, decl)?;
     }
     if let Some(a) = &checked.top_init {
-        write_func(kv, a, &local_funcs, &checked.structs)?;
+        write_func(kv, a, &local_funcs, &checked.structs, &checked.sigs)?;
         inits.push(init_fn_name(""));
     }
     Ok(inits)
@@ -90,6 +90,9 @@ pub struct AnalyzedFunc {
 pub struct CheckedFile {
     file: ast::File,
     structs: lower::StructTable,
+    /// 文件级签名表：写指令槽时用来取**被调方形参类型**（`None` 作实参时的
+    /// 上下文类型只能从这里得到）。
+    sigs: lower::SigTable,
     funcs: Vec<AnalyzedFunc>,
     top_init: Option<AnalyzedFunc>,
 }
@@ -176,6 +179,7 @@ fn analyze_file(src: &str) -> Result<CheckedFile, String> {
     Ok(CheckedFile {
         file,
         structs,
+        sigs,
         funcs,
         top_init,
     })
@@ -226,7 +230,7 @@ fn analyze_func(
     check_jumps(&seq, &labels).map_err(|e| format!("{}: {e}", fn_.sig.name))?;
     /* lower 之后补写槽类型：A/B/D 三类缺口共用这一个入口。必须在 write_func 之前、
      * 在 seq 定稿之后——早于 lower 时临时槽还没展开。 */
-    annotate_slot_types(&mut seq, &declared, sigs);
+    annotate_slot_types(&mut seq, &declared, sigs, structs);
     // Validate instruction arity before touching kvspace (shared by `vet` and `compile`).
     for inst in &seq {
         let (op, reads) = inst.flat();
@@ -768,6 +772,7 @@ fn build_body(insts: &[RawInst], labels: &[(i32, String)]) -> Vec<Stmt> {
             comments: Vec::new(),
             label: label.clone(),
             body: (*start..end).map(inst_stmt).collect(),
+            synthetic: true,
         }));
     }
     body
@@ -868,11 +873,48 @@ pub fn write_func(
     a: &AnalyzedFunc,
     local_funcs: &HashSet<String>,
     structs: &lower::StructTable,
+    sigs: &lower::SigTable,
 ) -> Result<(), String> {
     let pkg = a.pkg.as_str();
     let fn_ = &a.func;
     let (seq, labels, declared, type_sets, stable) =
         (&a.seq, &a.labels, &a.declared, &a.type_sets, &a.stable);
+    /*
+     * lowering 产生的临时槽（`_1`、`_2`…）不在 `declared`/`type_sets`/`stable`
+     * 任何一张表里。它们的写槽类型由 `annotate_slot_types` 推导出来并写在
+     * `instruction.write_types` 上，但**读**它们的指令仍按空类型落槽——
+     * 编码器于是报「parameter is not a single concrete langtype」。
+     *
+     * 这里把「写槽上已经推出的类型」并进 `stable`（读侧的最后一个来源），
+     * 让同一份推导结果同时服务写槽与后续读槽，不另建第二套推断。
+     */
+    let mut stable_with_temporaries = stable.clone();
+    for instruction in seq.iter() {
+        for (write, write_type) in instruction.writes.iter().zip(&instruction.write_types) {
+            if write_type.is_empty() {
+                continue;
+            }
+            /*
+             * 只补**别处都查不到**的名字：`declared` / `type_sets` / `stable`
+             * 任何一张表里有它，就以那张表为准（它们的优先级本来也更高）。
+             *
+             * 曾经这里只认 `_` 开头的临时槽。但 lowering 还会产生**隐式局部**——
+             * `(*p)·x -> t` 的 `t` 没有声明，写槽类型是靠推导填上的，读它时
+             * 四张表全查不到，于是读槽落成空类型。判据不是「名字长什么样」，
+             * 而是「这个名字的类型还能从哪儿查到」。
+             */
+            if declared.contains_key(write)
+                || type_sets.contains_key(write)
+                || stable.contains_key(write)
+            {
+                continue;
+            }
+            stable_with_temporaries
+                .entry(write.clone())
+                .or_insert_with(|| write_type.clone());
+        }
+    }
+    let stable = &stable_with_temporaries;
     let func_dir = keytree::lib_func(pkg, &fn_.sig.name);
     let opcode = if pkg.is_empty() {
         fn_.sig.name.clone()
@@ -895,6 +937,11 @@ pub fn write_func(
     for (i, r) in fn_.sig.returns.iter().enumerate() {
         param_coord.insert(r.name.clone(), format!("*[0,{}]", i + 1));
     }
+
+    /* 源级类型表：复合写目标（`(*r)`、`x·y`）与写槽兜底都按**源级**类型解析。
+     * 私有结构 + 派生函数，别在调用点直接拿 entries。 */
+    let source_langtypes = SourceLangtypes::new(&fn_.sig);
+    let declared_source = source_langtypes.merged_under(declared);
 
     let ctime_key = format!("{func_dir}/‥ctime");
     let ctime = next_ctime(read_ctime(kv, &ctime_key));
@@ -961,12 +1008,14 @@ pub fn write_func(
             inst,
             labels,
             declared,
+            &declared_source,
             type_sets,
             structs,
             &param_coord,
             &param_langtype,
             stable,
             local_funcs,
+            sigs,
         )
         .map_err(werr)?;
     }
@@ -1007,7 +1056,7 @@ pub fn write_func(
             for (j, w) in inst.writes.iter().enumerate() {
                 record(
                     &op,
-                    write_slot_type(inst, j, w, &param_langtype, declared, type_sets, structs, stable),
+                    write_slot_type(inst, j, w, &param_langtype, declared, &declared_source, type_sets, structs, stable),
                     true,
                 );
             }
@@ -1189,11 +1238,14 @@ fn collect_insts(
                 }
                 labels.insert(s.label.clone(), start);
                 collect_insts(&s.body, seq, labels)?;
+                /* 只有**合成**块必须自己跳出去：它的入口是跳转进来的（if/while
+                 * 分支、循环体），不跳就无法到达汇合点。用户具名块按线性展平，
+                 * 后面的语句就是续接——停下即衔接，不需要也不该补跳转。 */
                 let terminated = (seq.len() as i32) >= start
                     && seq.last().is_some_and(inst_is_terminator);
-                if !terminated {
+                if s.synthetic && !terminated {
                     return Err(format!(
-                        "block {:?} does not end with return/goto/br",
+                        "synthetic block {:?} does not end with return/goto/br",
                         s.label
                     ));
                 }
@@ -1232,6 +1284,72 @@ fn check_jumps(seq: &[Instruction], labels: &HashMap<String, i32>) -> Result<(),
     Ok(())
 }
 
+/// 源级类型表：形参/写参**源码里写的那个类型**（带 `*`/`@`，去 `...`）。
+///
+/// 私有：**表存哪种形态不泄漏到调用点**，只能经下面两个派生函数取。
+/// 判据（`ast.rs:77-114`）：同一个名字有三种互不相同的答案——
+///   源级（本表）  `*int64`、`*/lib/TNode`
+///   `langtype_value`  `int64`、`*/lib/TNode`（标量不可空 / 引用类本身即指针）
+///   `langtype_wire`   `int64`、`/lib/TNode`
+/// 只有源级算得回来，另两个是派生——所以只存源级。
+///
+/// **本表在 `lower::slot_is_plain_name` 排除 `(*` 之后才真正生效**：在那之前，
+/// `(*r)` 这类复合写目标会被判成普通名，走 plain 分支查不到，接上本表**不会改变
+/// 任何输出**（实测：接上前后的全语料 dump 逐条相同）。看到「接了但没效果」时，
+/// 先查那一行，不是这里漏了什么。
+struct SourceLangtypes {
+    entries: HashMap<String, String>,
+}
+
+impl SourceLangtypes {
+    fn new(sig: &ast::FuncSig) -> Self {
+        let mut entries = HashMap::new();
+        for parameter in sig.params.iter().chain(sig.returns.iter()) {
+            if !parameter.ty.is_empty() {
+                entries.insert(parameter.name.clone(), parameter.declared_type());
+            }
+        }
+        Self { entries }
+    }
+
+    /// 列表形态：`declared` 优先，本表补齐——只给 `lower::resolve_slot_type` 这类
+    /// 「按源级类型解析复合槽名」的调用用。
+    fn merged_under(&self, declared: &HashMap<String, String>) -> HashMap<String, String> {
+        let mut merged = self.entries.clone();
+        for (name, ty) in declared {
+            merged.insert(name.clone(), ty.clone());
+        }
+        merged
+    }
+
+    /// 值的类型：`*T $x` 的 `*` 是传递方式，不是值类型的一部分——
+    /// 标量剥掉（`*int64` → `int64`），引用类保留（`*TNode` 的值本身即指针）。
+    fn langtype_value(&self, name: &str) -> Option<String> {
+        let source = self.entries.get(name)?;
+        let by_ref_len = source.len() - source.trim_start_matches(['*', '@']).len();
+        let (by_ref, ty) = source.split_at(by_ref_len);
+        if ty.starts_with('/') || ty.starts_with('*') {
+            Some(source.clone())
+        } else if by_ref.is_empty() {
+            Some(ty.to_string())
+        } else {
+            Some(ty.to_string())
+        }
+    }
+
+    /// wire langtype：**不含** `*`/`@`（spec 04-layout语义/03-函数:17：传递方式由帧槽
+    /// 的指针位承载，不进类型串）。
+    fn langtype_wire(&self, name: &str) -> Option<String> {
+        let source = self.entries.get(name)?;
+        Some(
+            source
+                .trim_end_matches("...")
+                .trim_start_matches(['*', '@'])
+                .to_string(),
+        )
+    }
+}
+
 /// 操作数槽的静态类型：**可证明的具体 kind** → 形参/返回声明 → 源码声明 →
 /// 有限类型集合（union）。任一来源都没有 → 空串（未知；由 KVLANG_LAYOUT_STATS 计数）。
 ///
@@ -1267,6 +1385,11 @@ fn slot_static_type(
     if let Some(t) = param_langtype.get(lookup_name).filter(|t| !t.is_empty()) {
         return narrow_union(t.clone(), lookup_name, stable);
     }
+    /* 可证明的具体 kind：这里也是 lowering 临时槽（`_N`）写槽类型的唯一回填处。
+     * 少了这一条，读 `_N` 的指令拿到空类型，编码器报「不是单一具体类型」。 */
+    if let Some(t) = stable.get(lookup_name).filter(|t| !t.is_empty()) {
+        return t.clone();
+    }
     lower::type_set_slot_type(type_sets, lookup_name).unwrap_or_default()
 }
 
@@ -1298,7 +1421,17 @@ fn annotate_slot_types(
     seq: &mut [Instruction],
     declared: &HashMap<String, String>,
     sigs: &lower::SigTable,
+    structs: &lower::StructTable,
 ) {
+    /*
+     * lowering 产生的临时槽（`_N`）不在 `declared` 里，但它们的类型已经在前面
+     * 指令的写槽上推出来了。成员读/解引用的**基座**往往是这类临时槽
+     * （`(*node)·left` 的 `_8`），拿不到基座类型就算不出结果类型。
+     *
+     * 这里顺序扫一遍，把已推出的写槽类型记进 `derived`，后面遇到的基座从它取。
+     * 与写槽用同一份推导结果，不另起一套推断。
+     */
+    let mut derived: HashMap<String, String> = HashMap::new();
     for inst in seq.iter_mut() {
         if inst.writes.is_empty() {
             continue;
@@ -1309,16 +1442,20 @@ fn annotate_slot_types(
         if expr.is_leaf() {
             continue;
         }
-        let ty = expr_slot_type(expr, declared, sigs);
-        let Some(ty) = ty else { continue };
-        if ty.is_empty() {
-            continue;
+        let ty = expr_slot_type(expr, declared, sigs, &derived, structs);
+        if let Some(ty) = ty.filter(|value| !value.is_empty()) {
+            if inst.write_types.len() < inst.writes.len() {
+                inst.write_types.resize(inst.writes.len(), String::new());
+            }
+            if inst.write_types[0].is_empty() {
+                inst.write_types[0] = ty;
+            }
         }
-        if inst.write_types.len() < inst.writes.len() {
-            inst.write_types.resize(inst.writes.len(), String::new());
-        }
-        if inst.write_types[0].is_empty() {
-            inst.write_types[0] = ty;
+        /* 已推出的写槽类型记进 derived（后续指令的基座可能是它）。 */
+        for (write, write_type) in inst.writes.iter().zip(&inst.write_types) {
+            if !write_type.is_empty() {
+                derived.entry(write.clone()).or_insert_with(|| write_type.clone());
+            }
         }
     }
 }
@@ -1328,30 +1465,78 @@ fn expr_slot_type(
     expr: &ast::Expr,
     declared: &HashMap<String, String>,
     sigs: &lower::SigTable,
+    derived: &HashMap<String, String>,
+    structs: &lower::StructTable,
 ) -> Option<String> {
-    /* D：指针解引用 `*p` → declared[p] 去掉前导 `*`。 */
-    if expr.op == ast::DEREF_OP {
-        let base = expr.args.first()?;
-        let ty = declared.get(&base.val)?;
-        return Some(ty.strip_prefix('*').unwrap_or(ty).to_string());
-    }
-    /* B：成员读 `base·seg…` → 容器 value 类型（`·` 之后那段）。 */
-    if expr.op == ast::MEMBER_READ_OP {
-        let base = expr.args.first()?;
-        let mut ty = declared.get(&base.val)?.clone();
-        for _ in expr.args.iter().skip(1) {
-            ty = lower::container_value(&ty)?;
-        }
-        return Some(ty);
+    /* D：指针解引用 `*p`；B：成员读 `base·seg…`。
+     * 两者都可能以**复合表达式**为基座（`(*p)·x`），所以走同一套递归取型。 */
+    if expr.op == ast::DEREF_OP || expr.op == ast::MEMBER_READ_OP {
+        return value_type_of(expr, declared, derived, structs);
     }
     /* A：调用 `f(…)` → callee 的返回类型。 */
-    let sig = sigs.get(&expr.op)?;
+    /* 与 `annotate_returns_inst` 共用同一查找：先文件签名，再 native 表。
+     * 只查 `sigs` 会漏掉 `time·now` 这类**不落 /lib** 的能力——它们在嵌套调用
+     * 被 flatten 成临时槽之后才需要类型（命名局部在 lowering 前已被注解）。
+     *
+     * 查不到签名时**再**从实参推：`kvspace·listat` 这类「返回类型是实参的函数」
+     * 的算子进不了 native 表（那张表只放无前因的常量类型），只能在这里推。
+     * 顺序固定「签名优先」：有签名的算子以签名为准，实参推导只做兜底。 */
+    let Some(sig) = lower::sig_lookup(sigs, &expr.op) else {
+        let argument_types: Vec<Option<String>> = expr
+            .args
+            .iter()
+            .map(|argument| value_type_of(argument, declared, derived, structs))
+            .collect();
+        let argument_literals: Vec<Option<String>> = expr
+            .args
+            .iter()
+            .map(|argument| {
+                (argument.is_leaf() && argument.quote != 0 && !argument.val.is_empty())
+                    .then(|| argument.val.clone())
+            })
+            .collect();
+        return lower::call_result_type(&expr.op, &argument_types, &argument_literals);
+    };
     let first = sig.returns.first()?;
     if first.ty.is_empty() || first.ty.contains('|') {
         /* 空 kindexpr 不补；union 交给常规链路（那里已有 union 收敛规则）。 */
         return None;
     }
     Some(first.ty.clone())
+}
+
+/// 一个表达式的**值类型**：叶子查声明/已推导表；成员读与解引用递归向基座取。
+///
+/// 与 `lower::arg_type` 同形——那边早就按复合基座递归了（`(*p)·x` 的基座是解引用），
+/// 而 `expr_slot_type` 原先只查叶子 `val`，于是 `(*p)·field` 这类读槽拿不到类型。
+/// 两处逻辑必须一致：同一类表达式在写槽与读槽上得到同一个答案。
+///
+/// 成员链交给 `lower::member_chain_type`（mapexpr / 数组 / struct 三种基座它都认），
+/// 不在这里再写一遍逐段推导——那正是「事实在表里、路径没拿到表」的第二个入口。
+fn value_type_of(
+    expr: &ast::Expr,
+    declared: &HashMap<String, String>,
+    derived: &HashMap<String, String>,
+    structs: &lower::StructTable,
+) -> Option<String> {
+    if expr.op == ast::DEREF_OP {
+        let inner = expr.args.first()?;
+        let ty = value_type_of(inner, declared, derived, structs)?;
+        return Some(ty.strip_prefix('*').unwrap_or(&ty).to_string());
+    }
+    if expr.op == ast::MEMBER_READ_OP {
+        let base = expr.args.first()?;
+        let base_type = value_type_of(base, declared, derived, structs)?;
+        let tail: Vec<&str> = expr.args.iter().skip(1).map(|a| a.val.as_str()).collect();
+        return lower::member_chain_type(&base_type, &tail.join(keytree::MEMBER_SEP), structs);
+    }
+    if expr.val.is_empty() {
+        return None;
+    }
+    declared
+        .get(&expr.val)
+        .or_else(|| derived.get(&expr.val))
+        .cloned()
 }
 
 /// 成员读 `base·field` 的结果类型：基座是 structref 时，字段类型在 struct 原型里。
@@ -1367,15 +1552,20 @@ fn member_read_type(
     s: &Instruction,
     declared: &HashMap<String, String>,
     structs: &lower::StructTable,
+    stable: &HashMap<String, String>,
 ) -> Option<String> {
     let e = s.expr.as_ref()?;
     if e.is_leaf() || e.op != ast::MEMBER_READ_OP {
         return None;
     }
     let base = e.args.first()?;
+    /* 基座可能是 lowering 临时槽（`(*node)·left` 的 `_8`）：先查声明表，再查
+     * 可证明类型表（write_func 已把临时槽的写槽类型并进去）。 */
     let base_type = declared
         .get(&base.val)
-        .or_else(|| declared.get(base.val.trim_start_matches('*')))?;
+        .or_else(|| declared.get(base.val.trim_start_matches('*')))
+        .or_else(|| stable.get(&base.val))
+        .or_else(|| stable.get(base.val.trim_start_matches('*')))?;
     let field = e.args.get(1)?;
     let name = base_type
         .trim_start_matches('*')
@@ -1397,6 +1587,7 @@ fn write_slot_type(
     orig: &str,
     param_langtype: &HashMap<String, String>,
     declared: &HashMap<String, String>,
+    declared_source: &HashMap<String, String>,
     type_sets: &HashMap<String, Vec<String>>,
     structs: &lower::StructTable,
     stable: &HashMap<String, String>,
@@ -1404,13 +1595,16 @@ fn write_slot_type(
     if let Some(t) = s.write_types.get(j).filter(|t| !t.is_empty()) {
         return t.clone();
     }
-    if let Some(t) = member_read_type(s, declared, structs) {
+    if let Some(t) = member_read_type(s, declared, structs, stable) {
         return t;
     }
     if let Some(t) = param_langtype.get(orig).filter(|t| !t.is_empty()) {
         return t.clone();
     }
-    if let Some(t) = lower::resolve_slot_type(orig, declared, structs, declared) {
+    // `declared_source` = 写槽声明 ∪ **源级**形参类型：复合写目标（`(*r)`、`x·y`）
+    // 要按源级类型解析。用普通 `declared` 会漏掉形参（它只登记写槽），
+    // 用 `param_langtype` 又会混进 wire 形态（`*` 已被剥）。
+    if let Some(t) = lower::resolve_slot_type(orig, declared_source, structs, declared_source) {
         return narrow_union(t, orig, stable);
     }
     slot_static_type(orig, param_langtype, declared, type_sets, stable)
@@ -1454,12 +1648,14 @@ fn write_linear_inst(
     s: &Instruction,
     labels: &HashMap<String, i32>,
     declared: &HashMap<String, String>,
+    declared_source: &HashMap<String, String>,
     type_sets: &HashMap<String, Vec<String>>,
     structs: &lower::StructTable,
     params: &HashMap<String, String>,
     param_langtype: &HashMap<String, String>,
     stable: &HashMap<String, String>,
     local_funcs: &HashSet<String>,
+    sigs: &lower::SigTable,
 ) -> Result<(), String> {
     let (opcode, mut reads) = s.flat();
     // Already validated by `check_jumps`; still return `Result` to avoid panic paths.
@@ -1474,6 +1670,70 @@ fn write_linear_inst(
         "goto" | "br" => return Err(format!("{opcode}: bad arity {}", reads.len())),
         _ => {}
     }
+    /*
+     * `None` 操作数的槽 langtype = **该位置上下文要求的类型**。
+     *
+     * 为什么必须有类型：wire 仍是长度 0 的短内联头（表示是 None），但编码器要
+     * 按 langtype 把操作数归进类别表才能选出算子；空 langtype 在任何算子下都选
+     * 不出来。类型不在这层补，就只能在 vmkv 里从邻居猜——那是在看不到源码的层
+     * 做类型推断，等于给主干长分支。
+     *
+     * 三种上下文（spec `01-词法/07` 与 `03-类型系统/16-ptr`）：
+     *   比较：取另一侧的类型，且必须是引用（`*T`）——opcode 保持 `==`/`!=`，
+     *         由编码层的特化规则按「两侧都是指针」改选到 `ptreq`/`ptreq·not`
+     *         （`rwir_alias_table.def` 的两条 SPECIALIZATION 记录）。**不在 layout
+     *         改 opcode**：那会在编码层之上再造一套算子选择。
+     *   赋值/声明初始化：取写槽的声明类型；
+     *   调用实参：取被调方形参类型。
+     * 三种都给不出具体类型时在 **layout** 期报错，不许漏到编码器。
+     */
+    let none_index = reads.iter().position(|operand| operand == "None");
+    let mut none_type: Option<String> = None;
+    if let Some(index) = none_index {
+        let comparison = opcode == "==" || opcode == "!=";
+        let resolved = if comparison {
+            let other = reads
+                .get(if index == 0 { 1 } else { 0 })
+                .ok_or_else(|| format!("{opcode}: None 比较缺少另一侧操作数"))?;
+            let other_type = read_slot_type(other, param_langtype, declared, type_sets, stable);
+            if other_type.is_empty() {
+                return Err(format!(
+                    "{opcode}: 无法判定空引用比较的类型——另一侧 `{other}` 没有具体类型"
+                ));
+            }
+            if !other_type.starts_with('*') {
+                return Err(format!(
+                    "{opcode}: 空引用判定的左值不是引用类型（`{other}` 的类型是 `{other_type}`）"
+                ));
+            }
+            other_type
+        } else if let Some(sig) = sigs.get(&opcode) {
+            let parameter = sig.params.get(index).ok_or_else(|| {
+                format!("{opcode}: None 实参位置 {index} 超出台数形参表")
+            })?;
+            if parameter.ty.is_empty() || parameter.ty.contains('|') {
+                return Err(format!(
+                    "{opcode}: 无法判定 None 实参的类型——形参 `{}` 没有具体类型",
+                    parameter.name
+                ));
+            }
+            parameter.ty.trim_start_matches(['*', '@']).to_string()
+        } else if s.writes.len() == 1 {
+            let declared_type =
+                write_slot_type(s, 0, &s.writes[0], param_langtype, declared, declared_source, type_sets, structs, stable);
+            if declared_type.is_empty() || declared_type.contains('|') {
+                return Err(format!(
+                    "{} -> {}: 无法判定 None 的类型——写槽没有具体声明类型",
+                    opcode, s.writes[0]
+                ));
+            }
+            declared_type
+        } else {
+            return Err(format!("{opcode}: 无法判定 None 操作数的上下文类型"));
+        };
+        none_type = Some(resolved);
+    }
+
     let target_char = if s.writes.len() == 1
         && !s.write_types.is_empty()
         && kvkind::is_char_kind(&s.write_types[0])
@@ -1504,6 +1764,13 @@ fn write_linear_inst(
             pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
             continue;
         }
+        if Some(j) == none_index {
+            /* wire 恒是 None 头；只有槽 langtype 由上下文决定。 */
+            let wire = ffi::new_none()?;
+            let context_type = none_type.clone().unwrap_or_default();
+            pairs.push((format!("{prefix}/[{n},-{}]", j + 1), context_type, wire));
+            continue;
+        }
         let ty = read_slot_type(r, param_langtype, declared, type_sets, stable);
         let (wire, lt) = typed_slot_value(rv, &ty, target_char)?;
         pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
@@ -1511,7 +1778,7 @@ fn write_linear_inst(
     for (j, w) in s.writes.iter().enumerate() {
         let orig = w.as_str();
         let wv = param_slot(params, orig);
-        let ty = write_slot_type(s, j, orig, param_langtype, declared, type_sets, structs, stable);
+        let ty = write_slot_type(s, j, orig, param_langtype, declared, declared_source, type_sets, structs, stable);
         let (wire, lt) = typed_slot_value(wv, &ty, "")?;
         pairs.push((format!("{prefix}/[{n},{}]", j + 1), lt, wire));
     }
@@ -1716,6 +1983,19 @@ fn typed_slot_value(name: &str, ty: &str, target_char: &str) -> Result<(Vec<u8>,
 
 /// 指令操作数的 wire 解析；langtype 精确匹配 wire 的 kind。
 fn slot_value(val: &str, target_char: &str) -> Result<(Vec<u8>, String), String> {
+    /*
+     * `None` 是字面量，不是名字。它的 wire 是一条长度 0 的短内联头、langtype 空。
+     *
+     * 为什么不能落到下面 `new_rwir`：那会把 langtype 写成 `rwir`，于是 vmkv 按
+     * 「裸名/相对指针」分类，把 `None` 登记成一个读而未写的局部变量——C5 的整条
+     * 失败链就是这么来的。判据是**源码 token 是不是 None**，这一层是唯一知道
+     * 它来自源码记号的地方（下方 vmkv 只能看到槽，看不到源文本）。
+     *
+     * 只处理读侧：写目标叫 `None` 的情形不该走到这里，也不在这里放行。
+     */
+    if val == "None" {
+        return Ok((ffi::new_none()?, String::new()));
+    }
     if !is_literal(val) {
         return Ok((
             kvkind::new_rwir(0, 0, val)?,
@@ -1894,10 +2174,25 @@ pub fn printstack(kv: &mut Kv, vid: &str) -> String {
     for (i, f) in frames.iter().enumerate() {
         let lib = plain_of(kv, &format!("{f}/‥lib"));
         out.push_str(&format!("frame[{i}] {lib}\n"));
+        /*
+         * `‥callpc` / `‥returnpc` 与 `‥pc` **同编码**：langtype `[2]int32`，body 8 字节
+         * = [stackid:i32 LE][s0:i32 LE]（spec 04-layout语义/05-控制流）。
+         *
+         * 不能走 `plain_of`：它会按 int32 只取**前 4 字节**，把 stackid 显示成
+         * 唯一一个数字，s0 静默消失——**不报错**，看起来像「返回点丢了一位」。
+         * 三处共用同一个 `pc_of`，不写第二套解析。
+         */
         for key in ["‥callpc", "‥returnpc"] {
-            let v = plain_of(kv, &format!("{f}/{key}"));
-            if !v.is_empty() {
-                out.push_str(&format!("  {key} = {v}\n"));
+            let full = format!("{f}/{key}");
+            if kv.get_one(&full).is_empty() {
+                continue; // 键不存在是常态（非调用帧没有这两个字段）
+            }
+            match pc_of(kv, &full) {
+                Ok((stackid, s0)) => {
+                    out.push_str(&format!("  {key} = stackid={stackid} s0={s0}\n"))
+                }
+                /* 存在但解不出是**错误**，要看得见——静默跳过等于把它变回「少一位」。 */
+                Err(message) => out.push_str(&format!("  {key} = error: {message}\n")),
             }
         }
         // 帧成员 = 实参槽 `[0,±j]` + **命名局部**（变量名即成员名，如 text/total/sz）
@@ -2208,6 +2503,7 @@ mod tests {
                 Stmt::Scope(crate::ast::ScopeStmt {
                     comments: Vec::new(),
                     label: "_open".into(),
+                    synthetic: false,
                     body: vec![Stmt::Instruction(Instruction {
                         expr: Some(crate::ast::leaf("return")),
                         ..Default::default()
@@ -2221,6 +2517,53 @@ mod tests {
     }
 
     #[test]
+    fn named_block_falls_through_without_return() {
+        /* 用户具名块之后还有语句时，块体末尾**不得**补 `return`：线性展平后
+         * 下一条语句就是它的续接。旧实现递归 terminate 每个 Scope，把 return
+         * 插在序列中间，后面所有语句不可达（`local/shadowing.kv` 实测）。
+         *
+         * 正向判据只数 `return` 的个数：旧实现 2 条，正确实现 1 条且在最末。 */
+        let dsn = format!("fs:///tmp/kvlanglayout_named_block_{}", std::process::id());
+        struct Guard(String);
+        impl Drop for Guard {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(self.0.trim_start_matches("fs://"));
+            }
+        }
+        let _guard = Guard(dsn.clone());
+        let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+        let mut kv = Kv::conn(&dsn);
+        init_dirs(&mut kv).unwrap();
+        compile(
+            &mut kv,
+            "lib t {\nrwfunc main() -> () {\n1 -> x\ninner: {\n2 -> x\n}\n3 -> x\n}\n}\n",
+        )
+        .unwrap();
+        let mut returns = Vec::new();
+        let mut last_opcode = String::new();
+        let mut ordinal = 1;
+        loop {
+            let key = format!("/lib/t·main/[{ordinal},0]");
+            let value = kv.get_one(&key);
+            if value.is_empty() {
+                break;
+            }
+            let opcode = kvkind::value_string(&value);
+            if opcode.contains("return") {
+                returns.push(ordinal);
+            }
+            last_opcode = opcode;
+            ordinal += 1;
+        }
+        assert!(last_opcode.contains("return"), "函数级隐式 return 必须保留");
+        assert_eq!(
+            returns.len(),
+            1,
+            "具名块不应额外产生 return；实际 return 出现在 irseq {returns:?}"
+        );
+    }
+
+    #[test]
     fn unterminated_block_is_error() {
         let mut seq = Vec::new();
         let mut labels = HashMap::new();
@@ -2228,6 +2571,7 @@ mod tests {
             &[Stmt::Scope(crate::ast::ScopeStmt {
                 comments: Vec::new(),
                 label: "_open".into(),
+                synthetic: true,
                 body: vec![Stmt::Instruction(Instruction {
                     expr: Some(crate::ast::leaf("1")),
                     writes: vec!["x".into()],

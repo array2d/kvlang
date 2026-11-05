@@ -1414,7 +1414,19 @@ impl Parser {
         let is_named_map = inst.expr.as_ref().is_some_and(|e| {
             e.op == "map·new" && e.args.first().is_some_and(|a| a.quote != 0)
         });
-        if !is_named_map {
+        /*
+         * 空字面量 `{}` 同样是「按写目标落地」：structref 目标要克隆原型
+         * （`p:Point = {}` 等价于带默认字段的原型实例），map 目标才是 `map·new`。
+         * 早先只改写具名形态，空字面量在 struct 目标上留下 `map·new`——
+         * 能力行的写掩码是 map，structref 落不进去，编码期报「result type is
+         * outside the capability mask」。位置型 `{1,2}` 不在此列（struct 字段
+         * 必须带名字，位置型对 struct 本身就不是合法构造）。
+         */
+        let is_empty_map = inst
+            .expr
+            .as_ref()
+            .is_some_and(|e| e.op == "map·new" && e.args.is_empty());
+        if !is_named_map && !is_empty_map {
             return;
         }
         let ty = inst.write_types.first().map(String::as_str).unwrap_or("");
@@ -1480,6 +1492,7 @@ impl Parser {
             comments: Vec::new(),
             label,
             body,
+            synthetic: false,
         })
     }
 
