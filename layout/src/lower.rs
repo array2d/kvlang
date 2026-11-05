@@ -2199,6 +2199,7 @@ fn validate_num_op(
     }
     let mut saw_char = false;
     let mut saw_num = false;
+    let mut saw_bool = false;
     for a in args {
         let t = arg_type(a, tm);
         /*
@@ -2222,16 +2223,31 @@ fn validate_num_op(
         let members = type_members(&t);
         let all_num = !members.is_empty() && members.iter().all(|m| builtin::is_num_kind(m));
         let all_str = !members.is_empty() && members.iter().all(|m| is_string_kind(m));
+        let all_bool = !members.is_empty() && members.iter().all(|m| m.trim() == "bool");
         // 可与 None 比较的类型：指针与 structref。判据只有一份（见 `is_none_comparable`），
         // 这里不再维护本地宽表——`bool` 与 mapexpr 没有 spec 背书，等 `nonnull` 能力行。
         let nullable = is_none_comparable;
         let all_cmp_ok = !members.is_empty() && members.iter().all(|m| nullable(m));
+        /* **布尔只允许相等比较**（`==` / `!=`），且不得与数值混用。
+         *
+         * 依据：catalog 本就有 `bool·eq` / `bool·neq` 两条特化行
+         * （`rwir_alias_table.def:342-343`），说明布尔相等是已有语义；缺的只是
+         * layout 这一侧的准入——它把 `eq` 当纯数值算子，`true == true` 直接报
+         * `eq expects numeric operand, got "bool"`。
+         *
+         * 边界：`<`/`>`/`+` 等**仍然拒绝**布尔（走下面的 else 报错）；`1 == true`
+         * 这类跨类型也拒绝——`saw_bool` 与 `saw_num` 同时置位时在末尾报错。
+         * 语义本身不在这里实现：opcode 保持 `==`/`!=`，由编码器按静态类型走
+         * 既有的 `bool·eq` / `bool·neq` 特化。 */
+        let is_equality = word == "eq" || word == "neq";
         if is_string_kind(&t) || all_str {
             saw_char = true;
         } else if builtin::is_num_kind(&t) || all_num {
             saw_num = true;
+        } else if is_equality && (t.trim() == "bool" || all_bool) {
+            saw_bool = true;
         } else if is_cmp && all_cmp_ok {
-            // bool / Ptr 比较合法（Ptr 对 None 的判空在运行时做值检查）
+            // Ptr 比较合法（Ptr 对 None 的判空在运行时做值检查）
         } else {
             push_num_diag(
                 diags,
@@ -2244,6 +2260,14 @@ fn validate_num_op(
         push_num_diag(
             diags,
             format!("TypeError: {word} cannot mix string and numeric operands"),
+        );
+    }
+    /* 布尔不得与数值/字符串混用：`1 == true` 这类跨类型比较在 layout 期拒绝，
+     * 不留给运行时按值猜。 */
+    if saw_bool && (saw_num || saw_char) {
+        push_num_diag(
+            diags,
+            format!("TypeError: {word} cannot mix bool with other kinds"),
         );
     }
 }

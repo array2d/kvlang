@@ -1829,8 +1829,22 @@ fn write_linear_inst(
              * 是值形态的 `/lib/TNode`（`*` 是传递方式，已被剥），按 `*` 判会把
              * 一条合法的判空挡在 layout 期。 */
             if !lower::is_none_comparable(&other_type) {
+                /*
+                 * **能力缺口，不是缺陷**，所以带固定前缀 `[capability:nonnull]`。
+                 *
+                 * spec 明说「存在性判定本应对任意类型成立」（`03-类型系统/16-ptr`），
+                 * 当前只支持指针与 structref，因为非指针判空需要 `nonnull` /
+                 * `nonnull·not` 能力行——尚未实现（三条前置：一元特化机制、head 的
+                 * ptr 位过 ABI、catalog 的「任意单一类型」位）。
+                 *
+                 * 前缀是给 **runner 分类**用的：`kv_runner` 把「layout 失败且错误串含
+                 * `[capability:`」计 **blocked**（有名字的能力缺口），其余 layout
+                 * 失败仍是 **fail**——默认 fail、按前缀白名单放行。
+                 *
+                 * **只给这一条加前缀**：其余诊断都是真错误，不能被算成缺口。
+                 */
                 return Err(format!(
-                    "{opcode}: 空引用判定的另一侧不是引用类型（`{other}` 的类型是 `{other_type}`）"
+                    "[capability:nonnull] {opcode}: 空引用判定的另一侧不是引用类型（`{other}` 的类型是 `{other_type}`）"
                 ));
             }
             other_type

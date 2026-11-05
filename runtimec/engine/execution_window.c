@@ -610,12 +610,27 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
         }
         if (binrwir_program_get_symbol(program, (uint16_t)symbol_ordinal, &name,
                                        &langtype) != RUNTIMEC_STATUS_SUCCESS ||
-            name.size == 0U || langtype.size == 0U) {
+            name.size == 0U) {
             (void)runtimec_allocator_deallocate(
                 &host->allocator, is_local, sizeof(*is_local) * symbol_count,
                 _Alignof(bool));
             *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED;
             return RUNTIMEC_STATUS_INVALID;
+        }
+        /*
+         * **类型缺席的局部：不建、不绑**（`decision-type-from-target-local.md` §3）。
+         *
+         * 它的类型是「第一次写时才确定」的——写来源是一次 STATIC 读
+         * （`/lib/math·Pi -> pi`），类型的唯一事实源是那次读到的 XValue 头，
+         * 帧准备阶段还不存在。`create_unbound_local` 会在第一次写时从头取类型
+         * 并建槽，所以这里**什么都不做**。
+         *
+         * **与 `name.size == 0` 是两件事**：名字为空是真·程序损坏（上面那条），
+         * 类型为空是**合法的中间态**。曾经两者合并判 FRAME_FAILED，于是这类
+         * 用例在建帧第一步就倒，走不到写。
+         */
+        if (langtype.size == 0U) {
+            continue;
         }
         /*
          * 容器/结构体局部**不建、不绑**：它们的创建源是源码里的 `·new`

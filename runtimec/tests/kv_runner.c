@@ -1063,9 +1063,22 @@ static void collect_cases(const char *root, const char *relative,
 
 /* ── 期望输出解析（与 tutorial/test.py 同约定） ────────────────────── */
 
+/* 期望块容量上限。**超限必须具名失败，不许静默截断**：截断会让「期望 20 行」
+ * 被读成「期望 16 行」，再报「实际 20 / 期望 16」，判据指向完全错的方向。
+ * 曾经这里是 16，`cast`/`strict_types`（20）、`int_edge`（26）、`precision`（27）
+ * 四条因此长期假失败。 */
+#define KVRUN_EXPECTATION_LINE_CAPACITY 64U
+#define KVRUN_EXPECTATION_LINE_SIZE 256U
+
 typedef struct expectation {
-    char lines[16][256];
+    char lines[KVRUN_EXPECTATION_LINE_CAPACITY][KVRUN_EXPECTATION_LINE_SIZE];
     size_t count;
+    /* 期望行超出容量：解析时就记下，用例判 fail 并报「期望输出超过 runner 容量」。
+     * 只记标志不截断——截断是假信号的源头。 */
+    bool overflow;
+    /* 某行超出 `lines[i]` 的缓冲：单选标出第几行，同样判 fail。 */
+    bool line_overflow;
+    size_t line_overflow_index;
     /* `// 期望错误: <子串>`；空串表示「没有这一行」，即正向用例。 */
     char expected_error[256];
     /*
@@ -1175,6 +1188,18 @@ static void parse_expectations(const char *path, expectation_t *out) {
         if (strstr(line, "期望输出") != NULL ||
             strstr(line, "Expected output") != NULL) {
             /*
+             * **两条语料约定**（与 `tutorial/test.py` 一致，两个 harness 服务同一套语料）：
+             *
+             * 1. **块内只有三空格缩进的算内容**：`//   `（三个空格）或 `// \t` 开头。
+             *    说明文字**不得使用这两种缩进**，否则会被当成期望行。
+             *    实例（2026-11-06）：`01-basics/precision.kv` 的说明段里有
+             *    `//   \`println(bm)\` ← …` 三行，被当成期望内容，于是「实际 21 /
+             *    期望 27」——看起来像实现少打 6 行，其实是语料格式错。
+             *
+             * 2. **任意含「期望输出」四个字的行都算块头**，包括说明文字里的引用。
+             *    实例：同一份文件的说明里写了「否则会被当成期望输出」，那行被当作
+             *    块头，其后的内联文本成了第 1 行内容。写说明时**不要出现这四个字**。
+             *
              * **冒号可选**。`tutorial/test.py:104` 的判据是
              * `if inline.startswith(":"): inline = inline[1:].strip()`——
              * 带冒号就剥掉，不带就把 `// 期望输出` 之后当内容。两个 harness
@@ -1197,9 +1222,20 @@ static void parse_expectations(const char *path, expectation_t *out) {
                     inline_text += 1;
                 }
             }
-            if (*inline_text != '\0' && out->count < 16U) {
-                snprintf(out->lines[out->count], 256, "%s", inline_text);
-                out->count += 1U;
+            if (*inline_text != '\0') {
+                if (out->count >= KVRUN_EXPECTATION_LINE_CAPACITY) {
+                    out->overflow = true;
+                } else if (strlen(inline_text) >= KVRUN_EXPECTATION_LINE_SIZE) {
+                    /* **超限只标记、不拷贝**：用例已判 fail，不需要保存被截断的内容。
+                     * 拷贝会触发 `-Werror=format-truncation`（Release 优化下才报，
+                     * Debug `-O0` 不报），且等于把截断合法化。 */
+                    out->line_overflow = true;
+                    out->line_overflow_index = out->count;
+                } else {
+                    memcpy(out->lines[out->count], inline_text,
+                           strlen(inline_text) + 1U);
+                    out->count += 1U;
+                }
                 in_block = false;
                 continue;
             }
@@ -1209,9 +1245,17 @@ static void parse_expectations(const char *path, expectation_t *out) {
         if (in_block) {
             if (strncmp(line, "//   ", 5) == 0 || strncmp(line, "// \t", 4) == 0) {
                 const char *text = line + (strncmp(line, "//   ", 5) == 0 ? 5 : 4);
-                if (*text != '\0' && out->count < 16U) {
-                    snprintf(out->lines[out->count], 256, "%s", text);
-                    out->count += 1U;
+                if (*text != '\0') {
+                    if (out->count >= KVRUN_EXPECTATION_LINE_CAPACITY) {
+                        out->overflow = true;
+                    } else if (strlen(text) >= KVRUN_EXPECTATION_LINE_SIZE) {
+                        /* 同上：超限只标记、不拷贝。 */
+                        out->line_overflow = true;
+                        out->line_overflow_index = out->count;
+                    } else {
+                        memcpy(out->lines[out->count], text, strlen(text) + 1U);
+                        out->count += 1U;
+                    }
                 }
             } else if (strncmp(line, "//", 2) != 0) {
                 in_block = false;
@@ -1571,6 +1615,28 @@ int main(int argument_count, char **arguments) {
             (void)case_store_close(&environment);
             continue;
         }
+        /* **期望块超容量必须具名失败**，不许静默截断。
+         *
+         * 截断的后果实测过：`strict_types` 的期望本来 20 行，被截成 16 行，
+         * 于是报「行数不等（实际 20 / 期望 16）」——判据指向「实现多输出了」，
+         * 而真相是「runner 读不下」。假信号比没有信号更糟。 */
+        if (expectation.overflow) {
+            fprintf(stderr,
+                    "FAIL %s: 期望输出超过 runner 容量 %u 行\n", cases.paths[index],
+                    (unsigned)KVRUN_EXPECTATION_LINE_CAPACITY);
+            counts.failed += 1U;
+            (void)case_store_close(&environment);
+            continue;
+        }
+        if (expectation.line_overflow) {
+            fprintf(stderr,
+                    "FAIL %s: 期望输出第 %zu 行超过 runner 单行容量 %u 字节\n",
+                    cases.paths[index], expectation.line_overflow_index + 1U,
+                    (unsigned)KVRUN_EXPECTATION_LINE_SIZE);
+            counts.failed += 1U;
+            (void)case_store_close(&environment);
+            continue;
+        }
         /* layout 到本实例的 store。失败是 fail（跑不起来），不是 blocked。 */
         char entry[256];
         char error_text[512];
@@ -1629,6 +1695,46 @@ int main(int argument_count, char **arguments) {
             continue;
         }
         if (layout_result != 0) {
+            /*
+             * **`[capability:` 前缀 ⇒ blocked，其余 layout 失败仍是 fail。**
+             *
+             * 默认 fail、按前缀白名单放行——与编码期那条 blocked 白名单同一哲学：
+             * 「layout 拒绝」绝大多数是真错误，只有被**明确标记**为能力缺口的那一条
+             * 才计 blocked。判据是**产生方打的标记**，不是 runner 从文本猜语义。
+             *
+             * 目前唯一产生方：`layout/src/code.rs` 的「非指针判空」诊断，前缀
+             * `[capability:nonnull]`——那是 spec 承认的能力缺失（`nonnull` 未实现），
+             * 不是程序写错了。
+             */
+            static const char capability_prefix[] = "[capability:";
+            const char *capability = strstr(error_text, capability_prefix);
+            if (capability != NULL) {
+                /* 前缀形态是 `[capability:<名字>]`，**整个标记**（含 `]`）都跳过，
+                 * 原因文本从标记之后开始。漏掉 `]` 会在原因前面留一个 `name]`。 */
+                const char *reason =
+                    capability + sizeof(capability_prefix) - 1U;
+                const char *closing = strchr(reason, ']');
+                if (closing != NULL) {
+                    reason = closing + 1;
+                    while (*reason == ' ') {
+                        reason += 1;
+                    }
+                }
+                if (g_blocked_count < MAX_BLOCKED) {
+                    blocked_entry_t *slot = &g_blocked[g_blocked_count];
+                    snprintf(slot->file, sizeof(slot->file), "%s",
+                             cases.paths[index]);
+                    slot->pc = 0U;
+                    snprintf(slot->operation, sizeof(slot->operation),
+                             "layout");
+                    g_blocked_count += 1U;
+                }
+                fprintf(stderr, "BLOCKED %s: layout — %s\n", cases.paths[index],
+                        reason);
+                counts.blocked += 1U;
+                (void)case_store_close(&environment);
+                continue;
+            }
             /* 正向用例失败：摘要 + stderr 首行。只给汇总串等于没说，
              * 同一条红在语法层和类型层的原因完全不同。 */
             char stderr_line[512];

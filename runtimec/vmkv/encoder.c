@@ -510,11 +510,15 @@ static runtimec_status_t vmkv_encode_static_argument_into(
     if (output_argument != NULL) {
         memset(output_argument, 0, sizeof(*output_argument));
     }
+    /*
+     * **`parameter_type_name` 允许为空**：STATIC 读参（`/lib/math·Pi`）的类型是
+     * 运行态事实，源码给不出来（裁决 `decision-type-from-target-local.md`）。
+     * 其余检查照旧——key 必须有效、builder 必须在。
+     */
     if (!vmkv_encoder_request_is_valid(request) || output_argument == NULL ||
         builder == NULL || argument_index == BINRWIR_ARGUMENT_INDEX_NONE ||
         source_argument == NULL ||
         !runtimec_string_view_is_valid(source_argument->parameter_type_name) ||
-        source_argument->parameter_type_name.size == 0U ||
         !runtimec_key_view_is_valid(source_argument->key) ||
         source_argument->key.size == 0U) {
         return vmkv_encoder_fail(error, RUNTIMEC_STATUS_INVALID,
@@ -817,6 +821,22 @@ static runtimec_status_t vmkv_encoder_classify_read_arguments(
                 "vmkv encoder: parameter has no concrete langtype",
                 operation->logical_program_counter);
         }
+        /*
+         * **STATIC 读参允许没有类型**（裁决 `decision-type-from-target-local.md`）：
+         * `copy` 的读参若是一次绝对 key 引用（`/lib/math·Pi`），它的类型不可能由
+         * 源码给出——那是运行态事实，只能从目标 XValue 的头取。放行它，同时把
+         * 写侧槽标记成「类型来自目标」（`local_types` 那一侧已经这么标）。
+         *
+         * **范围严格**：只放行 `copy` 且读参是 STATIC 这一格；其余任何「没有类型」
+         * 仍是具名失败——不许把缺席类型变成通用口子。
+         */
+        if (result == VMKV_PARAMETER_TYPE_RESULT_NONE &&
+            source->read_argument_count == 1U &&
+            source->read_arguments[ordinal].key_addressability ==
+                VMKV_KEY_ADDRESSABILITY_STATIC) {
+            encoder->parameter_type_sets[ordinal] = VMKV_RWIR_TYPE_SET_NONE;
+            continue;
+        }
         if (!needs_classification) {
             /* 透传位置：只要具体即可，不要求落进类别表。 */
             if (result == VMKV_PARAMETER_TYPE_RESULT_NONE) {
@@ -944,11 +964,31 @@ static runtimec_status_t vmkv_encoder_resolve_write_types(
             source->write_arguments[ordinal].parameter_type_name;
         if (declared.size == 0U || declared.data == NULL ||
             memchr(declared.data, '|', declared.size) != NULL) {
-            return vmkv_encoder_fail(
-                error, RUNTIMEC_STATUS_UNSUPPORTED,
-                VMKV_ENCODER_DIAG_INVALID_PARAMETER_TYPE,
-                "vmkv encoder: write parameter has no concrete langtype",
-                operation->logical_program_counter);
+            /*
+             * **写参也可以没有类型**——当且仅当本条指令的读来源是一次 STATIC
+             * 绝对 key 引用（裁决 `decision-type-from-target-local.md`）。
+             *
+             * 那时代码形态是 `绝对 key -> 局部`：读进来什么类型，写侧就是什么
+             * 类型，**由运行期从目标 XValue 头取**。layout 不知道、编码器也不该猜。
+             * 编码出来仍是一个普通槽（类型字符串为空），`create_unbound_local`
+             * 在第一次写时按写入 wire 的头定它的类型。
+             *
+             * 范围严格：只认「只有一个读参、且它是 STATIC」这一格。其余任何
+             * 缺失仍是具名失败——不许把缺席类型变成通用口子。
+             */
+            const bool type_from_target =
+                source->read_argument_count == 1U &&
+                source->read_arguments[0].key_addressability ==
+                    VMKV_KEY_ADDRESSABILITY_STATIC;
+            if (!type_from_target) {
+                return vmkv_encoder_fail(
+                    error, RUNTIMEC_STATUS_UNSUPPORTED,
+                    VMKV_ENCODER_DIAG_INVALID_PARAMETER_TYPE,
+                    "vmkv encoder: write parameter has no concrete langtype",
+                    operation->logical_program_counter);
+            }
+            targets[ordinal] = runtimec_string_view_make(NULL, 0U);
+            continue;
         }
         targets[ordinal] = declared;
     }

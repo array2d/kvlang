@@ -154,11 +154,44 @@ static bool vmkv_local_types_is_concrete(runtimec_string_view_t langtype) {
     return true;
 }
 
-/* 写位置：类型必须具体；同一名字的第二个不同类型即失败。 */
+/*
+ * 写位置：类型必须具体；同一名字的第二个不同类型即失败。
+ *
+ * **唯一的例外**（裁决 `decision-type-from-target-local.md`）：本条指令的**写来源
+ * 是一次 STATIC 引用**（`/lib/math·Pi -> pi`）时，局部槽的类型允许缺席——它不能由
+ * 写入方给出，只能运行期从目标 XValue 的头取。
+ *
+ * **这不是通用口子**：`type_from_target` 由调用方按「读参的第 0 项是 STATIC 引用」
+ * 逐条算出，其余任何缺席仍走下面的具名失败。
+ */
 static runtimec_status_t vmkv_local_types_note_write(
     vmkv_local_types_t *local_types, runtimec_string_view_t name,
-    runtimec_string_view_t langtype, bool *output_usable,
+    runtimec_string_view_t langtype, bool type_from_target, bool *output_usable,
     runtimec_program_counter_t logical_program_counter, runtimec_error_t *error) {
+    if (!vmkv_local_types_is_concrete(langtype) && type_from_target) {
+        /* 类型缺席但来源允许：登记成「空类型、已写」，运行期定型。 */
+        vmkv_local_type_record_t *record = vmkv_local_types_record(
+            local_types, name, logical_program_counter, error);
+        if (record == NULL) {
+            return RUNTIMEC_STATUS_OUT_OF_MEMORY;
+        }
+        if (record->written) {
+            (void)snprintf(local_types->message, sizeof(local_types->message),
+                           "vmkv local types: local '%.*s' is written twice with "
+                           "a type-from-target source and a declared type",
+                           (int)name.size, name.data);
+            *output_usable = false;
+            return vmkv_local_types_fail(
+                error, RUNTIMEC_STATUS_UNSUPPORTED,
+                VMKV_LOCAL_TYPES_DIAG_NOT_CONCRETE,
+                runtimec_string_view_from_c_string(local_types->message),
+                logical_program_counter);
+        }
+        record->langtype = runtimec_string_view_make(NULL, 0U);
+        record->written = true;
+        *output_usable = true;
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
     if (!vmkv_local_types_is_concrete(langtype)) {
         (void)snprintf(local_types->message, sizeof(local_types->message),
                        "vmkv local types: local '%.*s' is written with a "
@@ -278,10 +311,19 @@ runtimec_status_t vmkv_local_types_collect(
                 continue;
             }
             bool usable = false;
+            /*
+             * 写来源是不是 STATIC 引用：只看**本条指令的第 0 个读参**——`copy`
+             * 只有一个读参，它就是来源。多读参的指令（容器构造等）不适用本例外，
+             * 因为「类型来自目标」要求来源唯一且是绝对 key。
+             */
+            const bool type_from_target =
+                instruction.read_argument_count == 1U &&
+                instruction.read_arguments[0].key_addressability ==
+                    VMKV_KEY_ADDRESSABILITY_STATIC;
             status = vmkv_local_types_note_write(
                 local_types, name,
                 instruction.write_arguments[ordinal].parameter_type_name,
-                &usable, logical_program_counter, error);
+                type_from_target, &usable, logical_program_counter, error);
             if (status != RUNTIMEC_STATUS_SUCCESS) {
                 break;
             }

@@ -545,6 +545,46 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
+    /*
+     * ── 声明类型缺席：从**写入 wire 的头**取类型 ──────────────────────────
+     * （裁决 `decision-type-from-target-local.md` 第三段）
+     *
+     * 形态是 `绝对 key -> 局部`：layout 不知道绝对 key 的类型（运行态事实），
+     * 编码器据此放行了缺席类型，于是这里必须自己定。
+     *
+     * **头里没有 langtype ⇒ 失败封闭**：
+     *   - 不建成无类型值（读侧无从判宽，必然退化成「按字节猜」）；
+     *   - **不回退到旧路径**（那是静默回退，A′ 那次的前置原则）；
+     *   - 不猜一个「看起来合理」的类型。
+     */
+    if (declared.size == 0U) {
+        if (!runtimec_bytes_view_is_valid(value) || value.data == NULL ||
+            value.size < KVSPACE_XVALUE_HEAD_LEN) {
+            return vmbin_value_access_fail(
+                error, RUNTIMEC_STATUS_INVALID,
+                VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE,
+                "local slot has no declared langtype and its written value "
+                "carries no readable head");
+        }
+        const uint8_t *head_langtype_bytes = NULL;
+        const uint16_t head_langtype_size = kvspaceXvalueHeadLangtypeBounded(
+            value.data, (uint64_t)value.size, &head_langtype_bytes);
+        const runtimec_string_view_t head_langtype =
+            head_langtype_size != 0U && head_langtype_bytes != NULL
+                ? runtimec_string_view_make(
+                      (const char *)(const void *)head_langtype_bytes,
+                      (size_t)head_langtype_size)
+                : runtimec_string_view_make(NULL, 0U);
+        if (!runtimec_string_view_is_valid(head_langtype) ||
+            head_langtype.size == 0U) {
+            return vmbin_value_access_fail(
+                error, RUNTIMEC_STATUS_INVALID,
+                VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE,
+                "local slot has no declared langtype and the written wire's "
+                "head carries none either");
+        }
+        declared = head_langtype;
+    }
     if (declared.size + 1U > sizeof(langtype_text)) {
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_INVALID, VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE,

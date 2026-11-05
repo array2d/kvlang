@@ -387,17 +387,127 @@ static int binrwir_program_local_symbol_is_untyped(
            program->symbols[argument->slot].langtype.size == 0U;
 }
 
+/*
+ * 一个参数区段是否合法。**读、写两侧的「无类型局部」判据不同**
+ * （裁决 `decision-type-from-target-local.md`）：
+ *
+ *   读 span  —— 局部符号必须带类型。**这一条不动**：读一个无类型局部，运行期
+ *               无从判宽，必然退化成「按字节猜」。
+ *   写 span  —— 允许类型缺席，**但要求本指令至少有一个 STATIC 读参**。
+ *
+ * 为什么写侧要那条附加条件：「类型来自目标」的形态是
+ *   `绝对 key -> 局部`（`/lib/math·Pi -> pi`）
+ * ——读参是 STATIC（本来就不受本判据管），写参是 LOCAL（类型缺席，由运行期从
+ * 目标 XValue 的头取）。**附加条件把口子精确钉在这一格**：没有 STATIC 读参的
+ * 指令，写参照样必须有类型，不许变成「写参随便无类型」。
+ */
+/*
+ * 类型来自目标的局部：**程序级一张表**（裁决 `decision-type-from-target-local.md` §2）。
+ *
+ *   `type_from_target_locals` = 所有「被一条带 STATIC 读参的指令写过」的
+ *   **无类型**局部符号下标。
+ *
+ * 为什么需要一张表而不是逐条指令判：写侧的那一格（`绝对 key -> 局部`）只说明
+ * 「这个槽的类型将来由运行期定」，而 `println("dst:", d1)` 这样的**读**发生在
+ * 另一条指令上——逐条判看不到「它被 STATIC 写过」，于是读会被误拒。
+ *
+ * **判据是写来源，不是读位置**：集合里放的是「被谁写过」，读在哪条指令不参与。
+ * **不做顺序分析**：读在任何写之前由运行期 `UNBOUND_SLOT` 具名失败，静态不管。
+ *
+ * 只收**无类型**局部：有类型的局部本来就走原校验路径，不受本表影响。
+ */
+typedef struct binrwir_type_from_target_set {
+    /* 位图按符号下标索引；symbol_count 在 validate 时已知且有限。 */
+    uint8_t *bits;
+    size_t size;
+} binrwir_type_from_target_set_t;
+
+static bool binrwir_type_from_target_contains(
+    const binrwir_type_from_target_set_t *set, uint16_t symbol_index) {
+    if (set == NULL || set->bits == NULL || (size_t)symbol_index >= set->size) {
+        return false;
+    }
+    return (set->bits[symbol_index / 8U] &
+            (uint8_t)(1U << (symbol_index % 8U))) != 0U;
+}
+
+static void binrwir_type_from_target_insert(binrwir_type_from_target_set_t *set,
+                                            uint16_t symbol_index) {
+    if (set == NULL || set->bits == NULL || (size_t)symbol_index >= set->size) {
+        return;
+    }
+    set->bits[symbol_index / 8U] |= (uint8_t)(1U << (symbol_index % 8U));
+}
+
+/* 扫一遍指令表，收集「带 STATIC 读参的指令」写过的无类型局部。 */
+static void binrwir_type_from_target_collect(
+    const binrwir_program_t *program, binrwir_type_from_target_set_t *set) {
+    for (size_t instruction_ordinal = 0U;
+         instruction_ordinal < program->instructions.count;
+         ++instruction_ordinal) {
+        const binrwir_program_instruction_record_t *record =
+            &program->instructions.records[instruction_ordinal];
+        const size_t read_offset = (size_t)record->read_argument_offset;
+        const size_t read_count = (size_t)record->read_argument_count;
+        const size_t write_count = (size_t)record->write_argument_count;
+
+        bool has_static_read = false;
+        for (size_t ordinal = 0U; ordinal < read_count; ++ordinal) {
+            if (program->arguments[read_offset + ordinal].reference_kind ==
+                BINRWIR_REFERENCE_STATIC) {
+                has_static_read = true;
+                break;
+            }
+        }
+        if (!has_static_read) {
+            continue;
+        }
+        for (size_t ordinal = 0U; ordinal < write_count; ++ordinal) {
+            const binrwir_argument_t *argument =
+                &program->arguments[read_offset + read_count + ordinal];
+
+            if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL ||
+                (size_t)argument->slot >= program->symbol_count ||
+                program->symbols[argument->slot].langtype.size != 0U) {
+                continue;
+            }
+            binrwir_type_from_target_insert(set, argument->slot);
+        }
+    }
+}
+
+/*
+ * 一个参数区段是否合法。**读、写两侧的「无类型局部」判据不同**
+ * （裁决 `decision-type-from-target-local.md` §2）：
+ *
+ *   写 span —— 本指令含 STATIC 读参时，无类型局部放行（它会被登记进集合）；
+ *   读 span —— 该局部**在集合里**才放行：集合说明它的类型由运行期从目标
+ *              XValue 头取；不在集合里说明它是**真·无类型局部**，仍拒。
+ *
+ * 两条都只针对**无类型局部**；有类型的局部判据一字不动。
+ */
 static int binrwir_program_span_is_invalid(
     const binrwir_program_t *program, const binrwir_argument_t *arguments,
-    size_t count) {
+    size_t count, bool is_write_span, bool instruction_has_static_read,
+    const binrwir_type_from_target_set_t *type_from_target) {
     size_t argument_ordinal;
 
     for (argument_ordinal = 0U; argument_ordinal < count; ++argument_ordinal) {
         const binrwir_argument_t *argument = &arguments[argument_ordinal];
+        bool exempt;
 
         if (binrwir_argument_validate(argument) != RUNTIMEC_STATUS_SUCCESS ||
-            binrwir_program_argument_is_unbound(program, argument) ||
-            binrwir_program_local_symbol_is_untyped(program, argument)) {
+            binrwir_program_argument_is_unbound(program, argument)) {
+            return 1;
+        }
+        if (!binrwir_program_local_symbol_is_untyped(program, argument)) {
+            continue;
+        }
+        exempt = is_write_span
+                     ? instruction_has_static_read
+                     : binrwir_type_from_target_contains(
+                           type_from_target, argument->slot);
+        if (!exempt) {
             return 1;
         }
     }
@@ -406,7 +516,26 @@ static int binrwir_program_span_is_invalid(
 
 static int binrwir_program_instructions_are_invalid(
     const binrwir_program_t *program) {
+    /*
+     * 程序级集合：只在 `symbol_count` 有限时可行；位图分配失败即视为非法
+     * （本函数是纯判定，没有 error 通道——分配不了就不放行，失败封闭）。
+     */
+    binrwir_type_from_target_set_t type_from_target = {NULL, 0U};
     size_t instruction_ordinal;
+    int invalid = 0;
+
+    if (program->symbol_count != 0U) {
+        const size_t size = (program->symbol_count + 7U) / 8U;
+        uint8_t *bits = (uint8_t *)runtimec_allocator_allocate(
+            &program->allocator, size, _Alignof(uint8_t));
+        if (bits == NULL) {
+            return 1;
+        }
+        memset(bits, 0, size);
+        type_from_target.bits = bits;
+        type_from_target.size = program->symbol_count;
+        binrwir_type_from_target_collect(program, &type_from_target);
+    }
 
     for (instruction_ordinal = 0U;
          instruction_ordinal < program->instructions.count;
@@ -427,15 +556,36 @@ static int binrwir_program_instructions_are_invalid(
             read_offset > program->argument_count - span_count) {
             return 1;
         }
-        if (binrwir_program_span_is_invalid(
-                program, program->arguments + read_offset, read_count) ||
-            binrwir_program_span_is_invalid(
+        /* 本指令是否至少有一个 STATIC 读参——写侧「类型来自目标」的附加条件。 */
+        bool instruction_has_static_read = false;
+        for (size_t ordinal = 0U; ordinal < read_count; ++ordinal) {
+            if (program->arguments[read_offset + ordinal].reference_kind ==
+                BINRWIR_REFERENCE_STATIC) {
+                instruction_has_static_read = true;
+                break;
+            }
+        }
+        {
+            const int read_bad = binrwir_program_span_is_invalid(
+                program, program->arguments + read_offset, read_count, false,
+                instruction_has_static_read, &type_from_target);
+            const int write_bad = binrwir_program_span_is_invalid(
                 program, program->arguments + read_offset + read_count,
-                write_count)) {
-            return 1;
+                write_count, true, instruction_has_static_read,
+                &type_from_target);
+            if (read_bad || write_bad) {
+                invalid = 1;
+                break;
+            }
         }
     }
-    return 0;
+    if (type_from_target.bits != NULL) {
+        (void)runtimec_allocator_deallocate(
+            &program->allocator, type_from_target.bits,
+            type_from_target.size == 0U ? 1U : type_from_target.size,
+            _Alignof(uint8_t));
+    }
+    return invalid;
 }
 
 /* 三个私有池的形状：空池即空指针；符号名非空且严格字典升序（规范顺序）；
