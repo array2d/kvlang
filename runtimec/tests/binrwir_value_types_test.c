@@ -99,12 +99,17 @@ static void test_instruction_request_rejects_inconsistent_spans(void) {
     RUNTIMEC_EXPECT(binrwir_instruction_validate_build_request(&request) ==
                     RUNTIMEC_STATUS_INVALID);
 
+    /*
+     * STATIC + payload NONE 现在是**结构合法**的：写目标的 key 允许在编码期
+     * 尚不存在，由执行期解析/创建。读目标不存在由 vmbin 值访问层拒绝，
+     * 不在「参数形状」这一层判（形状只管字段自洽，不管语义）。
+     */
     bad_argument = argument(0U, UINT64_C(0x1008));
     bad_argument.payload = BINRWIR_BODY_ADDRESS_NONE;
     request = simple_request();
     request.read_arguments.data = &bad_argument;
     RUNTIMEC_EXPECT(binrwir_instruction_validate_build_request(&request) ==
-                    RUNTIMEC_STATUS_INVALID);
+                    RUNTIMEC_STATUS_SUCCESS);
 
     bad_argument = argument(0U, UINT64_C(0x1008));
     bad_argument.reference_kind = BINRWIR_REFERENCE_PARAMETER_READ;

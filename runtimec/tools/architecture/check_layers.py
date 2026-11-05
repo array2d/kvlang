@@ -473,14 +473,18 @@ def audit_addressed_binrwir_model(
                     display, 1, "addressed-binrwir-offset", assertion,
                 ))
 
-    # 裁决 A.1：参数是引用，不是地址。唯一携带地址的是 STATIC，其 payload
-    # 必须非零；零地址只能在 STATIC 分支被拒绝（其余 kind 的 payload 不是地址）。
+    # 裁决 A.1：参数是引用，不是地址。唯一携带地址的是 STATIC。
+    #
+    # **2026-11-05 语义放宽**：STATIC 的 payload 现在允许 `BINRWIR_BODY_ADDRESS_NONE`
+    # ——写目标的 key 允许在编码期尚不存在（首次写一个绝对 key 是合法常态），地址由
+    # 执行期按符号池里的 key 解析/创建。读目标不存在仍是真实错误，由 vmbin 值访问层
+    # 拒绝；本规则因此不再要求「argument.c 里必须出现零地址比较」，改为要求它仍然
+    # 显式处理 STATIC 分支并清零输出。
     argument_source = binrwir_root / "argument.c"
     instruction_source = binrwir_root / "instruction.c"
     required_source_tokens = {
         argument_source: (
             "BINRWIR_REFERENCE_STATIC",
-            "payload == BINRWIR_BODY_ADDRESS_NONE",
             "memset(output_argument, 0, sizeof(*output_argument))",
         ),
         # instruction 不直接判地址，它把每个参数交给 argument_validate；

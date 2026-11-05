@@ -321,15 +321,21 @@ static void test_vmkv_xvalue_address_encoding(void) {
         .slot = UINT16_MAX,
         .payload = UINT64_MAX,
     };
+    /*
+     * **2026-11-05 语义变更**：host 返回 UNSUPPORTED 的语义是「key 尚未分配」，
+     * 不再等于「编码失败」——程序自己会创建 key（同一函数内先写后读就是常态），
+     * 地址由执行期按 key 解析（写目标不存在则创建）。编码器此时仍登记符号，
+     * payload 记 NONE。失败时机下移、判据不下移：执行期解析不到仍明确失败
+     * （见 `runtimec.engine.absolute_write` 的两条负向用例）。
+     */
     RUNTIMEC_EXPECT(vmkv_encode_static_argument(
         &request, builder, &source_argument, 7U, &encoded_argument, NULL) ==
-        RUNTIMEC_STATUS_UNSUPPORTED);
+        RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(resolution_context.call_count == 4U);
-    RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.argument_index == 7U);
     RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
-                    BINRWIR_REFERENCE_INVALID);
+                    BINRWIR_REFERENCE_STATIC);
     RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
-    RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
     RUNTIMEC_EXPECT(encoded_argument.payload == BINRWIR_BODY_ADDRESS_NONE);
 }
 

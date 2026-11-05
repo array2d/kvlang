@@ -424,7 +424,7 @@ static runtimec_status_t case_store_close(runner_environment_t *environment) {
  */
 static frame_outcome_t execute_frame_until_done(
     runner_environment_t *environment, const char *function_path,
-    const binrwir_program_t *program, uint32_t source_pc, int32_t depth,
+    uint32_t source_pc, int32_t depth,
     const char *vthread_identifier,
     const runtimec_argument_description_t *arguments, size_t argument_count,
     unsigned *out_callee_depth, binrwir_execution_exit_t *out_exit) {
@@ -477,201 +477,12 @@ static frame_outcome_t execute_frame_until_done(
          * 那条会写 "instruction execution failed (execution exit detail=…)"），
          * 而窗口自己提前返回的路径不会带这句。所以 `message` 空 = 窗口层失败。
          * 这也是 `execution_window.c:905` 注释里说的「读的人会把两者读错」。 */
-        fprintf(stderr, "  [diag] 帧执行失败 status=%d code=%lld domain=%d"
-                        " exit.kind=%u exit.status=%d exit.detail=%u"
-                        " message_empty=%d message=%s\n",
-                (int)error.status, (long long)error.code, (int)error.domain,
-                result.execution_exit.kind,
-                (int)result.execution_exit.status,
-                result.execution_exit.detail_code,
-                error.message.size == 0U, message_copy);
-        /* `COMPILE_FAILED`(6) 时编译器不填 message（`compiler.c:169-173`
-         * 直接 return status）。这里对被调 Program 单独 validate 一次，把
-         * 「Program 本身不合法」与「Program 合法但编译失败」分开——
-         * 前者在 `kv_runner.c` 就能定位，后者才需要动 `binrwir/`。 */
-        {
-            binrwir_program_t *probe_program = NULL;
-            vmkv_encode_request_t probe_request;
-            runtimec_error_t probe_error;
-            runtimec_session_runtime_components_t probe_components;
-            memset(&probe_request, 0, sizeof(probe_request));
-            memset(&probe_error, 0, sizeof(probe_error));
-            memset(&probe_components, 0, sizeof(probe_components));
-            probe_request.host_services = &environment->services;
-            probe_request.function_path =
-                runtimec_string_view_from_c_string(function_path);
-            probe_request.expected_snapshot.contract_version =
-                runtimec_contract_version();
-            runtimec_source_revision_reset(
-                &probe_request.expected_snapshot.source_revision);
-            probe_request.expected_snapshot.function_key =
-                runtimec_key_view_from_c_string(function_path);
-            probe_request.expected_snapshot.source_position_text =
-                runtimec_string_view_from_c_string("[1,0]");
-            (void)environment->services.source_revision(
-                environment->services.context,
-                probe_request.expected_snapshot.function_key,
-                &probe_request.expected_snapshot.source_revision,
-                &probe_error);
-            if (runtimec_session_get_runtime_components(
-                    environment->session, &probe_components) ==
-                    RUNTIMEC_STATUS_SUCCESS &&
-                vmkv_encode(probe_components.vmkv_encoder, &probe_request,
-                            &probe_program, &probe_error) ==
-                    RUNTIMEC_STATUS_SUCCESS &&
-                probe_program != NULL) {
-                fprintf(stderr,
-                        "  [diag] %s validate=%d（0=合法，非0=Program 本身不合法）\n",
-                        function_path,
-                        (int)binrwir_program_validate(probe_program));
-                /* 直接调编译器，把它的 error 四个字段全打出来——
-                 * `execution_window` 只写 detail，把 message 丢了。
-                 * **同一份 Program**：compile 接管所有权，成败都不还。 */
-                /* 窗口在编译前会特化（`execution_window.c:586-596`）。
-                 * 我上面直接编的是**未特化**的 Program——所以「单独调成功」
-                 * 不证明整条链成功。这里补一次特化，验特化产物是否合法。 */
-                {
-                    runtimec_host_services_t *services_probe = NULL;
-                    (void)runtimec_session_get_host_services(
-                        environment->session, (const runtimec_host_services_t **)&services_probe);
-                    if (services_probe != NULL) {
-                        fprintf(stderr,
-                                "  [diag] allocator 环境=%p 窗口=%p 相同=%d"
-                                "（窗口用 host->allocator，我原先用 services.allocator）\n",
-                                (void *)environment->services.allocator.context,
-                                (void *)services_probe->allocator.context,
-                                environment->services.allocator.context ==
-                                    services_probe->allocator.context);
-                    }
-                }
-                {
-                    binrwir_program_t *specialized = NULL;
-                    runtimec_error_t specialize_error;
-                    memset(&specialize_error, 0, sizeof(specialize_error));
-                    const runtimec_status_t specialize_status =
-                        binrwir_program_specialize(probe_program,
-                                                   &environment->services.allocator,
-                                                   &specialized,
-                                                   &specialize_error);
-                    fprintf(stderr,
-                            "  [diag] specialize status=%d code=%lld msg=%.*s\n",
-                            (int)specialize_status,
-                            (long long)specialize_error.code,
-                            (int)specialize_error.message.size,
-                            specialize_error.message.data
-                                ? specialize_error.message.data : "");
-                    if (specialize_status == RUNTIMEC_STATUS_SUCCESS &&
-                        specialized != NULL) {
-                        fprintf(stderr, "  [diag] 特化产物 validate=%d\n",
-                                (int)binrwir_program_validate(specialized));
-                        /* **用特化产物去编译**，不是未特化的那份。
-                         * 上一版这里 destroy 掉 specialized、拿 probe_program 去编，
-                         * 验错了对象——validate 通过不等于 compile 能过。
-                         *
-                         * compile 接管所有权（`compiler.h:88-91`），故不销毁。 */
-                        binrwir_compilation_t *specialized_compilation = NULL;
-                        runtimec_error_t specialized_error;
-                        memset(&specialized_error, 0, sizeof(specialized_error));
-                        const runtimec_status_t specialized_compile_status =
-                            binrwir_compiler_compile(
-                                probe_components.binrwir_compiler, specialized,
-                                &specialized_compilation, &specialized_error);
-                        fprintf(stderr,
-                                "  [diag] compile(特化产物) status=%d domain=%d"
-                                " code=%lld msg_len=%zu msg=%.*s\n",
-                                (int)specialized_compile_status,
-                                (int)specialized_error.domain,
-                                (long long)specialized_error.code,
-                                specialized_error.message.size,
-                                (int)specialized_error.message.size,
-                                specialized_error.message.data
-                                    ? specialized_error.message.data : "");
-                        if (specialized_compile_status == RUNTIMEC_STATUS_SUCCESS &&
-                            specialized_compilation != NULL) {
-                            runtimec_error_t destroy_error;
-                            memset(&destroy_error, 0, sizeof(destroy_error));
-                            (void)binrwir_compilation_destroy(
-                                specialized_compilation, &destroy_error);
-                        }
-                    }
-                }
-                {
-                    binrwir_compilation_t *probe_compilation = NULL;
-                    runtimec_error_t compile_error;
-                    memset(&compile_error, 0, sizeof(compile_error));
-                    const runtimec_status_t compile_status =
-                        binrwir_compiler_compile(
-                            probe_components.binrwir_compiler, probe_program,
-                            &probe_compilation, &compile_error);
-                    fprintf(stderr,
-                            "  [diag] compile status=%d domain=%d code=%lld"
-                            " message_len=%zu message=%.*s\n",
-                            (int)compile_status, (int)compile_error.domain,
-                            (long long)compile_error.code,
-                            compile_error.message.size,
-                            (int)compile_error.message.size,
-                            compile_error.message.data
-                                ? compile_error.message.data
-                                : "");
-                    if (compile_status == RUNTIMEC_STATUS_SUCCESS &&
-                        probe_compilation != NULL) {
-                        runtimec_error_t destroy_error;
-                        memset(&destroy_error, 0, sizeof(destroy_error));
-                        (void)binrwir_compilation_destroy(probe_compilation,
-                                                          &destroy_error);
-                    }
-                }
-            } else {
-                fprintf(stderr, "  [diag] %s 重新 encode 失败 code=%lld msg=%.*s\n",
-                        function_path, (long long)probe_error.code,
-                        (int)probe_error.message.size,
-                        probe_error.message.data ? probe_error.message.data : "");
-            }
-        }
-        if (error.message.data != NULL && error.message.size != 0U) {
-            fprintf(stderr, "  帧 /vthread/%s/[%d] 执行失败：%.*s"
-                            "（status=%d code=%lld domain=%d）\n",
-                    vthread_identifier, (int)depth, (int)error.message.size,
-                    error.message.data, (int)error.status,
-                    (long long)error.code, (int)error.domain);
-        }
-        /* 直接问 host 要被调函数的 source revision —— 窗口内部也是这么调它的，
-         * 但只回一个「不可用」，问不出是哪一步。这里带 code 与 message。 */
-        {
-            const runtimec_host_services_t *probe_host = NULL;
-            if (runtimec_session_get_host_services(environment->session,
-                                                   &probe_host) ==
-                    RUNTIMEC_STATUS_SUCCESS &&
-                probe_host != NULL && probe_host->source_revision != NULL) {
-                runtimec_source_revision_t revision;
-                runtimec_error_t revision_error;
-                memset(&revision_error, 0, sizeof(revision_error));
-                const runtimec_status_t revision_status =
-                    probe_host->source_revision(
-                        probe_host->context,
-                        runtimec_key_view_make(function_path,
-                                               strlen(function_path)),
-                        &revision, &revision_error);
-                fprintf(stderr,
-                        "  [diag] %s source_revision status=%d code=%lld "
-                        "msg=%.*s\n",
-                        function_path, (int)revision_status,
-                        (long long)revision_error.code,
-                        (int)revision_error.message.size,
-                        revision_error.message.data ? revision_error.message.data
-                                                    : "");
-            }
-        }
         return FRAME_OUTCOME_EXECUTE_FAILED;
     }
     *out_exit = result.execution_exit;
     /* 本帧实际执行的 Program。递归时每帧不同，所以**从结果里取**，
      * 不能存在驱动里当全局——那就是「一个函数只有一个活动帧」的错误假设。 */
     const binrwir_program_t *frame_program = result.program;
-    fprintf(stderr, "  [diag] depth=%d func=%s exit.kind=%u pc=%u resume=%u\n",
-            (int)depth, function_path, result.execution_exit.kind,
-            result.execution_exit.logical_program_counter,
-            result.execution_exit.resume_logical_program_counter);
     switch (result.execution_exit.kind) {
     case BINRWIR_EXECUTION_EXIT_DONE:
         return FRAME_OUTCOME_DONE;
@@ -684,7 +495,6 @@ static frame_outcome_t execute_frame_until_done(
          * **不许**当成「跑完了」。 */
         if (result.execution_exit.resume_logical_program_counter ==
             BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE) {
-            fprintf(stderr, "PROBE resume is NONE (return chain broken)\n");
             return FRAME_OUTCOME_ERROR;
         }
         /* 被调函数名在符号池里（不含 `/lib/`，见 encoder.c:1222-1226），
@@ -702,16 +512,6 @@ static frame_outcome_t execute_frame_until_done(
                 (uint16_t)result.execution_exit.target_identifier,
                 &callee_name, &callee_langtype) != RUNTIMEC_STATUS_SUCCESS ||
             callee_name.size == 0U) {
-            {
-                size_t probe_symbol_count = 0U;
-                (void)binrwir_program_get_symbol_count(program,
-                                                       &probe_symbol_count);
-                fprintf(stderr,
-                        "PROBE get_symbol failed target=%u depth=%d"
-                        " program=%p 符号数=%zu\n",
-                        result.execution_exit.target_identifier, (int)depth,
-                        (const void *)program, probe_symbol_count);
-            }
             return FRAME_OUTCOME_ERROR;
         }
         /* **必须用 `%.*s` + size**：`runtimec_string_view_t` 是长度视图，
@@ -837,9 +637,6 @@ static frame_outcome_t execute_frame_until_done(
                 continue;
             }
             /* 其它 kind（STATIC / PARAMETER_*）本阶段失败封闭。 */
-            fprintf(stderr, "  [diag] 未支持的读参 kind=%u slot=%u payload=%llu\n",
-                    argument->reference_kind, argument->slot,
-                    (unsigned long long)argument->payload);
             return FRAME_OUTCOME_ERROR;
         }
         /* 写参：指向调用方帧的槽。此刻可能还不存在（`add1(41) -> v` 的 `v`），
@@ -898,23 +695,6 @@ static frame_outcome_t execute_frame_until_done(
         }
         /* 递归进入被调帧。**深度递增**——复用同一帧号会让子帧覆盖调用方帧，
          * 那是「能跑一会儿但算错」的形态。 */
-        fprintf(stderr, "  [diag] CALL 目标=%.*s 实参 %zu 个（描述）：",
-                (int)callee_name.size, callee_name.data, callee_argument_count);
-        for (size_t probe_ordinal = 0U;
-             probe_ordinal < callee_argument_count; ++probe_ordinal) {
-            const runtimec_argument_description_t *probe_argument =
-                &callee_arguments[probe_ordinal];
-            if (probe_argument->source == RUNTIMEC_ARGUMENT_SOURCE_LITERAL) {
-                fprintf(stderr, " [literal %zu 字节 %.*s]",
-                        probe_argument->literal_bytes.size,
-                        (int)probe_argument->literal_langtype.size,
-                        probe_argument->literal_langtype.data);
-            } else {
-                fprintf(stderr, " [%.*s]", (int)probe_argument->key.size,
-                        probe_argument->key.data);
-            }
-        }
-        fprintf(stderr, "（子帧 %s）\n", callee_frame_path);
         /* 被调函数的 Program 由窗口内部 encode，驱动这里传 NULL：
          * `execute` 会用自己的 Program，并把结果里的 `program` 交回来。
          * **不自己 encode**——两个编码入口是这条链上最贵的错误。 */
@@ -923,7 +703,7 @@ static frame_outcome_t execute_frame_until_done(
         binrwir_execution_exit_t callee_exit;
         memset(&callee_exit, 0, sizeof(callee_exit));
         const frame_outcome_t callee_outcome = execute_frame_until_done(
-            environment, callee_path, NULL, KVRUN_CALLEE_ENTRY_SOURCE_PC,
+            environment, callee_path, KVRUN_CALLEE_ENTRY_SOURCE_PC,
             depth + 1, vthread_identifier, callee_arguments,
             callee_argument_count, NULL, &callee_exit);
         if (callee_outcome != FRAME_OUTCOME_DONE) {
@@ -939,10 +719,16 @@ static frame_outcome_t execute_frame_until_done(
          * 调用方的实参是它被调进来时那份，这里原样传 `arguments` 恰恰是错的：
          * 递归时 `fib(a)` 的 `a` 属于**被调那次**，恢复 fib 自身执行时，
          * 它要用的仍是自己被调时绑的那份。 */
+        /* 恢复执行时**必须传本帧自己的实参**（形参 `arguments`）。
+         *
+         * 曾经传 NULL，理由是「`arguments` 是调用被调方时用的」——那是把两件事
+         * 混了：`callee_arguments` 才是「给被调方的」；本帧的 `arguments` 是
+         * **它自己被调进来时收到的那份**，恢复续跑必须原样再给一次，
+         * 否则 `bind_parameters` 会因实参个数不足直接拒（detail=8）。 */
         return execute_frame_until_done(
-            environment, function_path, frame_program,
+            environment, function_path,
             result.execution_exit.resume_logical_program_counter, depth,
-            vthread_identifier, NULL, 0U, NULL, out_exit);
+            vthread_identifier, arguments, argument_count, NULL, out_exit);
     }
     default:
         return FRAME_OUTCOME_INVALID;
@@ -1690,7 +1476,7 @@ int main(int argument_count, char **arguments) {
                 redirect_stream_to(FILENO_STDOUT, output_path,
                                    sizeof(output_path), &saved_stdout);
             const frame_outcome_t frame_outcome = execute_frame_until_done(
-                &environment, function_path, program, 1U, 1,
+                &environment, function_path, 1U, 1,
                 vthread_identifier, NULL, 0U, NULL, &frame_exit);
             if (capturing_stdout) {
                 restore_stream(FILENO_STDOUT, saved_stdout, output_path,
@@ -1730,11 +1516,6 @@ int main(int argument_count, char **arguments) {
                 continue;
             }
             if (frame_outcome == FRAME_OUTCOME_ERROR) {
-                fprintf(stderr, "  [diag] FRAME_OUTCOME_ERROR exit.kind=%u"
-                                " detail=%u pc=%u resume=%u\n",
-                        frame_exit.kind, frame_exit.detail_code,
-                        frame_exit.logical_program_counter,
-                        frame_exit.resume_logical_program_counter);
                 /* 跑起来了但运行时错：是 fail，不是 blocked。
                  * 两者分开是因为处置不同——blocked 等能力补齐，fail 是缺陷。 */
                 char stderr_line[512];

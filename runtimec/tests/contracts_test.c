@@ -91,7 +91,7 @@ static void test_plain_data_copy_round_trip(void) {
                            sizeof(copied_exit)) == 0);
 }
 
-/* 构造失败必须清空输出；只有 STATIC 的 payload 可以当 body 地址。 */
+/* 构造失败必须清空输出；STATIC 的 payload 允许 NONE（写目标在编码期可未解析）。 */
 static void test_reference_argument_failure_shape(void) {
     binrwir_argument_t argument = {
         .argument_index = UINT32_MAX,
@@ -101,11 +101,17 @@ static void test_reference_argument_failure_shape(void) {
         .payload = UINT64_MAX,
     };
 
+    /*
+     * **2026-11-05 语义放宽**：STATIC + payload NONE 结构合法——写目标的 key 允许
+     * 在编码期尚不存在，地址由执行期按符号池里的 key 解析/创建。读目标缺值是
+     * 真实错误，由 vmbin 值访问层拒绝（见 `runtimec.engine.absolute_write`）。
+     * 形状层只回答字段是否自洽，不回答语义是否可执行。
+     */
     RUNTIMEC_EXPECT(binrwir_argument_create(
         3U, BINRWIR_REFERENCE_STATIC, 0U, BINRWIR_BODY_ADDRESS_NONE,
-        &argument) == RUNTIMEC_STATUS_INVALID);
-    RUNTIMEC_EXPECT(argument.argument_index == 0U);
-    RUNTIMEC_EXPECT(argument.reference_kind == BINRWIR_REFERENCE_INVALID);
+        &argument) == RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(argument.argument_index == 3U);
+    RUNTIMEC_EXPECT(argument.reference_kind == BINRWIR_REFERENCE_STATIC);
     RUNTIMEC_EXPECT(argument.reserved_8_bits == 0U);
     RUNTIMEC_EXPECT(argument.slot == 0U);
     RUNTIMEC_EXPECT(argument.payload == BINRWIR_BODY_ADDRESS_NONE);

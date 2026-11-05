@@ -292,8 +292,14 @@ static runtimec_status_t runtimec_execution_window_materialize_argument(
  * 顶层帧的形参绑定。槽号分区与 vmbin/frame_slot 完全一致（读参 0..nr-1、
  * 写参 nr..nr+nw-1），实参是调用方给的绝对槽键，route 不拼不猜。
  *
- * 局部符号本阶段不绑：符号池只有名字，局部槽的真实键属于 vthread 帧的坐标
- * 空间，而 route 没有任何事实源能推出那个前缀。未绑的局部槽在访问时失败封闭。
+ * **局部不在这里绑**，但**不是不绑**：局部槽由
+ * `runtimec_execution_window_materialize_locals`（本文件 `:482`）在建帧时
+ * 拼 `frame_path + "/" + name`（`:573-584`）并 `ensure_zero_value` 后立即绑定，
+ * 调用点在 `:953`，早于本函数（`:962`）。本函数只处理**实参**。
+ *
+ * 早先这里写的是「route 没有任何事实源能推出那个前缀」——那是实现之前的话，
+ * 后来做了没更新。它让人（包括写它的人）以为局部未支持，而真相相反。
+ * 引用注释当结论前，先看它下面 300 行内有没有实现。
  */
 static runtimec_status_t runtimec_execution_window_bind_parameters(
     const runtimec_host_services_t *host, const runtimec_snapshot_t *snapshot,

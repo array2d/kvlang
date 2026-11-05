@@ -817,7 +817,7 @@ int main(void) {
     runtimec_session_runtime_components_t components;
     runtimec_error_t error;
     binrwir_program_t *program = NULL;
-    runtimec_string_view_t arguments[2];
+    runtimec_argument_description_t arguments[2];
     runtimec_execution_window_request_t request;
     runtimec_execution_window_result_t result;
     uint32_t canonical_encoding_revision = 0U;
@@ -903,8 +903,13 @@ int main(void) {
                                    canonical_encoding_revision, program,
                                    &error) == RUNTIMEC_STATUS_SUCCESS);
 
-    arguments[0] = runtimec_string_view_from_c_string(TEST_READ_KEY);
-    arguments[1] = runtimec_string_view_from_c_string(TEST_WRITE_KEY);
+    /* 两个实参都是**调用方已存在的槽**：测试自己建了它们，
+     * 所以描述成 EXISTING_KEY，窗口不创建。 */
+    memset(arguments, 0, sizeof(arguments));
+    arguments[0].source = RUNTIMEC_ARGUMENT_SOURCE_EXISTING_KEY;
+    arguments[0].key = runtimec_string_view_from_c_string(TEST_READ_KEY);
+    arguments[1].source = RUNTIMEC_ARGUMENT_SOURCE_EXISTING_KEY;
+    arguments[1].key = runtimec_string_view_from_c_string(TEST_WRITE_KEY);
     memset(&request, 0, sizeof(request));
     request.frame_path = runtimec_string_view_from_c_string(TEST_FRAME_PATH);
     request.stack_identifier = TEST_STACK_IDENTIFIER;
