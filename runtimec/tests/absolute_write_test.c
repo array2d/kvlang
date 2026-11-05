@@ -1,23 +1,28 @@
 /*
- * 绝对 key 的读写契约：**指令不创造 key**。
+ * 绝对 key 的读写契约：**写指令创造 key，读指令不创造**（issue #632，用户裁决）。
  *
- * 绝对 key 的**存在性是运行时前提，不是静态保证**：layout 什么都不做（不要求声明、
- * 不读存储核对），运行时碰不到就失败封闭——这正是本文件三条判据要钉的行为。
+ * ── 本文件改过一次判据，原因写在最前面 ──────────────────────────────
  *
- * 规则（用户裁决）：kvlang 的 rwir 只容许触碰**已经存在**的 key。创建源在源码里：
- * 容器用 `·new` 一族，标量靠**类型声明**（`v:int32 = add(a,4)` 里 `v:int32`
- * 建 key，赋值只写）。帧准备阶段只是把这些声明落地的手段，不是创建源——
- * 没有声明就没有创建。
+ * 旧版写的是「**指令不创造 key**」，负向二是「写一个不存在的绝对 key 必须失败、
+ * 绝不顺手创建」。那条已被 **#632 推翻**——用户原话：
  *
- * 三条判据：
+ *   > 正确表述是「写指令创造 key，读指令不创造」——原先「指令不创造 key」
+ *   >  把两件事混成了一句。
  *
- *   正向：`x + 1 -> /abs_write_result`，目标在执行前**已存在**（测试用
- *          `ensure_zero_value` 代表源码里那条声明会做的事——标量靠类型声明建 key），
- *          执行成功且值为 42。
+ * ⇒ 本文件不是「被改成迁就实现」，是**跟着裁决走**。反过来保留旧判据，才是让
+ * 被推翻的规则继续当门禁。旧版那条断言与 `test_write_creates_missing_key`
+ * 现在的正向断言是同一件事的两面。
  *
- *   负向一：读一个不存在的绝对 key → 执行期失败（不是零值、不是 None）。
- *   负向二：写一个不存在的绝对 key → 执行期失败封闭，**绝不顺手创建**。
- *          这条钉的正是被删掉的「写路径创建」：值访问只解析、不建。
+ * ── 四条判据（#632 的完整形状）────────────────────────────────────
+ *
+ *   正向：`x + 1 -> /abs_write_result`，目标在执行前**已存在**，执行成功且值 42。
+ *
+ *   写创造：写一个**不存在**的 STATIC key ⇒ 创建成功、能读回、再写可覆盖。
+ *
+ *   读不创造：读一个**不存在**的 STATIC key ⇒ 仍失败封闭（#632 的另一半）。
+ *
+ *   冲突仍拒：已存在但**类型不符** ⇒ 失败封闭；写目标**声明类型缺席** ⇒ 具名失败。
+ *          头的用途是冲突检测，不作类型来源。
  *
  * 依赖：真 layout 库 + 真 kvspace（shm）。缺任一返回 77 跳过。
  */
@@ -291,15 +296,20 @@ static void test_read_missing_key_fails_at_execution(const char *layout_path,
 }
 
 /*
- * 负向二（值访问层）：写一个**未解析**的 STATIC 目标，必须失败封闭。
+ * 写创造（值访问层）：写一个**未解析**的 STATIC 目标，必须**创建成功**（#632）。
  *
- * 为什么放在值访问层而不是窗口层：声明一旦在窗口层被落地（帧准备物化），
- * 那时「写不存在」在窗口层就**应该**成功——用它钉「不许创建」会立刻过期。
- * 执行指令那一层的不变量才是永久的：值访问只解析、不建。
+ * 这条原来是它的反面（旧版叫 `test_write_never_creates_key`，断言「必须失败、
+ * 绝不顺手创建」）。那条判据已被 #632 推翻——用户原话见文件头。
  *
- * 反向控制：把「写路径顺手 ensure_zero_value」那段加回去，这里会变成 SUCCESS。
+ * 三步验完整形状：
+ *   1. 写 `42 -> /abs_created`（key 此前不存在）⇒ 成功；
+ *   2. 从存储读回 ⇒ 存在、body 是 42；
+ *   3. 再写一个不同值 ⇒ 覆盖成功（不是「已存在就拒」）。
+ *
+ * 剩下的两半（读不创造、类型冲突仍拒）在别的用例里，不合并到本条——
+ * 一条用例只钉一件事，红了才知道是哪个判据破了。
  */
-static void test_write_never_creates_key(const char *kvspace_path) {
+static void test_write_creates_missing_key(const char *kvspace_path) {
     void *kvspace_library = dlopen(kvspace_path, RTLD_NOW | RTLD_LOCAL);
     if (kvspace_library == NULL) {
         return;
@@ -352,7 +362,7 @@ static void test_write_never_creates_key(const char *kvspace_path) {
            RUNTIMEC_STATUS_SUCCESS);
     EXPECT(binrwir_program_builder_add_symbol(
                builder,
-               runtimec_string_view_from_c_string("/abs_never_created"),
+               runtimec_string_view_from_c_string("/abs_created"),
                runtimec_string_view_from_c_string("int64"),
                &symbol_index) == RUNTIMEC_STATUS_SUCCESS);
     /* STATIC 写参：payload = NONE 表示「编码期未解析」。 */
@@ -381,34 +391,60 @@ static void test_write_never_creates_key(const char *kvspace_path) {
      * 成功——传 NULL 会让两类失败都是失败，测不出「删掉的那段」是否回来了。
      */
     frame.kvspace_access = access;
+    /*
+     * **必须挂句柄**：写路径要 `kvspaceSetValue`，而 `kvspaceSetValue(NULL)` 是
+     * 段错误不是错误码——值访问层因此有一条句柄前置判（与
+     * `create_unbound_local` 的开头同一纪律）。旧版这条用例只测「失败」，
+     * 不挂句柄也「恰好」能过；现在它测创建，就必须有一个真句柄。
+     */
+    frame.kvspace_handle = handle;
     runtimec_snapshot_reset(&frame.snapshot);
     frame.snapshot.contract_version = runtimec_contract_version();
 
+    /*
+     * 1. 写一个不存在的 STATIC key 必须**创建成功**（#632：写指令创造 key）。
+     */
     runtimec_error_reset(&error);
     const runtimec_status_t write_status = vmbin_value_access_write_body(
         &frame, &write_argument,
         runtimec_bytes_view_make(&value, sizeof(value)), &error);
-    EXPECT(write_status != RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(error.message.size != 0U);
+    EXPECT(write_status == RUNTIMEC_STATUS_SUCCESS);
+
+    /* 2. 从存储读回：key 真的在，body 就是 42。 */
     {
-        static const char expected[] = "unresolved";
-        bool contains = false;
-        for (size_t offset = 0U;
-             offset + sizeof(expected) - 1U <= error.message.size; ++offset) {
-            if (memcmp(error.message.data + offset, expected,
-                       sizeof(expected) - 1U) == 0) {
-                contains = true;
-                break;
-            }
+        uint8_t *stored = NULL;
+        uint32_t stored_size = 0U;
+        EXPECT(kvspaceGet(handle, "/abs_created", 1, &stored, &stored_size) ==
+               0);
+        EXPECT(stored != NULL);
+        EXPECT(stored_size >= KVSPACE_XVALUE_HEAD_LEN + sizeof(value));
+        if (stored != NULL && stored_size >= KVSPACE_XVALUE_HEAD_LEN + sizeof(value)) {
+            int64_t read_back = 0;
+            memcpy(&read_back, stored + KVSPACE_XVALUE_HEAD_LEN, sizeof(read_back));
+            EXPECT(read_back == value);
         }
-        EXPECT(contains);
     }
-    /* 存储里不能凭空多出这个 key。 */
-    uint8_t *stored = NULL;
-    uint32_t stored_size = 0U;
-    (void)kvspaceGet(handle, "/abs_never_created", 1, &stored,
-                               &stored_size);
-    EXPECT(stored == NULL || stored_size == 0U);
+
+    /* 3. 再写一个不同值 ⇒ 覆盖成功（不是「已存在就拒」）。 */
+    {
+        const int64_t replacement = 7;
+        runtimec_error_reset(&error);
+        EXPECT(vmbin_value_access_write_body(
+                   &frame, &write_argument,
+                   runtimec_bytes_view_make(&replacement, sizeof(replacement)),
+                   &error) == RUNTIMEC_STATUS_SUCCESS);
+        uint8_t *stored = NULL;
+        uint32_t stored_size = 0U;
+        EXPECT(kvspaceGet(handle, "/abs_created", 1, &stored, &stored_size) ==
+               0);
+        if (stored != NULL &&
+            stored_size >= KVSPACE_XVALUE_HEAD_LEN + sizeof(replacement)) {
+            int64_t read_back = 0;
+            memcpy(&read_back, stored + KVSPACE_XVALUE_HEAD_LEN,
+                   sizeof(read_back));
+            EXPECT(read_back == replacement);
+        }
+    }
 
     EXPECT(binrwir_frame_bindings_destroy(created_bindings) ==
            RUNTIMEC_STATUS_SUCCESS);
@@ -424,7 +460,7 @@ int main(int argument_count, char **arguments) {
         return SKIP_RETURN_CODE;
     }
     test_write_existing_key_succeeds(arguments[1], arguments[2]);
-    test_write_never_creates_key(arguments[2]);
+    test_write_creates_missing_key(arguments[2]);
     test_read_missing_key_fails_at_execution(
         arguments[1], arguments[2],
         "rwfunc main() -> () {\n"

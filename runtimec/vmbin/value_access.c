@@ -620,6 +620,111 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
                                                 error);
 }
 
+/*
+ * STATIC 写目标的**创建**（裁决 #632：写指令创造 key，读指令不创造）。
+ *
+ * 三条边界：
+ *   1. 只对**写**目标调用；读目标仍然只解析、不创建（`locate` 那条不变）；
+ *   2. 类型取**写参声明的 langtype**；声明缺席 ⇒ 具名失败（不猜、不建无类型值）；
+ *   3. **整值写**，不是「先建零值再写」——后者会对变长目标必然 SIZE_MISMATCH
+ *      （今晚踩过），而且本来就要多写一次。
+ *
+ * 已存在的 key 走 `SetValue` 覆盖；**类型冲突由存储层拒**（#632：头只作冲突
+ * 检测，不作类型来源——本函数从不从旧头取类型）。
+ */
+static runtimec_status_t vmbin_value_access_create_static_target(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, runtimec_bytes_view_t value,
+    runtimec_error_t *error) {
+    runtimec_string_view_t key_text;
+    runtimec_string_view_t key_langtype;
+    char langtype_text[256];
+    char message[256];
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    runtimec_status_t status;
+
+    /*
+     * **句柄必须先判**：`kvspaceSetValue` 收到 NULL 句柄是段错误，不是错误码
+     * （实测 `runtimec.engine.absolute_write` 那条用例构造的帧没有句柄，本函数
+     * 直接把它打死）。与 `create_unbound_local` 开头 `kvspace_access == NULL`
+     * 即返回的写法同一纪律：**不拿未证明的前置条件去调 ABI**。
+     */
+    if (frame->kvspace_handle == NULL) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "static write target has no kvspace handle; the key cannot be "
+            "created or written");
+    }
+    status = binrwir_program_get_symbol(frame->program, argument->slot,
+                                        &key_text, &key_langtype);
+    if (status != RUNTIMEC_STATUS_SUCCESS || key_text.size == 0U) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "static write target has no key in the symbol pool");
+    }
+    /*
+     * 类型取**写参声明的 langtype**（符号池里那份）。缺席 ⇒ 具名失败：
+     * 不许建成无类型值——读侧无从判宽，必然退化成「按字节猜」。
+     */
+    if (!runtimec_string_view_is_valid(key_langtype) ||
+        key_langtype.size == 0U) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE,
+            "static write target has no declared langtype; a key cannot be "
+            "created without one");
+    }
+    if (key_langtype.size + 1U > sizeof(langtype_text)) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE,
+            "static write target's langtype does not fit the buffer");
+    }
+    memcpy(langtype_text, key_langtype.data, key_langtype.size);
+    langtype_text[key_langtype.size] = '\0';
+    if (value.size != 0U && value.data == NULL) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "static write value has no bytes");
+    }
+    if (kvspaceXvalueHeadNewSlack(value.data, (uint64_t)value.size,
+                                  (uint64_t)value.size, langtype_text, &wire,
+                                  &wire_size) != 0 ||
+        wire == NULL || wire_size > UINT32_MAX) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_ERROR,
+            VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
+            "static write value cannot be encoded as an XValue");
+    }
+    char key_c_string[512];
+    if (key_text.size + 1U > sizeof(key_c_string)) {
+        free(wire);
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "static write target key does not fit the buffer");
+    }
+    memcpy(key_c_string, key_text.data, key_text.size);
+    key_c_string[key_text.size] = '\0';
+    message[0] = '\0';
+    const int set_status = kvspaceSetValue(frame->kvspace_handle, key_c_string,
+                                           wire, (uint32_t)wire_size, message,
+                                           sizeof(message));
+    free(wire);
+    if (set_status != 0) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_ERROR,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            message[0] != '\0' ? message
+                                : "static write target could not be written");
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 runtimec_status_t vmbin_value_access_write_body(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
@@ -631,6 +736,28 @@ runtimec_status_t vmbin_value_access_write_body(
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_INVALID,
             VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST, "invalid write value");
+    }
+    /*
+     * **STATIC 写目标：写即创建**（裁决 #632）。
+     *
+     * 这里不改 `locate`：读目标仍然只解析、不创建——读一个不存在的绝对 key
+     * 是真实错误。创建只发生在**写**路径，且是整值写。
+     */
+    /*
+     * **只有 payload 未解析（NONE）的 STATIC 写目标才创建。**
+     *
+     * payload 非 NONE 时它是**已解析的值体地址**，那种情况走下面的
+     * 「定位 + 比长度 + memcpy」原路径——照抄 `locate` 里 STATIC 分支的同一分叉，
+     * 不在这里另立一套判据。
+     *
+     * 判据是「有没有地址」，不是「是不是 STATIC」：只看后者会把已解析的静态槽
+     * 也当成待创建，于是放着现成地址不用去拼 key——那会让所有走内联地址的
+     * 单测整组失败（实测 vmbin.execute / vmbin.call 两组红）。
+     */
+    if (argument->reference_kind == BINRWIR_REFERENCE_STATIC &&
+        argument->payload == BINRWIR_BODY_ADDRESS_NONE) {
+        return vmbin_value_access_create_static_target(frame, argument, value,
+                                                       error);
     }
     status = vmbin_value_access_create_unbound_local(frame, argument, value,
                                                      error);
