@@ -32,10 +32,21 @@ HANDLERS_DIRECTORY = Path("runtimec/vmbin/handlers")
 # 上限按「参数类型复杂度」分档，不是按文件喜好。普通类型 3 行；容器、数组、
 # 编解码这类要处理维度、容量、边界，天然多两步。
 DEFAULT_LIMIT = 5
+# 门槛按「这类函数最少要写几行才说清一件事」定，不按文件喜好。
+#
+#   普通（默认 5）    容器 / 字符串 / 数组这类，边界检查与类型解析各占一两行
+#   scalar.c = 3      运算类：一行取操作数、一行算、一行写回
+#   host.c   = 30     **ABI 适配层**：每个 handler 至少三段——取参 / 调 ABI /
+#                     翻译返回约定，而且**返回约定互不相同**（有的超时不是错误、
+#                     有的写调用方缓冲、有的要整条 wire）。30 允许三段各自展开；
+#                     超过 30 说明这个 handler 里塞进了不属于它的东西。
+#
+# 为什么 host.c 不是 5：5 行的门槛是给运算类写的，套到 ABI 适配层会让**每一个**
+# handler 都要人审——当限制被它管的每个对象都违反时，它不是限制，是形式。
 LIMITS = {
     "scalar.c": 3,
+    "host.c": 30,
 }
-COMPLEX_FILES = ("string.c", "container.c", "scatter.c", "langtype.c", "host.c")
 
 # `static inline runtimec_status_t name(...)` / `static runtimec_status_t name(...)`
 # 两种都要认：有人不写 inline。返回类型固定在这一族函数里，别放宽成任意类型。
@@ -165,8 +176,22 @@ NON_FAMILY_MACROS = frozenset({
 # 放行表：确实需要人工审查、已裁定保留的超限 handler。
 # **每条都必须仍然存在且仍然超限**——某条被重写变小之后，放行条目会变成僵尸，
 # 规则就被悄悄放宽了。selftest 会断言这一点。
+# 例外清单：**只放真正超过门槛的**。
+#
+# 放行表的意义是「例外」，不是「清单」——如果被某个门槛管的每个对象都在表里，
+# 那不是限制，是形式。所以门槛（`LIMITS`）该调就调，不要用放行表代替它。
+#
+# host.c 的门槛已在 LIMITS 里单列为 30（ABI 适配层，每个 handler 至少三段且
+# 返回约定互不相同）。那 11 条原本逐条躺在放行表里的算子，现在**正常通过**；
+# 它们的「这段在做什么」记录在 `host.c` 各算子的函数注释里，不放这里。
 REVIEWED_OVERSIZE = {
     "scalar_handle_debugger": "调试器入口：状态机分支天然多，见 workspace/622 裁定",
+    "runtimec_host_kvspace_watch":
+        "37 行，超过 ABI 适配层的 30：在「取 key / 取期望值 / 调 Watch」之外还多一段"
+        "**超时不是错误**（ABI 返回 0 且 out=NULL 时写参保持原样）——那段是本条独有的返回约定，抽不出来",
+    "runtimec_host_kvspace_list_at":
+        "42 行，超过 ABI 适配层的 30：在「取 path / 取下标 / 调 ListAt」之外还多一段"
+        "**写进调用方缓冲**（ABI 是 buffer+capacity 而非返回指针）——缓冲约定是这条独有的",
 }
 
 

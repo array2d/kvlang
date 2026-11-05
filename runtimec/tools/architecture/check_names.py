@@ -230,6 +230,9 @@ OFFSETOF_FIELD_PATTERN = re.compile(r"\boffsetof\s*\([^,()]*,\s*([A-Za-z_][A-Za-
 # 白名单膨胀是可见的，而「宏名一律放过」会连带放过我们自己造的大写缩写。
 FOREIGN_ABI_IDENTIFIERS = (
     "KVSPACE_XVALUE_HEAD_LEN", "KVSPACE_XVALUE_PTR_INLINE",
+    # `ptr` 字段的取值：INLINE / PTR。两者都是上游线格式的拼写，我们没有命名权；
+    # 造本地常量（如 `TEST_HEAD_POINTER 1U`）等于把上游数值抄一份，值变了会静默测错。
+    "KVSPACE_XVALUE_PTR_PTR",
     # kvspace C ABI 的存储位置常量：`ref` 是上游的拼写，这里没有命名权。
     # 调用方要用 `kvspaceWriteNewPlace` 指定 ref 时只能写这个名字。
     "KVSPACE_REF_INLINE", "KVSPACE_REF_PTR", "KVSPACE_REF_EXT",

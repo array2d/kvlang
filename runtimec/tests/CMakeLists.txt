@@ -605,3 +605,17 @@ add_test(NAME runtimec.architecture.variadic_purity
 set_tests_properties(runtimec.architecture.variadic_purity PROPERTIES
     SKIP_RETURN_CODE 77
     LABELS "runtimec;scaffold;architecture;variadic")
+
+# binrwir-dump：逐文件独立临时 kvspace → layout → 编码 → 打印成 .binkv。
+# 不进 ctest：它是产出文本产物的工具，不是断言式用例；失败判据由它自己打印
+# 「共 N：成功 X / 失败 Y」并写 FAILURES.md。
+add_executable(runtimec_binrwir_dump ../tools/binrwir_dump.c)
+target_compile_features(runtimec_binrwir_dump PRIVATE c_std_11)
+target_include_directories(runtimec_binrwir_dump PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_binrwir_dump PRIVATE
+    runtimec_contract runtimec_host runtimec_binrwir runtimec_vmkv
+    "${CMAKE_DL_LIBS}")
+runtimec_test_warnings(runtimec_binrwir_dump)

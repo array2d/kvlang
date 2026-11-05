@@ -126,7 +126,7 @@ FLOAT64 = type_set("float64")
 # 理由：这份清单已经是一份「类型表」。往这里加名字，等于在 layout 之外再养一份会漂移的
 # 类型事实源——今天已经在多处栽过同一个坑（两份 head 实现、两份签名表、两份 wire 常量）。
 # 加名字看起来是一行，实质是给漂移开一个新落点。
-SIGNATURE_LANGTYPES = ("time", "time/duration", "int64", "bool")
+SIGNATURE_LANGTYPES = ("time", "time/duration", "int64", "uint64", "bool")
 # 类型串直接嵌进声明文本：逗号会切断参数表、竖线与引号会改变语义。这些字符一出现，
 # 生成物就会被 layout 解析成另一件事，而肉眼看着仍然像一条合法声明。
 FORBIDDEN_LANGTYPE_CHARACTERS = (",", "|", '"', "'", " ", "\t", "(", ")")
@@ -447,10 +447,14 @@ FAMILY_ROWS = (
     FamilyRow("vthread", "call", 0x0182, "vthread-control-opcodes"),
     FamilyRow("vthread", "sleep", 0x0183, "vthread-control-opcodes"),
     FamilyRow("vthread", "setstatus", 0x0184, "vthread-control-opcodes"),
-    # random
-    FamilyRow("random", "uint64", 0x0190, "random-source-and-range"),
-    FamilyRow("random", "int63", 0x0191, "random-source-and-range"),
-    FamilyRow("random", "intn", 0x0192, "random-source-and-range"),
+    # random：签名来自 runtime/src/rwir_random.c 的实现（不是推断）。
+    #   uint64()/int63() 无读参；intn(int64) 取模后仍按 uint64 产出。
+    FamilyRow("random", "uint64", 0x0190, "random-source-and-range",
+              write_langtypes="uint64"),
+    FamilyRow("random", "int63", 0x0191, "random-source-and-range",
+              write_langtypes="int64"),
+    FamilyRow("random", "intn", 0x0192, "random-source-and-range",
+              read_langtypes="int64", write_langtypes="uint64"),
     # map / struct / kvlang
     # 构造类算子：读参是**初值**，类型由各自槽的 langtype 决定，不由掩码收敛。
     # 掩码 0 = 不约束（编码器对 0 跳过校验，见 encoder.c 的 `!= TYPE_SET_NONE`）。
@@ -714,19 +718,31 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
     # `float32 + int16` 也是 float32——只有 float64 参与才升。写错时不报任何
     # 错，只是把 102 条特化的结果类型标成 float64，而那会把一次多余的类型
     # 提升固化进 opid，之后改都改不回来。
-    float32_slip = 0
+    # WIDEN 的结果类型必须等于「类优先级最大者，同类取较宽」。
+    #
+    # **断言写规则本身，不写某一种具体错法。** 这个函数错过两轮：
+    #   第一轮「任一 float → float64」→ 102 条 float32 被标成 float64；
+    #   第二轮只修了「有没有 float64」，`float32,int64` 仍按宽度取 int64 → 24 条。
+    # 每轮都只补一种症状，下一轮的另一种就漏掉。所以这里直接比**按规则算出来的
+    # 类型**与**产物里的类型**，两者不等即红——规则变了断言自动跟着变。
+    widen_slip = 0
+    widen_examples: list[str] = []
     for row in rows:
-        if row.result_rule not in ("WIDEN", "WIDEN_INTEGER", "SAME_FIRST"):
+        if row.result_rule != "WIDEN":
             continue
         for combination in specialization_combinations(row):
             operands, result = combination[:-1], combination[-1]
-            if ("float32" in operands and "float64" not in operands
-                    and result == "float64"):
-                float32_slip += 1
-    if float32_slip:
+            expected = result_of("WIDEN", list(operands))
+            if expected is None or expected == result:
+                continue
+            widen_slip += 1
+            if len(widen_examples) < 3:
+                widen_examples.append(f"{row.operator}({','.join(operands)}) "
+                                      f"= {result}, expected {expected}")
+    if widen_slip:
         findings.append(
-            f"{float32_slip} specialization(s) promote float32 without float64 "
-            f"in the operand tuple — WIDEN keeps float32 unless float64 takes part")
+            f"{widen_slip} WIDEN row(s) disagree with the class-priority rule "
+            f"(float beats integer regardless of width): {'; '.join(widen_examples)}")
 
     # 保留区（>= RESERVED_BASE）留给 FOREIGN 这类结构标记，能力行不得占用。
     # 判据是白名单：opid 必须严格落在 (0, reserved_base)，不是「不许等于某个值」。
@@ -833,8 +849,9 @@ def render_signature_table(rows: list[Row]) -> str:
     这样 layout 现成的 `rwir_decls` 解析器直接消费，不需要为这张表再写一个解析器；手写的
     `rwir xxx` 声明与 runtime 提供的 native rwir 从此是同一件事，只是兑现方不同。
 
-    空 kindexpr（`name:` 后面什么都不写）就是「该参数/返回值不声明类型」的官方写法：
-    `any` 已被禁用、缺冒号是错误。生成物只用这一种写法，不发明第三种占位。
+    每个参数/返回值**必须声明类型**：裸 `$name`（空 kindexpr）不表示「不声明类型」，
+    而是一条坏形状——layout 的 `rwir_decls` 解析器会拒绝它（`参数必须声明类型`）。
+    旧写法 `name: T` 同样被拒：**只接受 `*T $name` 与 `T $name` 两种**。
 
     只收录声明了名字型类型的行。其余行的类型由 TypeSet 位或 `/lib/<op>` 的安装签名给出，
     在 layout 侧是另一套判据，不该在这份声明里出现第二份。
@@ -849,7 +866,7 @@ def render_signature_table(rows: list[Row]) -> str:
         "//       tools/architecture/generate_rwir_catalog.py 生成并由同一脚本校验。",
         "// 约束：不让 layout 运行期访问 kvspace 读 /lib/<op>；也不在 layout 里手写第二份。",
         "// 语法：与 rwfunc 同形的 rwir 声明，只差函数体——兑现方是 runtime。",
-        "//       空 kindexpr（`name:`）表示该参数/返回值不声明类型。",
+        "//       每个参数/返回值必须带类型；裸 `$name` 与旧写法 `name:` 都被拒绝。",
         f"// 统计：{len(declared)} 条声明"
         "（其余行的签名由 TypeSet 位或安装签名给出）。",
         "",
@@ -875,23 +892,35 @@ SIGNATURE_RESULT_NAME = "result"
 
 SIGNATURE_LINE_PATTERN = re.compile(
     r"^rwir (\S+)\(([^)]*)\) -> \(([^)]*)\)$")
-# 形参 = `*T $name` 或空 kindexpr 的 `$name`。旧写法 `name: T` 必须被拒——否则
-# 「把整串当类型也照样通过」，那是一条不会失败的校验。
+# 形参 = `*T $name` 或 `T $name`，**类型部分必需**。
+#
+# 两处「不放行」都是同一条判据的两面：
+#   旧写法 `name: T` —— 不匹配本正则，被拒（否则「把整串当类型也照样通过」）；
+#   裸 `$name`       —— 类型组曾是 `(\S(?:.*?))?`（可空），放行了空 kindexpr。
+#                       而 layout 的解析器拒绝它（`参数必须声明类型`）。两个解析器
+#                       判据不一致时**以 layout 为准**：BinRWIR 要求具体类型。
+#
+# 一个放行坏形状的校验就是一条不会失败的校验——所以这里把它收紧成必需。
 SIGNATURE_PARAMETER_PATTERN = re.compile(
-    r"^(\*{0,2})(\S(?:.*?))?\s*\$([A-Za-z0-9_]+)$")
+    r"^(\*{0,2})(\S.*?)\s*\$([A-Za-z0-9_]+)$")
 
 
 def parse_signature_parameter(text: str) -> tuple[str, str]:
     """Return (type_text, name_text) for one formal parameter.
 
-    `*T $name` -> ("*T", "$name"); a bare `$name` (empty kindexpr) -> ("", "$name").
+    `*T $name` -> ("*T", "$name"); `T $name` -> ("T", "$name").
+    A bare `$name` (empty kindexpr) is **not** accepted: layout's `rwir_decls` parser
+    rejects it (`参数必须声明类型`), and BinRWIR requires a concrete type. Two parsers
+    disagreeing on the same file is the bug this function exists to prevent — layout
+    is the authority because it is the reader.
     Anything that is not that shape is a hard error: a reader that accepts whatever
     the writer emits proves nothing about the writer.
     """
     match = SIGNATURE_PARAMETER_PATTERN.match(text.strip())
     if match is None:
         raise SystemExit(
-            f"formal parameter {text!r} does not match `*T $name` or `$name`")
+            f"formal parameter {text!r} does not match `*T $name` or `T $name`; "
+            f"every parameter must declare a type (a bare `$name` is not enough)")
     stars, type_text, name_text = match.groups()
     if len(stars) > 1:
         raise SystemExit(
@@ -1145,15 +1174,21 @@ def result_of(rule: str, operand_types: list[str]) -> str | None:
     if rule == "SAME_SECOND" and len(operand_types) > 1:
         return operand_types[1]
     if rule in ("WIDEN", "WIDEN_INTEGER"):
-        # matrix:77 — 宽度取较宽者，与顺序无关。
+        # 判序：**先比类，再比宽**。
         #
-        # 浮点只在**有 float64 参与**时升 float64，不是「见 float 就升」：
-        # `float32,float32` 的结果是 float32，`float32,int16` 也是 float32。
-        # 早先写成「任一 float → float64」会把 102 条错标成 float64 结果，
-        # 而 float32 与 float64 是**两种宽度**，合并它们等于宣称 float32 加法
-        # 产出 float64——那会把一次多余的类型提升固化进 opid。
-        if "float64" in operand_types:
-            return "float64"
+        # 依据 spec `05-runtime语义/11`：「int × float：按 float 规则——任一方
+        # float64 → float64，否则 float32」。**浮点类优先于任何整数类，与宽度
+        # 无关**：float32 的 4 字节不是「比 int64 的 8 字节窄的整数」。
+        #
+        # 这个函数错了**两轮**：
+        #   第一轮「任一 float → float64」→ 102 条该是 float32 的标成 float64；
+        #   第二轮只修了「有没有 float64」，跨类的仍按宽度比 → 24 条
+        #   `float32,int64` 取 int64。
+        # 所以下面把「类优先级」写成显式判据，而不是靠宽度大小的巧合。
+        float_operands = [entry for entry in operand_types
+                          if OPERAND_CLASS[entry] == "float"]
+        if float_operands:
+            return "float64" if "float64" in float_operands else "float32"
         widest = operand_types[0]
         for entry in operand_types[1:]:
             if TYPE_WIDTH[entry] > TYPE_WIDTH[widest]:

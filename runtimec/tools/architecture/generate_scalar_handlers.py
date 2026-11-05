@@ -618,20 +618,22 @@ def shift_template(row: Row) -> str | None:
     if result_type not in INTEGER:
         return None
     width, signed_source = INTEGER[left_type]
-    # 计数先掩到操作数宽度：helper 内部也掩，这里再掩一次是给 C 的移位运算
-    # 留出确定行为——`*b` 是 int8 时直接左移可能超过 int64 的宽度。
-    count_cast = f"((uint64_t)*b & {width - 1}U)"
+    # 计数**不在这里掩码**：helper 内部已经掩过（四条纹移 helper 各自
+    # `(uint64_t)count & (width - 1)`）。两处掩码是同一事实的第二个真相，
+    # 而且实测证明它有害——把模板里的 `& 7U` 删掉做变异，测试全绿，因为
+    # helper 补上了。冗余让「这一层是否在正确工作」变得不可测。
+    count_argument = "(uint64_t)*b"
     if row.operator == "SHIFT_LEFT":
         helper = ("runtimec_scalar_shift_left_signed" if signed_source
                   else "runtimec_scalar_shift_left_unsigned")
         argument = f"({C_TYPE[left_type]})*a" if signed_source else f"*a"
         return (f"*{output_name(row)} = ({C_TYPE[result_type]})"
-                f"{helper}({argument}, {count_cast}, {width}U);")
+                f"{helper}({argument}, {count_argument}, {width}U);")
     helper = ("runtimec_scalar_shift_right_signed" if signed_source
               else "runtimec_scalar_shift_right_unsigned")
     argument = f"({C_TYPE[left_type]})*a" if signed_source else f"*a"
     return (f"*{output_name(row)} = ({C_TYPE[result_type]})"
-            f"{helper}({argument}, {count_cast}, {width}U);")
+            f"{helper}({argument}, {count_argument}, {width}U);")
 
 
 TEMPLATES["SHIFT_LEFT"] = shift_template
@@ -840,63 +842,71 @@ CHARACTER_ENCODING = {
 
 
 def character_thunk(row: Row) -> str | None:
-    """字符族的 thunk 体。None 表示不是这一族。
+    """字符族的 thunk。None 表示不是这一族。
 
-    三类：
-      concat / streq / streq·not  —— 两段文本进，解码器由元组钉死；
-      cast 目标 char             —— 单值 → 单字符，目标编码由元组钉死。
+    **每个 thunk 只有一行宏调用**：参数准备（定位、宽度核对、取值/解码）全在
+    `scalar_character.h` 的 `VMBIN_HANDLER_*` 宏里。之前这 72 条把那些摊在
+    每个 thunk 里，每条 20 行，`check_handler_size` 报 72 条超限。
+
+    宏按「读参怎么来、写参怎么去」分族，与 `handler_call.h` 的 `_TYPED` /
+    `_CREATE` 是同一套思路：一族一种参数形状。
+
+    **这一族的宏定义在我自己的头文件里**，因为 `handler_call.h` 归 coding4，
+    同一文件不能两个写者。命名保持 `VMBIN_HANDLER_*` 前缀，合并时搬过去即可。
     """
-    if row.operator == "CAST" and row.types[1] in CHARACTER_ENCODING:
-        source, target = row.types[0], row.types[1]
-        if source.startswith("char/"):
-            return None  # 字符 → 字符要解码再重编，属字符族，暂不生成
-        # 这条不能用类型化宏：写参是**变长** body，长度由目标编码决定，
-        # 不能按 sizeof(T) 核。所以 thunk 自己做定位与宽度核对。
+    if row.operator in ("CONCAT",):
+        left, right = row.types[0], row.types[1]
+        if left not in CHARACTER_DECODER or right not in CHARACTER_DECODER:
+            return None
+        return (f"VMBIN_HANDLER_CHARACTER_CONCAT({handler_name(row)}, "
+                f"runtimec_scalar_concat, {CHARACTER_DECODER[left]}, "
+                f"{CHARACTER_DECODER[right]})\n")
+
+    if row.operator in ("CHARACTER_EQUAL", "CHARACTER_NOT_EQUAL"):
+        left, right = row.types[0], row.types[1]
+        if left not in CHARACTER_DECODER or right not in CHARACTER_DECODER:
+            return None
+        invert = ("false" if row.operator == "CHARACTER_EQUAL" else "true")
+        return (f"VMBIN_HANDLER_CHARACTER_EQUAL({handler_name(row)}, "
+                f"runtimec_scalar_character_equal, "
+                f"{CHARACTER_DECODER[left]}, {CHARACTER_DECODER[right]}, "
+                f"{invert})\n")
+
+    if row.operator != "CAST":
+        return None
+    source, target = row.types[0], row.types[1]
+
+    # 单字符读 → 单字符写（跨编码）。
+    if source in CHARACTER_DECODER and target in CHARACTER_ENCODING:
+        return (f"VMBIN_HANDLER_CHARACTER_TO_CHARACTER({handler_name(row)}, "
+                f"runtimec_scalar_character_to_value, "
+                f"{CHARACTER_DECODER[source]}, {CHARACTER_ENCODING[target]})\n")
+
+    # 单字符读 → 数值写（定宽）。
+    if source in CHARACTER_DECODER and target in INTEGER:
+        width, signed_target = INTEGER[target]
+        return (f"VMBIN_HANDLER_CHARACTER_TO_NUMBER({handler_name(row)}, "
+                f"runtimec_scalar_character_to_number, "
+                f"{CHARACTER_DECODER[source]}, {width}U, "
+                f"{str(signed_target).lower()}, false)\n")
+    if source in CHARACTER_DECODER and target in FLOAT:
+        width = 32 if target == "float32" else 64
+        return (f"VMBIN_HANDLER_CHARACTER_TO_NUMBER({handler_name(row)}, "
+                f"runtimec_scalar_character_to_number, "
+                f"{CHARACTER_DECODER[source]}, {width}U, false, true)\n")
+
+    # 定宽读 → 单字符写。
+    if target in CHARACTER_ENCODING and not source.startswith("char/"):
+        source_type = C_TYPE[source]
         if source == "bool":
-            convert = "source_value = *a ? 1U : 0U;"
+            to_code_point = "(*source_ ? 1U : 0U)"
         else:
-            convert = "source_value = (uint32_t)(int64_t)*a;"
-        call = (
-            "vmbin_value_location_t read_position_;\n"
-            "    runtimec_error_t error_;\n"
-            "    uint32_t source_value = 0U;\n"
-            "    runtimec_error_reset(&error_);\n"
-            "    if (vmbin_value_access_locate_body(\n"
-            "            frame, &instruction->read_arguments.data[0],\n"
-            "            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {\n"
-            "        runtimec_scalar_fail(output_exit,\n"
-            "                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);\n"
-            "        return RUNTIMEC_STATUS_ERROR;\n"
-            "    }\n"
-            f"    if (read_position_.size != sizeof({C_TYPE[source]})) {{\n"
-            "        runtimec_scalar_fail(output_exit,\n"
-            "                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);\n"
-            "        return RUNTIMEC_STATUS_ERROR;\n"
-            "    }\n"
-            f"    {{\n"
-            f"        const {C_TYPE[source]} *a = "
-            "(const " + C_TYPE[source] + " *)(const void *)read_position_.read_bytes;\n"
-            f"        (void)a;\n"
-            f"        {convert}\n"
-            "    }\n"
-            f"    runtimec_scalar_value_to_character(frame, instruction, "
-            f"source_value, {CHARACTER_ENCODING[target]}, output_exit);")
-        return _emit_character_thunk(row, call)
-    if row.operator not in ("CONCAT", "CHARACTER_EQUAL", "CHARACTER_NOT_EQUAL"):
-        return None
-    left, right = row.types[0], row.types[1]
-    if left not in CHARACTER_DECODER or right not in CHARACTER_DECODER:
-        return None
-    decode_left = CHARACTER_DECODER[left]
-    decode_right = CHARACTER_DECODER[right]
-    if row.operator == "CONCAT":
-        call = (f"runtimec_scalar_concat(frame, instruction, {decode_left}, "
-                f"{decode_right}, output_exit);")
-    else:
-        invert = "false" if row.operator == "CHARACTER_EQUAL" else "true"
-        call = (f"runtimec_scalar_character_equal(frame, instruction, "
-                f"{decode_left}, {decode_right}, {invert}, output_exit);")
-    return _emit_character_thunk(row, call)
+            to_code_point = "(uint32_t)(int64_t)*source_"
+        return (f"VMBIN_HANDLER_UNARY_TO_CHARACTER({handler_name(row)}, "
+                f"runtimec_scalar_value_to_character, {source_type}, "
+                f"{to_code_point}, {CHARACTER_ENCODING[target]})\n")
+
+    return None
 
 
 def _emit_character_thunk(row: Row, call: str) -> str:
@@ -1052,6 +1062,25 @@ PROBE_ROWS = (
     ("DIV", "float64,float64,float64"),
     ("MOD", "int64,int64,int64"),
     ("MOD", "uint8,uint8,uint8"),
+    # 浮点与 64 位整数混算：结果**必须**是浮点（跨类不比宽度）。
+    # 这 6 个组合曾在表里被写成 int64/uint64 结果，是今天最顽固的一类错。
+    ("ADD", "float32,int64,float32"),
+    ("MIN", "int32,float32,float32"),
+    ("MUL", "float32,uint64,float32"),
+    # 按模板覆盖补的边界锚点：整数回绕、浮点精度、比较相等、位运算、cast 饱和。
+    ("SUB", "int8,int8,int8"),
+    ("ADD", "int8,int8,int8"),
+    ("SUB", "uint8,uint8,uint8"),
+    ("ADD", "float32,float32,float32"),
+    ("LESS", "int32,int32,bool"),
+    ("EQUAL", "int64,int64,bool"),
+    ("BITWISE_AND", "uint8,uint8,uint8"),
+    ("LOGICAL_OR", "float64,float64,bool"),
+    ("LOGICAL_NOT", "int64,bool"),
+    ("SHIFT_LEFT", "uint8,uint8,uint8"),
+    ("SHIFT_RIGHT", "int8,int8,int8"),
+    ("CAST", "float64,int8,int8"),
+    ("CAST", "float32,uint8,uint8"),
 )
 
 
@@ -1066,6 +1095,16 @@ def probe_name(row: Row) -> str:
 
 
 def render_probes(rows: list[Row]) -> str:
+    """测试探针 = **已生成逻辑函数的别名**，不是第二份拷贝。
+
+    **这是被实测打回来改的**：第一版这里重新渲染了一次模板表达式，于是探针与
+    逻辑函数是两份独立文本。手工改一处逻辑函数做变异时，探针仍走旧模板，
+    测试照样全绿——五个变异（整数回绕、比较 `<`→`<=`、相等经浮点、逻辑真值、
+    cast 饱和）**一个都没抓到**。
+
+    现在探针体只有一句 `logic_name(...)` 转发：改任何一处实现，探针跟着变。
+    这也让「探针只能镜像生成器产物」变成结构保证，而不是一句约定。
+    """
     by_key = {(row.operator, row.operand_types): row for row in rows}
     rendered: list[str] = []
     for operator, operand_types in PROBE_ROWS:
@@ -1081,10 +1120,17 @@ def render_probes(rows: list[Row]) -> str:
             raise SystemExit(
                 f"probe row {operator}({operand_types}) is not produced by a "
                 f"template; a probe can only mirror what the generator writes")
+        parameters = signature(row, uses_exit(row, body))
+        reads, writes = ARITY[row.operator]
+        read_names = ["a", "b", "c"][:reads]
+        write_names = [output_name(row)][:writes]
+        arguments = ", ".join(read_names + write_names)
+        if uses_exit(row, body):
+            arguments += ", output_exit"
         rendered.append(
             f"void {probe_name(row)}("
-            f"{signature(row, uses_exit(row, body)).replace('static', '')}) {{\n"
-            f"    {body}\n"
+            f"{parameters.replace('static', '')}) {{\n"
+            f"    {logic_name(row)}({arguments});\n"
             f"}}\n")
     return "\n".join(rendered)
 
@@ -1171,6 +1217,29 @@ def main(arguments: list[str] | None = None) -> int:
 
     if parsed.report:
         return report(root)
+
+    # 全量对拍：**表里有的 opid，产物必须全有；产物不得有表里没有的**。
+    # 这两条合起来才是「满」——单看条数相等不够，两条 1836 的列表可以
+    # 互为子集之外的置换，而那种置换意味着某条 handler 接到了错的 opid。
+    rows = read_specializations(root)
+    expected_identifiers = {row.opid.upper() for row in rows}
+    expected, generated, _ = render(root)
+    produced_identifiers = {
+        match.upper() for match in
+        re.findall(r"^\s*\{(0x[0-9A-Fa-f]+)U, BINRWIR_REGISTRY_FLAG_NONE",
+                   expected, re.MULTILINE)}
+    if produced_identifiers != expected_identifiers:
+        missing = sorted(expected_identifiers - produced_identifiers)
+        extra = sorted(produced_identifiers - expected_identifiers)
+        print(f"generate_scalar_handlers: FAIL — table has "
+              f"{len(expected_identifiers)} opid(s), generated "
+              f"{len(produced_identifiers)}; missing {missing[:8]}, "
+              f"unexpected {extra[:8]}")
+        return 1
+    if generated != len(expected_identifiers):
+        print(f"generate_scalar_handlers: FAIL — {generated} handler(s) for "
+              f"{len(expected_identifiers)} opid(s)")
+        return 1
 
     expected, generated, skipped = render(root)
     destination = root / GENERATED_HANDLERS
