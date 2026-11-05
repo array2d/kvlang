@@ -24,10 +24,41 @@
 #include "contract/view.h"
 #include "engine/session.h"
 #include "binrwir/execution_exit.h"
+#include "binrwir/program.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* 一个实参的来源。判据是「执行窗口要不要创建它」，不是「谁声明的它」。 */
+typedef enum runtimec_argument_source {
+    RUNTIMEC_ARGUMENT_SOURCE_INVALID = 0,
+    /* 调用方已存在的槽：本层直接用，不创建。 */
+    RUNTIMEC_ARGUMENT_SOURCE_EXISTING_KEY = 1,
+    /* 常量：本层物化到被调帧的 `._lit<i>`（命名归本层，调用方不算这个名字）。 */
+    RUNTIMEC_ARGUMENT_SOURCE_LITERAL = 2,
+    /* 调用方尚无的写目标：本层经 `ensure_zero_value` 创建。 */
+    RUNTIMEC_ARGUMENT_SOURCE_WRITE_TARGET = 3
+} runtimec_argument_source_t;
+
+/*
+ * 一个实参的描述。
+ *
+ * `key` 的三种用法按 `source` 解释：
+ *   EXISTING_KEY / WRITE_TARGET —— 绝对槽键（`/vthread/...`），本层不拼不猜；
+ *   LITERAL                     —— **不用**，常量没有 key。
+ *
+ * `literal_bytes` / `literal_langtype` 只在 LITERAL 时有值：
+ * 前者是已编码的 wire 字节（XValue head + body + attr），后者是该值的具体
+ * langtype 文本。两者都由本层借用至本次调用结束，调用方保生存期。
+ */
+typedef struct runtimec_argument_description {
+    runtimec_argument_source_t source;
+    uint32_t reserved_32_bits;
+    runtimec_string_view_t key;
+    runtimec_bytes_view_t literal_bytes;
+    runtimec_string_view_t literal_langtype;
+} runtimec_argument_description_t;
 
 typedef struct runtimec_execution_window_request_t {
     /* 要编译并执行的函数绝对路径。 */
@@ -49,10 +80,24 @@ typedef struct runtimec_execution_window_request_t {
      */
     uint32_t source_logical_program_counter;
     /*
-     * 绝对槽键，读参在前、写参在后，数量等于被调签名的读参 + 写参数。
-     * 本层不解包、不拼路径、不猜 vid/depth：裸名与相对名一律失败封闭。
+     * 实参**描述**，读参在前、写参在后，数量等于被调签名的读参 + 写参数。
+     *
+     * 早先这里是「已造好的绝对槽键」。那样要求调用方**有能力造出 key**，
+     * 而造 key 需要 snapshot 与 `ensure_zero_value`——两者都在本层内部。
+     * 让调用方去造，等于逼它抄一份内部状态，绕开来又会破坏 revision
+     * （实测症状：`function source revision differs`）。
+     *
+     * 现在调用方只描述「这是什么」，物化归本层。三种来源恰好覆盖全部实参：
+     *   EXISTING_KEY —— 调用方已存在的槽，本层直接用，不创建；
+     *   LITERAL      —— 常量，本层物化到被调帧的 `._lit<i>`（**命名归本层**）；
+     *   WRITE_TARGET —— 调用方尚无的写目标（`add1(41) -> v` 的 `v`），
+     *                   本层经 `ensure_zero_value` 创建。
+     * 判据是「本层要不要创建它」，不是「谁声明的它」。
+     *
+     * **顺序**：先物化全部实参，**再**取快照。反过来的话，物化的写会让地址
+     * 重定位、`source_revision` 前进，取到的世代在物化之后就失效了。
      */
-    const runtimec_string_view_t *arguments;
+    const runtimec_argument_description_t *arguments;
     size_t argument_count;
 } runtimec_execution_window_request_t;
 
@@ -60,6 +105,18 @@ typedef struct runtimec_execution_window_result_t {
     runtimec_status_t status;
     binrwir_execution_exit_t execution_exit;
     runtimec_string_view_t return_value;
+    /*
+     * 本帧实际执行的那份 Program（只读借用，生存期到下一次 execute 或 session 销毁）。
+     *
+     * **为什么必须借出**：`execution_exit.target_identifier` 是**这份 Program
+     * 符号池**的下标。调用方要解析被调函数名，就必须用同一份 Program——
+     * 用别的 Program 不会报错，只会拿到不相关的名字，然后以「查不到函数」的
+     * 形式失败，离根因很远。
+     *
+     * 递归时每帧的 Program 不同（`/lib/test` 与 `/lib/fib` 各一份），
+     * 所以它是**每帧**的事实，不能存在驱动里当全局。
+     */
+    const binrwir_program_t *program;
 } runtimec_execution_window_result_t;
 
 runtimec_status_t runtimec_execution_window_execute(

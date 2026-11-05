@@ -14,6 +14,7 @@
 
 #include "engine/execution_window.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "binrwir/execution_frame.h"
@@ -47,7 +48,13 @@ typedef enum runtimec_execution_window_diagnostic_t {
     RUNTIMEC_EXECUTION_WINDOW_DIAG_EXECUTION_FAILED = 14,
     RUNTIMEC_EXECUTION_WINDOW_DIAG_CHECKPOINT_FAILED = 15,
     RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED = 16,
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY = 17
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY = 17,
+    /* 实参描述的 key 不合法（空、不可解析）。 */
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_KEY_INVALID = 18,
+    /* 字面量描述缺 bytes 或 langtype。 */
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_LITERAL_INVALID = 19,
+    /* 物化本身失败（写不进去、key 放不下）。 */
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_MATERIALIZE_FAILED = 20
 } runtimec_execution_window_diagnostic_t;
 
 static void runtimec_execution_window_reset_result(runtimec_execution_window_result_t *result,
@@ -70,6 +77,22 @@ static runtimec_status_t runtimec_execution_window_fail(runtimec_execution_windo
                                              runtimec_execution_window_diagnostic_t detail,
                                              const char *message) {
     runtimec_execution_window_reset_result(result, status, (uint32_t)detail);
+    /*
+     * **下层带上来具体消息时，上层不许用通用消息覆盖它。**
+     * 诊断信息的价值沿调用链递减：上层只知道「这一步失败了」，下层才知道
+     * 「为什么失败」。把编译器的「某条指令无法编码」换成「编译没产出」，
+     * 等于把根因擦掉，只留一个数字。
+     *
+     * `detail` 仍然写进 result 的执行退出——那是本层的分类，与 error 的
+     * message 不冲突：分类回答「哪一步」，消息回答「为什么」。
+     *
+     * 前提：execute 入口已 reset error，因此这里的非空消息一定来自本次调用的
+     * 下游，不会是上一次调用的残留。
+     */
+    if (error != NULL && error->message.size != 0U) {
+        error->status = status;
+        return status;
+    }
     runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT, detail,
                        runtimec_string_view_from_c_string(message),
                        RUNTIMEC_PROGRAM_COUNTER_NONE);
@@ -161,6 +184,111 @@ static runtimec_status_t runtimec_execution_window_bind_slot(
 }
 
 /*
+ * 把一个实参**描述**物化成可以绑定的绝对槽键。三种来源各自的处置：
+ *
+ *   EXISTING_KEY  —— 原样返回，本层不创建、不校验存在性（绑定那步会失败封闭）；
+ *   LITERAL       —— 写到被调帧的 `._lit<i>`。**命名归本层**：调用方若也拼这个名字，
+ *                    就成了两处维护同一个规则，不同步的症状是「实参找不到」；
+ *   WRITE_TARGET  —— 经 `ensure_zero_value` 创建（唯一创建入口），再原样返回。
+ *
+ * **必须先物化、后取快照**：物化的写会让地址重定位、`source_revision` 前进。
+ * 先取快照的话，拿到的世代在物化之后就失效——实测症状是
+ * `vmkv encoder: function source revision differs from the request`。
+ *
+ * 输出 key 借用自 `scratch`（调用方给的足够大的缓冲数组），生存期到本次绑定结束。
+ */
+static runtimec_status_t runtimec_execution_window_materialize_argument(
+    const runtimec_host_services_t *host, const runtimec_snapshot_t *snapshot,
+    const runtimec_execution_window_request_t *request,
+    const runtimec_argument_description_t *description, size_t ordinal,
+    char *scratch, size_t scratch_capacity, runtimec_string_view_t *output_key,
+    runtimec_execution_window_diagnostic_t *output_detail,
+    runtimec_error_t *error) {
+    *output_key = runtimec_string_view_make(NULL, 0U);
+    switch (description->source) {
+    case RUNTIMEC_ARGUMENT_SOURCE_EXISTING_KEY:
+        if (!runtimec_string_view_is_valid(description->key) ||
+            description->key.size == 0U) {
+            *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_KEY_INVALID;
+            return RUNTIMEC_STATUS_INVALID;
+        }
+        *output_key = description->key;
+        return RUNTIMEC_STATUS_SUCCESS;
+    case RUNTIMEC_ARGUMENT_SOURCE_LITERAL: {
+        if (!runtimec_string_view_is_valid(description->literal_langtype) ||
+            description->literal_langtype.size == 0U ||
+            description->literal_bytes.data == NULL) {
+            *output_detail =
+                RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_LITERAL_INVALID;
+            return RUNTIMEC_STATUS_INVALID;
+        }
+        /* 名字归本层：`<frame_path>/._lit<序号>`，序号是**实参序号**（从 0 起），
+         * 不是 read_arguments 的下标——FUNCTION 引用占第 0 位，两者不等。 */
+        char langtype_text[128];
+        const int langtype_length =
+            snprintf(langtype_text, sizeof(langtype_text), "%.*s",
+                     (int)description->literal_langtype.size,
+                     description->literal_langtype.data);
+        if (langtype_length < 0 ||
+            (size_t)langtype_length >= sizeof(langtype_text)) {
+            *output_detail =
+                RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_LITERAL_INVALID;
+            return RUNTIMEC_STATUS_INVALID;
+        }
+        const int key_length =
+            snprintf(scratch, scratch_capacity, "%.*s/._lit%zu",
+                     (int)request->frame_path.size, request->frame_path.data,
+                     ordinal);
+        if (key_length < 0 || (size_t)key_length >= scratch_capacity) {
+            *output_detail =
+                RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_MATERIALIZE_FAILED;
+            return RUNTIMEC_STATUS_INVALID;
+        }
+        /* 用现有的 `host->write`——**没有 `ensure_literal` 这种能力，
+         * 不要发明**。`write` 的 value 是整条 wire（XValue head + body + attr），
+         * 而 `literal_bytes` 正是那个形状（`binrwir/argument.h` 的 LITERAL 约定）。 */
+        if (host->write == NULL ||
+            host->write(host->context, snapshot,
+                        runtimec_key_view_make(scratch, strlen(scratch)),
+                        runtimec_bytes_view_make(description->literal_bytes.data,
+                                                 description->literal_bytes.size),
+                        error) != RUNTIMEC_STATUS_SUCCESS) {
+            *output_detail =
+                RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_MATERIALIZE_FAILED;
+            return RUNTIMEC_STATUS_INVALID;
+        }
+        *output_key = runtimec_string_view_from_c_string(scratch);
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    case RUNTIMEC_ARGUMENT_SOURCE_WRITE_TARGET: {
+        if (!runtimec_string_view_is_valid(description->key) ||
+            description->key.size == 0U ||
+            !runtimec_string_view_is_valid(description->literal_langtype) ||
+            description->literal_langtype.size == 0U) {
+            *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_KEY_INVALID;
+            return RUNTIMEC_STATUS_INVALID;
+        }
+        /* **唯一创建入口**：`ensure_zero_value`。驱动不许直接 `set_value`——
+         * 绕过会让地址重定位而 `source_revision` 不跟随，绑定期就失配。 */
+        if (host->ensure_zero_value(host->context, snapshot,
+                                    runtimec_key_view_make(description->key.data,
+                                                           description->key.size),
+                                    description->literal_langtype,
+                                    error) != RUNTIMEC_STATUS_SUCCESS) {
+            *output_detail =
+                RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_MATERIALIZE_FAILED;
+            return RUNTIMEC_STATUS_INVALID;
+        }
+        *output_key = description->key;
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    default:
+        *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_KEY_INVALID;
+        return RUNTIMEC_STATUS_INVALID;
+    }
+}
+
+/*
  * 顶层帧的形参绑定。槽号分区与 vmbin/frame_slot 完全一致（读参 0..nr-1、
  * 写参 nr..nr+nw-1），实参是调用方给的绝对槽键，route 不拼不猜。
  *
@@ -176,6 +304,9 @@ static runtimec_status_t runtimec_execution_window_bind_parameters(
     size_t read_count;
     size_t write_count;
     size_t ordinal;
+    /* 物化后的 key 文本。放本栈上：`bind_slot` 只在本函数内借用。
+     * 每个 key 上限 256——`/vthread/<vid>/[<depth>]/<name>` 的实测长度远小于此。 */
+    char materialized_keys[64][256];
 
     /*
      * 「这一帧的绑定已建立」与参数个数无关：**空绑定也是一次绑定**。
@@ -211,8 +342,16 @@ static runtimec_status_t runtimec_execution_window_bind_parameters(
             *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED;
             return RUNTIMEC_STATUS_INVALID;
         }
-        runtimec_status_t status = runtimec_execution_window_bind_slot(
-            host, snapshot, bindings, binding_slot, request->arguments[ordinal],
+        runtimec_string_view_t resolved_key;
+        runtimec_status_t status = runtimec_execution_window_materialize_argument(
+            host, snapshot, request, &request->arguments[ordinal], ordinal,
+            materialized_keys[ordinal], sizeof(materialized_keys[ordinal]),
+            &resolved_key, output_detail, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+        status = runtimec_execution_window_bind_slot(
+            host, snapshot, bindings, binding_slot, resolved_key,
             output_generation, output_detail, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return status;
@@ -228,10 +367,19 @@ static runtimec_status_t runtimec_execution_window_bind_parameters(
             *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED;
             return RUNTIMEC_STATUS_INVALID;
         }
-        runtimec_status_t status = runtimec_execution_window_bind_slot(
-            host, snapshot, bindings, binding_slot,
-            request->arguments[read_count + ordinal], output_generation,
+        runtimec_string_view_t resolved_key;
+        runtimec_status_t status = runtimec_execution_window_materialize_argument(
+            host, snapshot, request,
+            &request->arguments[read_count + ordinal], read_count + ordinal,
+            materialized_keys[read_count + ordinal],
+            sizeof(materialized_keys[read_count + ordinal]), &resolved_key,
             output_detail, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+        status = runtimec_execution_window_bind_slot(
+            host, snapshot, bindings, binding_slot, resolved_key,
+            output_generation, output_detail, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return status;
         }
@@ -634,6 +782,9 @@ runtimec_status_t runtimec_execution_window_execute(
     if (session == NULL || request == NULL || error == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
+    /* 入口清空 error：`fail` 依据「消息非空」判断是否保留下层诊断，陈旧消息
+     * 会让一次全新的失败被误认成「下层已经说过了」。 */
+    runtimec_error_reset(error);
     if (!runtimec_string_view_is_valid(request->function_path) ||
         request->function_path.size == 0U ||
         !runtimec_string_view_is_valid(request->vthread_identifier) ||
@@ -758,6 +909,7 @@ runtimec_status_t runtimec_execution_window_execute(
                                      "compilation is not executable");
         goto release_lease;
     }
+    output_result->program = compilation_view.canonical_program;
     if (binrwir_program_get_view(compilation_view.canonical_program,
                                  &program_view) != RUNTIMEC_STATUS_SUCCESS ||
         vmbin_frame_slot_capacity(compilation_view.canonical_program,
@@ -842,6 +994,13 @@ runtimec_status_t runtimec_execution_window_execute(
         goto release_bindings;
     }
     /*
+     * 值访问写路径需要 host 才能完成两件事：按 langtype 创建尚不存在的写目标
+     * （复用 `ensure_zero_value`，零值规则的唯一实现），以及执行期解析 STATIC
+     * 且 payload 为 NONE 的写目标。帧只借用这两样，不拥有。
+     */
+    frame.host_services = host;
+    frame.snapshot = snapshot;
+    /*
      * 帧路径原样借用——不重新拼接。重新拼就是第二份地址来源，一旦与请求里
      * 那份不一致，事后无法判断哪一份才是调用方要的。借用视图，不拷贝：
      * 字节归请求所有，本次调用内有效。
@@ -865,9 +1024,46 @@ runtimec_status_t runtimec_execution_window_execute(
     output_result->execution_exit = execution_exit;
     output_result->status = execution_exit.status;
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        /* 所选入口失败就沿这条路径上报，不切换到另一个执行器。 */
+        /* 所选入口失败就沿这条路径上报，不切换到另一个执行器。
+         *
+         * **必须填 error**：这条路径不经过 `runtimec_execution_window_fail`，
+         * 而 `execute` 入口已 reset error——不填的话调用方只拿到一个状态码，
+         * 退出明细（detail）与出错位置（pc）全丢。诊断码取执行退出里的
+         * detail，位置取该条指令的 source pc。 */
         output_result->status = status;
         output_result->execution_exit.status = status;
+        if (error != NULL && error->message.size == 0U) {
+            /*
+             * 跨枚举复用数值时必须在人可见处标明来源：`detail_code` 是
+             * **解释器**的诊断码，而 `RUNTIMEC_ERROR_DOMAIN_CONTRACT` 里也有
+             * 一个同值的窗口诊断码（两者都可能是 6）。不写来源，读的人会把
+             * `UNRESOLVED_TARGET` 读成 `COMPILE_FAILED`——今天真实发生过。
+             *
+             * 用线程局部静态缓冲承载带数值的消息：借用视图不会悬空，也不分配。
+             *
+             * **借用语义的显式化**：该缓冲是「最近一次失败」的消息，下一次失败会
+             * 覆盖它。error 只在本次调用内有效——把 error 存起来延后读取，会读到
+             * 后一次失败的话。需要跨调用持有就必须自己拷贝。
+             *
+             * 数值取自 `execution_exit.detail_code`：它可能是解释器诊断（1–10），
+             * 也可能是 handler 自己的诊断码（0x4xxx）。消息写「execution exit
+             * detail」而不是「interpreter diagnostic」，避免把 handler 码也标错来源。
+             */
+            static _Thread_local char execution_message[96];
+            (void)snprintf(execution_message, sizeof(execution_message),
+                           "instruction execution failed (execution exit detail=%u)",
+                           (unsigned)execution_exit.detail_code);
+            runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT,
+                               (int64_t)execution_exit.detail_code,
+                               runtimec_string_view_from_c_string(
+                                   execution_message),
+                               (runtimec_program_counter_t){
+                                   .stack_identifier =
+                                       (int32_t)request->stack_identifier,
+                                   .source_instruction_ordinal =
+                                       (int32_t)execution_exit
+                                           .logical_program_counter});
+        }
         goto release_frame;
     }
 
@@ -877,6 +1073,22 @@ runtimec_status_t runtimec_execution_window_execute(
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         output_result->status = status;
         output_result->execution_exit.status = status;
+        if (error != NULL && error->message.size == 0U) {
+            static _Thread_local char checkpoint_message[96];
+            (void)snprintf(checkpoint_message, sizeof(checkpoint_message),
+                           "checkpoint commit failed (exit detail=%u)",
+                           (unsigned)execution_exit.detail_code);
+            runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT,
+                               (int64_t)execution_exit.detail_code,
+                               runtimec_string_view_from_c_string(
+                                   checkpoint_message),
+                               (runtimec_program_counter_t){
+                                   .stack_identifier =
+                                       (int32_t)request->stack_identifier,
+                                   .source_instruction_ordinal =
+                                       (int32_t)execution_exit
+                                           .logical_program_counter});
+        }
         goto release_frame;
     }
     status = RUNTIMEC_STATUS_SUCCESS;
