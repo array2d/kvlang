@@ -7,7 +7,7 @@
  *       返回、没有 exit 写入。需要判据的算子不进本文件（分工见生成器头注释）。
  *       thunk 由 `handler_call` 的宏产出——定位、宽度核对、失败出口都在那里，
  *       这里是**同一套样板**的第二份实现会立刻漂移。
- * 统计：1773 个特化 handler，63 条特化行归 scalar.c 的手写特例。
+ * 统计：1836 个特化 handler，0 条特化行归 scalar.c 的手写特例。
  */
 
 #include "vmbin/handlers/scalar_generated.h"
@@ -44,6 +44,12 @@ static inline void scalar_generated_add_float32_int32_float32_logic(const float 
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_add_float32_int32_float32, scalar_generated_add_float32_int32_float32_logic, float, int32_t, float)
 
+static inline void scalar_generated_add_float32_int64_float32_logic(const float *a, const int64_t *b, float *c) {
+    *c = (float)*a + (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_add_float32_int64_float32, scalar_generated_add_float32_int64_float32_logic, float, int64_t, float)
+
 static inline void scalar_generated_add_float32_int8_float32_logic(const float *a, const int8_t *b, float *c) {
     *c = (float)*a + (float)*b;
 }
@@ -61,6 +67,12 @@ static inline void scalar_generated_add_float32_uint32_float32_logic(const float
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_add_float32_uint32_float32, scalar_generated_add_float32_uint32_float32_logic, float, uint32_t, float)
+
+static inline void scalar_generated_add_float32_uint64_float32_logic(const float *a, const uint64_t *b, float *c) {
+    *c = (float)*a + (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_add_float32_uint64_float32, scalar_generated_add_float32_uint64_float32_logic, float, uint64_t, float)
 
 static inline void scalar_generated_add_float32_uint8_float32_logic(const float *a, const uint8_t *b, float *c) {
     *c = (float)*a + (float)*b;
@@ -164,6 +176,12 @@ static inline void scalar_generated_add_int16_int8_int16_logic(const int16_t *a,
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_add_int16_int8_int16, scalar_generated_add_int16_int8_int16_logic, int16_t, int8_t, int16_t)
 
+static inline void scalar_generated_add_int32_float32_float32_logic(const int32_t *a, const float *b, float *c) {
+    *c = (float)*a + (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_add_int32_float32_float32, scalar_generated_add_int32_float32_float32_logic, int32_t, float, float)
+
 static inline void scalar_generated_add_int32_float64_float64_logic(const int32_t *a, const double *b, double *c) {
     *c = (double)*a + (double)*b;
 }
@@ -193,6 +211,12 @@ static inline void scalar_generated_add_int32_int8_int32_logic(const int32_t *a,
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_add_int32_int8_int32, scalar_generated_add_int32_int8_int32_logic, int32_t, int8_t, int32_t)
+
+static inline void scalar_generated_add_int64_float32_float32_logic(const int64_t *a, const float *b, float *c) {
+    *c = (float)*a + (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_add_int64_float32_float32, scalar_generated_add_int64_float32_float32_logic, int64_t, float, float)
 
 static inline void scalar_generated_add_int64_float64_float64_logic(const int64_t *a, const double *b, double *c) {
     *c = (double)*a + (double)*b;
@@ -296,6 +320,12 @@ static inline void scalar_generated_add_uint16_uint8_uint16_logic(const uint16_t
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_add_uint16_uint8_uint16, scalar_generated_add_uint16_uint8_uint16_logic, uint16_t, uint8_t, uint16_t)
 
+static inline void scalar_generated_add_uint32_float32_float32_logic(const uint32_t *a, const float *b, float *c) {
+    *c = (float)*a + (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_add_uint32_float32_float32, scalar_generated_add_uint32_float32_float32_logic, uint32_t, float, float)
+
 static inline void scalar_generated_add_uint32_float64_float64_logic(const uint32_t *a, const double *b, double *c) {
     *c = (double)*a + (double)*b;
 }
@@ -325,6 +355,12 @@ static inline void scalar_generated_add_uint32_uint8_uint32_logic(const uint32_t
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_add_uint32_uint8_uint32, scalar_generated_add_uint32_uint8_uint32_logic, uint32_t, uint8_t, uint32_t)
+
+static inline void scalar_generated_add_uint64_float32_float32_logic(const uint64_t *a, const float *b, float *c) {
+    *c = (float)*a + (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_add_uint64_float32_float32, scalar_generated_add_uint64_float32_float32_logic, uint64_t, float, float)
 
 static inline void scalar_generated_add_uint64_float64_float64_logic(const uint64_t *a, const double *b, double *c) {
     *c = (double)*a + (double)*b;
@@ -416,6 +452,12 @@ static inline void scalar_generated_sub_float32_int32_float32_logic(const float 
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_sub_float32_int32_float32, scalar_generated_sub_float32_int32_float32_logic, float, int32_t, float)
 
+static inline void scalar_generated_sub_float32_int64_float32_logic(const float *a, const int64_t *b, float *c) {
+    *c = (float)*a - (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_sub_float32_int64_float32, scalar_generated_sub_float32_int64_float32_logic, float, int64_t, float)
+
 static inline void scalar_generated_sub_float32_int8_float32_logic(const float *a, const int8_t *b, float *c) {
     *c = (float)*a - (float)*b;
 }
@@ -433,6 +475,12 @@ static inline void scalar_generated_sub_float32_uint32_float32_logic(const float
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_sub_float32_uint32_float32, scalar_generated_sub_float32_uint32_float32_logic, float, uint32_t, float)
+
+static inline void scalar_generated_sub_float32_uint64_float32_logic(const float *a, const uint64_t *b, float *c) {
+    *c = (float)*a - (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_sub_float32_uint64_float32, scalar_generated_sub_float32_uint64_float32_logic, float, uint64_t, float)
 
 static inline void scalar_generated_sub_float32_uint8_float32_logic(const float *a, const uint8_t *b, float *c) {
     *c = (float)*a - (float)*b;
@@ -536,6 +584,12 @@ static inline void scalar_generated_sub_int16_int8_int16_logic(const int16_t *a,
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_sub_int16_int8_int16, scalar_generated_sub_int16_int8_int16_logic, int16_t, int8_t, int16_t)
 
+static inline void scalar_generated_sub_int32_float32_float32_logic(const int32_t *a, const float *b, float *c) {
+    *c = (float)*a - (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_sub_int32_float32_float32, scalar_generated_sub_int32_float32_float32_logic, int32_t, float, float)
+
 static inline void scalar_generated_sub_int32_float64_float64_logic(const int32_t *a, const double *b, double *c) {
     *c = (double)*a - (double)*b;
 }
@@ -565,6 +619,12 @@ static inline void scalar_generated_sub_int32_int8_int32_logic(const int32_t *a,
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_sub_int32_int8_int32, scalar_generated_sub_int32_int8_int32_logic, int32_t, int8_t, int32_t)
+
+static inline void scalar_generated_sub_int64_float32_float32_logic(const int64_t *a, const float *b, float *c) {
+    *c = (float)*a - (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_sub_int64_float32_float32, scalar_generated_sub_int64_float32_float32_logic, int64_t, float, float)
 
 static inline void scalar_generated_sub_int64_float64_float64_logic(const int64_t *a, const double *b, double *c) {
     *c = (double)*a - (double)*b;
@@ -668,6 +728,12 @@ static inline void scalar_generated_sub_uint16_uint8_uint16_logic(const uint16_t
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_sub_uint16_uint8_uint16, scalar_generated_sub_uint16_uint8_uint16_logic, uint16_t, uint8_t, uint16_t)
 
+static inline void scalar_generated_sub_uint32_float32_float32_logic(const uint32_t *a, const float *b, float *c) {
+    *c = (float)*a - (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_sub_uint32_float32_float32, scalar_generated_sub_uint32_float32_float32_logic, uint32_t, float, float)
+
 static inline void scalar_generated_sub_uint32_float64_float64_logic(const uint32_t *a, const double *b, double *c) {
     *c = (double)*a - (double)*b;
 }
@@ -697,6 +763,12 @@ static inline void scalar_generated_sub_uint32_uint8_uint32_logic(const uint32_t
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_sub_uint32_uint8_uint32, scalar_generated_sub_uint32_uint8_uint32_logic, uint32_t, uint8_t, uint32_t)
+
+static inline void scalar_generated_sub_uint64_float32_float32_logic(const uint64_t *a, const float *b, float *c) {
+    *c = (float)*a - (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_sub_uint64_float32_float32, scalar_generated_sub_uint64_float32_float32_logic, uint64_t, float, float)
 
 static inline void scalar_generated_sub_uint64_float64_float64_logic(const uint64_t *a, const double *b, double *c) {
     *c = (double)*a - (double)*b;
@@ -788,6 +860,12 @@ static inline void scalar_generated_mul_float32_int32_float32_logic(const float 
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_mul_float32_int32_float32, scalar_generated_mul_float32_int32_float32_logic, float, int32_t, float)
 
+static inline void scalar_generated_mul_float32_int64_float32_logic(const float *a, const int64_t *b, float *c) {
+    *c = (float)*a * (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_mul_float32_int64_float32, scalar_generated_mul_float32_int64_float32_logic, float, int64_t, float)
+
 static inline void scalar_generated_mul_float32_int8_float32_logic(const float *a, const int8_t *b, float *c) {
     *c = (float)*a * (float)*b;
 }
@@ -805,6 +883,12 @@ static inline void scalar_generated_mul_float32_uint32_float32_logic(const float
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_mul_float32_uint32_float32, scalar_generated_mul_float32_uint32_float32_logic, float, uint32_t, float)
+
+static inline void scalar_generated_mul_float32_uint64_float32_logic(const float *a, const uint64_t *b, float *c) {
+    *c = (float)*a * (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_mul_float32_uint64_float32, scalar_generated_mul_float32_uint64_float32_logic, float, uint64_t, float)
 
 static inline void scalar_generated_mul_float32_uint8_float32_logic(const float *a, const uint8_t *b, float *c) {
     *c = (float)*a * (float)*b;
@@ -908,6 +992,12 @@ static inline void scalar_generated_mul_int16_int8_int16_logic(const int16_t *a,
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_mul_int16_int8_int16, scalar_generated_mul_int16_int8_int16_logic, int16_t, int8_t, int16_t)
 
+static inline void scalar_generated_mul_int32_float32_float32_logic(const int32_t *a, const float *b, float *c) {
+    *c = (float)*a * (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_mul_int32_float32_float32, scalar_generated_mul_int32_float32_float32_logic, int32_t, float, float)
+
 static inline void scalar_generated_mul_int32_float64_float64_logic(const int32_t *a, const double *b, double *c) {
     *c = (double)*a * (double)*b;
 }
@@ -937,6 +1027,12 @@ static inline void scalar_generated_mul_int32_int8_int32_logic(const int32_t *a,
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_mul_int32_int8_int32, scalar_generated_mul_int32_int8_int32_logic, int32_t, int8_t, int32_t)
+
+static inline void scalar_generated_mul_int64_float32_float32_logic(const int64_t *a, const float *b, float *c) {
+    *c = (float)*a * (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_mul_int64_float32_float32, scalar_generated_mul_int64_float32_float32_logic, int64_t, float, float)
 
 static inline void scalar_generated_mul_int64_float64_float64_logic(const int64_t *a, const double *b, double *c) {
     *c = (double)*a * (double)*b;
@@ -1040,6 +1136,12 @@ static inline void scalar_generated_mul_uint16_uint8_uint16_logic(const uint16_t
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_mul_uint16_uint8_uint16, scalar_generated_mul_uint16_uint8_uint16_logic, uint16_t, uint8_t, uint16_t)
 
+static inline void scalar_generated_mul_uint32_float32_float32_logic(const uint32_t *a, const float *b, float *c) {
+    *c = (float)*a * (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_mul_uint32_float32_float32, scalar_generated_mul_uint32_float32_float32_logic, uint32_t, float, float)
+
 static inline void scalar_generated_mul_uint32_float64_float64_logic(const uint32_t *a, const double *b, double *c) {
     *c = (double)*a * (double)*b;
 }
@@ -1069,6 +1171,12 @@ static inline void scalar_generated_mul_uint32_uint8_uint32_logic(const uint32_t
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_mul_uint32_uint8_uint32, scalar_generated_mul_uint32_uint8_uint32_logic, uint32_t, uint8_t, uint32_t)
+
+static inline void scalar_generated_mul_uint64_float32_float32_logic(const uint64_t *a, const float *b, float *c) {
+    *c = (float)*a * (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_mul_uint64_float32_float32, scalar_generated_mul_uint64_float32_float32_logic, uint64_t, float, float)
 
 static inline void scalar_generated_mul_uint64_float64_float64_logic(const uint64_t *a, const double *b, double *c) {
     *c = (double)*a * (double)*b;
@@ -1160,6 +1268,12 @@ static inline void scalar_generated_div_float32_int32_float32_logic(const float 
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_div_float32_int32_float32, scalar_generated_div_float32_int32_float32_logic, float, int32_t, float)
 
+static inline void scalar_generated_div_float32_int64_float32_logic(const float *a, const int64_t *b, float *c) {
+    *c = (float)*a / (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_div_float32_int64_float32, scalar_generated_div_float32_int64_float32_logic, float, int64_t, float)
+
 static inline void scalar_generated_div_float32_int8_float32_logic(const float *a, const int8_t *b, float *c) {
     *c = (float)*a / (float)*b;
 }
@@ -1177,6 +1291,12 @@ static inline void scalar_generated_div_float32_uint32_float32_logic(const float
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_div_float32_uint32_float32, scalar_generated_div_float32_uint32_float32_logic, float, uint32_t, float)
+
+static inline void scalar_generated_div_float32_uint64_float32_logic(const float *a, const uint64_t *b, float *c) {
+    *c = (float)*a / (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_div_float32_uint64_float32, scalar_generated_div_float32_uint64_float32_logic, float, uint64_t, float)
 
 static inline void scalar_generated_div_float32_uint8_float32_logic(const float *a, const uint8_t *b, float *c) {
     *c = (float)*a / (float)*b;
@@ -1280,6 +1400,12 @@ static inline void scalar_generated_div_int16_int8_int16_logic(const int16_t *a,
 
 VMBIN_HANDLER_BINARY_TYPED_EXIT(scalar_generated_div_int16_int8_int16, scalar_generated_div_int16_int8_int16_logic, int16_t, int8_t, int16_t)
 
+static inline void scalar_generated_div_int32_float32_float32_logic(const int32_t *a, const float *b, float *c) {
+    *c = (float)*a / (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_div_int32_float32_float32, scalar_generated_div_int32_float32_float32_logic, int32_t, float, float)
+
 static inline void scalar_generated_div_int32_float64_float64_logic(const int32_t *a, const double *b, double *c) {
     *c = (double)*a / (double)*b;
 }
@@ -1309,6 +1435,12 @@ static inline void scalar_generated_div_int32_int8_int32_logic(const int32_t *a,
 }
 
 VMBIN_HANDLER_BINARY_TYPED_EXIT(scalar_generated_div_int32_int8_int32, scalar_generated_div_int32_int8_int32_logic, int32_t, int8_t, int32_t)
+
+static inline void scalar_generated_div_int64_float32_float32_logic(const int64_t *a, const float *b, float *c) {
+    *c = (float)*a / (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_div_int64_float32_float32, scalar_generated_div_int64_float32_float32_logic, int64_t, float, float)
 
 static inline void scalar_generated_div_int64_float64_float64_logic(const int64_t *a, const double *b, double *c) {
     *c = (double)*a / (double)*b;
@@ -1412,6 +1544,12 @@ static inline void scalar_generated_div_uint16_uint8_uint16_logic(const uint16_t
 
 VMBIN_HANDLER_BINARY_TYPED_EXIT(scalar_generated_div_uint16_uint8_uint16, scalar_generated_div_uint16_uint8_uint16_logic, uint16_t, uint8_t, uint16_t)
 
+static inline void scalar_generated_div_uint32_float32_float32_logic(const uint32_t *a, const float *b, float *c) {
+    *c = (float)*a / (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_div_uint32_float32_float32, scalar_generated_div_uint32_float32_float32_logic, uint32_t, float, float)
+
 static inline void scalar_generated_div_uint32_float64_float64_logic(const uint32_t *a, const double *b, double *c) {
     *c = (double)*a / (double)*b;
 }
@@ -1441,6 +1579,12 @@ static inline void scalar_generated_div_uint32_uint8_uint32_logic(const uint32_t
 }
 
 VMBIN_HANDLER_BINARY_TYPED_EXIT(scalar_generated_div_uint32_uint8_uint32, scalar_generated_div_uint32_uint8_uint32_logic, uint32_t, uint8_t, uint32_t)
+
+static inline void scalar_generated_div_uint64_float32_float32_logic(const uint64_t *a, const float *b, float *c) {
+    *c = (float)*a / (float)*b;
+}
+
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_div_uint64_float32_float32, scalar_generated_div_uint64_float32_float32_logic, uint64_t, float, float)
 
 static inline void scalar_generated_div_uint64_float64_float64_logic(const uint64_t *a, const double *b, double *c) {
     *c = (double)*a / (double)*b;
@@ -1724,11 +1868,11 @@ static inline void scalar_generated_max_float32_int32_float32_logic(const float 
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_float32_int32_float32, scalar_generated_max_float32_int32_float32_logic, float, int32_t, float)
 
-static inline void scalar_generated_max_float32_int64_int64_logic(const float *a, const int64_t *b, int64_t *c) {
-    *c = (int64_t)((int64_t)*a > (int64_t)*b ? *a : *b);
+static inline void scalar_generated_max_float32_int64_float32_logic(const float *a, const int64_t *b, float *c) {
+    *c = runtimec_scalar_float_max((double)*a, (double)*b);
 }
 
-VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_float32_int64_int64, scalar_generated_max_float32_int64_int64_logic, float, int64_t, int64_t)
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_float32_int64_float32, scalar_generated_max_float32_int64_float32_logic, float, int64_t, float)
 
 static inline void scalar_generated_max_float32_int8_float32_logic(const float *a, const int8_t *b, float *c) {
     *c = runtimec_scalar_float_max((double)*a, (double)*b);
@@ -1748,11 +1892,11 @@ static inline void scalar_generated_max_float32_uint32_float32_logic(const float
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_float32_uint32_float32, scalar_generated_max_float32_uint32_float32_logic, float, uint32_t, float)
 
-static inline void scalar_generated_max_float32_uint64_uint64_logic(const float *a, const uint64_t *b, uint64_t *c) {
-    *c = (uint64_t)((uint64_t)*a > (uint64_t)*b ? *a : *b);
+static inline void scalar_generated_max_float32_uint64_float32_logic(const float *a, const uint64_t *b, float *c) {
+    *c = runtimec_scalar_float_max((double)*a, (double)*b);
 }
 
-VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_float32_uint64_uint64, scalar_generated_max_float32_uint64_uint64_logic, float, uint64_t, uint64_t)
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_float32_uint64_float32, scalar_generated_max_float32_uint64_float32_logic, float, uint64_t, float)
 
 static inline void scalar_generated_max_float32_uint8_float32_logic(const float *a, const uint8_t *b, float *c) {
     *c = runtimec_scalar_float_max((double)*a, (double)*b);
@@ -1856,11 +2000,11 @@ static inline void scalar_generated_max_int16_int8_int16_logic(const int16_t *a,
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_int16_int8_int16, scalar_generated_max_int16_int8_int16_logic, int16_t, int8_t, int16_t)
 
-static inline void scalar_generated_max_int32_float32_int32_logic(const int32_t *a, const float *b, int32_t *c) {
-    *c = (int32_t)((int32_t)*a > (int32_t)*b ? *a : *b);
+static inline void scalar_generated_max_int32_float32_float32_logic(const int32_t *a, const float *b, float *c) {
+    *c = runtimec_scalar_float_max((double)*a, (double)*b);
 }
 
-VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_int32_float32_int32, scalar_generated_max_int32_float32_int32_logic, int32_t, float, int32_t)
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_int32_float32_float32, scalar_generated_max_int32_float32_float32_logic, int32_t, float, float)
 
 static inline void scalar_generated_max_int32_float64_float64_logic(const int32_t *a, const double *b, double *c) {
     *c = runtimec_scalar_float_max((double)*a, (double)*b);
@@ -1892,11 +2036,11 @@ static inline void scalar_generated_max_int32_int8_int32_logic(const int32_t *a,
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_int32_int8_int32, scalar_generated_max_int32_int8_int32_logic, int32_t, int8_t, int32_t)
 
-static inline void scalar_generated_max_int64_float32_int64_logic(const int64_t *a, const float *b, int64_t *c) {
-    *c = (int64_t)((int64_t)*a > (int64_t)*b ? *a : *b);
+static inline void scalar_generated_max_int64_float32_float32_logic(const int64_t *a, const float *b, float *c) {
+    *c = runtimec_scalar_float_max((double)*a, (double)*b);
 }
 
-VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_int64_float32_int64, scalar_generated_max_int64_float32_int64_logic, int64_t, float, int64_t)
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_int64_float32_float32, scalar_generated_max_int64_float32_float32_logic, int64_t, float, float)
 
 static inline void scalar_generated_max_int64_float64_float64_logic(const int64_t *a, const double *b, double *c) {
     *c = runtimec_scalar_float_max((double)*a, (double)*b);
@@ -2000,11 +2144,11 @@ static inline void scalar_generated_max_uint16_uint8_uint16_logic(const uint16_t
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_uint16_uint8_uint16, scalar_generated_max_uint16_uint8_uint16_logic, uint16_t, uint8_t, uint16_t)
 
-static inline void scalar_generated_max_uint32_float32_uint32_logic(const uint32_t *a, const float *b, uint32_t *c) {
-    *c = (uint32_t)((uint32_t)*a > (uint32_t)*b ? *a : *b);
+static inline void scalar_generated_max_uint32_float32_float32_logic(const uint32_t *a, const float *b, float *c) {
+    *c = runtimec_scalar_float_max((double)*a, (double)*b);
 }
 
-VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_uint32_float32_uint32, scalar_generated_max_uint32_float32_uint32_logic, uint32_t, float, uint32_t)
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_uint32_float32_float32, scalar_generated_max_uint32_float32_float32_logic, uint32_t, float, float)
 
 static inline void scalar_generated_max_uint32_float64_float64_logic(const uint32_t *a, const double *b, double *c) {
     *c = runtimec_scalar_float_max((double)*a, (double)*b);
@@ -2036,11 +2180,11 @@ static inline void scalar_generated_max_uint32_uint8_uint32_logic(const uint32_t
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_uint32_uint8_uint32, scalar_generated_max_uint32_uint8_uint32_logic, uint32_t, uint8_t, uint32_t)
 
-static inline void scalar_generated_max_uint64_float32_uint64_logic(const uint64_t *a, const float *b, uint64_t *c) {
-    *c = (uint64_t)((uint64_t)*a > (uint64_t)*b ? *a : *b);
+static inline void scalar_generated_max_uint64_float32_float32_logic(const uint64_t *a, const float *b, float *c) {
+    *c = runtimec_scalar_float_max((double)*a, (double)*b);
 }
 
-VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_uint64_float32_uint64, scalar_generated_max_uint64_float32_uint64_logic, uint64_t, float, uint64_t)
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_max_uint64_float32_float32, scalar_generated_max_uint64_float32_float32_logic, uint64_t, float, float)
 
 static inline void scalar_generated_max_uint64_float64_float64_logic(const uint64_t *a, const double *b, double *c) {
     *c = runtimec_scalar_float_max((double)*a, (double)*b);
@@ -2132,11 +2276,11 @@ static inline void scalar_generated_min_float32_int32_float32_logic(const float 
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_float32_int32_float32, scalar_generated_min_float32_int32_float32_logic, float, int32_t, float)
 
-static inline void scalar_generated_min_float32_int64_int64_logic(const float *a, const int64_t *b, int64_t *c) {
-    *c = (int64_t)((int64_t)*a < (int64_t)*b ? *a : *b);
+static inline void scalar_generated_min_float32_int64_float32_logic(const float *a, const int64_t *b, float *c) {
+    *c = runtimec_scalar_float_min((double)*a, (double)*b);
 }
 
-VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_float32_int64_int64, scalar_generated_min_float32_int64_int64_logic, float, int64_t, int64_t)
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_float32_int64_float32, scalar_generated_min_float32_int64_float32_logic, float, int64_t, float)
 
 static inline void scalar_generated_min_float32_int8_float32_logic(const float *a, const int8_t *b, float *c) {
     *c = runtimec_scalar_float_min((double)*a, (double)*b);
@@ -2156,11 +2300,11 @@ static inline void scalar_generated_min_float32_uint32_float32_logic(const float
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_float32_uint32_float32, scalar_generated_min_float32_uint32_float32_logic, float, uint32_t, float)
 
-static inline void scalar_generated_min_float32_uint64_uint64_logic(const float *a, const uint64_t *b, uint64_t *c) {
-    *c = (uint64_t)((uint64_t)*a < (uint64_t)*b ? *a : *b);
+static inline void scalar_generated_min_float32_uint64_float32_logic(const float *a, const uint64_t *b, float *c) {
+    *c = runtimec_scalar_float_min((double)*a, (double)*b);
 }
 
-VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_float32_uint64_uint64, scalar_generated_min_float32_uint64_uint64_logic, float, uint64_t, uint64_t)
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_float32_uint64_float32, scalar_generated_min_float32_uint64_float32_logic, float, uint64_t, float)
 
 static inline void scalar_generated_min_float32_uint8_float32_logic(const float *a, const uint8_t *b, float *c) {
     *c = runtimec_scalar_float_min((double)*a, (double)*b);
@@ -2264,11 +2408,11 @@ static inline void scalar_generated_min_int16_int8_int16_logic(const int16_t *a,
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_int16_int8_int16, scalar_generated_min_int16_int8_int16_logic, int16_t, int8_t, int16_t)
 
-static inline void scalar_generated_min_int32_float32_int32_logic(const int32_t *a, const float *b, int32_t *c) {
-    *c = (int32_t)((int32_t)*a < (int32_t)*b ? *a : *b);
+static inline void scalar_generated_min_int32_float32_float32_logic(const int32_t *a, const float *b, float *c) {
+    *c = runtimec_scalar_float_min((double)*a, (double)*b);
 }
 
-VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_int32_float32_int32, scalar_generated_min_int32_float32_int32_logic, int32_t, float, int32_t)
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_int32_float32_float32, scalar_generated_min_int32_float32_float32_logic, int32_t, float, float)
 
 static inline void scalar_generated_min_int32_float64_float64_logic(const int32_t *a, const double *b, double *c) {
     *c = runtimec_scalar_float_min((double)*a, (double)*b);
@@ -2300,11 +2444,11 @@ static inline void scalar_generated_min_int32_int8_int32_logic(const int32_t *a,
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_int32_int8_int32, scalar_generated_min_int32_int8_int32_logic, int32_t, int8_t, int32_t)
 
-static inline void scalar_generated_min_int64_float32_int64_logic(const int64_t *a, const float *b, int64_t *c) {
-    *c = (int64_t)((int64_t)*a < (int64_t)*b ? *a : *b);
+static inline void scalar_generated_min_int64_float32_float32_logic(const int64_t *a, const float *b, float *c) {
+    *c = runtimec_scalar_float_min((double)*a, (double)*b);
 }
 
-VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_int64_float32_int64, scalar_generated_min_int64_float32_int64_logic, int64_t, float, int64_t)
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_int64_float32_float32, scalar_generated_min_int64_float32_float32_logic, int64_t, float, float)
 
 static inline void scalar_generated_min_int64_float64_float64_logic(const int64_t *a, const double *b, double *c) {
     *c = runtimec_scalar_float_min((double)*a, (double)*b);
@@ -2408,11 +2552,11 @@ static inline void scalar_generated_min_uint16_uint8_uint16_logic(const uint16_t
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_uint16_uint8_uint16, scalar_generated_min_uint16_uint8_uint16_logic, uint16_t, uint8_t, uint16_t)
 
-static inline void scalar_generated_min_uint32_float32_uint32_logic(const uint32_t *a, const float *b, uint32_t *c) {
-    *c = (uint32_t)((uint32_t)*a < (uint32_t)*b ? *a : *b);
+static inline void scalar_generated_min_uint32_float32_float32_logic(const uint32_t *a, const float *b, float *c) {
+    *c = runtimec_scalar_float_min((double)*a, (double)*b);
 }
 
-VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_uint32_float32_uint32, scalar_generated_min_uint32_float32_uint32_logic, uint32_t, float, uint32_t)
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_uint32_float32_float32, scalar_generated_min_uint32_float32_float32_logic, uint32_t, float, float)
 
 static inline void scalar_generated_min_uint32_float64_float64_logic(const uint32_t *a, const double *b, double *c) {
     *c = runtimec_scalar_float_min((double)*a, (double)*b);
@@ -2444,11 +2588,11 @@ static inline void scalar_generated_min_uint32_uint8_uint32_logic(const uint32_t
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_uint32_uint8_uint32, scalar_generated_min_uint32_uint8_uint32_logic, uint32_t, uint8_t, uint32_t)
 
-static inline void scalar_generated_min_uint64_float32_uint64_logic(const uint64_t *a, const float *b, uint64_t *c) {
-    *c = (uint64_t)((uint64_t)*a < (uint64_t)*b ? *a : *b);
+static inline void scalar_generated_min_uint64_float32_float32_logic(const uint64_t *a, const float *b, float *c) {
+    *c = runtimec_scalar_float_min((double)*a, (double)*b);
 }
 
-VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_uint64_float32_uint64, scalar_generated_min_uint64_float32_uint64_logic, uint64_t, float, uint64_t)
+VMBIN_HANDLER_BINARY_TYPED(scalar_generated_min_uint64_float32_float32, scalar_generated_min_uint64_float32_float32_logic, uint64_t, float, float)
 
 static inline void scalar_generated_min_uint64_float64_float64_logic(const uint64_t *a, const double *b, double *c) {
     *c = runtimec_scalar_float_min((double)*a, (double)*b);
@@ -3273,385 +3417,385 @@ static inline void scalar_generated_bitwise_xor_uint8_uint8_uint8_logic(const ui
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_bitwise_xor_uint8_uint8_uint8, scalar_generated_bitwise_xor_uint8_uint8_uint8_logic, uint8_t, uint8_t, uint8_t)
 
 static inline void scalar_generated_shift_left_int16_int16_int16_logic(const int16_t *a, const int16_t *b, int16_t *c) {
-    *c = (int16_t)runtimec_scalar_shift_left_signed((int16_t)*a, ((uint64_t)*b & 15U), 16U);
+    *c = (int16_t)runtimec_scalar_shift_left_signed((int16_t)*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int16_int16_int16, scalar_generated_shift_left_int16_int16_int16_logic, int16_t, int16_t, int16_t)
 
 static inline void scalar_generated_shift_left_int16_int32_int32_logic(const int16_t *a, const int32_t *b, int32_t *c) {
-    *c = (int32_t)runtimec_scalar_shift_left_signed((int16_t)*a, ((uint64_t)*b & 15U), 16U);
+    *c = (int32_t)runtimec_scalar_shift_left_signed((int16_t)*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int16_int32_int32, scalar_generated_shift_left_int16_int32_int32_logic, int16_t, int32_t, int32_t)
 
 static inline void scalar_generated_shift_left_int16_int64_int64_logic(const int16_t *a, const int64_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_left_signed((int16_t)*a, ((uint64_t)*b & 15U), 16U);
+    *c = (int64_t)runtimec_scalar_shift_left_signed((int16_t)*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int16_int64_int64, scalar_generated_shift_left_int16_int64_int64_logic, int16_t, int64_t, int64_t)
 
 static inline void scalar_generated_shift_left_int16_int8_int16_logic(const int16_t *a, const int8_t *b, int16_t *c) {
-    *c = (int16_t)runtimec_scalar_shift_left_signed((int16_t)*a, ((uint64_t)*b & 15U), 16U);
+    *c = (int16_t)runtimec_scalar_shift_left_signed((int16_t)*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int16_int8_int16, scalar_generated_shift_left_int16_int8_int16_logic, int16_t, int8_t, int16_t)
 
 static inline void scalar_generated_shift_left_int32_int16_int32_logic(const int32_t *a, const int16_t *b, int32_t *c) {
-    *c = (int32_t)runtimec_scalar_shift_left_signed((int32_t)*a, ((uint64_t)*b & 31U), 32U);
+    *c = (int32_t)runtimec_scalar_shift_left_signed((int32_t)*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int32_int16_int32, scalar_generated_shift_left_int32_int16_int32_logic, int32_t, int16_t, int32_t)
 
 static inline void scalar_generated_shift_left_int32_int32_int32_logic(const int32_t *a, const int32_t *b, int32_t *c) {
-    *c = (int32_t)runtimec_scalar_shift_left_signed((int32_t)*a, ((uint64_t)*b & 31U), 32U);
+    *c = (int32_t)runtimec_scalar_shift_left_signed((int32_t)*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int32_int32_int32, scalar_generated_shift_left_int32_int32_int32_logic, int32_t, int32_t, int32_t)
 
 static inline void scalar_generated_shift_left_int32_int64_int64_logic(const int32_t *a, const int64_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_left_signed((int32_t)*a, ((uint64_t)*b & 31U), 32U);
+    *c = (int64_t)runtimec_scalar_shift_left_signed((int32_t)*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int32_int64_int64, scalar_generated_shift_left_int32_int64_int64_logic, int32_t, int64_t, int64_t)
 
 static inline void scalar_generated_shift_left_int32_int8_int32_logic(const int32_t *a, const int8_t *b, int32_t *c) {
-    *c = (int32_t)runtimec_scalar_shift_left_signed((int32_t)*a, ((uint64_t)*b & 31U), 32U);
+    *c = (int32_t)runtimec_scalar_shift_left_signed((int32_t)*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int32_int8_int32, scalar_generated_shift_left_int32_int8_int32_logic, int32_t, int8_t, int32_t)
 
 static inline void scalar_generated_shift_left_int64_int16_int64_logic(const int64_t *a, const int16_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_left_signed((int64_t)*a, ((uint64_t)*b & 63U), 64U);
+    *c = (int64_t)runtimec_scalar_shift_left_signed((int64_t)*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int64_int16_int64, scalar_generated_shift_left_int64_int16_int64_logic, int64_t, int16_t, int64_t)
 
 static inline void scalar_generated_shift_left_int64_int32_int64_logic(const int64_t *a, const int32_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_left_signed((int64_t)*a, ((uint64_t)*b & 63U), 64U);
+    *c = (int64_t)runtimec_scalar_shift_left_signed((int64_t)*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int64_int32_int64, scalar_generated_shift_left_int64_int32_int64_logic, int64_t, int32_t, int64_t)
 
 static inline void scalar_generated_shift_left_int64_int64_int64_logic(const int64_t *a, const int64_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_left_signed((int64_t)*a, ((uint64_t)*b & 63U), 64U);
+    *c = (int64_t)runtimec_scalar_shift_left_signed((int64_t)*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int64_int64_int64, scalar_generated_shift_left_int64_int64_int64_logic, int64_t, int64_t, int64_t)
 
 static inline void scalar_generated_shift_left_int64_int8_int64_logic(const int64_t *a, const int8_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_left_signed((int64_t)*a, ((uint64_t)*b & 63U), 64U);
+    *c = (int64_t)runtimec_scalar_shift_left_signed((int64_t)*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int64_int8_int64, scalar_generated_shift_left_int64_int8_int64_logic, int64_t, int8_t, int64_t)
 
 static inline void scalar_generated_shift_left_int8_int16_int16_logic(const int8_t *a, const int16_t *b, int16_t *c) {
-    *c = (int16_t)runtimec_scalar_shift_left_signed((int8_t)*a, ((uint64_t)*b & 7U), 8U);
+    *c = (int16_t)runtimec_scalar_shift_left_signed((int8_t)*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int8_int16_int16, scalar_generated_shift_left_int8_int16_int16_logic, int8_t, int16_t, int16_t)
 
 static inline void scalar_generated_shift_left_int8_int32_int32_logic(const int8_t *a, const int32_t *b, int32_t *c) {
-    *c = (int32_t)runtimec_scalar_shift_left_signed((int8_t)*a, ((uint64_t)*b & 7U), 8U);
+    *c = (int32_t)runtimec_scalar_shift_left_signed((int8_t)*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int8_int32_int32, scalar_generated_shift_left_int8_int32_int32_logic, int8_t, int32_t, int32_t)
 
 static inline void scalar_generated_shift_left_int8_int64_int64_logic(const int8_t *a, const int64_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_left_signed((int8_t)*a, ((uint64_t)*b & 7U), 8U);
+    *c = (int64_t)runtimec_scalar_shift_left_signed((int8_t)*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int8_int64_int64, scalar_generated_shift_left_int8_int64_int64_logic, int8_t, int64_t, int64_t)
 
 static inline void scalar_generated_shift_left_int8_int8_int8_logic(const int8_t *a, const int8_t *b, int8_t *c) {
-    *c = (int8_t)runtimec_scalar_shift_left_signed((int8_t)*a, ((uint64_t)*b & 7U), 8U);
+    *c = (int8_t)runtimec_scalar_shift_left_signed((int8_t)*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_int8_int8_int8, scalar_generated_shift_left_int8_int8_int8_logic, int8_t, int8_t, int8_t)
 
 static inline void scalar_generated_shift_left_uint16_uint16_uint16_logic(const uint16_t *a, const uint16_t *b, uint16_t *c) {
-    *c = (uint16_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 15U), 16U);
+    *c = (uint16_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint16_uint16_uint16, scalar_generated_shift_left_uint16_uint16_uint16_logic, uint16_t, uint16_t, uint16_t)
 
 static inline void scalar_generated_shift_left_uint16_uint32_uint32_logic(const uint16_t *a, const uint32_t *b, uint32_t *c) {
-    *c = (uint32_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 15U), 16U);
+    *c = (uint32_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint16_uint32_uint32, scalar_generated_shift_left_uint16_uint32_uint32_logic, uint16_t, uint32_t, uint32_t)
 
 static inline void scalar_generated_shift_left_uint16_uint64_uint64_logic(const uint16_t *a, const uint64_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 15U), 16U);
+    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint16_uint64_uint64, scalar_generated_shift_left_uint16_uint64_uint64_logic, uint16_t, uint64_t, uint64_t)
 
 static inline void scalar_generated_shift_left_uint16_uint8_uint16_logic(const uint16_t *a, const uint8_t *b, uint16_t *c) {
-    *c = (uint16_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 15U), 16U);
+    *c = (uint16_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint16_uint8_uint16, scalar_generated_shift_left_uint16_uint8_uint16_logic, uint16_t, uint8_t, uint16_t)
 
 static inline void scalar_generated_shift_left_uint32_uint16_uint32_logic(const uint32_t *a, const uint16_t *b, uint32_t *c) {
-    *c = (uint32_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 31U), 32U);
+    *c = (uint32_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint32_uint16_uint32, scalar_generated_shift_left_uint32_uint16_uint32_logic, uint32_t, uint16_t, uint32_t)
 
 static inline void scalar_generated_shift_left_uint32_uint32_uint32_logic(const uint32_t *a, const uint32_t *b, uint32_t *c) {
-    *c = (uint32_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 31U), 32U);
+    *c = (uint32_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint32_uint32_uint32, scalar_generated_shift_left_uint32_uint32_uint32_logic, uint32_t, uint32_t, uint32_t)
 
 static inline void scalar_generated_shift_left_uint32_uint64_uint64_logic(const uint32_t *a, const uint64_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 31U), 32U);
+    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint32_uint64_uint64, scalar_generated_shift_left_uint32_uint64_uint64_logic, uint32_t, uint64_t, uint64_t)
 
 static inline void scalar_generated_shift_left_uint32_uint8_uint32_logic(const uint32_t *a, const uint8_t *b, uint32_t *c) {
-    *c = (uint32_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 31U), 32U);
+    *c = (uint32_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint32_uint8_uint32, scalar_generated_shift_left_uint32_uint8_uint32_logic, uint32_t, uint8_t, uint32_t)
 
 static inline void scalar_generated_shift_left_uint64_uint16_uint64_logic(const uint64_t *a, const uint16_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 63U), 64U);
+    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint64_uint16_uint64, scalar_generated_shift_left_uint64_uint16_uint64_logic, uint64_t, uint16_t, uint64_t)
 
 static inline void scalar_generated_shift_left_uint64_uint32_uint64_logic(const uint64_t *a, const uint32_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 63U), 64U);
+    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint64_uint32_uint64, scalar_generated_shift_left_uint64_uint32_uint64_logic, uint64_t, uint32_t, uint64_t)
 
 static inline void scalar_generated_shift_left_uint64_uint64_uint64_logic(const uint64_t *a, const uint64_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 63U), 64U);
+    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint64_uint64_uint64, scalar_generated_shift_left_uint64_uint64_uint64_logic, uint64_t, uint64_t, uint64_t)
 
 static inline void scalar_generated_shift_left_uint64_uint8_uint64_logic(const uint64_t *a, const uint8_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 63U), 64U);
+    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint64_uint8_uint64, scalar_generated_shift_left_uint64_uint8_uint64_logic, uint64_t, uint8_t, uint64_t)
 
 static inline void scalar_generated_shift_left_uint8_uint16_uint16_logic(const uint8_t *a, const uint16_t *b, uint16_t *c) {
-    *c = (uint16_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 7U), 8U);
+    *c = (uint16_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint8_uint16_uint16, scalar_generated_shift_left_uint8_uint16_uint16_logic, uint8_t, uint16_t, uint16_t)
 
 static inline void scalar_generated_shift_left_uint8_uint32_uint32_logic(const uint8_t *a, const uint32_t *b, uint32_t *c) {
-    *c = (uint32_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 7U), 8U);
+    *c = (uint32_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint8_uint32_uint32, scalar_generated_shift_left_uint8_uint32_uint32_logic, uint8_t, uint32_t, uint32_t)
 
 static inline void scalar_generated_shift_left_uint8_uint64_uint64_logic(const uint8_t *a, const uint64_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 7U), 8U);
+    *c = (uint64_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint8_uint64_uint64, scalar_generated_shift_left_uint8_uint64_uint64_logic, uint8_t, uint64_t, uint64_t)
 
 static inline void scalar_generated_shift_left_uint8_uint8_uint8_logic(const uint8_t *a, const uint8_t *b, uint8_t *c) {
-    *c = (uint8_t)runtimec_scalar_shift_left_unsigned(*a, ((uint64_t)*b & 7U), 8U);
+    *c = (uint8_t)runtimec_scalar_shift_left_unsigned(*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_left_uint8_uint8_uint8, scalar_generated_shift_left_uint8_uint8_uint8_logic, uint8_t, uint8_t, uint8_t)
 
 static inline void scalar_generated_shift_right_int16_int16_int16_logic(const int16_t *a, const int16_t *b, int16_t *c) {
-    *c = (int16_t)runtimec_scalar_shift_right_signed((int16_t)*a, ((uint64_t)*b & 15U), 16U);
+    *c = (int16_t)runtimec_scalar_shift_right_signed((int16_t)*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int16_int16_int16, scalar_generated_shift_right_int16_int16_int16_logic, int16_t, int16_t, int16_t)
 
 static inline void scalar_generated_shift_right_int16_int32_int32_logic(const int16_t *a, const int32_t *b, int32_t *c) {
-    *c = (int32_t)runtimec_scalar_shift_right_signed((int16_t)*a, ((uint64_t)*b & 15U), 16U);
+    *c = (int32_t)runtimec_scalar_shift_right_signed((int16_t)*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int16_int32_int32, scalar_generated_shift_right_int16_int32_int32_logic, int16_t, int32_t, int32_t)
 
 static inline void scalar_generated_shift_right_int16_int64_int64_logic(const int16_t *a, const int64_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_right_signed((int16_t)*a, ((uint64_t)*b & 15U), 16U);
+    *c = (int64_t)runtimec_scalar_shift_right_signed((int16_t)*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int16_int64_int64, scalar_generated_shift_right_int16_int64_int64_logic, int16_t, int64_t, int64_t)
 
 static inline void scalar_generated_shift_right_int16_int8_int16_logic(const int16_t *a, const int8_t *b, int16_t *c) {
-    *c = (int16_t)runtimec_scalar_shift_right_signed((int16_t)*a, ((uint64_t)*b & 15U), 16U);
+    *c = (int16_t)runtimec_scalar_shift_right_signed((int16_t)*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int16_int8_int16, scalar_generated_shift_right_int16_int8_int16_logic, int16_t, int8_t, int16_t)
 
 static inline void scalar_generated_shift_right_int32_int16_int32_logic(const int32_t *a, const int16_t *b, int32_t *c) {
-    *c = (int32_t)runtimec_scalar_shift_right_signed((int32_t)*a, ((uint64_t)*b & 31U), 32U);
+    *c = (int32_t)runtimec_scalar_shift_right_signed((int32_t)*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int32_int16_int32, scalar_generated_shift_right_int32_int16_int32_logic, int32_t, int16_t, int32_t)
 
 static inline void scalar_generated_shift_right_int32_int32_int32_logic(const int32_t *a, const int32_t *b, int32_t *c) {
-    *c = (int32_t)runtimec_scalar_shift_right_signed((int32_t)*a, ((uint64_t)*b & 31U), 32U);
+    *c = (int32_t)runtimec_scalar_shift_right_signed((int32_t)*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int32_int32_int32, scalar_generated_shift_right_int32_int32_int32_logic, int32_t, int32_t, int32_t)
 
 static inline void scalar_generated_shift_right_int32_int64_int64_logic(const int32_t *a, const int64_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_right_signed((int32_t)*a, ((uint64_t)*b & 31U), 32U);
+    *c = (int64_t)runtimec_scalar_shift_right_signed((int32_t)*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int32_int64_int64, scalar_generated_shift_right_int32_int64_int64_logic, int32_t, int64_t, int64_t)
 
 static inline void scalar_generated_shift_right_int32_int8_int32_logic(const int32_t *a, const int8_t *b, int32_t *c) {
-    *c = (int32_t)runtimec_scalar_shift_right_signed((int32_t)*a, ((uint64_t)*b & 31U), 32U);
+    *c = (int32_t)runtimec_scalar_shift_right_signed((int32_t)*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int32_int8_int32, scalar_generated_shift_right_int32_int8_int32_logic, int32_t, int8_t, int32_t)
 
 static inline void scalar_generated_shift_right_int64_int16_int64_logic(const int64_t *a, const int16_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_right_signed((int64_t)*a, ((uint64_t)*b & 63U), 64U);
+    *c = (int64_t)runtimec_scalar_shift_right_signed((int64_t)*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int64_int16_int64, scalar_generated_shift_right_int64_int16_int64_logic, int64_t, int16_t, int64_t)
 
 static inline void scalar_generated_shift_right_int64_int32_int64_logic(const int64_t *a, const int32_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_right_signed((int64_t)*a, ((uint64_t)*b & 63U), 64U);
+    *c = (int64_t)runtimec_scalar_shift_right_signed((int64_t)*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int64_int32_int64, scalar_generated_shift_right_int64_int32_int64_logic, int64_t, int32_t, int64_t)
 
 static inline void scalar_generated_shift_right_int64_int64_int64_logic(const int64_t *a, const int64_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_right_signed((int64_t)*a, ((uint64_t)*b & 63U), 64U);
+    *c = (int64_t)runtimec_scalar_shift_right_signed((int64_t)*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int64_int64_int64, scalar_generated_shift_right_int64_int64_int64_logic, int64_t, int64_t, int64_t)
 
 static inline void scalar_generated_shift_right_int64_int8_int64_logic(const int64_t *a, const int8_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_right_signed((int64_t)*a, ((uint64_t)*b & 63U), 64U);
+    *c = (int64_t)runtimec_scalar_shift_right_signed((int64_t)*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int64_int8_int64, scalar_generated_shift_right_int64_int8_int64_logic, int64_t, int8_t, int64_t)
 
 static inline void scalar_generated_shift_right_int8_int16_int16_logic(const int8_t *a, const int16_t *b, int16_t *c) {
-    *c = (int16_t)runtimec_scalar_shift_right_signed((int8_t)*a, ((uint64_t)*b & 7U), 8U);
+    *c = (int16_t)runtimec_scalar_shift_right_signed((int8_t)*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int8_int16_int16, scalar_generated_shift_right_int8_int16_int16_logic, int8_t, int16_t, int16_t)
 
 static inline void scalar_generated_shift_right_int8_int32_int32_logic(const int8_t *a, const int32_t *b, int32_t *c) {
-    *c = (int32_t)runtimec_scalar_shift_right_signed((int8_t)*a, ((uint64_t)*b & 7U), 8U);
+    *c = (int32_t)runtimec_scalar_shift_right_signed((int8_t)*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int8_int32_int32, scalar_generated_shift_right_int8_int32_int32_logic, int8_t, int32_t, int32_t)
 
 static inline void scalar_generated_shift_right_int8_int64_int64_logic(const int8_t *a, const int64_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_right_signed((int8_t)*a, ((uint64_t)*b & 7U), 8U);
+    *c = (int64_t)runtimec_scalar_shift_right_signed((int8_t)*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int8_int64_int64, scalar_generated_shift_right_int8_int64_int64_logic, int8_t, int64_t, int64_t)
 
 static inline void scalar_generated_shift_right_int8_int8_int8_logic(const int8_t *a, const int8_t *b, int8_t *c) {
-    *c = (int8_t)runtimec_scalar_shift_right_signed((int8_t)*a, ((uint64_t)*b & 7U), 8U);
+    *c = (int8_t)runtimec_scalar_shift_right_signed((int8_t)*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_int8_int8_int8, scalar_generated_shift_right_int8_int8_int8_logic, int8_t, int8_t, int8_t)
 
 static inline void scalar_generated_shift_right_uint16_uint16_uint16_logic(const uint16_t *a, const uint16_t *b, uint16_t *c) {
-    *c = (uint16_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 15U), 16U);
+    *c = (uint16_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint16_uint16_uint16, scalar_generated_shift_right_uint16_uint16_uint16_logic, uint16_t, uint16_t, uint16_t)
 
 static inline void scalar_generated_shift_right_uint16_uint32_uint32_logic(const uint16_t *a, const uint32_t *b, uint32_t *c) {
-    *c = (uint32_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 15U), 16U);
+    *c = (uint32_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint16_uint32_uint32, scalar_generated_shift_right_uint16_uint32_uint32_logic, uint16_t, uint32_t, uint32_t)
 
 static inline void scalar_generated_shift_right_uint16_uint64_uint64_logic(const uint16_t *a, const uint64_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 15U), 16U);
+    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint16_uint64_uint64, scalar_generated_shift_right_uint16_uint64_uint64_logic, uint16_t, uint64_t, uint64_t)
 
 static inline void scalar_generated_shift_right_uint16_uint8_uint16_logic(const uint16_t *a, const uint8_t *b, uint16_t *c) {
-    *c = (uint16_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 15U), 16U);
+    *c = (uint16_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 16U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint16_uint8_uint16, scalar_generated_shift_right_uint16_uint8_uint16_logic, uint16_t, uint8_t, uint16_t)
 
 static inline void scalar_generated_shift_right_uint32_uint16_uint32_logic(const uint32_t *a, const uint16_t *b, uint32_t *c) {
-    *c = (uint32_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 31U), 32U);
+    *c = (uint32_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint32_uint16_uint32, scalar_generated_shift_right_uint32_uint16_uint32_logic, uint32_t, uint16_t, uint32_t)
 
 static inline void scalar_generated_shift_right_uint32_uint32_uint32_logic(const uint32_t *a, const uint32_t *b, uint32_t *c) {
-    *c = (uint32_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 31U), 32U);
+    *c = (uint32_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint32_uint32_uint32, scalar_generated_shift_right_uint32_uint32_uint32_logic, uint32_t, uint32_t, uint32_t)
 
 static inline void scalar_generated_shift_right_uint32_uint64_uint64_logic(const uint32_t *a, const uint64_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 31U), 32U);
+    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint32_uint64_uint64, scalar_generated_shift_right_uint32_uint64_uint64_logic, uint32_t, uint64_t, uint64_t)
 
 static inline void scalar_generated_shift_right_uint32_uint8_uint32_logic(const uint32_t *a, const uint8_t *b, uint32_t *c) {
-    *c = (uint32_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 31U), 32U);
+    *c = (uint32_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 32U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint32_uint8_uint32, scalar_generated_shift_right_uint32_uint8_uint32_logic, uint32_t, uint8_t, uint32_t)
 
 static inline void scalar_generated_shift_right_uint64_uint16_uint64_logic(const uint64_t *a, const uint16_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 63U), 64U);
+    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint64_uint16_uint64, scalar_generated_shift_right_uint64_uint16_uint64_logic, uint64_t, uint16_t, uint64_t)
 
 static inline void scalar_generated_shift_right_uint64_uint32_uint64_logic(const uint64_t *a, const uint32_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 63U), 64U);
+    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint64_uint32_uint64, scalar_generated_shift_right_uint64_uint32_uint64_logic, uint64_t, uint32_t, uint64_t)
 
 static inline void scalar_generated_shift_right_uint64_uint64_uint64_logic(const uint64_t *a, const uint64_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 63U), 64U);
+    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint64_uint64_uint64, scalar_generated_shift_right_uint64_uint64_uint64_logic, uint64_t, uint64_t, uint64_t)
 
 static inline void scalar_generated_shift_right_uint64_uint8_uint64_logic(const uint64_t *a, const uint8_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 63U), 64U);
+    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 64U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint64_uint8_uint64, scalar_generated_shift_right_uint64_uint8_uint64_logic, uint64_t, uint8_t, uint64_t)
 
 static inline void scalar_generated_shift_right_uint8_uint16_uint16_logic(const uint8_t *a, const uint16_t *b, uint16_t *c) {
-    *c = (uint16_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 7U), 8U);
+    *c = (uint16_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint8_uint16_uint16, scalar_generated_shift_right_uint8_uint16_uint16_logic, uint8_t, uint16_t, uint16_t)
 
 static inline void scalar_generated_shift_right_uint8_uint32_uint32_logic(const uint8_t *a, const uint32_t *b, uint32_t *c) {
-    *c = (uint32_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 7U), 8U);
+    *c = (uint32_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint8_uint32_uint32, scalar_generated_shift_right_uint8_uint32_uint32_logic, uint8_t, uint32_t, uint32_t)
 
 static inline void scalar_generated_shift_right_uint8_uint64_uint64_logic(const uint8_t *a, const uint64_t *b, uint64_t *c) {
-    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 7U), 8U);
+    *c = (uint64_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint8_uint64_uint64, scalar_generated_shift_right_uint8_uint64_uint64_logic, uint8_t, uint64_t, uint64_t)
 
 static inline void scalar_generated_shift_right_uint8_uint8_uint8_logic(const uint8_t *a, const uint8_t *b, uint8_t *c) {
-    *c = (uint8_t)runtimec_scalar_shift_right_unsigned(*a, ((uint64_t)*b & 7U), 8U);
+    *c = (uint8_t)runtimec_scalar_shift_right_unsigned(*a, (uint64_t)*b, 8U);
 }
 
 VMBIN_HANDLER_BINARY_TYPED(scalar_generated_shift_right_uint8_uint8_uint8, scalar_generated_shift_right_uint8_uint8_uint8_logic, uint8_t, uint8_t, uint8_t)
@@ -9560,98 +9704,11 @@ static inline void scalar_generated_cast_bool_bool_bool_logic(const bool *a, boo
 
 VMBIN_HANDLER_UNARY_TYPED(scalar_generated_cast_bool_bool_bool, scalar_generated_cast_bool_bool_bool_logic, bool, bool)
 
-static runtimec_status_t scalar_generated_cast_bool_char_ascii_char_ascii(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(bool)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const bool *a = (const bool *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = *a ? 1U : 0U;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_ASCII, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_bool_char_ascii_char_ascii, runtimec_scalar_value_to_character, bool, (*source_ ? 1U : 0U), RUNTIMEC_CHARACTER_ENCODING_ASCII)
 
-static runtimec_status_t scalar_generated_cast_bool_char_utf32_char_utf32(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(bool)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const bool *a = (const bool *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = *a ? 1U : 0U;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_bool_char_utf32_char_utf32, runtimec_scalar_value_to_character, bool, (*source_ ? 1U : 0U), RUNTIMEC_CHARACTER_ENCODING_UTF32)
 
-static runtimec_status_t scalar_generated_cast_bool_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(bool)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const bool *a = (const bool *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = *a ? 1U : 0U;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_bool_char_utf8_char_utf8, runtimec_scalar_value_to_character, bool, (*source_ ? 1U : 0U), RUNTIMEC_CHARACTER_ENCODING_UTF8)
 
 static inline void scalar_generated_cast_bool_float32_float32_logic(const bool *a, float *out) {
     *out = (float)(*a ? 1 : 0);
@@ -9719,11 +9776,63 @@ static inline void scalar_generated_cast_char_ascii_bool_bool_logic(const uint8_
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_char_ascii_bool_bool, scalar_generated_cast_char_ascii_bool_bool_logic, uint8_t, bool)
 
+VMBIN_HANDLER_CHARACTER_TO_CHARACTER(scalar_generated_cast_char_ascii_char_ascii_char_ascii, runtimec_scalar_character_to_value, string_text_decode_ascii, RUNTIMEC_CHARACTER_ENCODING_ASCII)
+
+VMBIN_HANDLER_CHARACTER_TO_CHARACTER(scalar_generated_cast_char_ascii_char_utf32_char_utf32, runtimec_scalar_character_to_value, string_text_decode_ascii, RUNTIMEC_CHARACTER_ENCODING_UTF32)
+
+VMBIN_HANDLER_CHARACTER_TO_CHARACTER(scalar_generated_cast_char_ascii_char_utf8_char_utf8, runtimec_scalar_character_to_value, string_text_decode_ascii, RUNTIMEC_CHARACTER_ENCODING_UTF8)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_ascii_float32_float32, runtimec_scalar_character_to_number, string_text_decode_ascii, 32U, false, true)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_ascii_float64_float64, runtimec_scalar_character_to_number, string_text_decode_ascii, 64U, false, true)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_ascii_int16_int16, runtimec_scalar_character_to_number, string_text_decode_ascii, 16U, true, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_ascii_int32_int32, runtimec_scalar_character_to_number, string_text_decode_ascii, 32U, true, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_ascii_int64_int64, runtimec_scalar_character_to_number, string_text_decode_ascii, 64U, true, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_ascii_int8_int8, runtimec_scalar_character_to_number, string_text_decode_ascii, 8U, true, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_ascii_uint16_uint16, runtimec_scalar_character_to_number, string_text_decode_ascii, 16U, false, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_ascii_uint32_uint32, runtimec_scalar_character_to_number, string_text_decode_ascii, 32U, false, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_ascii_uint64_uint64, runtimec_scalar_character_to_number, string_text_decode_ascii, 64U, false, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_ascii_uint8_uint8, runtimec_scalar_character_to_number, string_text_decode_ascii, 8U, false, false)
+
 static inline void scalar_generated_cast_char_utf32_bool_bool_logic(const uint32_t *a, bool *out, binrwir_execution_exit_t *output_exit) {
     (void)a; (void)out; runtimec_scalar_cast_to_bool_invalid(output_exit);
 }
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_char_utf32_bool_bool, scalar_generated_cast_char_utf32_bool_bool_logic, uint32_t, bool)
+
+VMBIN_HANDLER_CHARACTER_TO_CHARACTER(scalar_generated_cast_char_utf32_char_ascii_char_ascii, runtimec_scalar_character_to_value, string_text_decode_utf32, RUNTIMEC_CHARACTER_ENCODING_ASCII)
+
+VMBIN_HANDLER_CHARACTER_TO_CHARACTER(scalar_generated_cast_char_utf32_char_utf32_char_utf32, runtimec_scalar_character_to_value, string_text_decode_utf32, RUNTIMEC_CHARACTER_ENCODING_UTF32)
+
+VMBIN_HANDLER_CHARACTER_TO_CHARACTER(scalar_generated_cast_char_utf32_char_utf8_char_utf8, runtimec_scalar_character_to_value, string_text_decode_utf32, RUNTIMEC_CHARACTER_ENCODING_UTF8)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf32_float32_float32, runtimec_scalar_character_to_number, string_text_decode_utf32, 32U, false, true)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf32_float64_float64, runtimec_scalar_character_to_number, string_text_decode_utf32, 64U, false, true)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf32_int16_int16, runtimec_scalar_character_to_number, string_text_decode_utf32, 16U, true, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf32_int32_int32, runtimec_scalar_character_to_number, string_text_decode_utf32, 32U, true, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf32_int64_int64, runtimec_scalar_character_to_number, string_text_decode_utf32, 64U, true, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf32_int8_int8, runtimec_scalar_character_to_number, string_text_decode_utf32, 8U, true, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf32_uint16_uint16, runtimec_scalar_character_to_number, string_text_decode_utf32, 16U, false, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf32_uint32_uint32, runtimec_scalar_character_to_number, string_text_decode_utf32, 32U, false, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf32_uint64_uint64, runtimec_scalar_character_to_number, string_text_decode_utf32, 64U, false, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf32_uint8_uint8, runtimec_scalar_character_to_number, string_text_decode_utf32, 8U, false, false)
 
 static inline void scalar_generated_cast_char_utf8_bool_bool_logic(const uint32_t *a, bool *out, binrwir_execution_exit_t *output_exit) {
     (void)a; (void)out; runtimec_scalar_cast_to_bool_invalid(output_exit);
@@ -9731,104 +9840,43 @@ static inline void scalar_generated_cast_char_utf8_bool_bool_logic(const uint32_
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_char_utf8_bool_bool, scalar_generated_cast_char_utf8_bool_bool_logic, uint32_t, bool)
 
+VMBIN_HANDLER_CHARACTER_TO_CHARACTER(scalar_generated_cast_char_utf8_char_ascii_char_ascii, runtimec_scalar_character_to_value, string_text_decode_utf8, RUNTIMEC_CHARACTER_ENCODING_ASCII)
+
+VMBIN_HANDLER_CHARACTER_TO_CHARACTER(scalar_generated_cast_char_utf8_char_utf32_char_utf32, runtimec_scalar_character_to_value, string_text_decode_utf8, RUNTIMEC_CHARACTER_ENCODING_UTF32)
+
+VMBIN_HANDLER_CHARACTER_TO_CHARACTER(scalar_generated_cast_char_utf8_char_utf8_char_utf8, runtimec_scalar_character_to_value, string_text_decode_utf8, RUNTIMEC_CHARACTER_ENCODING_UTF8)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf8_float32_float32, runtimec_scalar_character_to_number, string_text_decode_utf8, 32U, false, true)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf8_float64_float64, runtimec_scalar_character_to_number, string_text_decode_utf8, 64U, false, true)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf8_int16_int16, runtimec_scalar_character_to_number, string_text_decode_utf8, 16U, true, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf8_int32_int32, runtimec_scalar_character_to_number, string_text_decode_utf8, 32U, true, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf8_int64_int64, runtimec_scalar_character_to_number, string_text_decode_utf8, 64U, true, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf8_int8_int8, runtimec_scalar_character_to_number, string_text_decode_utf8, 8U, true, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf8_uint16_uint16, runtimec_scalar_character_to_number, string_text_decode_utf8, 16U, false, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf8_uint32_uint32, runtimec_scalar_character_to_number, string_text_decode_utf8, 32U, false, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf8_uint64_uint64, runtimec_scalar_character_to_number, string_text_decode_utf8, 64U, false, false)
+
+VMBIN_HANDLER_CHARACTER_TO_NUMBER(scalar_generated_cast_char_utf8_uint8_uint8, runtimec_scalar_character_to_number, string_text_decode_utf8, 8U, false, false)
+
 static inline void scalar_generated_cast_float32_bool_bool_logic(const float *a, bool *out, binrwir_execution_exit_t *output_exit) {
     (void)a; (void)out; runtimec_scalar_cast_to_bool_invalid(output_exit);
 }
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_float32_bool_bool, scalar_generated_cast_float32_bool_bool_logic, float, bool)
 
-static runtimec_status_t scalar_generated_cast_float32_char_ascii_char_ascii(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(float)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const float *a = (const float *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_ASCII, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_float32_char_ascii_char_ascii, runtimec_scalar_value_to_character, float, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_ASCII)
 
-static runtimec_status_t scalar_generated_cast_float32_char_utf32_char_utf32(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(float)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const float *a = (const float *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_float32_char_utf32_char_utf32, runtimec_scalar_value_to_character, float, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF32)
 
-static runtimec_status_t scalar_generated_cast_float32_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(float)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const float *a = (const float *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_float32_char_utf8_char_utf8, runtimec_scalar_value_to_character, float, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF8)
 
 static inline void scalar_generated_cast_float32_float32_float32_logic(const float *a, float *out) {
     *out = (float)*a;
@@ -9896,98 +9944,11 @@ static inline void scalar_generated_cast_float64_bool_bool_logic(const double *a
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_float64_bool_bool, scalar_generated_cast_float64_bool_bool_logic, double, bool)
 
-static runtimec_status_t scalar_generated_cast_float64_char_ascii_char_ascii(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(double)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const double *a = (const double *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_ASCII, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_float64_char_ascii_char_ascii, runtimec_scalar_value_to_character, double, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_ASCII)
 
-static runtimec_status_t scalar_generated_cast_float64_char_utf32_char_utf32(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(double)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const double *a = (const double *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_float64_char_utf32_char_utf32, runtimec_scalar_value_to_character, double, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF32)
 
-static runtimec_status_t scalar_generated_cast_float64_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(double)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const double *a = (const double *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_float64_char_utf8_char_utf8, runtimec_scalar_value_to_character, double, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF8)
 
 static inline void scalar_generated_cast_float64_float32_float32_logic(const double *a, float *out) {
     *out = (float)*a;
@@ -10055,98 +10016,11 @@ static inline void scalar_generated_cast_int16_bool_bool_logic(const int16_t *a,
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_int16_bool_bool, scalar_generated_cast_int16_bool_bool_logic, int16_t, bool)
 
-static runtimec_status_t scalar_generated_cast_int16_char_ascii_char_ascii(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(int16_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const int16_t *a = (const int16_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_ASCII, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_int16_char_ascii_char_ascii, runtimec_scalar_value_to_character, int16_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_ASCII)
 
-static runtimec_status_t scalar_generated_cast_int16_char_utf32_char_utf32(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(int16_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const int16_t *a = (const int16_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_int16_char_utf32_char_utf32, runtimec_scalar_value_to_character, int16_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF32)
 
-static runtimec_status_t scalar_generated_cast_int16_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(int16_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const int16_t *a = (const int16_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_int16_char_utf8_char_utf8, runtimec_scalar_value_to_character, int16_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF8)
 
 static inline void scalar_generated_cast_int16_float32_float32_logic(const int16_t *a, float *out) {
     *out = (float)*a;
@@ -10214,98 +10088,11 @@ static inline void scalar_generated_cast_int32_bool_bool_logic(const int32_t *a,
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_int32_bool_bool, scalar_generated_cast_int32_bool_bool_logic, int32_t, bool)
 
-static runtimec_status_t scalar_generated_cast_int32_char_ascii_char_ascii(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(int32_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const int32_t *a = (const int32_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_ASCII, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_int32_char_ascii_char_ascii, runtimec_scalar_value_to_character, int32_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_ASCII)
 
-static runtimec_status_t scalar_generated_cast_int32_char_utf32_char_utf32(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(int32_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const int32_t *a = (const int32_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_int32_char_utf32_char_utf32, runtimec_scalar_value_to_character, int32_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF32)
 
-static runtimec_status_t scalar_generated_cast_int32_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(int32_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const int32_t *a = (const int32_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_int32_char_utf8_char_utf8, runtimec_scalar_value_to_character, int32_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF8)
 
 static inline void scalar_generated_cast_int32_float32_float32_logic(const int32_t *a, float *out) {
     *out = (float)*a;
@@ -10373,98 +10160,11 @@ static inline void scalar_generated_cast_int64_bool_bool_logic(const int64_t *a,
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_int64_bool_bool, scalar_generated_cast_int64_bool_bool_logic, int64_t, bool)
 
-static runtimec_status_t scalar_generated_cast_int64_char_ascii_char_ascii(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(int64_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const int64_t *a = (const int64_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_ASCII, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_int64_char_ascii_char_ascii, runtimec_scalar_value_to_character, int64_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_ASCII)
 
-static runtimec_status_t scalar_generated_cast_int64_char_utf32_char_utf32(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(int64_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const int64_t *a = (const int64_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_int64_char_utf32_char_utf32, runtimec_scalar_value_to_character, int64_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF32)
 
-static runtimec_status_t scalar_generated_cast_int64_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(int64_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const int64_t *a = (const int64_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_int64_char_utf8_char_utf8, runtimec_scalar_value_to_character, int64_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF8)
 
 static inline void scalar_generated_cast_int64_float32_float32_logic(const int64_t *a, float *out) {
     *out = (float)*a;
@@ -10532,98 +10232,11 @@ static inline void scalar_generated_cast_int8_bool_bool_logic(const int8_t *a, b
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_int8_bool_bool, scalar_generated_cast_int8_bool_bool_logic, int8_t, bool)
 
-static runtimec_status_t scalar_generated_cast_int8_char_ascii_char_ascii(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(int8_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const int8_t *a = (const int8_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_ASCII, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_int8_char_ascii_char_ascii, runtimec_scalar_value_to_character, int8_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_ASCII)
 
-static runtimec_status_t scalar_generated_cast_int8_char_utf32_char_utf32(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(int8_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const int8_t *a = (const int8_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_int8_char_utf32_char_utf32, runtimec_scalar_value_to_character, int8_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF32)
 
-static runtimec_status_t scalar_generated_cast_int8_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(int8_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const int8_t *a = (const int8_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_int8_char_utf8_char_utf8, runtimec_scalar_value_to_character, int8_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF8)
 
 static inline void scalar_generated_cast_int8_float32_float32_logic(const int8_t *a, float *out) {
     *out = (float)*a;
@@ -10691,98 +10304,11 @@ static inline void scalar_generated_cast_uint16_bool_bool_logic(const uint16_t *
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_uint16_bool_bool, scalar_generated_cast_uint16_bool_bool_logic, uint16_t, bool)
 
-static runtimec_status_t scalar_generated_cast_uint16_char_ascii_char_ascii(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(uint16_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const uint16_t *a = (const uint16_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_ASCII, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_uint16_char_ascii_char_ascii, runtimec_scalar_value_to_character, uint16_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_ASCII)
 
-static runtimec_status_t scalar_generated_cast_uint16_char_utf32_char_utf32(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(uint16_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const uint16_t *a = (const uint16_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_uint16_char_utf32_char_utf32, runtimec_scalar_value_to_character, uint16_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF32)
 
-static runtimec_status_t scalar_generated_cast_uint16_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(uint16_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const uint16_t *a = (const uint16_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_uint16_char_utf8_char_utf8, runtimec_scalar_value_to_character, uint16_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF8)
 
 static inline void scalar_generated_cast_uint16_float32_float32_logic(const uint16_t *a, float *out) {
     *out = (float)*a;
@@ -10850,98 +10376,11 @@ static inline void scalar_generated_cast_uint32_bool_bool_logic(const uint32_t *
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_uint32_bool_bool, scalar_generated_cast_uint32_bool_bool_logic, uint32_t, bool)
 
-static runtimec_status_t scalar_generated_cast_uint32_char_ascii_char_ascii(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(uint32_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const uint32_t *a = (const uint32_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_ASCII, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_uint32_char_ascii_char_ascii, runtimec_scalar_value_to_character, uint32_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_ASCII)
 
-static runtimec_status_t scalar_generated_cast_uint32_char_utf32_char_utf32(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(uint32_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const uint32_t *a = (const uint32_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_uint32_char_utf32_char_utf32, runtimec_scalar_value_to_character, uint32_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF32)
 
-static runtimec_status_t scalar_generated_cast_uint32_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(uint32_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const uint32_t *a = (const uint32_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_uint32_char_utf8_char_utf8, runtimec_scalar_value_to_character, uint32_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF8)
 
 static inline void scalar_generated_cast_uint32_float32_float32_logic(const uint32_t *a, float *out) {
     *out = (float)*a;
@@ -11009,98 +10448,11 @@ static inline void scalar_generated_cast_uint64_bool_bool_logic(const uint64_t *
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_uint64_bool_bool, scalar_generated_cast_uint64_bool_bool_logic, uint64_t, bool)
 
-static runtimec_status_t scalar_generated_cast_uint64_char_ascii_char_ascii(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(uint64_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const uint64_t *a = (const uint64_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_ASCII, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_uint64_char_ascii_char_ascii, runtimec_scalar_value_to_character, uint64_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_ASCII)
 
-static runtimec_status_t scalar_generated_cast_uint64_char_utf32_char_utf32(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(uint64_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const uint64_t *a = (const uint64_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_uint64_char_utf32_char_utf32, runtimec_scalar_value_to_character, uint64_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF32)
 
-static runtimec_status_t scalar_generated_cast_uint64_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(uint64_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const uint64_t *a = (const uint64_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_uint64_char_utf8_char_utf8, runtimec_scalar_value_to_character, uint64_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF8)
 
 static inline void scalar_generated_cast_uint64_float32_float32_logic(const uint64_t *a, float *out) {
     *out = (float)*a;
@@ -11168,98 +10520,11 @@ static inline void scalar_generated_cast_uint8_bool_bool_logic(const uint8_t *a,
 
 VMBIN_HANDLER_UNARY_TYPED_EXIT(scalar_generated_cast_uint8_bool_bool, scalar_generated_cast_uint8_bool_bool_logic, uint8_t, bool)
 
-static runtimec_status_t scalar_generated_cast_uint8_char_ascii_char_ascii(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(uint8_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const uint8_t *a = (const uint8_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_ASCII, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_uint8_char_ascii_char_ascii, runtimec_scalar_value_to_character, uint8_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_ASCII)
 
-static runtimec_status_t scalar_generated_cast_uint8_char_utf32_char_utf32(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(uint8_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const uint8_t *a = (const uint8_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_uint8_char_utf32_char_utf32, runtimec_scalar_value_to_character, uint8_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF32)
 
-static runtimec_status_t scalar_generated_cast_uint8_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    vmbin_value_location_t read_position_;
-    runtimec_error_t error_;
-    uint32_t source_value = 0U;
-    runtimec_error_reset(&error_);
-    if (vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0],
-            &read_position_, &error_) != RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (read_position_.size != sizeof(uint8_t)) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    {
-        const uint8_t *a = (const uint8_t *)(const void *)read_position_.read_bytes;
-        (void)a;
-        source_value = (uint32_t)(int64_t)*a;
-    }
-    runtimec_scalar_value_to_character(frame, instruction, source_value, RUNTIMEC_CHARACTER_ENCODING_UTF8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_UNARY_TO_CHARACTER(scalar_generated_cast_uint8_char_utf8_char_utf8, runtimec_scalar_value_to_character, uint8_t, (uint32_t)(int64_t)*source_, RUNTIMEC_CHARACTER_ENCODING_UTF8)
 
 static inline void scalar_generated_cast_uint8_float32_float32_logic(const uint8_t *a, float *out) {
     *out = (float)*a;
@@ -11321,284 +10586,70 @@ static inline void scalar_generated_cast_uint8_uint8_uint8_logic(const uint8_t *
 
 VMBIN_HANDLER_UNARY_TYPED(scalar_generated_cast_uint8_uint8_uint8, scalar_generated_cast_uint8_uint8_uint8_logic, uint8_t, uint8_t)
 
-static runtimec_status_t scalar_generated_concat_char_ascii_char_ascii_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_concat(frame, instruction, string_text_decode_ascii, string_text_decode_ascii, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_CONCAT(scalar_generated_concat_char_ascii_char_ascii_char_utf8, runtimec_scalar_concat, string_text_decode_ascii, string_text_decode_ascii)
 
-static runtimec_status_t scalar_generated_concat_char_ascii_char_utf32_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_concat(frame, instruction, string_text_decode_ascii, string_text_decode_utf32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_CONCAT(scalar_generated_concat_char_ascii_char_utf32_char_utf8, runtimec_scalar_concat, string_text_decode_ascii, string_text_decode_utf32)
 
-static runtimec_status_t scalar_generated_concat_char_ascii_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_concat(frame, instruction, string_text_decode_ascii, string_text_decode_utf8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_CONCAT(scalar_generated_concat_char_ascii_char_utf8_char_utf8, runtimec_scalar_concat, string_text_decode_ascii, string_text_decode_utf8)
 
-static runtimec_status_t scalar_generated_concat_char_utf32_char_ascii_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_concat(frame, instruction, string_text_decode_utf32, string_text_decode_ascii, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_CONCAT(scalar_generated_concat_char_utf32_char_ascii_char_utf8, runtimec_scalar_concat, string_text_decode_utf32, string_text_decode_ascii)
 
-static runtimec_status_t scalar_generated_concat_char_utf32_char_utf32_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_concat(frame, instruction, string_text_decode_utf32, string_text_decode_utf32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_CONCAT(scalar_generated_concat_char_utf32_char_utf32_char_utf8, runtimec_scalar_concat, string_text_decode_utf32, string_text_decode_utf32)
 
-static runtimec_status_t scalar_generated_concat_char_utf32_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_concat(frame, instruction, string_text_decode_utf32, string_text_decode_utf8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_CONCAT(scalar_generated_concat_char_utf32_char_utf8_char_utf8, runtimec_scalar_concat, string_text_decode_utf32, string_text_decode_utf8)
 
-static runtimec_status_t scalar_generated_concat_char_utf8_char_ascii_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_concat(frame, instruction, string_text_decode_utf8, string_text_decode_ascii, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_CONCAT(scalar_generated_concat_char_utf8_char_ascii_char_utf8, runtimec_scalar_concat, string_text_decode_utf8, string_text_decode_ascii)
 
-static runtimec_status_t scalar_generated_concat_char_utf8_char_utf32_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_concat(frame, instruction, string_text_decode_utf8, string_text_decode_utf32, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_CONCAT(scalar_generated_concat_char_utf8_char_utf32_char_utf8, runtimec_scalar_concat, string_text_decode_utf8, string_text_decode_utf32)
 
-static runtimec_status_t scalar_generated_concat_char_utf8_char_utf8_char_utf8(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_concat(frame, instruction, string_text_decode_utf8, string_text_decode_utf8, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_CONCAT(scalar_generated_concat_char_utf8_char_utf8_char_utf8, runtimec_scalar_concat, string_text_decode_utf8, string_text_decode_utf8)
 
-static runtimec_status_t scalar_generated_character_equal_char_ascii_char_ascii_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_ascii, string_text_decode_ascii, false, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_equal_char_ascii_char_ascii_bool, runtimec_scalar_character_equal, string_text_decode_ascii, string_text_decode_ascii, false)
 
-static runtimec_status_t scalar_generated_character_equal_char_ascii_char_utf32_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_ascii, string_text_decode_utf32, false, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_equal_char_ascii_char_utf32_bool, runtimec_scalar_character_equal, string_text_decode_ascii, string_text_decode_utf32, false)
 
-static runtimec_status_t scalar_generated_character_equal_char_ascii_char_utf8_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_ascii, string_text_decode_utf8, false, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_equal_char_ascii_char_utf8_bool, runtimec_scalar_character_equal, string_text_decode_ascii, string_text_decode_utf8, false)
 
-static runtimec_status_t scalar_generated_character_equal_char_utf32_char_ascii_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_utf32, string_text_decode_ascii, false, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_equal_char_utf32_char_ascii_bool, runtimec_scalar_character_equal, string_text_decode_utf32, string_text_decode_ascii, false)
 
-static runtimec_status_t scalar_generated_character_equal_char_utf32_char_utf32_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_utf32, string_text_decode_utf32, false, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_equal_char_utf32_char_utf32_bool, runtimec_scalar_character_equal, string_text_decode_utf32, string_text_decode_utf32, false)
 
-static runtimec_status_t scalar_generated_character_equal_char_utf32_char_utf8_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_utf32, string_text_decode_utf8, false, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_equal_char_utf32_char_utf8_bool, runtimec_scalar_character_equal, string_text_decode_utf32, string_text_decode_utf8, false)
 
-static runtimec_status_t scalar_generated_character_equal_char_utf8_char_ascii_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_utf8, string_text_decode_ascii, false, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_equal_char_utf8_char_ascii_bool, runtimec_scalar_character_equal, string_text_decode_utf8, string_text_decode_ascii, false)
 
-static runtimec_status_t scalar_generated_character_equal_char_utf8_char_utf32_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_utf8, string_text_decode_utf32, false, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_equal_char_utf8_char_utf32_bool, runtimec_scalar_character_equal, string_text_decode_utf8, string_text_decode_utf32, false)
 
-static runtimec_status_t scalar_generated_character_equal_char_utf8_char_utf8_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_utf8, string_text_decode_utf8, false, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_equal_char_utf8_char_utf8_bool, runtimec_scalar_character_equal, string_text_decode_utf8, string_text_decode_utf8, false)
 
-static runtimec_status_t scalar_generated_character_not_equal_char_ascii_char_ascii_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_ascii, string_text_decode_ascii, true, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_not_equal_char_ascii_char_ascii_bool, runtimec_scalar_character_equal, string_text_decode_ascii, string_text_decode_ascii, true)
 
-static runtimec_status_t scalar_generated_character_not_equal_char_ascii_char_utf32_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_ascii, string_text_decode_utf32, true, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_not_equal_char_ascii_char_utf32_bool, runtimec_scalar_character_equal, string_text_decode_ascii, string_text_decode_utf32, true)
 
-static runtimec_status_t scalar_generated_character_not_equal_char_ascii_char_utf8_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_ascii, string_text_decode_utf8, true, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_not_equal_char_ascii_char_utf8_bool, runtimec_scalar_character_equal, string_text_decode_ascii, string_text_decode_utf8, true)
 
-static runtimec_status_t scalar_generated_character_not_equal_char_utf32_char_ascii_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_utf32, string_text_decode_ascii, true, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_not_equal_char_utf32_char_ascii_bool, runtimec_scalar_character_equal, string_text_decode_utf32, string_text_decode_ascii, true)
 
-static runtimec_status_t scalar_generated_character_not_equal_char_utf32_char_utf32_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_utf32, string_text_decode_utf32, true, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_not_equal_char_utf32_char_utf32_bool, runtimec_scalar_character_equal, string_text_decode_utf32, string_text_decode_utf32, true)
 
-static runtimec_status_t scalar_generated_character_not_equal_char_utf32_char_utf8_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_utf32, string_text_decode_utf8, true, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_not_equal_char_utf32_char_utf8_bool, runtimec_scalar_character_equal, string_text_decode_utf32, string_text_decode_utf8, true)
 
-static runtimec_status_t scalar_generated_character_not_equal_char_utf8_char_ascii_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_utf8, string_text_decode_ascii, true, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_not_equal_char_utf8_char_ascii_bool, runtimec_scalar_character_equal, string_text_decode_utf8, string_text_decode_ascii, true)
 
-static runtimec_status_t scalar_generated_character_not_equal_char_utf8_char_utf32_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_utf8, string_text_decode_utf32, true, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_not_equal_char_utf8_char_utf32_bool, runtimec_scalar_character_equal, string_text_decode_utf8, string_text_decode_utf32, true)
 
-static runtimec_status_t scalar_generated_character_not_equal_char_utf8_char_utf8_bool(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_scalar_character_equal(frame, instruction, string_text_decode_utf8, string_text_decode_utf8, true, output_exit);
-    return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
-               ? output_exit->status
-               : RUNTIMEC_STATUS_SUCCESS;
-}
+VMBIN_HANDLER_CHARACTER_EQUAL(scalar_generated_character_not_equal_char_utf8_char_utf8_bool, runtimec_scalar_character_equal, string_text_decode_utf8, string_text_decode_utf8, true)
 
 const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x8000U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_float32_float32_float32},
     {0x8001U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_float32_float64_float64},
     {0x8002U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_float32_int16_float32},
     {0x8003U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_float32_int32_float32},
+    {0x8004U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_float32_int64_float32},
     {0x8005U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_float32_int8_float32},
     {0x8006U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_float32_uint16_float32},
     {0x8007U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_float32_uint32_float32},
+    {0x8008U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_float32_uint64_float32},
     {0x8009U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_float32_uint8_float32},
     {0x800AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_float64_float32_float64},
     {0x800BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_float64_float64_float64},
@@ -11616,11 +10667,13 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x8017U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int16_int32_int32},
     {0x8018U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int16_int64_int64},
     {0x8019U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int16_int8_int16},
+    {0x801AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int32_float32_float32},
     {0x801BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int32_float64_float64},
     {0x801CU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int32_int16_int32},
     {0x801DU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int32_int32_int32},
     {0x801EU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int32_int64_int64},
     {0x801FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int32_int8_int32},
+    {0x8020U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int64_float32_float32},
     {0x8021U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int64_float64_float64},
     {0x8022U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int64_int16_int64},
     {0x8023U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_int64_int32_int64},
@@ -11638,11 +10691,13 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x802FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint16_uint32_uint32},
     {0x8030U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint16_uint64_uint64},
     {0x8031U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint16_uint8_uint16},
+    {0x8032U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint32_float32_float32},
     {0x8033U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint32_float64_float64},
     {0x8034U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint32_uint16_uint32},
     {0x8035U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint32_uint32_uint32},
     {0x8036U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint32_uint64_uint64},
     {0x8037U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint32_uint8_uint32},
+    {0x8038U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint64_float32_float32},
     {0x8039U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint64_float64_float64},
     {0x803AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint64_uint16_uint64},
     {0x803BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_add_uint64_uint32_uint64},
@@ -11658,9 +10713,11 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x8045U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_float32_float64_float64},
     {0x8046U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_float32_int16_float32},
     {0x8047U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_float32_int32_float32},
+    {0x8048U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_float32_int64_float32},
     {0x8049U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_float32_int8_float32},
     {0x804AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_float32_uint16_float32},
     {0x804BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_float32_uint32_float32},
+    {0x804CU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_float32_uint64_float32},
     {0x804DU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_float32_uint8_float32},
     {0x804EU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_float64_float32_float64},
     {0x804FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_float64_float64_float64},
@@ -11678,11 +10735,13 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x805BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int16_int32_int32},
     {0x805CU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int16_int64_int64},
     {0x805DU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int16_int8_int16},
+    {0x805EU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int32_float32_float32},
     {0x805FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int32_float64_float64},
     {0x8060U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int32_int16_int32},
     {0x8061U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int32_int32_int32},
     {0x8062U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int32_int64_int64},
     {0x8063U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int32_int8_int32},
+    {0x8064U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int64_float32_float32},
     {0x8065U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int64_float64_float64},
     {0x8066U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int64_int16_int64},
     {0x8067U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_int64_int32_int64},
@@ -11700,11 +10759,13 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x8073U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint16_uint32_uint32},
     {0x8074U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint16_uint64_uint64},
     {0x8075U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint16_uint8_uint16},
+    {0x8076U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint32_float32_float32},
     {0x8077U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint32_float64_float64},
     {0x8078U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint32_uint16_uint32},
     {0x8079U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint32_uint32_uint32},
     {0x807AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint32_uint64_uint64},
     {0x807BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint32_uint8_uint32},
+    {0x807CU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint64_float32_float32},
     {0x807DU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint64_float64_float64},
     {0x807EU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint64_uint16_uint64},
     {0x807FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_sub_uint64_uint32_uint64},
@@ -11720,9 +10781,11 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x8089U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_float32_float64_float64},
     {0x808AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_float32_int16_float32},
     {0x808BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_float32_int32_float32},
+    {0x808CU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_float32_int64_float32},
     {0x808DU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_float32_int8_float32},
     {0x808EU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_float32_uint16_float32},
     {0x808FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_float32_uint32_float32},
+    {0x8090U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_float32_uint64_float32},
     {0x8091U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_float32_uint8_float32},
     {0x8092U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_float64_float32_float64},
     {0x8093U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_float64_float64_float64},
@@ -11740,11 +10803,13 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x809FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int16_int32_int32},
     {0x80A0U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int16_int64_int64},
     {0x80A1U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int16_int8_int16},
+    {0x80A2U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int32_float32_float32},
     {0x80A3U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int32_float64_float64},
     {0x80A4U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int32_int16_int32},
     {0x80A5U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int32_int32_int32},
     {0x80A6U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int32_int64_int64},
     {0x80A7U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int32_int8_int32},
+    {0x80A8U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int64_float32_float32},
     {0x80A9U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int64_float64_float64},
     {0x80AAU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int64_int16_int64},
     {0x80ABU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_int64_int32_int64},
@@ -11762,11 +10827,13 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x80B7U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint16_uint32_uint32},
     {0x80B8U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint16_uint64_uint64},
     {0x80B9U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint16_uint8_uint16},
+    {0x80BAU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint32_float32_float32},
     {0x80BBU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint32_float64_float64},
     {0x80BCU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint32_uint16_uint32},
     {0x80BDU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint32_uint32_uint32},
     {0x80BEU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint32_uint64_uint64},
     {0x80BFU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint32_uint8_uint32},
+    {0x80C0U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint64_float32_float32},
     {0x80C1U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint64_float64_float64},
     {0x80C2U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint64_uint16_uint64},
     {0x80C3U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_mul_uint64_uint32_uint64},
@@ -11782,9 +10849,11 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x80CDU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_float32_float64_float64},
     {0x80CEU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_float32_int16_float32},
     {0x80CFU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_float32_int32_float32},
+    {0x80D0U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_float32_int64_float32},
     {0x80D1U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_float32_int8_float32},
     {0x80D2U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_float32_uint16_float32},
     {0x80D3U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_float32_uint32_float32},
+    {0x80D4U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_float32_uint64_float32},
     {0x80D5U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_float32_uint8_float32},
     {0x80D6U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_float64_float32_float64},
     {0x80D7U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_float64_float64_float64},
@@ -11802,11 +10871,13 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x80E3U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int16_int32_int32},
     {0x80E4U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int16_int64_int64},
     {0x80E5U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int16_int8_int16},
+    {0x80E6U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int32_float32_float32},
     {0x80E7U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int32_float64_float64},
     {0x80E8U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int32_int16_int32},
     {0x80E9U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int32_int32_int32},
     {0x80EAU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int32_int64_int64},
     {0x80EBU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int32_int8_int32},
+    {0x80ECU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int64_float32_float32},
     {0x80EDU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int64_float64_float64},
     {0x80EEU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int64_int16_int64},
     {0x80EFU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_int64_int32_int64},
@@ -11824,11 +10895,13 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x80FBU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint16_uint32_uint32},
     {0x80FCU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint16_uint64_uint64},
     {0x80FDU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint16_uint8_uint16},
+    {0x80FEU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint32_float32_float32},
     {0x80FFU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint32_float64_float64},
     {0x8100U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint32_uint16_uint32},
     {0x8101U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint32_uint32_uint32},
     {0x8102U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint32_uint64_uint64},
     {0x8103U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint32_uint8_uint32},
+    {0x8104U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint64_float32_float32},
     {0x8105U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint64_float64_float64},
     {0x8106U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint64_uint16_uint64},
     {0x8107U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_div_uint64_uint32_uint64},
@@ -11876,11 +10949,11 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x8131U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float32_float64_float64},
     {0x8132U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float32_int16_float32},
     {0x8133U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float32_int32_float32},
-    {0x8134U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float32_int64_int64},
+    {0x8134U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float32_int64_float32},
     {0x8135U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float32_int8_float32},
     {0x8136U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float32_uint16_float32},
     {0x8137U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float32_uint32_float32},
-    {0x8138U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float32_uint64_uint64},
+    {0x8138U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float32_uint64_float32},
     {0x8139U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float32_uint8_float32},
     {0x813AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float64_float32_float64},
     {0x813BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_float64_float64_float64},
@@ -11898,13 +10971,13 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x8147U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int16_int32_int32},
     {0x8148U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int16_int64_int64},
     {0x8149U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int16_int8_int16},
-    {0x814AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int32_float32_int32},
+    {0x814AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int32_float32_float32},
     {0x814BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int32_float64_float64},
     {0x814CU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int32_int16_int32},
     {0x814DU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int32_int32_int32},
     {0x814EU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int32_int64_int64},
     {0x814FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int32_int8_int32},
-    {0x8150U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int64_float32_int64},
+    {0x8150U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int64_float32_float32},
     {0x8151U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int64_float64_float64},
     {0x8152U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int64_int16_int64},
     {0x8153U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_int64_int32_int64},
@@ -11922,13 +10995,13 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x815FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint16_uint32_uint32},
     {0x8160U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint16_uint64_uint64},
     {0x8161U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint16_uint8_uint16},
-    {0x8162U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint32_float32_uint32},
+    {0x8162U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint32_float32_float32},
     {0x8163U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint32_float64_float64},
     {0x8164U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint32_uint16_uint32},
     {0x8165U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint32_uint32_uint32},
     {0x8166U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint32_uint64_uint64},
     {0x8167U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint32_uint8_uint32},
-    {0x8168U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint64_float32_uint64},
+    {0x8168U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint64_float32_float32},
     {0x8169U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint64_float64_float64},
     {0x816AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint64_uint16_uint64},
     {0x816BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_max_uint64_uint32_uint64},
@@ -11944,11 +11017,11 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x8175U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float32_float64_float64},
     {0x8176U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float32_int16_float32},
     {0x8177U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float32_int32_float32},
-    {0x8178U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float32_int64_int64},
+    {0x8178U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float32_int64_float32},
     {0x8179U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float32_int8_float32},
     {0x817AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float32_uint16_float32},
     {0x817BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float32_uint32_float32},
-    {0x817CU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float32_uint64_uint64},
+    {0x817CU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float32_uint64_float32},
     {0x817DU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float32_uint8_float32},
     {0x817EU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float64_float32_float64},
     {0x817FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_float64_float64_float64},
@@ -11966,13 +11039,13 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x818BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int16_int32_int32},
     {0x818CU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int16_int64_int64},
     {0x818DU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int16_int8_int16},
-    {0x818EU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int32_float32_int32},
+    {0x818EU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int32_float32_float32},
     {0x818FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int32_float64_float64},
     {0x8190U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int32_int16_int32},
     {0x8191U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int32_int32_int32},
     {0x8192U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int32_int64_int64},
     {0x8193U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int32_int8_int32},
-    {0x8194U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int64_float32_int64},
+    {0x8194U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int64_float32_float32},
     {0x8195U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int64_float64_float64},
     {0x8196U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int64_int16_int64},
     {0x8197U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_int64_int32_int64},
@@ -11990,13 +11063,13 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x81A3U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint16_uint32_uint32},
     {0x81A4U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint16_uint64_uint64},
     {0x81A5U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint16_uint8_uint16},
-    {0x81A6U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint32_float32_uint32},
+    {0x81A6U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint32_float32_float32},
     {0x81A7U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint32_float64_float64},
     {0x81A8U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint32_uint16_uint32},
     {0x81A9U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint32_uint32_uint32},
     {0x81AAU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint32_uint64_uint64},
     {0x81ABU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint32_uint8_uint32},
-    {0x81ACU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint64_float32_uint64},
+    {0x81ACU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint64_float32_float32},
     {0x81ADU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint64_float64_float64},
     {0x81AEU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint64_uint16_uint64},
     {0x81AFU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_min_uint64_uint32_uint64},
@@ -13196,8 +12269,47 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
     {0x8659U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_bool_uint64_uint64},
     {0x865AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_bool_uint8_uint8},
     {0x865BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_bool_bool},
+    {0x865CU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_char_ascii_char_ascii},
+    {0x865DU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_char_utf32_char_utf32},
+    {0x865EU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_char_utf8_char_utf8},
+    {0x865FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_float32_float32},
+    {0x8660U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_float64_float64},
+    {0x8661U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_int16_int16},
+    {0x8662U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_int32_int32},
+    {0x8663U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_int64_int64},
+    {0x8664U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_int8_int8},
+    {0x8665U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_uint16_uint16},
+    {0x8666U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_uint32_uint32},
+    {0x8667U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_uint64_uint64},
+    {0x8668U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_ascii_uint8_uint8},
     {0x8669U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_bool_bool},
+    {0x866AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_char_ascii_char_ascii},
+    {0x866BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_char_utf32_char_utf32},
+    {0x866CU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_char_utf8_char_utf8},
+    {0x866DU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_float32_float32},
+    {0x866EU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_float64_float64},
+    {0x866FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_int16_int16},
+    {0x8670U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_int32_int32},
+    {0x8671U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_int64_int64},
+    {0x8672U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_int8_int8},
+    {0x8673U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_uint16_uint16},
+    {0x8674U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_uint32_uint32},
+    {0x8675U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_uint64_uint64},
+    {0x8676U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf32_uint8_uint8},
     {0x8677U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_bool_bool},
+    {0x8678U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_char_ascii_char_ascii},
+    {0x8679U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_char_utf32_char_utf32},
+    {0x867AU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_char_utf8_char_utf8},
+    {0x867BU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_float32_float32},
+    {0x867CU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_float64_float64},
+    {0x867DU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_int16_int16},
+    {0x867EU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_int32_int32},
+    {0x867FU, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_int64_int64},
+    {0x8680U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_int8_int8},
+    {0x8681U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_uint16_uint16},
+    {0x8682U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_uint32_uint32},
+    {0x8683U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_uint64_uint64},
+    {0x8684U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_char_utf8_uint8_uint8},
     {0x8685U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_float32_bool_bool},
     {0x8686U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_float32_char_ascii_char_ascii},
     {0x8687U, BINRWIR_REGISTRY_FLAG_NONE, scalar_generated_cast_float32_char_utf32_char_utf32},
@@ -13384,90 +12496,154 @@ const size_t scalar_generated_entry_count =
  * 上千个符号，且没人会去写那么多断言，反而把「导出清单」变成第三处真相。
  */
 void runtimec_scalar_probe_add_int64_int32_int64(const int64_t *a, const int32_t *b, int64_t *c) {
-    *c = (int64_t)((uint64_t)(int64_t)*a + (uint64_t)(int64_t)*b);
+    scalar_generated_add_int64_int32_int64_logic(a, b, c);
 }
 
 void runtimec_scalar_probe_mul_int32_int32_int32(const int32_t *a, const int32_t *b, int32_t *c) {
-    *c = (int32_t)((uint32_t)(int32_t)*a * (uint32_t)(int32_t)*b);
+    scalar_generated_mul_int32_int32_int32_logic(a, b, c);
 }
 
 void runtimec_scalar_probe_min_int64_int32_int64(const int64_t *a, const int32_t *b, int64_t *c) {
-    *c = (int64_t)((int64_t)*a < (int64_t)*b ? *a : *b);
+    scalar_generated_min_int64_int32_int64_logic(a, b, c);
 }
 
 void runtimec_scalar_probe_max_int32_int32_int32(const int32_t *a, const int32_t *b, int32_t *c) {
-    *c = (int32_t)((int32_t)*a > (int32_t)*b ? *a : *b);
+    scalar_generated_max_int32_int32_int32_logic(a, b, c);
 }
 
 void runtimec_scalar_probe_less_int64_uint64_bool(const int64_t *a, const uint64_t *b, bool *c) {
-    *c = (bool)(runtimec_scalar_compare_signed_unsigned((int64_t)*a, (uint64_t)*b) < 0);
+    scalar_generated_less_int64_uint64_bool_logic(a, b, c);
 }
 
 void runtimec_scalar_probe_equal_float64_int8_bool(const double *a, const int8_t *b, bool *c) {
-    *c = (bool)((double)*a == (double)*b);
+    scalar_generated_equal_float64_int8_bool_logic(a, b, c);
 }
 
 void runtimec_scalar_probe_logical_and_uint8_float64_bool(const uint8_t *a, const double *b, bool *c) {
-    *c = (bool)((*a != 0) && (*b != 0.0));
+    scalar_generated_logical_and_uint8_float64_bool_logic(a, b, c);
 }
 
 void runtimec_scalar_probe_bitwise_or_int8_int64_int64(const int8_t *a, const int64_t *b, int64_t *c) {
-    *c = (int64_t)((int64_t)*a | (int64_t)*b);
+    scalar_generated_bitwise_or_int8_int64_int64_logic(a, b, c);
 }
 
 void runtimec_scalar_probe_square_root_uint64_float64(const uint64_t *a, double *out) {
-    *out = sqrt((double)*a);
+    scalar_generated_square_root_uint64_float64_logic(a, out);
 }
 
 void runtimec_scalar_probe_negation_int64_int64(const int64_t *a, int64_t *out) {
-    *out = (int64_t)(0 - (uint64_t)*a);
+    scalar_generated_negation_int64_int64_logic(a, out);
 }
 
 void runtimec_scalar_probe_absolute_int8_int8(const int8_t *a, int8_t *out) {
-    *out = (int8_t)(*a < 0 ? 0 - (uint8_t)*a : (uint8_t)*a);
+    scalar_generated_absolute_int8_int8_logic(a, out);
 }
 
 void runtimec_scalar_probe_sign_float64_float64(const double *a, double *out) {
-    *out = (double)((*a > 0) - (*a < 0));
+    scalar_generated_sign_float64_float64_logic(a, out);
 }
 
 void runtimec_scalar_probe_shift_left_int8_int8_int8(const int8_t *a, const int8_t *b, int8_t *c) {
-    *c = (int8_t)runtimec_scalar_shift_left_signed((int8_t)*a, ((uint64_t)*b & 7U), 8U);
+    scalar_generated_shift_left_int8_int8_int8_logic(a, b, c);
 }
 
 void runtimec_scalar_probe_shift_right_int64_int8_int64(const int64_t *a, const int8_t *b, int64_t *c) {
-    *c = (int64_t)runtimec_scalar_shift_right_signed((int64_t)*a, ((uint64_t)*b & 63U), 64U);
+    scalar_generated_shift_right_int64_int8_int64_logic(a, b, c);
 }
 
 void runtimec_scalar_probe_cast_int64_int8_int8(const int64_t *a, int8_t *out) {
-    *out = (int8_t)runtimec_scalar_wrap_signed((int64_t)*a, 64U, 8U);
+    scalar_generated_cast_int64_int8_int8_logic(a, out);
 }
 
 void runtimec_scalar_probe_cast_uint8_int8_int8(const uint8_t *a, int8_t *out) {
-    *out = (int8_t)runtimec_scalar_wrap_signed((int64_t)*a, 8U, 8U);
+    scalar_generated_cast_uint8_int8_int8_logic(a, out);
 }
 
 void runtimec_scalar_probe_cast_int8_uint8_uint8(const int8_t *a, uint8_t *out) {
-    *out = (uint8_t)runtimec_scalar_wrap_unsigned((uint64_t)*a, 8U);
+    scalar_generated_cast_int8_uint8_uint8_logic(a, out);
 }
 
 void runtimec_scalar_probe_div_int16_int16_int16(const int16_t *a, const int16_t *b, int16_t *c, binrwir_execution_exit_t *output_exit) {
-    {int64_t quotient_; runtimec_scalar_divide_signed((int64_t)*a, (int64_t)*b, 16U, &quotient_, output_exit); if (output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR) { return; } *c = (int16_t)runtimec_scalar_wrap_signed(quotient_, 16U, 16U);}
+    scalar_generated_div_int16_int16_int16_logic(a, b, c, output_exit);
 }
 
 void runtimec_scalar_probe_div_int64_int64_int64(const int64_t *a, const int64_t *b, int64_t *c, binrwir_execution_exit_t *output_exit) {
-    {int64_t quotient_; runtimec_scalar_divide_signed((int64_t)*a, (int64_t)*b, 64U, &quotient_, output_exit); if (output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR) { return; } *c = (int64_t)runtimec_scalar_wrap_signed(quotient_, 64U, 64U);}
+    scalar_generated_div_int64_int64_int64_logic(a, b, c, output_exit);
 }
 
 void runtimec_scalar_probe_div_float64_float64_float64(const double *a, const double *b, double *c) {
-    *c = (double)*a / (double)*b;
+    scalar_generated_div_float64_float64_float64_logic(a, b, c);
 }
 
 void runtimec_scalar_probe_mod_int64_int64_int64(const int64_t *a, const int64_t *b, int64_t *c, binrwir_execution_exit_t *output_exit) {
-    {int64_t quotient_; runtimec_scalar_remainder_signed((int64_t)*a, (int64_t)*b, 64U, &quotient_, output_exit); if (output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR) { return; } *c = (int64_t)runtimec_scalar_wrap_signed(quotient_, 64U, 64U);}
+    scalar_generated_mod_int64_int64_int64_logic(a, b, c, output_exit);
 }
 
 void runtimec_scalar_probe_mod_uint8_uint8_uint8(const uint8_t *a, const uint8_t *b, uint8_t *c, binrwir_execution_exit_t *output_exit) {
-    {uint64_t remainder_; runtimec_scalar_remainder_unsigned((uint64_t)*a, (uint64_t)*b, &remainder_, output_exit); if (output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR) { return; } *c = (uint8_t)runtimec_scalar_wrap_unsigned(remainder_, 8U);}
+    scalar_generated_mod_uint8_uint8_uint8_logic(a, b, c, output_exit);
+}
+
+void runtimec_scalar_probe_add_float32_int64_float32(const float *a, const int64_t *b, float *c) {
+    scalar_generated_add_float32_int64_float32_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_min_int32_float32_float32(const int32_t *a, const float *b, float *c) {
+    scalar_generated_min_int32_float32_float32_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_mul_float32_uint64_float32(const float *a, const uint64_t *b, float *c) {
+    scalar_generated_mul_float32_uint64_float32_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_sub_int8_int8_int8(const int8_t *a, const int8_t *b, int8_t *c) {
+    scalar_generated_sub_int8_int8_int8_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_add_int8_int8_int8(const int8_t *a, const int8_t *b, int8_t *c) {
+    scalar_generated_add_int8_int8_int8_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_sub_uint8_uint8_uint8(const uint8_t *a, const uint8_t *b, uint8_t *c) {
+    scalar_generated_sub_uint8_uint8_uint8_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_add_float32_float32_float32(const float *a, const float *b, float *c) {
+    scalar_generated_add_float32_float32_float32_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_less_int32_int32_bool(const int32_t *a, const int32_t *b, bool *c) {
+    scalar_generated_less_int32_int32_bool_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_equal_int64_int64_bool(const int64_t *a, const int64_t *b, bool *c) {
+    scalar_generated_equal_int64_int64_bool_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_bitwise_and_uint8_uint8_uint8(const uint8_t *a, const uint8_t *b, uint8_t *c) {
+    scalar_generated_bitwise_and_uint8_uint8_uint8_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_logical_or_float64_float64_bool(const double *a, const double *b, bool *c) {
+    scalar_generated_logical_or_float64_float64_bool_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_logical_not_int64_bool(const int64_t *a, bool *out) {
+    scalar_generated_logical_not_int64_bool_logic(a, out);
+}
+
+void runtimec_scalar_probe_shift_left_uint8_uint8_uint8(const uint8_t *a, const uint8_t *b, uint8_t *c) {
+    scalar_generated_shift_left_uint8_uint8_uint8_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_shift_right_int8_int8_int8(const int8_t *a, const int8_t *b, int8_t *c) {
+    scalar_generated_shift_right_int8_int8_int8_logic(a, b, c);
+}
+
+void runtimec_scalar_probe_cast_float64_int8_int8(const double *a, int8_t *out, binrwir_execution_exit_t *output_exit) {
+    scalar_generated_cast_float64_int8_int8_logic(a, out, output_exit);
+}
+
+void runtimec_scalar_probe_cast_float32_uint8_uint8(const float *a, uint8_t *out, binrwir_execution_exit_t *output_exit) {
+    scalar_generated_cast_float32_uint8_uint8_logic(a, out, output_exit);
 }
 

@@ -51,7 +51,13 @@ typedef enum vmbin_interpreter_diagnostic {
     VMBIN_INTERPRETER_DIAG_OUT_OF_MEMORY = 9,
     /* 表被绕过 append 写坏（条目 handler 为空）。与 INVALID_INSTRUCTION
      * （表里没有这个 opid）必须分开：前者是 bug，后者是编译期与执行期的表不一致。 */
-    VMBIN_INTERPRETER_DIAG_CORRUPT_REGISTRY = 10
+    VMBIN_INTERPRETER_DIAG_CORRUPT_REGISTRY = 10,
+    /*
+     * 两个通道自相矛盾：结构化退出说失败（kind = ERROR），返回状态却说成功。
+     * 这是实现 bug——handler 置了错却报了成功。不做静默对齐，用这条码暴露它，
+     * 否则调用方按返回状态判成败，会把一次失败当成成功原样拷贝下去。
+     */
+    VMBIN_INTERPRETER_DIAG_CONTRADICTORY_EXIT = 11
 } vmbin_interpreter_diagnostic_t;
 
 /*

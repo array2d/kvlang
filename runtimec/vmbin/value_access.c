@@ -16,17 +16,6 @@
 #include "kvspace/kvspace.h"
 #include "kvspace/xvalue_head.h"
 
-typedef enum vmbin_value_access_diagnostic {
-    VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST = 1,
-    VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE = 2,
-    VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT = 3,
-    VMBIN_VALUE_ACCESS_DIAG_MISSING_LITERAL = 4,
-    VMBIN_VALUE_ACCESS_DIAG_LITERAL_IS_READ_ONLY = 5,
-    VMBIN_VALUE_ACCESS_DIAG_SIZE_MISMATCH = 6,
-    VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE = 7,
-    VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE = 8
-} vmbin_value_access_diagnostic_t;
-
 static runtimec_status_t vmbin_value_access_fail(
     runtimec_error_t *error, runtimec_status_t status,
     vmbin_value_access_diagnostic_t code, const char *message) {
@@ -76,12 +65,74 @@ runtimec_status_t vmbin_value_access_locate(
     case BINRWIR_REFERENCE_STATIC:
         /* 静态参数的 payload 已经是值体地址；值头在它前面。 */
         if (argument->payload == BINRWIR_BODY_ADDRESS_NONE) {
+            /*
+             * 静态参数在编码期可能还没解析（payload 记 NONE）。这里只做**解析**，
+             * 不创建：创建源是源码里的声明（标量 `v:int32 = …`、容器 `·new`），
+             * 帧准备只是执行声明的手段；执行指令只许触碰已经存在的 key。
+             *
+             * **绝对 key 的存在性是运行时前提，不是静态保证**：layout 对它什么都不做
+             * （不要求声明、不读存储核对），碰不到就在这里失败封闭。解析不到是真实
+             * 错误——读一个不存在的静态 key 不该被当成「空值」，写一个不存在的 key
+             * 也不该顺手建出来。
+             */
+            /* 初始化成空视图：下面 host 能力缺失时会短路，`key_text` 还没被赋值，
+             * 读它的 size 就是读未初始化栈——拼消息时就会成段越界。 */
+            runtimec_string_view_t key_text = runtimec_string_view_make(NULL, 0U);
+            runtimec_string_view_t key_langtype;
+            runtimec_xvalue_address_t resolved = RUNTIMEC_XVALUE_ADDRESS_NONE;
+            if (frame->host_services == NULL ||
+                frame->host_services->resolve_static_xvalue_address == NULL ||
+                binrwir_program_get_symbol(frame->program, argument->slot,
+                                           &key_text, &key_langtype) !=
+                    RUNTIMEC_STATUS_SUCCESS ||
+                frame->host_services->resolve_static_xvalue_address(
+                    frame->host_services->context, &frame->snapshot,
+                    runtimec_key_view_make(key_text.data, key_text.size),
+                    &resolved, error) != RUNTIMEC_STATUS_SUCCESS ||
+                resolved == RUNTIMEC_XVALUE_ADDRESS_NONE) {
+                {
+                    /*
+                     * 说清是哪个 key：只报「解析失败」等于让人自己去翻符号池。
+                     *
+                     * 缓冲必须是**线程局部静态**，不能是栈上的：`runtimec_error_set`
+                     * 只借用视图，函数一返回栈帧就没了，调用方拿到的是悬垂指针——
+                     * 实测紧跟着的 printf 还能读到正确文本（栈尚未被覆盖），
+                     * 隔几行再读就是垃圾。执行窗口那边用的是同一个做法。
+                     */
+                    static const char prefix[] =
+                        "static key is unresolved at execution time: ";
+                    static _Thread_local char message[512];
+                    const size_t prefix_size = sizeof(prefix) - 1U;
+                    const size_t key_size =
+                        key_text.size < sizeof(message) - prefix_size - 1U
+                            ? key_text.size
+                            : sizeof(message) - prefix_size - 1U;
+                    /* 走不到 get_symbol 的分支（host 能力缺失）连 key 都没有：
+                     * 此时只报「未解析」，不去解引用空视图。 */
+                    if (key_size == 0U) {
+                        static const char bare[] =
+                            "static key is unresolved at execution time";
+                        memcpy(message, bare, sizeof(bare));
+                    } else {
+                        memcpy(message, prefix, prefix_size);
+                        memcpy(message + prefix_size, key_text.data, key_size);
+                        message[prefix_size + key_size] = '\0';
+                    }
+                    return vmbin_value_access_fail(
+                        error, RUNTIMEC_STATUS_INVALID,
+                        VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST, message);
+                }
+            }
+            body_address = runtimec_xvalue_body_address(resolved);
+        } else {
+            body_address = (runtimec_value_body_address_t)argument->payload;
+        }
+        if (body_address == RUNTIMEC_VALUE_BODY_ADDRESS_NONE) {
             return vmbin_value_access_fail(
                 error, RUNTIMEC_STATUS_INVALID,
                 VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
-                "static argument carries no body address");
+                "static argument has no derivable value body");
         }
-        body_address = (runtimec_value_body_address_t)argument->payload;
         break;
     case BINRWIR_REFERENCE_PARAMETER_READ:
     case BINRWIR_REFERENCE_PARAMETER_WRITE:
@@ -242,6 +293,15 @@ runtimec_status_t vmbin_value_access_read_body(
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }
+
+/*
+ * 指令不创造 key。
+ *
+ * 曾有 `vmbin_value_access_prepare_static_target`：「写目标还不存在就建一个」。
+ * 那是把创建放错了阶段——创建源是**源码里的声明**（标量类型声明、容器 `·new`），
+ * 帧准备只是执行声明的手段；执行指令只许触碰已经存在的 key。删掉之后，STATIC 写目标若在执行期仍不存在，
+ * 由 `locate_body` 的解析分支失败封闭（消息里带 key 名），不在这里补建。
+ */
 
 runtimec_status_t vmbin_value_access_write_body(
     const binrwir_execution_frame_t *frame,

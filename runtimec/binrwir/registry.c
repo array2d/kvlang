@@ -58,12 +58,19 @@ static void binrwir_registry_rebuild_index(binrwir_registry_t *registry) {
                 (size_t)(identifier - BINRWIR_SPECIALIZED_BASE);
             registry->specialized_index[offset] = (uint16_t)(entry_ordinal + 1U);
             registry->specialized_index_count += 1U;
-        } else if (identifier < BINRWIR_SPECIALIZED_BASE) {
+        } else {
+            /* 非特化区的**全部**条目都进这张数组——包括保留区（`0xFF00` 以上）。
+             *
+             * 保留区里确实住着算子（临时 println `0xFF01–0xFF03`，见
+             * `vmbin/temp_println.h`），`append` 也特意放行它们。早先把保留区
+             * 排除在索引外，于是「注册了却查不到」：任何临时 println 在执行期
+             * 都拿 `CORRUPT_REGISTRY`。
+             *
+             * 判据：**能不能分派由注册表里有没有这条决定，不由 opid 落在哪个
+             * 区间决定**。结构标记（FOREIGN/NONE）在 `append` 期就已被拒绝。 */
             registry->base_index[base_count] = (uint16_t)entry_ordinal;
             base_count += 1U;
         }
-        /* 保留区（>= RESERVED_BASE）不进任何索引：append 已经拒了结构标记，
-         * 走到这里说明表被绕过写坏，find 会因索引缺失返回 UNSUPPORTED。 */
     }
     /* 基础区要能二分，必须按 opid 升序。插入排序：条目数是个位数到百位数，
      * 且装载期只跑一次——这里选「显然正确」而不是「常数更小」。 */
@@ -214,7 +221,8 @@ binrwir_registry_find(const binrwir_registry_t *registry,
             return RUNTIMEC_STATUS_UNSUPPORTED;
         }
         entry_ordinal = (size_t)(slot - 1U);
-    } else if (operation_identifier < BINRWIR_SPECIALIZED_BASE) {
+    } else {
+        /* 非特化区（含保留区里已注册的临时算子）走二分。 */
         size_t low = 0U;
         size_t high = registry->base_index_count;
 
@@ -236,9 +244,6 @@ binrwir_registry_find(const binrwir_registry_t *registry,
             return RUNTIMEC_STATUS_UNSUPPORTED;
         }
         entry_ordinal = registry->base_index[low];
-    } else {
-        /* 保留区：结构标记与临时实现的 opid 不进注册表。 */
-        return RUNTIMEC_STATUS_UNSUPPORTED;
     }
     /* 装载期已拒绝空 handler，走到这里说明表被绕过 append 写坏了。
      * 返回 INVALID 而不是跳过：跳过会让「注册了但没实现」伪装成「没注册」，

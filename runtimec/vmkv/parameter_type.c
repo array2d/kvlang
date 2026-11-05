@@ -132,6 +132,22 @@ vmkv_parameter_type_result_t vmkv_parameter_type_classify(
                langtype.size) != NULL) {
         return VMKV_PARAMETER_TYPE_RESULT_UNION;
     }
+    /*
+     * 指针/引用值：首字节 `*` 即指针类别，**不看指向什么**。
+     *
+     * `*T`、`**T`（rwfunc 帧槽形态，见 `04-函数调用.kv` 的参数槽条款）、
+     * `*[dims]T`、指向结构体原型的指针，一律落 `VMKV_RWIR_TYPE_SET_POINTER`。理由：
+     * 特化改选只问「两侧是不是同类指针」（`rwir_alias_table.def` 的
+     * `!=` → `ptreq·not` 记录），指向的类型不影响这次选择；把它拆细等于在
+     * 分类层复制一份类型表。
+     *
+     * 判据是**首字节**而不是 `strip_prefix("*")` 后非空：`**T` 同样要进这一支，
+     * 它的第一个 `*` 之后还是 `*`，任何「剥一层再看」的写法都会把它漏成裸名。
+     */
+    if (langtype.data[0] == '*') {
+        *output_type_set = VMKV_RWIR_TYPE_SET_POINTER;
+        return VMKV_PARAMETER_TYPE_RESULT_SINGLE;
+    }
     if (vmkv_parameter_contains(langtype, VMKV_PARAMETER_TYPE_MAP_SEPARATOR)) {
         *output_type_set = VMKV_RWIR_TYPE_SET_STRING_KEY_MAP;
         return VMKV_PARAMETER_TYPE_RESULT_SINGLE;

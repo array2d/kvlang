@@ -502,7 +502,7 @@ static runtimec_status_t vmkv_encoder_register_symbol(
  * 静态参数：绝对路径 → host 解引用 XValue 基址 → 唯一推导 body 地址。
  * 路径文本同时登记进符号池：vmbin 阶段按 key 访问，slot 就是符号下标。
  */
-runtimec_status_t vmkv_encode_static_argument(
+static runtimec_status_t vmkv_encode_static_argument_into(
     const vmkv_encode_request_t *request, binrwir_program_builder_t *builder,
     const vmkv_rwir_argument_view_t *source_argument,
     uint32_t argument_index, binrwir_argument_t *output_argument,
@@ -541,12 +541,23 @@ runtimec_status_t vmkv_encode_static_argument(
         request->host_services->resolve_static_xvalue_address(
             request->host_services->context, &request->expected_snapshot,
             source_argument->key, &xvalue_address, error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
+    /*
+     * key 是否**存在**不是可静态判定的属性：程序自己会创建 key（同一函数内
+     * 先写后读就是常态）。契约里「尚未分配的 key 必须返回 UNSUPPORTED」正是
+     * 这个信号——此时仍登记符号（key 是执行期解析/创建的依据），payload 记
+     * NONE，由执行期按 key 解析（写目标不存在则创建）。
+     *
+     * 失败时机下移、判据不下移：执行期解析不到仍然明确失败（见值访问层），
+     * 只是不再把「编码时还不存在」当成错误。
+     */
+    const bool unresolved = status == RUNTIMEC_STATUS_UNSUPPORTED;
+    if (status != RUNTIMEC_STATUS_SUCCESS && !unresolved) {
         return status;
     }
     runtimec_value_body_address_t body_address =
         RUNTIMEC_VALUE_BODY_ADDRESS_NONE;
-    if (!vmkv_encoder_derive_value_body_address(xvalue_address,
+    if (!unresolved &&
+        !vmkv_encoder_derive_value_body_address(xvalue_address,
                                                 &body_address)) {
         return vmkv_encoder_fail(error, RUNTIMEC_STATUS_ERROR,
                                  VMKV_ENCODER_DIAG_ADDRESS_DERIVATION,
@@ -621,8 +632,8 @@ static runtimec_status_t vmkv_encoder_map_argument(
         return RUNTIMEC_STATUS_SUCCESS;
     }
     if (source_argument->key_addressability == VMKV_KEY_ADDRESSABILITY_STATIC) {
-        return vmkv_encode_static_argument(request, builder, source_argument,
-                                           argument_index, output, error);
+        return vmkv_encode_static_argument_into(
+            request, builder, source_argument, argument_index, output, error);
     }
     uint16_t parameter_ordinal = 0U;
     bool writes_parameter = false;
@@ -684,6 +695,17 @@ static runtimec_status_t vmkv_encoder_map_argument(
     output->slot = symbol_index;
     output->payload = 0U;
     return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/* 公开入口：读参语义（key 必须已存在）。写参走 `_into(..., true)`。 */
+runtimec_status_t vmkv_encode_static_argument(
+    const vmkv_encode_request_t *request, binrwir_program_builder_t *builder,
+    const vmkv_rwir_argument_view_t *source_argument,
+    uint32_t argument_index, binrwir_argument_t *output_argument,
+    runtimec_error_t *error) {
+    return vmkv_encode_static_argument_into(request, builder, source_argument,
+                                            argument_index, output_argument,
+                                            error);
 }
 
 /* 一条已解析操作的编码状态，避免在函数间反复传长参数表。 */

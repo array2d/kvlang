@@ -28,6 +28,26 @@ extern "C" {
 #endif
 
 /*
+ * 值访问失败的分类，经 `error.code` 报出。
+ *
+ * 放头文件而不是 .c：测试必须能引用具体码值做断言，并证明它**没有**被抄进
+ * `exit.detail_code`——那里只放解释器自己的分类。只断言「非零」时，两个命名
+ * 空间同值的缺陷照样绿，等于没测。
+ *
+ * 编号只增不改：已报出的码值会出现在下游日志里。
+ */
+typedef enum vmbin_value_access_diagnostic {
+    VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST = 1,
+    VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE = 2,
+    VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT = 3,
+    VMBIN_VALUE_ACCESS_DIAG_MISSING_LITERAL = 4,
+    VMBIN_VALUE_ACCESS_DIAG_LITERAL_IS_READ_ONLY = 5,
+    VMBIN_VALUE_ACCESS_DIAG_SIZE_MISMATCH = 6,
+    VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE = 7,
+    VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE = 8
+} vmbin_value_access_diagnostic_t;
+
+/*
  * 一个参数项解析出的位置：可读写值体，或只读的池内字面量。
  *
  * `is_whole_wire` 由本函数回答，**调用方不得推断**：`write_bytes == NULL` 表示
@@ -134,6 +154,25 @@ runtimec_status_t vmbin_value_access_locate_body(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error);
+/*
+ * **指令不创造 key，创建源在源码里。**
+ *
+ * 创建动作按值的种类分两种，但都写在源码中：
+ *   - 容器：`map·new` / `struct·new` / `compactarray·new` / `scatterarray·new`；
+ *   - 标量：类型声明，`v:int32 = add(a, 4)` 里的 `v:int32` —— **声明建 key，
+ *     赋值只写**。
+ *
+ * 帧准备阶段的 `ensure_zero_value` 只是**执行这条声明的手段**，不是创建源：
+ * 没有声明就没有创建，实现手段不能反过来当规则用（按实现写规则，下一个人就会
+ * 以为「没声明也能建」，然后把写路径创建再发明一遍）。
+ *
+ * 所以这一层没有、也不该有「写路径顺手建一个」的入口：写目标在执行期仍不存在
+ * （payload 仍是 NONE）时，与读一样按未解析失败封闭。
+ *
+ * **绝对 key 的存在性是运行时前提，不是静态保证。** layout 对它什么都不做——
+ * 既不要求声明，也不去读存储核对；碰不到就由 runtime 失败封闭（本条实现）。
+ * 别在这里加「先检查一下再执行」：检查与执行之间还会有变化，静态保证是假保证。
+ */
 runtimec_status_t vmbin_value_access_read_body(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_buffer_t *output,

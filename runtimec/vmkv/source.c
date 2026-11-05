@@ -9,6 +9,7 @@
 
 #include "vmkv/source.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "kvspace/xvalue_head.h"
@@ -266,13 +267,101 @@ static bool vmkv_source_parse_parameter_definition(
     return true;
 }
 
+static runtimec_status_t vmkv_source_accept_listed_key(
+    vmkv_source_build_t *build, const char *text, size_t text_size,
+    runtimec_error_t *error);
+
 static runtimec_status_t vmkv_source_list_visit(void *context,
                                                 runtimec_key_view_t key,
                                                 runtimec_error_t *error) {
     vmkv_source_build_t *build = context;
+    if (key.data == NULL) {
+        return vmkv_source_fail(error, RUNTIMEC_STATUS_ERROR,
+                                VMKV_DIAG_MALFORMED_KEY,
+                                "vmkv source: listed key is empty");
+    }
+    return vmkv_source_accept_listed_key(build, key.data, key.size, error);
+}
+
+/*
+ * 读一个参数定义键并写进参数表。key 是完整键（`<func>.[0,±j]`）。
+ * 与枚举路径共用同一套 wire 解析与重复检查。
+ */
+static runtimec_status_t vmkv_source_read_parameter_key(
+    vmkv_source_build_t *build, runtimec_key_view_t key, bool read_side,
+    runtimec_error_t *error) {
     vmkv_function_source_t *function = build->function;
     const char *text = key.data;
     const size_t text_size = key.size;
+    if (text_size < 3U || text[text_size - 1U] != ']') {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    /* 从键尾解出 `.[0,±j]` 的 j 与方向：`]` 前后是十进制数。 */
+    size_t cursor = text_size - 1U;
+    uint32_t index = 0U;
+    while (cursor > 0U && text[cursor] != ',' && text[cursor] != '[') {
+        cursor -= 1U;
+    }
+    if (cursor == 0U || text[cursor] != ',') {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    size_t digit = cursor + 1U;
+    /* 负坐标 `.[0,-j]` 的符号在逗号之后：先跳过 `-` 再读数字。 */
+    if (digit < text_size && text[digit] == '-') {
+        digit += 1U;
+    }
+    while (digit < text_size && text[digit] >= '0' && text[digit] <= '9') {
+        index = index * 10U + (uint32_t)(text[digit] - '0');
+        digit += 1U;
+    }
+    if (index == 0U) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    const uint8_t *wire = NULL;
+    size_t wire_size = 0U;
+    runtimec_status_t status =
+        vmkv_source_read_value(build, key, &wire, &wire_size, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        if (status == RUNTIMEC_STATUS_UNSUPPORTED) {
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+        return status;
+    }
+    const uint8_t *body = NULL;
+    size_t body_size = 0U;
+    runtimec_string_view_t langtype;
+    if (!vmkv_source_split_wire(wire, wire_size, &body, &body_size, &langtype)) {
+        return vmkv_source_fail(error, RUNTIMEC_STATUS_ERROR,
+                                VMKV_DIAG_MALFORMED_VALUE,
+                                "vmkv source: parameter definition is malformed");
+    }
+    vmkv_param_definition_t *table =
+        read_side ? function->read_parameters : function->write_parameters;
+    if (index > (read_side ? function->read_parameter_count
+                           : function->write_parameter_count)) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    if (table[index - 1U].present) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    if (!vmkv_source_parse_parameter_definition(body, body_size,
+                                                &table[index - 1U])) {
+        return vmkv_source_fail(error, RUNTIMEC_STATUS_ERROR,
+                                VMKV_DIAG_MALFORMED_VALUE,
+                                "vmkv source: parameter definition is malformed");
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 接受一个「完整键」：判断它是不是本函数的坐标/参数槽，是则读值并登记。
+ * 枚举路径与「按坐标补读」路径共用这一份——槽解析只有一处。
+ */
+static runtimec_status_t vmkv_source_accept_listed_key(
+    vmkv_source_build_t *build, const char *text, size_t text_size,
+    runtimec_error_t *error) {
+    vmkv_function_source_t *function = build->function;
+    runtimec_key_view_t key = runtimec_key_view_make(text, text_size);
     if (text == NULL) {
         return vmkv_source_fail(error, RUNTIMEC_STATUS_ERROR,
                                 VMKV_DIAG_MALFORMED_KEY,
@@ -579,6 +668,125 @@ runtimec_status_t vmkv_source_open_function(
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         (void)vmkv_source_release(function, &allocator);
         return status;
+    }
+
+    /*
+     * 枚举可能整片看不到：嵌套 lib 的函数键含 `·`（`/lib/outer/inner·add1`），
+     * 目录枚举只返回 `inner`，函数子树里的坐标槽**一条都拿不到**。此时按
+     * **确定坐标**补读：`<func>/[n,0]` 是第 n 条指令的算子槽，其 body 的计数头
+     * 给出该行的读写参数个数，依此读 `[n,∓j]`；算子槽不存在即指令序列结束。
+     *
+     * 只在枚举一无所获时启用：普通函数走枚举，不付这份代价。
+     */
+    if (function->slot_count == 0U) {
+        char key_text[512];
+        for (uint32_t line = 1U; line <= 4096U; ++line) {
+            const int key_size = snprintf(key_text, sizeof(key_text),
+                                          "%.*s/[%u,0]", (int)build.prefix_size,
+                                          build.prefix, (unsigned)line);
+            if (key_size < 0 || (size_t)key_size >= sizeof(key_text)) {
+                break;
+            }
+            const uint8_t *wire = NULL;
+            size_t wire_size = 0U;
+            if (vmkv_source_read_value(
+                    &build, runtimec_key_view_make(key_text, (size_t)key_size),
+                    &wire, &wire_size, error) != RUNTIMEC_STATUS_SUCCESS) {
+                break; /* 不存在即结束 */
+            }
+            status = vmkv_source_accept_listed_key(&build, key_text,
+                                                   (size_t)key_size, error);
+            if (status != RUNTIMEC_STATUS_SUCCESS) {
+                (void)vmkv_source_release(function, &allocator);
+                return status;
+            }
+            const uint8_t *opcode_body = NULL;
+            size_t opcode_body_size = 0U;
+            runtimec_string_view_t opcode_langtype;
+            if (!vmkv_source_split_wire(wire, wire_size, &opcode_body,
+                                        &opcode_body_size, &opcode_langtype) ||
+                opcode_body_size < VMKV_COUNTS_HEADER_SIZE) {
+                break;
+            }
+            const uint32_t read_count =
+                (uint32_t)opcode_body[0] | ((uint32_t)opcode_body[1] << 8U);
+            const uint32_t write_count =
+                (uint32_t)opcode_body[2] | ((uint32_t)opcode_body[3] << 8U);
+            for (uint32_t index = 1U; index <= read_count; ++index) {
+                const int argument_key_size = snprintf(
+                    key_text, sizeof(key_text), "%.*s/[%u,-%u]",
+                    (int)build.prefix_size, build.prefix, (unsigned)line,
+                    (unsigned)index);
+                if (argument_key_size < 0 ||
+                    (size_t)argument_key_size >= sizeof(key_text)) {
+                    break;
+                }
+                status = vmkv_source_accept_listed_key(
+                    &build, key_text, (size_t)argument_key_size, error);
+                if (status != RUNTIMEC_STATUS_SUCCESS) {
+                    (void)vmkv_source_release(function, &allocator);
+                    return status;
+                }
+            }
+            for (uint32_t index = 1U; index <= write_count; ++index) {
+                const int argument_key_size = snprintf(
+                    key_text, sizeof(key_text), "%.*s/[%u,%u]",
+                    (int)build.prefix_size, build.prefix, (unsigned)line,
+                    (unsigned)index);
+                if (argument_key_size < 0 ||
+                    (size_t)argument_key_size >= sizeof(key_text)) {
+                    break;
+                }
+                status = vmkv_source_accept_listed_key(
+                    &build, key_text, (size_t)argument_key_size, error);
+                if (status != RUNTIMEC_STATUS_SUCCESS) {
+                    (void)vmkv_source_release(function, &allocator);
+                    return status;
+                }
+            }
+        }
+    }
+
+    /*
+     * 补齐枚举可能漏掉的参数定义键：**直接按坐标读** `<func>.[0,±j]`。
+     *
+     * 为什么需要：枚举前缀是函数键的父目录，而嵌套 lib 的函数键形如
+     * `/lib/outer/inner·add1`——目录枚举把含 `·` 的条目当扩展项，默认不返回，
+     * 于是参数定义键「存在但没被发现」，编码期报「read parameter definition is
+     * missing」。坐标是**确定**的（签名给了 nr/nw），直接构造键比依赖枚举可靠。
+     *
+     * 只补枚举没给到的槽：已 present 的不再读，避免与重复检查冲突。
+     */
+    {
+        char key_text[512];
+        for (uint32_t i = 0U; i < function->read_parameter_count; ++i) {
+            if (function->read_parameters[i].present) {
+                continue;
+            }
+            const int key_size = snprintf(key_text, sizeof(key_text),
+                                          "%.*s.[0,-%u]", (int)build.prefix_size,
+                                          build.prefix, (unsigned)(i + 1U));
+            if (key_size < 0 || (size_t)key_size >= sizeof(key_text)) {
+                continue; /* 键名放不下不是「缺失」的成因，留给下面统一报错 */
+            }
+            (void)vmkv_source_read_parameter_key(
+                &build, runtimec_key_view_make(key_text, (size_t)key_size),
+                true, error);
+        }
+        for (uint32_t i = 0U; i < function->write_parameter_count; ++i) {
+            if (function->write_parameters[i].present) {
+                continue;
+            }
+            const int key_size = snprintf(key_text, sizeof(key_text),
+                                          "%.*s.[0,%u]", (int)build.prefix_size,
+                                          build.prefix, (unsigned)(i + 1U));
+            if (key_size < 0 || (size_t)key_size >= sizeof(key_text)) {
+                continue;
+            }
+            (void)vmkv_source_read_parameter_key(
+                &build, runtimec_key_view_make(key_text, (size_t)key_size),
+                false, error);
+        }
     }
 
     /* 签名声明的每个参数必须有定义键；多余的定义键在上面的重复检查中已拒绝。 */

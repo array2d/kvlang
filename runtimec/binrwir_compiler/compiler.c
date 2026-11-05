@@ -143,14 +143,17 @@ runtimec_status_t binrwir_compiler_compile(
     if (output_compilation != NULL) {
         *output_compilation = NULL;
     }
-    /* program 一进来就归编译器：任何出口都不还给调用方。 */
+    /* program 一进来就归编译器：任何出口都不还给调用方。
+     * 每个失败出口都必须填 error——只返回一个码，调用方只能看到一个数字。 */
     if (program == NULL) {
-        return RUNTIMEC_STATUS_INVALID;
+        return binrwir_compiler_fail(error, RUNTIMEC_STATUS_INVALID, 1,
+                                     "compiler received no program");
     }
     if (compiler == NULL || output_compilation == NULL) {
         runtimec_error_reset(&ignored);
         (void)binrwir_program_destroy(program);
-        return RUNTIMEC_STATUS_INVALID;
+        return binrwir_compiler_fail(error, RUNTIMEC_STATUS_INVALID, 2,
+                                     "compiler or output slot is missing");
     }
     if (binrwir_program_validate(program) != RUNTIMEC_STATUS_SUCCESS) {
         runtimec_error_reset(&ignored);
@@ -171,6 +174,16 @@ runtimec_status_t binrwir_compiler_compile(
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         runtimec_error_reset(&ignored);
         (void)binrwir_program_destroy(program);
+        /*
+         * 兜底：下游若已填过 error 就保留它（那条消息更接近根因），
+         * 没填就补一条——绝不让失败只剩一个状态码。
+         * 状态本身在 `error->status` 里，消息说清是哪一步即可。
+         */
+        if (error != NULL && error->message.size == 0U) {
+            return binrwir_compiler_fail(
+                error, status, 7,
+                "execution plan build failed without diagnosis");
+        }
         return status;
     }
     /*
@@ -203,12 +216,13 @@ runtimec_status_t binrwir_compiler_compile(
 runtimec_status_t binrwir_compilation_get_view(
     const binrwir_compilation_t *compilation,
     binrwir_compilation_view_t *output_view, runtimec_error_t *error) {
-    (void)error;
     binrwir_compilation_reset_view(output_view);
     if (compilation == NULL || output_view == NULL ||
         compilation->canonical_program == NULL ||
         compilation->execution_plan == NULL) {
-        return RUNTIMEC_STATUS_INVALID;
+        return binrwir_compiler_fail(
+            error, RUNTIMEC_STATUS_INVALID, 8,
+            "compilation view is not readable (program or plan missing)");
     }
     *output_view = compilation->view;
     return RUNTIMEC_STATUS_SUCCESS;

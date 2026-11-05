@@ -12,6 +12,8 @@
 
 #include <stdint.h>
 
+#include "contract/host_services.h"
+#include "contract/snapshot.h"
 #include "contract/status.h"
 #include "contract/view.h"
 #include "binrwir/frame_bindings.h"
@@ -47,6 +49,16 @@ typedef struct binrwir_execution_frame {
      * 尾斜杠只出现一次（由调用方给的路径决定），本层不再补也不再剥。
      */
     runtimec_key_view_t frame_path;
+    /*
+     * host services（借用，可为 NULL）。值访问写路径需要两件只有 host 才能做的事：
+     *   - 按 langtype **创建**尚不存在的写目标（`ensure_zero_value`，零值规则的
+     *     唯一实现）；
+     *   - 对 STATIC 且 payload 为 NONE 的写目标做**执行期**地址解析。
+     * 由执行入口填入；其它构造点保持 NULL，此时未解析的写目标失败封闭。
+     */
+    const runtimec_host_services_t *host_services;
+    /* 与 host services 配套的快照（源世代）；借用的拷贝。 */
+    runtimec_snapshot_t snapshot;
     uint64_t snapshot_generation;
     uint64_t program_generation;
     uint32_t logical_program_counter;

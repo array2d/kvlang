@@ -141,6 +141,30 @@ static runtimec_status_t runtimec_host_finish_call(
  * 缺失 key 不是错误：C ABI 返回 0 且 value=NULL，写参保持原样。
  */
 /*
+ * 从一个读参取 `uint64` 标量。宽度必须正好 8 字节——不截断、不扩展。
+ *
+ * 一句话目的：**把一个读参读成一个数**。
+ */
+static bool runtimec_host_read_uint64(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, uint64_t *output_value,
+    binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
+    vmbin_value_location_t location;
+    runtimec_error_t error;
+
+    runtimec_error_reset(&error);
+    if (vmbin_value_access_locate_body(frame, argument, &location, &error) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        location.read_bytes == NULL || location.size != sizeof(*output_value)) {
+        runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           source_program_counter);
+        return false;
+    }
+    memcpy(output_value, location.read_bytes, sizeof(*output_value));
+    return true;
+}
+
+/*
  * 把一个 int64 结果写进写参。`random·*`、`listlen` 这类「算出一个数」的算子共用。
  *
  * 一句话目的：**把一个数落到写参上**。
@@ -402,31 +426,25 @@ static uint64_t runtimec_host_random_u64(void) {
 }
 
 /* `random·uint64()`：无读参，结果写写参 1。 */
+/* `random·u64()`：满 64 位随机数。 */
 static runtimec_status_t runtimec_host_random_unsigned_64(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
         instruction->source_logical_program_counter;
-    const uint64_t value = runtimec_host_random_u64();
-    runtimec_error_t error;
-    runtimec_status_t status;
 
-    runtimec_error_reset(&error);
     *output_exit = (binrwir_execution_exit_t){0};
     if (instruction->write_arguments.count != 1U) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                                   source_program_counter);
     }
-    status = vmbin_value_access_write_body(
-        frame, &instruction->write_arguments.data[0],
-        runtimec_bytes_view_make(&value, sizeof(value)), &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
+    return runtimec_host_store_int64(frame, instruction,
+                                     (int64_t)runtimec_host_random_u64(),
+                                     output_exit, source_program_counter);
 }
 
+/* `random·int63()`：取 64 位随机数的高 63 位，保证非负（旧实现 `>> 1`）。 */
 /* `random·int63()`：取 64 位随机数的高 63 位，保证非负（旧实现 `>> 1`）。 */
 static runtimec_status_t runtimec_host_random_signed_63(
     binrwir_execution_frame_t *frame,
@@ -434,67 +452,45 @@ static runtimec_status_t runtimec_host_random_signed_63(
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
         instruction->source_logical_program_counter;
-    const int64_t value = (int64_t)(runtimec_host_random_u64() >> 1U);
-    runtimec_error_t error;
-    runtimec_status_t status;
 
-    runtimec_error_reset(&error);
     *output_exit = (binrwir_execution_exit_t){0};
     if (instruction->write_arguments.count != 1U) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                                   source_program_counter);
     }
-    status = vmbin_value_access_write_body(
-        frame, &instruction->write_arguments.data[0],
-        runtimec_bytes_view_make(&value, sizeof(value)), &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
+    return runtimec_host_store_int64(
+        frame, instruction, (int64_t)(runtimec_host_random_u64() >> 1U),
+        output_exit, source_program_counter);
 }
 
 /*
  * `random·intn(bound)`：读参 1 是 int64 上界，结果写写参 1。
  * 语义按旧实现（`rwir_random.c:30`）：`bound == 0` 返回 0，否则取模。
  */
+/* `random·intn(bound) -> n`：`[0, bound)` 半开区间；bound 为 0 时返回 0。 */
 static runtimec_status_t runtimec_host_random_below(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
         instruction->source_logical_program_counter;
-    vmbin_value_location_t bound_location;
     uint64_t bound = 0U;
     uint64_t value;
-    runtimec_error_t error;
-    runtimec_status_t status;
 
-    runtimec_error_reset(&error);
     *output_exit = (binrwir_execution_exit_t){0};
     if (instruction->read_arguments.count != 1U ||
         instruction->write_arguments.count != 1U) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                                   source_program_counter);
     }
-    status = vmbin_value_access_locate_body(frame, &instruction->read_arguments.data[0],
-                                       &bound_location, &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
+    if (!runtimec_host_read_uint64(frame, &instruction->read_arguments.data[0],
+                                   &bound, output_exit,
+                                   source_program_counter)) {
+        return RUNTIMEC_STATUS_ERROR;
     }
-    if (bound_location.read_bytes == NULL ||
-        bound_location.size != sizeof(bound)) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
-    }
-    memcpy(&bound, bound_location.read_bytes, sizeof(bound));
     value = bound == 0U ? 0U : runtimec_host_random_u64() % bound;
-    status = vmbin_value_access_write_body(
-        frame, &instruction->write_arguments.data[0],
-        runtimec_bytes_view_make(&value, sizeof(value)), &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
+    return runtimec_host_store_int64(frame, instruction, (int64_t)value,
+                                     output_exit, source_program_counter);
 }
 
 /*
@@ -730,52 +726,32 @@ static runtimec_status_t runtimec_host_kvspace_copy_list(
 }
 
 /* `kvspace·mkindex(path, capacity)`：路径 + 容量，无写参。 */
+/* `kvspace·mkindex(path, capacity)`：路径 + 容量，调 ABI。 */
 static runtimec_status_t runtimec_host_kvspace_make_index(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
         instruction->source_logical_program_counter;
-    char path[RUNTIMEC_HOST_KEY_CAPACITY];
+    char keys[2][RUNTIMEC_HOST_KEY_CAPACITY];
     char message[256];
-    vmbin_value_location_t capacity_location;
     uint64_t capacity = 0U;
     void *handle = NULL;
-    runtimec_error_t error;
-    runtimec_status_t status;
 
-    runtimec_error_reset(&error);
-    *output_exit = (binrwir_execution_exit_t){0};
-    if (instruction->read_arguments.count != 2U) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
+    /* 第二个读参是标量不是路径：`prepare_call` 只取第一个，第二个单独读。 */
+    if (!runtimec_host_prepare_call(frame, instruction, output_exit, 2U,
+                                    &handle, keys) ||
+        !runtimec_host_read_uint64(frame, &instruction->read_arguments.data[1],
+                                   &capacity, output_exit,
+                                   source_program_counter)) {
+        return RUNTIMEC_STATUS_ERROR;
     }
-    status = runtimec_vthread_status_handle(frame, &handle);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_host_static_key(frame, &instruction->read_arguments.data[0],
-                                          path, sizeof(path));
-    }
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[1], &capacity_location,
-            &error);
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, status, source_program_counter);
-    }
-    if (capacity_location.read_bytes == NULL ||
-        capacity_location.size != sizeof(capacity)) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  source_program_counter);
-    }
-    memcpy(&capacity, capacity_location.read_bytes, sizeof(capacity));
     message[0] = '\0';
-    if (kvspaceMkindex(handle, path, (uint32_t)capacity, message,
-                       sizeof(message)) != 0) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                  source_program_counter);
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
+    return runtimec_host_finish_call(
+        output_exit,
+        kvspaceMkindex(handle, keys[0], (uint32_t)capacity, message,
+                       sizeof(message)),
+        source_program_counter);
 }
 
 /*

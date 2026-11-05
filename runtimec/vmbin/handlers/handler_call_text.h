@@ -271,7 +271,10 @@ static inline void vmbin_handler_fail_decode(
         }                                                                          \
         function(&read_text_, write_position_.write_bytes,                         \
                  write_position_.size, output_exit);                               \
-        return RUNTIMEC_STATUS_SUCCESS;                                            \
+        /* 逻辑函数自己置了 exit 就必须按它回值——无条件 SUCCESS 会把失败吞掉。 */  \
+        return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR                    \
+                   ? output_exit->status                                           \
+                   : RUNTIMEC_STATUS_SUCCESS;                                      \
     }
 
 /*
@@ -340,6 +343,7 @@ static inline void vmbin_handler_fail_decode(
         function(&first_text_, &second_text_,                                      \
                  (const index_type *)(const void *)index_position_.read_bytes,     \
                  write_position_.write_bytes, write_position_.size);               \
+        /* 逻辑函数不置 exit（该形态无失败路径），此处恒成功。 */                  \
         return RUNTIMEC_STATUS_SUCCESS;                                            \
     }
 

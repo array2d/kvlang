@@ -69,8 +69,14 @@ void runtimec_scalar_divide_signed(int64_t left, int64_t right,
         return;
     }
     if (left == minimum && right == -1) {
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_DIVIDE_OVERFLOW);
+        /*
+         * 二补数回绕：`INT64_MIN / -1` 得 `INT64_MIN`（架构师裁决 2026-11-05，
+         * Go 规范「`q = x / -1` 等于 `x`」）。
+         *
+         * **这不是可选的处理**：C 在这里是未定义行为，x86 的 `idiv` 直接抛 #DE
+         * 杀掉进程。所以必须先判，且结果是定义好的回绕值，不是错误。
+         */
+        *output_value = minimum;
         return;
     }
     *output_value = left / right;
@@ -86,9 +92,9 @@ void runtimec_scalar_remainder_signed(int64_t left, int64_t right,
         return;
     }
     if (left == minimum && right == -1) {
-        /* 数学上余数是 0，但 `INT64_MIN % -1` 与除法同源，C 不定义。 */
-        runtimec_scalar_fail(output_exit,
-                             RUNTIMEC_SCALAR_DIAG_DIVIDE_OVERFLOW);
+        /* 二补数回绕：`INT64_MIN % -1` 得 0（同一条裁决）。数学上余数确实是 0，
+         * 但 C 不定义这个表达式，`idiv` 同样会抛 #DE。 */
+        *output_value = 0;
         return;
     }
     *output_value = left % right;

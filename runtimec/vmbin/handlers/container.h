@@ -90,6 +90,18 @@ typedef enum runtimec_container_diagnostic {
      */
     RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH = 0x4304,
     /*
+     * 散列容器有**洞**：成员序列中间缺坐标。跨形态搬运要求源能完整填满目标，
+     * 洞让「成员数」与「坐标空间」分离，填零是发明数据、跳过是自洽的谎言。
+     */
+    RUNTIMEC_CONTAINER_DIAG_SCATTER_HAS_HOLE = 0x4306,
+    /*
+     * 源成员数与目标声明元素数不符。
+     *
+     * 与 `HAS_HOLE` **分开**：洞是「序列中间缺」，数量不符是「总数不对」——
+     * 修法不同（前者补成员，后者改声明的 N）。
+     */
+    RUNTIMEC_CONTAINER_DIAG_ELEMENT_COUNT_MISMATCH = 0x4307,
+    /*
      * `newreshape` 的新旧元素总数不守恒。
      *
      * `[4]int64 → [3,3]int64`：4 ≠ 9，body 长度装不下。与 `VALUE_WIDTH_MISMATCH`
@@ -118,6 +130,14 @@ typedef struct runtimec_container_langtype {
  */
 runtimec_status_t runtimec_container_langtype_parse(
     runtimec_string_view_t langtype, runtimec_container_langtype_t *output);
+
+/*
+ * 形状段 `[d1,d2,…]` 的**元素个数**（乘积）。非法形状返回 -1。
+ *
+ * 导出给 `scatterarray·newcompact`：它要核「源成员数 == 目标声明的 N」，
+ * 而 `N` 只能从声明类型里算——那是同一份解析，不该各写一遍。
+ */
+int64_t runtimec_container_shape_numel(runtimec_string_view_t langtype);
 
 /*
  * 返回本模块的静态条目数组，并把条目数写入 output_count。

@@ -29,6 +29,7 @@
 #include "contract/status.h"
 #include "contract/view.h"
 #include "vmbin/handlers/scalar.h"
+#include "vmbin/handlers/scalar_special.h"
 #include "vmbin/handlers/string_text.h"
 #include "vmbin/value_access.h"
 
@@ -271,4 +272,109 @@ bool runtimec_scalar_character_code_point(const uint8_t *bytes, size_t size,
     }
     *output_code_point = text.codepoints[0];
     return true;
+}
+
+/*
+ * 字符 → 数值 / 字符（matrix:62 的反向）。源是字符，先解码成码点，再按目标转换。
+ *
+ * 目标分两类：
+ *   数值目标（整数/浮点）—— 码点值直接转换。码点恒在 [0, 0x10FFFF]，所以
+ *      「到更宽的类型」永远装得下；窄化的回绕与饱和按整数 cast 的同一套判据。
+ *   char 目标 —— 走 `value_to_character` 重编，目标编码由元组定。
+ *
+ * 单字符要求**恰好一个码点**：空 body 或多码点都是畸形载荷，不取第一个。
+ */
+void runtimec_scalar_character_to_value(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    string_text_decode_function_t decode_source,
+    runtimec_character_encoding_t target_encoding,
+    binrwir_execution_exit_t *output_exit) {
+    vmbin_value_location_t source;
+    runtimec_error_t error;
+    runtimec_status_t status;
+    uint32_t code_point = 0U;
+
+    runtimec_error_reset(&error);
+    status = vmbin_value_access_locate_body(
+        frame, &instruction->read_arguments.data[0], &source, &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        runtimec_scalar_fail(output_exit, RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
+        return;
+    }
+    if (!runtimec_scalar_character_code_point(source.read_bytes, source.size,
+                                              decode_source, &code_point)) {
+        runtimec_scalar_fail(output_exit,
+                             RUNTIMEC_SCALAR_DIAG_MALFORMED_CHARACTER);
+        return;
+    }
+    runtimec_scalar_value_to_character(frame, instruction, code_point,
+                                       target_encoding, output_exit);
+}
+
+/*
+ * 字符 → 整数 / 浮点：目标定宽，直接写。
+ *
+ * 码点范围 [0, 0x10FFFF] 对任何整数/浮点目标都够用（最小目标 int8 的上限是 127，
+ * 所以**窄化仍可能发生**）——按整数 cast 的同一套语义：有符号目标回绕、无符号
+ * 目标回绕。这与其他整数 cast 的判据同源，不另立规则。
+ */
+void runtimec_scalar_character_to_number(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    string_text_decode_function_t decode_source, uint32_t target_width,
+    bool target_signed, bool target_is_float,
+    binrwir_execution_exit_t *output_exit) {
+    vmbin_value_location_t source;
+    vmbin_value_location_t target;
+    runtimec_error_t error;
+    runtimec_status_t status;
+    uint32_t code_point = 0U;
+
+    runtimec_error_reset(&error);
+    status = vmbin_value_access_locate_body(
+        frame, &instruction->read_arguments.data[0], &source, &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        runtimec_scalar_fail(output_exit, RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
+        return;
+    }
+    if (!runtimec_scalar_character_code_point(source.read_bytes, source.size,
+                                              decode_source, &code_point)) {
+        runtimec_scalar_fail(output_exit,
+                             RUNTIMEC_SCALAR_DIAG_MALFORMED_CHARACTER);
+        return;
+    }
+    status = vmbin_value_access_locate_body(
+        frame, &instruction->write_arguments.data[0], &target, &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        runtimec_scalar_fail(output_exit, RUNTIMEC_SCALAR_DIAG_LOCATE_FAILED);
+        return;
+    }
+    if (target.write_bytes == NULL ||
+        target.size != (size_t)(target_width / 8U)) {
+        runtimec_scalar_fail(output_exit,
+                             RUNTIMEC_SCALAR_DIAG_LENGTH_MISMATCH);
+        return;
+    }
+    if (target_is_float) {
+        if (target_width == 32U) {
+            float narrow = (float)code_point;
+            memcpy(target.write_bytes, &narrow, sizeof(narrow));
+        } else {
+            double wide = (double)code_point;
+            memcpy(target.write_bytes, &wide, sizeof(wide));
+        }
+        return;
+    }
+    if (target_signed) {
+        const int64_t narrowed = runtimec_scalar_wrap_signed(
+            (int64_t)code_point, 32U, target_width);
+        memcpy(target.write_bytes, &narrowed, target.size);
+        return;
+    }
+    {
+        const uint64_t narrowed =
+            runtimec_scalar_wrap_unsigned((uint64_t)code_point, target_width);
+        memcpy(target.write_bytes, &narrowed, target.size);
+    }
 }

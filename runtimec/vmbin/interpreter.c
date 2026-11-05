@@ -64,20 +64,25 @@ static runtimec_status_t vmbin_interpreter_fail(
     return status;
 }
 
-/* 失败细节优先用下层写下的稳定错误码，没有才用本层分类。 */
+/*
+ * `exit.detail_code` **只承载本层（解释器）的分类**，下层的码留在
+ * `execution->error.code` 里——调用方要细节就读 error。
+ *
+ * 曾经这里把 `error.code` 抄进 detail_code，理由是「给更具体的细节」。代价是
+ * 这个字段变成混合命名空间：解释器、执行窗口、值访问三个枚举同值 6，同一个
+ * 数字在三种解释下都含义明确，于是没有任何地方会报「你不确定」。实际后果是
+ * 全队两次误判（UNRESOLVED_TARGET 被读成 COMPILE_FAILED，真实原因却是
+ * 值访问的 SIZE_MISMATCH）。
+ *
+ * 判据：**同一份数据不许有两种解释**。细节已经在 error 里，抄第二份是冗余，
+ * 而冗余的代价是命名空间被毁。
+ */
 static runtimec_status_t vmbin_interpreter_fail_with_error(
     vmbin_execution_t *execution,
     const binrwir_instruction_view_t *instruction, runtimec_status_t status,
     uint32_t default_detail_code, binrwir_execution_exit_t *output_exit) {
-    uint32_t detail_code = default_detail_code;
-
-    if (runtimec_error_is_set(&execution->error) &&
-        execution->error.code > 0 &&
-        (uint64_t)execution->error.code <= UINT32_MAX) {
-        detail_code = (uint32_t)execution->error.code;
-    }
-    return vmbin_interpreter_fail(execution, instruction, status, detail_code,
-                                  output_exit);
+    return vmbin_interpreter_fail(execution, instruction, status,
+                                  default_detail_code, output_exit);
 }
 
 /* 借出一个参数项的值体位置；读写信都从这里拿地址，不复制。 */
@@ -552,6 +557,43 @@ vmbin_execute(const binrwir_program_t *program,
             output_exit->kind != BINRWIR_EXECUTION_EXIT_NONE) {
             break;
         }
+    }
+    /*
+     * 不变量：返回 SUCCESS 时，结构化退出不许是 ERROR。
+     *
+     * 两个通道表达同一件事——返回状态与 exit.kind。它们不一致时调用方没有唯一
+     * 规则：执行窗口按返回状态判成败，于是把一次失败当成成功原样拷贝，下游看到
+     * `status=0`、`detail=0`，而 exit.kind 明明是 ERROR。
+     *
+     * 这是实现 bug（handler 置了错，却报了成功），不做静默对齐：换成一条只属于
+     * 本层的诊断，让它在第一次出现时就把位置暴露出来。
+     */
+    if (status == RUNTIMEC_STATUS_SUCCESS &&
+        output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR) {
+        const runtimec_status_t reported_status =
+            output_exit->status != RUNTIMEC_STATUS_SUCCESS
+                ? output_exit->status
+                : RUNTIMEC_STATUS_ERROR;
+        /*
+         * handler 返回了 SUCCESS，所以分派层没给它补位置——出口里的 pc 不可信
+         * （多半是 0）。矛盾发生在**刚执行的那条指令**上，位置从游标取。
+         */
+        uint32_t source_program_counter =
+            output_exit->logical_program_counter;
+        {
+            binrwir_instruction_view_t failing_instruction;
+            if (binrwir_program_get_instruction(
+                    program, frame->logical_program_counter,
+                    &failing_instruction) == RUNTIMEC_STATUS_SUCCESS) {
+                source_program_counter =
+                    failing_instruction.source_logical_program_counter;
+            }
+        }
+
+        vmbin_interpreter_error_exit(
+            output_exit, reported_status,
+            VMBIN_INTERPRETER_DIAG_CONTRADICTORY_EXIT, source_program_counter);
+        return reported_status;
     }
     return status;
 }

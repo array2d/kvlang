@@ -26,6 +26,37 @@
  * 为什么需要这一层：registry 的 handler 签名是 `(frame, instruction, exit)`，而
  * 逻辑函数要的是已定位、已核长的类型化指针。把这段转换写一次，三百个条目各自一行
  * 宏调用；否则每个 handler 都要重复十行样板，那正是行数超限的来源。
+ *
+ * ── 选宏前先数读参 ────────────────────────────────────────────────────
+ *
+ * **每个宏只接受一种操作数形状**，形状不符会在装载期报 `0x4A01 WRONG_ARITY`。
+ * 写 handler 时先数「这条指令有几个读参、几个写参」，再照下表选宏——
+ * 不要凭名字猜（`_SCATTER_CROSS` 与 `_SCATTER_EXPAND` 就因此被混用过两次）。
+ *
+ *   | 宏                                  | 读 | 写 | 备注                          |
+ *   |-------------------------------------|----|----|-------------------------------|
+ *   | `_UNARY_TYPED` / `_UNARY_TYPED_EXIT`   | 1 | 1 | 类型化指针                  |
+ *   | `_BINARY_TYPED` / `_BINARY_TYPED_EXIT` | 2 | 1 | **两读参各有类型**          |
+ *   | `_TERNARY_TYPED` / `_TERNARY_TYPED_EXIT` | 3 | 1 | 三读参各有类型            |
+ *   | `_UNARY_LOCATION`                   | 1 | 1 | 位置级（长度运行期决定）      |
+ *   | `_BINARY_LOCATION`                  | 2 | 1 | 位置级                        |
+ *   | `_TERNARY_LOCATION`                 | 3 | 1 | 位置级                        |
+ *   | `_UNARY_ARRAY`                      | 1 | 1 | 读参是 compact 数组           |
+ *   | `_ARRAY_INDEX`                      | 2 | 1 | 数组 + 下标                   |
+ *   | `_ARRAY_INDEX_WRITE`                | 3 | 1 | 数组 + 下标 + 新值（同槽）    |
+ *   | `_CREATE_NONE`                      | 0 | 1 | 纯创建                        |
+ *   | `_CREATE_ONE`                       | 1 | 1 | 一读参创建                    |
+ *   | `_CREATE_TWO`                       | 2 | 1 | 两读参创建                    |
+ *   | `_CREATE_TERNARY`                   | 3 | 1 | 三读参创建                    |
+ *   | `_CREATE_VARIADIC`                  | 不定 | 1 | 读参个数运行期才知道        |
+ *   | `_SCATTER_READ_SCALAR`              | 1 | 1 | 容器 → 标量                   |
+ *   | `_SCATTER_CREATE`                   | 0 | 1 | 空容器                        |
+ *   | `_SCATTER_READ_WRITE`               | 2 | 1 | 容器 + 下标 → 元素            |
+ *   | `_SCATTER_WRITE_READS`              | ≥2 | 1 | 容器 + 若干读参（`set`/`append`） |
+ *   | `_SCATTER_CROSS`                    | ≥2 | 1 | **跨容器搬运**（源 + 目标）  |
+ *   | `_SCATTER_EXPAND`                   | 1 | 1 | **单容器转换**（散列 ↔ compact） |
+ *
+ * `handler_call_text.h` 的文本族同理，见该文件顶部的表。
  */
 
 #include <stddef.h>
@@ -124,9 +155,10 @@ static inline void vmbin_handler_fail(binrwir_execution_exit_t *output_exit,
         runtimec_status_t vmbin_handler_status_;                                   \
                                                                                    \
         runtimec_error_reset(&vmbin_handler_error_);                               \
-        vmbin_handler_status_ = vmbin_value_access_locate_body(                    \
-            (frame), &(instruction)->write_arguments.data[(ordinal)], (location),  \
-            &vmbin_handler_error_);                                                \
+        vmbin_handler_status_ =                                                   \
+            vmbin_value_access_locate_body(                                        \
+                (frame), &(instruction)->write_arguments.data[(ordinal)],          \
+                (location), &vmbin_handler_error_);                                \
         if (vmbin_handler_status_ != RUNTIMEC_STATUS_SUCCESS) {                    \
             vmbin_handler_fail(output_exit, vmbin_handler_status_,                 \
                                VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,              \
@@ -964,6 +996,75 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
             instruction->source_logical_program_counter;                           \
         function(frame, instruction, write_position_.write_bytes,                  \
                  write_position_.size, output_exit);                               \
+        return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR                    \
+                   ? output_exit->status                                           \
+                   : RUNTIMEC_STATUS_SUCCESS;                                      \
+    }
+
+
+/* 写参（容器）+ 若干读参：`scatterarray·set` 这类「往容器里写一个成员」。 */
+#define VMBIN_HANDLER_SCATTER_WRITE_READS(handler_name, function)                  \
+    static runtimec_status_t handler_name(                                         \
+        binrwir_execution_frame_t *frame,                                          \
+        const binrwir_instruction_view_t *instruction,                             \
+        binrwir_execution_exit_t *output_exit) {                                   \
+        if (instruction->read_arguments.count < 2U ||                              \
+            instruction->write_arguments.count != 1U ||                            \
+            frame->kvspace_handle == NULL) {                                       \
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,               \
+                               VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY,                \
+                               instruction->source_logical_program_counter);       \
+            return RUNTIMEC_STATUS_ERROR;                                          \
+        }                                                                          \
+        output_exit->logical_program_counter =                                     \
+            instruction->source_logical_program_counter;                           \
+        function(frame, instruction, output_exit);                                 \
+        return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR                    \
+                   ? output_exit->status                                           \
+                   : RUNTIMEC_STATUS_SUCCESS;                                      \
+    }
+
+
+/* 多个读参 + 写参（跨容器搬运）：`scatterarray·slice` / `newscatter` / `newcompact`。 */
+#define VMBIN_HANDLER_SCATTER_CROSS(handler_name, function)                        \
+    static runtimec_status_t handler_name(                                         \
+        binrwir_execution_frame_t *frame,                                          \
+        const binrwir_instruction_view_t *instruction,                             \
+        binrwir_execution_exit_t *output_exit) {                                   \
+        if (instruction->read_arguments.count < 2U ||                              \
+            instruction->write_arguments.count != 1U ||                            \
+            frame->kvspace_handle == NULL) {                                       \
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,               \
+                               VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY,                \
+                               instruction->source_logical_program_counter);       \
+            return RUNTIMEC_STATUS_ERROR;                                          \
+        }                                                                          \
+        output_exit->logical_program_counter =                                     \
+            instruction->source_logical_program_counter;                           \
+        function(frame, instruction, output_exit);                                 \
+        return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR                    \
+                   ? output_exit->status                                           \
+                   : RUNTIMEC_STATUS_SUCCESS;                                      \
+    }
+
+
+/* 1 读参（compact）+ 1 写参（新建散列容器）：`scatterarray·newscatter`。 */
+#define VMBIN_HANDLER_SCATTER_EXPAND(handler_name, function)                       \
+    static runtimec_status_t handler_name(                                         \
+        binrwir_execution_frame_t *frame,                                          \
+        const binrwir_instruction_view_t *instruction,                             \
+        binrwir_execution_exit_t *output_exit) {                                   \
+        if (instruction->read_arguments.count != 1U ||                             \
+            instruction->write_arguments.count != 1U ||                            \
+            frame->kvspace_handle == NULL) {                                       \
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,               \
+                               VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY,                \
+                               instruction->source_logical_program_counter);       \
+            return RUNTIMEC_STATUS_ERROR;                                          \
+        }                                                                          \
+        output_exit->logical_program_counter =                                     \
+            instruction->source_logical_program_counter;                           \
+        function(frame, instruction, output_exit);                                 \
         return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR                    \
                    ? output_exit->status                                           \
                    : RUNTIMEC_STATUS_SUCCESS;                                      \

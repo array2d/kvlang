@@ -351,7 +351,7 @@ VMBIN_HANDLER_CREATE_TERNARY(container_newslice_handler, container_newslice_buil
  * 只解析**首个**方括号段：本批只支持一维定长（`[N]K`），多维留到单独立条时再扩。
  * 不认识的写法一律返回 -1，不猜。
  */
-static int64_t container_shape_numel(runtimec_string_view_t langtype) {
+int64_t runtimec_container_shape_numel(runtimec_string_view_t langtype) {
     int64_t total = 1;
     size_t offset = 1U;
 
@@ -389,7 +389,7 @@ static int64_t container_shape_numel(runtimec_string_view_t langtype) {
  */
 static int64_t container_langtype_total_bytes(runtimec_string_view_t langtype) {
     runtimec_container_langtype_t type;
-    const int64_t element_count = container_shape_numel(langtype);
+    const int64_t element_count = runtimec_container_shape_numel(langtype);
 
     if (element_count < 0 ||
         runtimec_container_langtype_parse(langtype, &type) !=
@@ -521,7 +521,7 @@ static int64_t container_fill_body(runtimec_string_view_t langtype,
                                    size_t capacity,
                                    runtimec_container_diagnostic_t *output_detail) {
     runtimec_container_langtype_t type;
-    const int64_t element_count = container_shape_numel(langtype);
+    const int64_t element_count = runtimec_container_shape_numel(langtype);
     uint8_t element[CONTAINER_SCALAR_CAPACITY];
 
     *output_detail = RUNTIMEC_CONTAINER_DIAG_NONE;

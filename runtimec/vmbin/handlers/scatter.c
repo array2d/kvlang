@@ -17,7 +17,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
@@ -35,25 +34,67 @@
 #include "vmbin/value_access.h"
 
 #define SCATTER_KEY_CAPACITY 512U
-
-/*
- * 成员分隔符：`·`（U+00B7，UTF-8 两个字节）。
- *
- * **不是 `/`**：散列容器的成员是 `base·[i]`，`kvspaceListLen` 用这个前缀枚举。
- * 写成 `base/` 会建出一条与成员不相干的目录——`len` 恒为 0，而成员明明在。
- */
-#define SCATTER_MEMBER_SEPARATOR "\xC2\xB7"
 #define SCATTER_BODY_CAPACITY 512U
 
-static runtimec_status_t scatter_fail(binrwir_execution_exit_t *output_exit,
-                                      runtimec_status_t status,
-                                      uint32_t source_program_counter) {
-    *output_exit = (binrwir_execution_exit_t){0};
-    output_exit->kind = BINRWIR_EXECUTION_EXIT_ERROR;
-    output_exit->status = status;
-    output_exit->logical_program_counter = source_program_counter;
-    output_exit->resume_logical_program_counter = source_program_counter;
-    return status;
+/*
+ * 成员分隔符：`·`（U+00B7，UTF-8 两个字节）。**不是 `/`**——散列容器的成员是
+ * `base·[i]`，`kvspaceListLen` 用这个前缀枚举。写成 `base/` 会建出一条与成员
+ * 不相干的目录：`len` 恒为 0，而成员明明在。
+ */
+#define SCATTER_MEMBER_SEPARATOR "\xC2\xB7"
+
+/* 前置声明：容器创建 helper 要先用到目录前缀与成员键，两者在它之后定义。 */
+static bool scatter_member_prefix(const char *base, char *buffer,
+                                  size_t capacity,
+                                  binrwir_execution_exit_t *output_exit);
+static runtimec_status_t scatter_member_key(const char *base, int64_t coordinate,
+                                            char *buffer, size_t capacity);
+
+/*
+ * 建一个**空散列容器**：空 body 的 map 头 + 目录。跨容器搬运的目标都先建成它。
+ *
+ * 两步缺一不可：只写 marker 则 `ListLen` 数不到成员；只建目录则 base 没有类型。
+ * **失败即置 `exit` 并返回 false**。
+ */
+static bool scatter_container_empty(const binrwir_execution_frame_t *frame,
+                                    const char *base,
+                                    binrwir_execution_exit_t *output_exit) {
+    char directory[SCATTER_KEY_CAPACITY + 2U];
+    char message[256];
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+
+    if (kvspaceXvalueHeadNewSlack(NULL, 0U, 0U, "stringkeymap", &wire,
+                                  &wire_size) != 0 ||
+        wire == NULL) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                           VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
+                           output_exit->logical_program_counter);
+        return false;
+    }
+    message[0] = '\0';
+    if (kvspaceSetValue(frame->kvspace_handle, base, wire, (uint32_t)wire_size,
+                        message, sizeof(message)) != 0) {
+        free(wire);
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                           VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
+                           output_exit->logical_program_counter);
+        return false;
+    }
+    free(wire);
+    if (!scatter_member_prefix(base, directory, sizeof(directory),
+                               output_exit)) {
+        return false;
+    }
+    message[0] = '\0';
+    if (kvspaceMkindex(frame->kvspace_handle, directory, 0U, message,
+                       (uint32_t)sizeof(message)) != 0) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                           VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
+                           output_exit->logical_program_counter);
+        return false;
+    }
+    return true;
 }
 
 /*
@@ -123,8 +164,10 @@ static void scatter_container_create(const binrwir_execution_frame_t *frame,
     }
     free(wire);
     /* 目录必须单独建：成员按这个前缀枚举。mkindex 自身幂等。 */
-    snprintf(directory, sizeof(directory), "%s%s", key,
-             SCATTER_MEMBER_SEPARATOR);
+    if (!scatter_member_prefix(key, directory, sizeof(directory),
+                               output_exit)) {
+        return;
+    }
     message[0] = '\0';
     if (kvspaceMkindex(frame->kvspace_handle, directory, 0U, message,
                        (uint32_t)sizeof(message)) != 0) {
@@ -142,71 +185,6 @@ static inline void scatter_new_build(const binrwir_execution_frame_t *frame,
 }
 
 VMBIN_HANDLER_SCATTER_CREATE(scatter_new_handler, scatter_new_build)
-
-
-/* 容器的**成员目录前缀**（`base·`）。同样是七处重复的一步。 */
-static bool scatter_member_prefix(const char *base, char *buffer,
-                                  size_t capacity,
-                                  binrwir_execution_exit_t *output_exit) {
-    if (strlen(base) + 2U > capacity) {
-        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
-                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
-                           output_exit->logical_program_counter);
-        return false;
-    }
-    snprintf(buffer, capacity, "%s%s", base, SCATTER_MEMBER_SEPARATOR);
-    return true;
-}
-
-/*
- * 散列容器的**实存成员数**（memindex 权威，不是坐标空间容量）。
- *
- * 数的是 base 目录下的直接子项，`resolve = 0`：成员是独立键，不沿 Ptr 跳转。
- * **成功才写 `*out`，失败只写 `exit`**。
- */
-static void scatter_member_count(const binrwir_execution_frame_t *frame,
-                                 const binrwir_instruction_view_t *instruction,
-                                 int64_t *out,
-                                 binrwir_execution_exit_t *output_exit) {
-    char base[SCATTER_KEY_CAPACITY];
-    char directory[SCATTER_KEY_CAPACITY + 2U];
-    int32_t count = 0;
-
-    if (vmbin_frame_target_key(frame, &instruction->read_arguments.data[0], base,
-                               sizeof(base)) != RUNTIMEC_STATUS_SUCCESS) {
-        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                           VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
-                           output_exit->logical_program_counter);
-        return;
-    }
-    if (!scatter_member_prefix(base, directory, sizeof(directory),
-                               output_exit)) {
-        return;
-    }
-    if (kvspaceListLen(frame->kvspace_handle, directory, 0, 0, &count) != 0) {
-        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                           VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
-                           output_exit->logical_program_counter);
-        return;
-    }
-    *out = (int64_t)count;
-}
-
-/* 逻辑函数：一句话——数出容器有几个成员。 */
-static inline void scatter_length_build(const binrwir_execution_frame_t *frame,
-                                        const binrwir_instruction_view_t *instruction,
-                                        int64_t *out,
-                                        binrwir_execution_exit_t *output_exit) {
-    scatter_member_count(frame, instruction, out, output_exit);
-}
-
-VMBIN_HANDLER_SCATTER_READ_SCALAR(scatter_length_handler, scatter_length_build,
-                                  int64_t)
-
-
-/* 注册用的薄封装：主体 static inline，注册表要地址，两件事各自独立。 */
-
-
 
 
 /*
@@ -281,17 +259,80 @@ static bool scatter_base_key(const binrwir_execution_frame_t *frame,
     return true;
 }
 
-static runtimec_status_t scatter_member_key(const char *base, int64_t coordinate,
-                                            char *buffer, size_t capacity) {
-    const int written = snprintf(buffer, capacity, "%s%s[%lld]", base,
-                                 SCATTER_MEMBER_SEPARATOR,
-                                 (long long)coordinate);
+/*
+ * 取第 ordinal 个读参的**坐标**（非负整数）。`at`/`set`/`append`/`slice` 都要，
+ * 七处重复的第二步。
+ */
+static runtimec_status_t scatter_member_coordinate(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, size_t ordinal,
+    int64_t *output_coordinate, binrwir_execution_exit_t *output_exit) {
+    vmbin_value_location_t position;
+    runtimec_error_t error;
 
-    if (written < 0 || (size_t)written >= capacity) {
-        return RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY;
+    runtimec_error_reset(&error);
+    if (vmbin_value_access_locate_body(
+            frame, &instruction->read_arguments.data[ordinal], &position,
+            &error) != RUNTIMEC_STATUS_SUCCESS ||
+        position.size != sizeof(int64_t)) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    memcpy(output_coordinate, position.read_bytes, sizeof(int64_t));
+    if (*output_coordinate < 0) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return RUNTIMEC_STATUS_INVALID;
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }
+
+/*
+ * 把一个成员从源坐标搬到目标坐标：**整条 wire 原样搬**，不重新编码。
+ * 源成员缺失时跳过（洞不是元素）。**失败即置 `exit` 并返回 false**。
+ */
+static bool scatter_member_copy(const binrwir_execution_frame_t *frame,
+                                const char *source_base, int64_t source_coordinate,
+                                const char *target_base,
+                                int64_t target_coordinate, char *source_member,
+                                char *target_member, size_t member_capacity,
+                                binrwir_execution_exit_t *output_exit) {
+    uint8_t *stored = NULL;
+    uint32_t stored_size = 0U;
+    char message[256];
+
+    if (scatter_member_key(source_base, source_coordinate, source_member,
+                           member_capacity) != RUNTIMEC_STATUS_SUCCESS ||
+        scatter_member_key(target_base, target_coordinate, target_member,
+                           member_capacity) != RUNTIMEC_STATUS_SUCCESS) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return false;
+    }
+    if (kvspaceGet(frame->kvspace_handle, source_member, 0, &stored,
+                   &stored_size) != 0 ||
+        stored == NULL) {
+        return true; /* 洞：跳过，不是错误。 */
+    }
+    message[0] = '\0';
+    if (kvspaceSetValue(frame->kvspace_handle, target_member, stored,
+                        stored_size, message, sizeof(message)) != 0) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                           VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
+                           output_exit->logical_program_counter);
+        return false;
+    }
+    return true;
+}
+
+/* 注册用的薄封装：主体 static inline，注册表要地址，两件事各自独立。 */
+
+
+
 
 /*
  * 读坐标 `i` 下的成员。**成员缺失（不是 0 长度，而是根本没有这个键）即失败**——
@@ -360,109 +401,96 @@ static inline void scatter_at_build(const binrwir_execution_frame_t *frame,
 
 
 /*
- * `scatterarray·set(a, i, v) -> a`：写坐标 `i` 下的成员。成员是**独立键**，
- * 所以走 `kvspaceSetValue` 整条写，不碰容器的 body。
+ * 写一个成员：值写成**完整 wire**（head + body + attr）——`kvspaceSetValue` 收的
+ * 就是它，喂 body 会得到 invalid XValue。成员值原样搬，不重新编码。
+ *
+ * **成功不写哨兵，失败只写 `exit`**。
  */
-static inline runtimec_status_t scatter_set(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    char base[SCATTER_KEY_CAPACITY];
-    char member[SCATTER_KEY_CAPACITY];
+static void scatter_member_write(const binrwir_execution_frame_t *frame,
+                                 const char *member,
+                                 const runtimec_bytes_view_t *value,
+                                 binrwir_execution_exit_t *output_exit) {
     char message[256];
-    vmbin_value_location_t coordinate_value;
-    runtimec_bytes_view_t wire_value;
-    int64_t coordinate = 0;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
 
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 3U || frame->kvspace_handle == NULL) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = vmbin_frame_target_key(frame, &instruction->write_arguments.data[0],
-                                         base, sizeof(base));
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[1], &coordinate_value,
-            &error);
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scatter_fail(output_exit, status, counter);
-    }
-    if (coordinate_value.size != sizeof(coordinate)) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    memcpy(&coordinate, coordinate_value.read_bytes, sizeof(coordinate));
-    if (coordinate < 0) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = scatter_member_key(base, coordinate, member, sizeof(member));
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scatter_fail(output_exit, status, counter);
-    }
-    /* 值写成**完整 wire**（head + body + attr）：`kvspaceSetValue` 收的就是它，
-     * 喂 body 会得到 invalid XValue。成员值原样搬，不重新编码。 */
-    status = scatter_whole_wire(frame, &instruction->read_arguments.data[2],
-                                &wire_value, &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scatter_fail(output_exit, status, counter);
-    }
     message[0] = '\0';
-    if (kvspaceSetValue(frame->kvspace_handle, member, wire_value.data,
-                        (uint32_t)wire_value.size, message, sizeof(message)) != 0) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
+    if (kvspaceSetValue(frame->kvspace_handle, member, value->data,
+                        (uint32_t)value->size, message, sizeof(message)) != 0) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                           VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
+                           output_exit->logical_program_counter);
     }
-    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 /*
- * `scatterarray·append(a, v) -> a`：追加到**最大坐标 + 1**（行为矩阵
- * scatterarray-next-index）。坐标从目录里现数，不缓存。
+ * 把一个读参的值写进容器的第 i 个成员。四步（取 base、取坐标、取 wire、写成员）
+ * 合成一层——目的只有一个：**把值放到那个坐标上**。
  */
-static inline runtimec_status_t scatter_append(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
+static void scatter_store_at(const binrwir_execution_frame_t *frame,
+                             const binrwir_instruction_view_t *instruction,
+                             binrwir_execution_exit_t *output_exit) {
     char base[SCATTER_KEY_CAPACITY];
-    char directory[SCATTER_KEY_CAPACITY + 2U];
     char member[SCATTER_KEY_CAPACITY];
-    char name[SCATTER_KEY_CAPACITY];
-    char message[256];
-    runtimec_bytes_view_t wire;
-    int32_t count = 0;
-    int64_t largest = -1;
+    runtimec_bytes_view_t value;
+    int64_t coordinate = 0;
     runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
 
     runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 2U || frame->kvspace_handle == NULL) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    if (!scatter_base_key(frame, &instruction->write_arguments.data[0], base,
+                          sizeof(base), output_exit) ||
+        scatter_member_coordinate(frame, instruction, 1U, &coordinate,
+                                  output_exit) != RUNTIMEC_STATUS_SUCCESS ||
+        scatter_whole_wire(frame, &instruction->read_arguments.data[2], &value,
+                           &error) != RUNTIMEC_STATUS_SUCCESS ||
+        scatter_member_key(base, coordinate, member, sizeof(member)) !=
+            RUNTIMEC_STATUS_SUCCESS) {
+        if (output_exit->kind != BINRWIR_EXECUTION_EXIT_ERROR) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                               output_exit->logical_program_counter);
+        }
+        return;
     }
-    status = vmbin_frame_target_key(frame, &instruction->write_arguments.data[0],
-                                         base, sizeof(base));
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scatter_fail(output_exit, status, counter);
+    scatter_member_write(frame, member, &value, output_exit);
+}
+
+/* 逻辑函数：一句话——把值写进坐标 i 那个成员键。 */
+static inline void scatter_set_build(const binrwir_execution_frame_t *frame,
+                                     const binrwir_instruction_view_t *instruction,
+                                     binrwir_execution_exit_t *output_exit) {
+    scatter_store_at(frame, instruction, output_exit);
+}
+
+
+/*
+ * 目录里**最大的坐标**；空容器返回 -1（所以 next = 0）。
+ *
+ * 目录里的名字形如 `[i]`：逐个解析取最大值。**洞不是问题**——用户直写 `[100]`
+ * 之后 append 就该接 101，这正是行为矩阵 `scatterarray-next-index` 的判据。
+ *
+ * **成功才写 `*output_largest`，失败只写 `exit`**。
+ *
+ * `-1` **只表示「成功且容器为空」**（所以 next = 0），不是错误哨兵——坐标域是
+ * `0..n-1`，`-1` 在域外。失败一律走 `exit` 且**不写 out**，所以调用方永远不会
+ * 把「该从 0 开始」与「该报错」混为一谈。
+ */
+static void scatter_largest_coordinate(const binrwir_execution_frame_t *frame,
+                                       const char *base, int64_t *output_largest,
+                                       binrwir_execution_exit_t *output_exit) {
+    char directory[SCATTER_KEY_CAPACITY + 2U];
+    char name[SCATTER_KEY_CAPACITY];
+    int32_t count = 0;
+
+    *output_largest = -1;
+    if (!scatter_member_prefix(base, directory, sizeof(directory),
+                               output_exit)) {
+        return;
     }
-    if (strlen(base) + 2U > sizeof(directory)) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
-                            counter);
-    }
-    snprintf(directory, sizeof(directory), "%s%s", base,
-             SCATTER_MEMBER_SEPARATOR);
-    /*
-     * 顺序要紧：**先把目录数完，再取值的地址**。
-     *
-     * 值的地址来自绑定表（shm 的 mmap 视图）；`kvspaceListLen`/`ListAt` 是会
-     * 触碰后端的调用，可能让之前的视图失效。先 locate 再枚举，等于拿一个已经
-     * 不保证有效的地址去写——这正是本算子最初 status=7 的成因。
-     */
     if (kvspaceListLen(frame->kvspace_handle, directory, 0, 0, &count) != 0) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                           VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                           output_exit->logical_program_counter);
+        return;
     }
-    /* 目录里的名字形如 `[i]`：逐个解析取最大坐标。 */
     for (int32_t ordinal = 0; ordinal < count; ++ordinal) {
         uint32_t name_size = 0U;
 
@@ -473,42 +501,71 @@ static inline runtimec_status_t scatter_append(
         }
         name[name_size] = '\0';
         if (name[0] == '[') {
-            char *end = NULL;
-            const long long parsed = strtoll(name + 1, &end, 10);
+            char *end_of_number = NULL;
+            const long long parsed = strtoll(name + 1, &end_of_number, 10);
 
-            if (end != NULL && *end == ']' && end[1] == '\0' &&
-                parsed > largest) {
-                largest = (int64_t)parsed;
+            if (end_of_number != NULL && *end_of_number == ']' &&
+                end_of_number[1] == '\0' && parsed > *output_largest) {
+                *output_largest = (int64_t)parsed;
             }
         }
     }
-    status = scatter_member_key(base, largest + 1, member, sizeof(member));
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scatter_fail(output_exit, status, counter);
-    }
-    /* 枚举完再取值：此时视图是新读的，写它安全。取的是**整条 wire**——
-     * `kvspaceSetValue` 收完整 XValue，喂 body 会得到 invalid XValue。 */
-    status = scatter_whole_wire(frame, &instruction->read_arguments.data[1],
-                                &wire, &error);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scatter_fail(output_exit, status, counter);
-    }
-    message[0] = '\0';
-    if (kvspaceSetValue(frame->kvspace_handle, member, wire.data,
-                        (uint32_t)wire.size, message, sizeof(message)) != 0) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 /*
- * `scatterarray·newscatter(a) -> b`：compact → 散列。把 body 里每个元素搬到
- * `b·[i]`，再把 `b` 建成容器（marker + 目录）。
- *
- * compact → 散列是**显式**转换：没有任何算子会隐式跨形态（spec 的铁律）。
+ * 追加：坐标 = 最大坐标 + 1。**先把目录数完，再取值的 wire**——
+ * 值的地址来自绑定表（shm 的 mmap 视图），而枚举会触碰后端，可能让之前的视图失效。
+ * 先 locate 再枚举，等于拿一个不保证有效的地址去写。
  */
-static inline runtimec_status_t scatter_newscatter(
-    binrwir_execution_frame_t *frame,
+static void scatter_append_value(const binrwir_execution_frame_t *frame,
+                                 const binrwir_instruction_view_t *instruction,
+                                 binrwir_execution_exit_t *output_exit) {
+    char base[SCATTER_KEY_CAPACITY];
+    char member[SCATTER_KEY_CAPACITY];
+    runtimec_bytes_view_t wire;
+    int64_t largest = -1;
+    runtimec_error_t error;
+
+    runtimec_error_reset(&error);
+    if (!scatter_base_key(frame, &instruction->write_arguments.data[0], base,
+                          sizeof(base), output_exit)) {
+        return;
+    }
+    scatter_largest_coordinate(frame, base, &largest, output_exit);
+    if (output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR) {
+        return;
+    }
+    if (scatter_member_key(base, largest + 1, member, sizeof(member)) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        scatter_whole_wire(frame, &instruction->read_arguments.data[1], &wire,
+                           &error) != RUNTIMEC_STATUS_SUCCESS) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    scatter_member_write(frame, member, &wire, output_exit);
+}
+
+/* 逻辑函数：一句话——追加到最大坐标 + 1。 */
+static inline void scatter_append_build(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    scatter_append_value(frame, instruction, output_exit);
+}
+
+
+/*
+ * **展开**：把 compact 数组的每个元素变成散列容器的一个成员（`b·[i]`）。
+ *
+ * 名字带方向是有意的——压缩走 `scatter_pack_to_compact`，两者成员键构造规则相反，
+ * 硬合并会变成按形态分支的巨函数。
+ *
+ * 跨形态是**显式**转换：没有任何算子会隐式跨形态（spec 的铁律）。
+ */
+static void scatter_expand_from_compact(
+    const binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     runtimec_string_view_t source_langtype;
@@ -516,362 +573,367 @@ static inline runtimec_status_t scatter_newscatter(
     runtimec_container_langtype_t source_type;
     char base[SCATTER_KEY_CAPACITY];
     char member[SCATTER_KEY_CAPACITY];
-    char message[256];
-    uint8_t *wire = NULL;
-    uint64_t wire_size = 0U;
+    char element_langtype[64];
     runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
 
     runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 1U || frame->kvspace_handle == NULL) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    if (vmbin_value_access_langtype(
+            frame, &instruction->read_arguments.data[0], &source_langtype,
+            &error) != RUNTIMEC_STATUS_SUCCESS ||
+        runtimec_container_langtype_parse(source_langtype, &source_type) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        source_type.element_size == 0U ||
+        vmbin_value_access_locate_body(
+            frame, &instruction->read_arguments.data[0], &source,
+            &error) != RUNTIMEC_STATUS_SUCCESS ||
+        !scatter_base_key(frame, &instruction->write_arguments.data[0], base,
+                          sizeof(base), output_exit)) {
+        if (output_exit->kind != BINRWIR_EXECUTION_EXIT_ERROR) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                               output_exit->logical_program_counter);
+        }
+        return;
     }
-    status = vmbin_value_access_langtype(
-        frame, &instruction->read_arguments.data[0], &source_langtype, &error);
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_container_langtype_parse(source_langtype, &source_type);
+    if (source_type.base.size + 1U > sizeof(element_langtype)) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
     }
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = vmbin_value_access_locate_body(
-            frame, &instruction->read_arguments.data[0], &source, &error);
+    memcpy(element_langtype, source_type.base.data, source_type.base.size);
+    element_langtype[source_type.base.size] = '\0';
+    if (!scatter_container_empty(frame, base, output_exit)) {
+        return;
     }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scatter_fail(output_exit, status, counter);
-    }
-    status = vmbin_frame_target_key(frame, &instruction->write_arguments.data[0],
-                                         base, sizeof(base));
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scatter_fail(output_exit, status, counter);
-    }
-    /* 先把目标建成容器，再逐元素搬进成员键。 */
+    /* 逐元素：源 body 的第 i 段 → `base·[i]`，每段用元素类型组 wire。 */
     {
-        char directory[SCATTER_KEY_CAPACITY + 2U];
+        const size_t element_count = source.size / source_type.element_size;
 
-        if (kvspaceXvalueHeadNewSlack(NULL, 0U, 0U, "stringkeymap", &wire,
-                                      &wire_size) == 0) {
-            message[0] = '\0';
-            status = kvspaceSetValue(frame->kvspace_handle, base, wire,
-                                     (uint32_t)wire_size, message,
-                                     sizeof(message)) == 0
-                         ? RUNTIMEC_STATUS_SUCCESS
-                         : RUNTIMEC_STATUS_ERROR;
-            free(wire);
-        } else {
-            status = RUNTIMEC_STATUS_ERROR;
-        }
-        if (status == RUNTIMEC_STATUS_SUCCESS) {
-            snprintf(directory, sizeof(directory), "%s%s", base,
-                 SCATTER_MEMBER_SEPARATOR);
-            message[0] = '\0';
-            if (kvspaceMkindex(frame->kvspace_handle, directory, 0U, message,
-                               (uint32_t)sizeof(message)) != 0) {
-                status = RUNTIMEC_STATUS_ERROR;
-            }
-        }
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scatter_fail(output_exit, status, counter);
-    }
-    /* 逐元素：源 body 的第 i 段 → `base·[i]`，每段用元素的 langtype 组 wire。 */
-    {
-        const size_t element_count =
-            source.size / (source_type.element_size == 0U
-                               ? 1U
-                               : source_type.element_size);
-        char element_langtype[64];
-
-        if (source_type.base.size + 1U > sizeof(element_langtype)) {
-            return scatter_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-        }
-        memcpy(element_langtype, source_type.base.data, source_type.base.size);
-        element_langtype[source_type.base.size] = '\0';
         for (size_t ordinal = 0U; ordinal < element_count; ++ordinal) {
-            status = scatter_member_key(base, (int64_t)ordinal, member,
-                                        sizeof(member));
-            if (status != RUNTIMEC_STATUS_SUCCESS) {
-                return scatter_fail(output_exit, status, counter);
-            }
-            if (kvspaceXvalueHeadNewSlack(
+            uint8_t *wire = NULL;
+            uint64_t wire_size = 0U;
+            char message[256];
+
+            if (scatter_member_key(base, (int64_t)ordinal, member,
+                                   sizeof(member)) != RUNTIMEC_STATUS_SUCCESS ||
+                kvspaceXvalueHeadNewSlack(
                     source.read_bytes + ordinal * source_type.element_size,
                     source_type.element_size, source_type.element_size,
                     element_langtype, &wire, &wire_size) != 0) {
-                return scatter_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
+                vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                                   VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
+                                   output_exit->logical_program_counter);
+                return;
             }
             message[0] = '\0';
             if (kvspaceSetValue(frame->kvspace_handle, member, wire,
                                 (uint32_t)wire_size, message,
                                 sizeof(message)) != 0) {
                 free(wire);
-                return scatter_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
+                vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                                   VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
+                                   output_exit->logical_program_counter);
+                return;
             }
             free(wire);
         }
     }
-    return RUNTIMEC_STATUS_SUCCESS;
 }
 
+/* 逻辑函数：一句话——把 compact 数组展开成散列容器。 */
+static inline void scatter_newscatter_build(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    scatter_expand_from_compact(frame, instruction, output_exit);
+}
+
+
 /*
- * `scatterarray·newcompact(a) -> b`：散列 → compact。按坐标顺序读成员，拼成
- * 一个连续 body，langtype 由写槽声明给出（维度来自目标声明，不抄成员类型）。
+ * **压缩**：把散列容器的成员按坐标顺序压成连续 body（`b` 是 compact）。
+ *
+ * 两条拒绝（细节码分开，因为修法不同）：
+ *   - **有洞** → `0x4306`。坐标 0..n-1 必须齐全。填零是**发明数据**，跳过是
+ *     **自洽的谎言**（头说 `[N]T`、body 只有 k 个元素），两者都比报错坏；
+ *   - **成员数 ≠ 目标声明的 N** → `0x4307`。`N` 是契约，源必须恰好填满它。
+ *
+ * 名字带方向：展开走 `scatter_expand_from_compact`，两者成员键构造规则相反。
  */
-static inline runtimec_status_t scatter_newcompact(
-    binrwir_execution_frame_t *frame,
+static void scatter_pack_to_compact(
+    const binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     char base[SCATTER_KEY_CAPACITY];
     char directory[SCATTER_KEY_CAPACITY + 2U];
     char member[SCATTER_KEY_CAPACITY];
-    char langtype_text[SCATTER_KEY_CAPACITY];
+    runtimec_string_view_t target_langtype;
+    int32_t member_count = 0;
+    int64_t declared_count;
     uint8_t body[SCATTER_BODY_CAPACITY];
     size_t body_size = 0U;
-    runtimec_string_view_t declared;
-    int32_t count = 0;
     runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
 
     runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 1U || frame->kvspace_handle == NULL) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    if (!scatter_base_key(frame, &instruction->read_arguments.data[0], base,
+                          sizeof(base), output_exit) ||
+        vmbin_value_access_langtype(
+            frame, &instruction->write_arguments.data[0], &target_langtype,
+            &error) != RUNTIMEC_STATUS_SUCCESS) {
+        if (output_exit->kind != BINRWIR_EXECUTION_EXIT_ERROR) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                               output_exit->logical_program_counter);
+        }
+        return;
     }
-    status = vmbin_frame_target_key(frame, &instruction->read_arguments.data[0],
-                                         base, sizeof(base));
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = vmbin_value_access_langtype(
-            frame, &instruction->write_arguments.data[0], &declared, &error);
+    /* 目标声明的 N 是契约：源必须恰好填满它。 */
+    declared_count = runtimec_container_shape_numel(target_langtype);
+    if (declared_count < 0 ||
+        !scatter_member_prefix(base, directory, sizeof(directory),
+                               output_exit)) {
+        if (output_exit->kind != BINRWIR_EXECUTION_EXIT_ERROR) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                               output_exit->logical_program_counter);
+        }
+        return;
     }
-    if (status != RUNTIMEC_STATUS_SUCCESS ||
-        declared.size + 1U > sizeof(langtype_text)) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    if (kvspaceListLen(frame->kvspace_handle, directory, 0, 0,
+                       &member_count) != 0) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                           VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                           output_exit->logical_program_counter);
+        return;
     }
-    memcpy(langtype_text, declared.data, declared.size);
-    langtype_text[declared.size] = '\0';
-    if (strlen(base) + 2U > sizeof(directory)) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
-                            counter);
+    if ((int64_t)member_count != declared_count) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_ELEMENT_COUNT_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
     }
-    snprintf(directory, sizeof(directory), "%s%s", base,
-                 SCATTER_MEMBER_SEPARATOR);
-    if (kvspaceListLen(frame->kvspace_handle, directory, 0, 0, &count) != 0) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
-    }
-    for (int32_t ordinal = 0; ordinal < count; ++ordinal) {
-        char name[SCATTER_KEY_CAPACITY];
-        uint32_t name_size = 0U;
+    /* 逐个坐标读：缺一个就是洞——不是「跳过」，是拒绝。 */
+    for (int64_t ordinal = 0; ordinal < declared_count; ++ordinal) {
         uint8_t *stored = NULL;
         uint32_t stored_size = 0U;
+        uint64_t element_length;
 
-        if (kvspaceListAt(frame->kvspace_handle, directory, 0, 0, ordinal,
-                          (uint8_t *)name, (uint32_t)sizeof(name),
-                          &name_size) != 0) {
-            continue;
+        if (scatter_member_key(base, ordinal, member, sizeof(member)) !=
+            RUNTIMEC_STATUS_SUCCESS) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                               output_exit->logical_program_counter);
+            return;
         }
-        name[name_size] = '\0';
-        if (name[0] != '[') {
-            continue;
-        }
-        if (snprintf(member, sizeof(member), "%s%s%s", base,
-                     SCATTER_MEMBER_SEPARATOR, name) >=
-            (int)sizeof(member)) {
-            return scatter_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
-                                counter);
-        }
-        if (kvspaceGet(frame->kvspace_handle, member, 0, &stored, &stored_size) !=
-                0 ||
+        if (kvspaceGet(frame->kvspace_handle, member, 0, &stored,
+                       &stored_size) != 0 ||
             stored == NULL || stored_size < KVSPACE_XVALUE_HEAD_LEN) {
-            continue;
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               RUNTIMEC_CONTAINER_DIAG_SCATTER_HAS_HOLE,
+                               output_exit->logical_program_counter);
+            return;
         }
-        {
-            const kvspaceXvalueHead *head =
-                (const kvspaceXvalueHead *)(const void *)stored;
-
-            if (body_size + kvspaceXvalueHeadLen(head) > sizeof(body)) {
-                return scatter_fail(output_exit, RUNTIMEC_STATUS_OUT_OF_MEMORY,
-                                    counter);
-            }
-            memcpy(body + body_size, stored + KVSPACE_XVALUE_HEAD_LEN,
-                   (size_t)kvspaceXvalueHeadLen(head));
-            body_size += (size_t)kvspaceXvalueHeadLen(head);
+        element_length = kvspaceXvalueHeadLen(
+            (const kvspaceXvalueHead *)(const void *)stored);
+        if (body_size + element_length > sizeof(body)) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_OUT_OF_MEMORY,
+                               RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER,
+                               output_exit->logical_program_counter);
+            return;
         }
+        memcpy(body + body_size, stored + KVSPACE_XVALUE_HEAD_LEN,
+               (size_t)element_length);
+        body_size += (size_t)element_length;
     }
-    {
-        char key[SCATTER_KEY_CAPACITY];
-        char message[256];
-        uint8_t *wire = NULL;
-        uint64_t wire_size = 0U;
-
-        if (kvspaceXvalueHeadNewSlack(body, (uint64_t)body_size,
-                                      (uint64_t)body_size, langtype_text, &wire,
-                                      &wire_size) != 0) {
-            return scatter_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
-        }
-        status = vmbin_frame_target_key(
-            frame, &instruction->write_arguments.data[0], key, sizeof(key));
-        if (status == RUNTIMEC_STATUS_SUCCESS) {
-            message[0] = '\0';
-            if (kvspaceSetValue(frame->kvspace_handle, key, wire,
-                                (uint32_t)wire_size, message,
-                                sizeof(message)) != 0) {
-                status = RUNTIMEC_STATUS_ERROR;
-            }
-        }
-        free(wire);
-    }
-    return status == RUNTIMEC_STATUS_SUCCESS
-               ? RUNTIMEC_STATUS_SUCCESS
-               : scatter_fail(output_exit, status, counter);
+    /* 结果 langtype 从写参声明取——`vmbin_handler_write_new_value` 自己取。 */
+    (void)vmbin_handler_write_new_value(frame, instruction, body, body_size,
+                                        output_exit);
 }
 
-/*
- * `scatterarray·slice(a, lo, hi) -> b`：按坐标段重排成员到新容器。
- * 位置越界或 lo > hi 返回 INVALID（string-slice-bounds 的同一判据）。
- */
-static inline runtimec_status_t scatter_slice(
-    binrwir_execution_frame_t *frame,
+/* 逻辑函数：一句话——把散列容器压成连续 body。 */
+static inline void scatter_newcompact_build(
+    const binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
+    scatter_pack_to_compact(frame, instruction, output_exit);
+}
+
+
+/*
+ * 把源容器的一段成员**重排到**目标容器：新坐标 = 源坐标 - lo。
+ *
+ * 判据（比规则更根本）：**坐标是成员序列上的下标，不是键空间里的绝对位置。**
+ * `len` 返回成员数、`append` 允许洞、重排本身要把序列压紧——三者都指向同一个
+ * 结论：`hi` 与**成员数**比，不与「最大坐标 + 1」比。所以 `[0]=10`、`[5]=30`
+ * 的容器上切 `[0,6)` 是**合法**的，得到两个成员。
+ *
+ * 目标必须先建成空容器（marker + 目录）再逐成员写——跨形态/跨容器的搬运都是
+ * **新建**，不是同槽 patch。
+ */
+static void scatter_slice_between(const binrwir_execution_frame_t *frame,
+                                  const binrwir_instruction_view_t *instruction,
+                                  binrwir_execution_exit_t *output_exit) {
     char source_base[SCATTER_KEY_CAPACITY];
     char target_base[SCATTER_KEY_CAPACITY];
     char directory[SCATTER_KEY_CAPACITY + 2U];
-    char member[SCATTER_KEY_CAPACITY];
-    char message[256];
-    vmbin_value_location_t bounds[2];
+    char source_member[SCATTER_KEY_CAPACITY];
+    char target_member[SCATTER_KEY_CAPACITY];
     int64_t lo = 0;
     int64_t hi = 0;
     int32_t count = 0;
-    runtimec_error_t error;
-    runtimec_status_t status;
-    const uint32_t counter = instruction->source_logical_program_counter;
 
-    runtimec_error_reset(&error);
-    if (instruction->read_arguments.count != 3U || frame->kvspace_handle == NULL) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+    if (!scatter_base_key(frame, &instruction->read_arguments.data[0],
+                          source_base, sizeof(source_base), output_exit) ||
+        scatter_member_coordinate(frame, instruction, 1U, &lo, output_exit) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        scatter_member_coordinate(frame, instruction, 2U, &hi, output_exit) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        !scatter_base_key(frame, &instruction->write_arguments.data[0],
+                          target_base, sizeof(target_base), output_exit)) {
+        return;
     }
-    status = vmbin_frame_target_key(frame, &instruction->read_arguments.data[0],
-                                         source_base, sizeof(source_base));
-    if (status == RUNTIMEC_STATUS_SUCCESS) {
-        for (size_t ordinal = 0U; ordinal < 2U && status == RUNTIMEC_STATUS_SUCCESS;
-             ++ordinal) {
-            status = vmbin_value_access_locate_body(
-                frame, &instruction->read_arguments.data[ordinal + 1U],
-                &bounds[ordinal], &error);
+    if (hi < lo || !scatter_member_prefix(source_base, directory,
+                                          sizeof(directory), output_exit)) {
+        if (output_exit->kind != BINRWIR_EXECUTION_EXIT_ERROR) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                               output_exit->logical_program_counter);
         }
+        return;
     }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scatter_fail(output_exit, status, counter);
-    }
-    if (bounds[0].size != sizeof(lo) || bounds[1].size != sizeof(hi)) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    memcpy(&lo, bounds[0].read_bytes, sizeof(lo));
-    memcpy(&hi, bounds[1].read_bytes, sizeof(hi));
-    if (lo < 0 || hi < lo) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
-    }
-    status = vmbin_frame_target_key(frame, &instruction->write_arguments.data[0],
-                                         target_base, sizeof(target_base));
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scatter_fail(output_exit, status, counter);
-    }
-    /* 目标容器：marker + 目录。 */
-    {
-        uint8_t *wire = NULL;
-        uint64_t wire_size = 0U;
-
-        if (kvspaceXvalueHeadNewSlack(NULL, 0U, 0U, "stringkeymap", &wire,
-                                      &wire_size) == 0) {
-            message[0] = '\0';
-            status = kvspaceSetValue(frame->kvspace_handle, target_base, wire,
-                                     (uint32_t)wire_size, message,
-                                     sizeof(message)) == 0
-                         ? RUNTIMEC_STATUS_SUCCESS
-                         : RUNTIMEC_STATUS_ERROR;
-            free(wire);
-        } else {
-            status = RUNTIMEC_STATUS_ERROR;
-        }
-    }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scatter_fail(output_exit, status, counter);
-    }
-    snprintf(directory, sizeof(directory), "%s%s", target_base,
-                 SCATTER_MEMBER_SEPARATOR);
-    message[0] = '\0';
-    if (kvspaceMkindex(frame->kvspace_handle, directory, 0U, message,
-                       (uint32_t)sizeof(message)) != 0) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
-    }
-    snprintf(directory, sizeof(directory), "%s%s", source_base,
-                 SCATTER_MEMBER_SEPARATOR);
+    /* 成员数才是边界：`hi` 不能超过实存成员数（与「最大坐标+1」无关）。 */
     if (kvspaceListLen(frame->kvspace_handle, directory, 0, 0, &count) != 0) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                           VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                           output_exit->logical_program_counter);
+        return;
     }
     if (hi > count) {
-        return scatter_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    if (!scatter_container_empty(frame, target_base, output_exit)) {
+        return;
     }
     for (int64_t ordinal = lo; ordinal < hi; ++ordinal) {
-        uint8_t *stored = NULL;
-        uint32_t stored_size = 0U;
-
-        status = scatter_member_key(source_base, ordinal, member,
-                                    sizeof(member));
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            return scatter_fail(output_exit, status, counter);
-        }
-        if (kvspaceGet(frame->kvspace_handle, member, 0, &stored, &stored_size) !=
-                0 ||
-            stored == NULL) {
-            continue;
-        }
-        status = scatter_member_key(target_base, ordinal - lo, member,
-                                    sizeof(member));
-        if (status != RUNTIMEC_STATUS_SUCCESS) {
-            return scatter_fail(output_exit, status, counter);
-        }
-        message[0] = '\0';
-        if (kvspaceSetValue(frame->kvspace_handle, member, stored, stored_size,
-                            message, sizeof(message)) != 0) {
-            return scatter_fail(output_exit, RUNTIMEC_STATUS_ERROR, counter);
+        if (!scatter_member_copy(frame, source_base, ordinal, target_base,
+                                 ordinal - lo, source_member, target_member,
+                                 sizeof(source_member), output_exit)) {
+            return;
         }
     }
-    return RUNTIMEC_STATUS_SUCCESS;
 }
+
+/* 逻辑函数：一句话——把源的一段成员重排到目标容器。 */
+static inline void scatter_slice_build(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    scatter_slice_between(frame, instruction, output_exit);
+}
+
 
 VMBIN_HANDLER_SCATTER_READ_WRITE(scatter_at_handler, scatter_at_build)
-static runtimec_status_t scatter_set_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return scatter_set(frame, instruction, output_exit);
+VMBIN_HANDLER_SCATTER_WRITE_READS(scatter_set_handler, scatter_set_build)
+VMBIN_HANDLER_SCATTER_WRITE_READS(scatter_append_handler, scatter_append_build)
+VMBIN_HANDLER_SCATTER_EXPAND(scatter_newscatter_handler,
+                            scatter_newscatter_build)
+VMBIN_HANDLER_SCATTER_EXPAND(scatter_newcompact_handler,
+                            scatter_newcompact_build)
+VMBIN_HANDLER_SCATTER_CROSS(scatter_slice_handler, scatter_slice_build)
+/*
+ * 容器的**成员目录前缀**（`base·`）。七处重复的一步。
+ *
+ * **判据是 `snprintf` 的返回值，不是手算的长度预检查**：返回值是「想写的长度」，
+ * 那是真实的截断判据。预检查既挡不住 `-Wformat-truncation=2`（编译器不认运行期
+ * `strlen` 的推论），又容易差一——分隔符 2 字节、NUL 又 1 字节，`+2` 就少一个。
+ */
+static bool scatter_member_prefix(const char *base, char *buffer,
+                                  size_t capacity,
+                                  binrwir_execution_exit_t *output_exit) {
+    const int written =
+        snprintf(buffer, capacity, "%s%s", base, SCATTER_MEMBER_SEPARATOR);
+
+    if (written < 0 || (size_t)written >= capacity) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
+                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return false;
+    }
+    return true;
 }
 
-static runtimec_status_t scatter_append_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return scatter_append(frame, instruction, output_exit);
+/*
+ * 散列容器的**实存成员数**（memindex 权威，不是坐标空间容量）。
+ * **成功才写 `*out`，失败只写 `exit`**。
+ */
+static void scatter_member_count(const binrwir_execution_frame_t *frame,
+                                 const binrwir_instruction_view_t *instruction,
+                                 int64_t *out,
+                                 binrwir_execution_exit_t *output_exit) {
+    char base[SCATTER_KEY_CAPACITY];
+    char directory[SCATTER_KEY_CAPACITY + 2U];
+    int32_t count = 0;
+
+    if (!scatter_base_key(frame, &instruction->read_arguments.data[0], base,
+                          sizeof(base), output_exit)) {
+        return;
+    }
+    if (!scatter_member_prefix(base, directory, sizeof(directory),
+                               output_exit)) {
+        return;
+    }
+    if (kvspaceListLen(frame->kvspace_handle, directory, 0, 0, &count) != 0) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                           VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    *out = (int64_t)count;
 }
 
-static runtimec_status_t scatter_newscatter_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return scatter_newscatter(frame, instruction, output_exit);
+/* 逻辑函数：一句话——数出容器有几个成员。 */
+static inline void scatter_length_build(const binrwir_execution_frame_t *frame,
+                                        const binrwir_instruction_view_t *instruction,
+                                        int64_t *out,
+                                        binrwir_execution_exit_t *output_exit) {
+    scatter_member_count(frame, instruction, out, output_exit);
 }
 
-static runtimec_status_t scatter_newcompact_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return scatter_newcompact(frame, instruction, output_exit);
-}
+VMBIN_HANDLER_SCATTER_READ_SCALAR(scatter_length_handler, scatter_length_build,
+                                  int64_t)
 
-static runtimec_status_t scatter_slice_handler(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return scatter_slice(frame, instruction, output_exit);
+/*
+ * 成员 key：`base·[i]`。**用 `memcpy` 拼接、不用 `snprintf`**：`base` 长度运行期
+ * 才知，任何 `%s` 参与的 `snprintf` 都会被 `-Wformat-truncation=2` 判成可能截断，
+ * 而截断的后果是**成员键少一截**（静默错值）。手工拼接让每段长度检查都是真的。
+ */
+static runtimec_status_t scatter_member_key(const char *base, int64_t coordinate,
+                                            char *buffer, size_t capacity) {
+    char coordinate_text[32];
+    const int coordinate_written =
+        snprintf(coordinate_text, sizeof(coordinate_text), "[%lld]",
+                 (long long)coordinate);
+    const size_t base_length = strlen(base);
+    const size_t separator_length = sizeof(SCATTER_MEMBER_SEPARATOR) - 1U;
+    size_t total_length;
+
+    if (coordinate_written < 0 ||
+        (size_t)coordinate_written >= sizeof(coordinate_text)) {
+        return RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY;
+    }
+    total_length = base_length + separator_length + (size_t)coordinate_written;
+    if (total_length + 1U > capacity) {
+        return RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY;
+    }
+    memcpy(buffer, base, base_length);
+    memcpy(buffer + base_length, SCATTER_MEMBER_SEPARATOR, separator_length);
+    memcpy(buffer + base_length + separator_length, coordinate_text,
+           (size_t)coordinate_written);
+    buffer[total_length] = '\0';
+    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 static const binrwir_registry_entry_t runtimec_scatter_entry_table[] = {

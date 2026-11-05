@@ -29,9 +29,14 @@ static int binrwir_argument_shape_is_invalid(
     case BINRWIR_REFERENCE_FUNCTION:
         return payload != 0U;
     case BINRWIR_REFERENCE_STATIC:
-        /* slot 是符号池下标（key 文本），任意值都留待 program 层查池；只有 body
-         * 地址必须非零。 */
-        return payload == BINRWIR_BODY_ADDRESS_NONE;
+        /*
+         * slot 是符号池下标（key 文本），任意值都留待 program 层查池。
+         *
+         * payload 允许 NONE：**写目标**的 key 允许在编码期尚不存在——地址由
+         * 执行期按 key 解析（不存在则创建）。读目标的 key 不存在仍是真实错误，
+         * 由值访问层拒绝；本函数不区分读/写，只保证结构自洽。
+         */
+        return 0;
     case BINRWIR_REFERENCE_LITERAL:
         return slot != 0U;
     default:

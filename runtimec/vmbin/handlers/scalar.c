@@ -62,6 +62,7 @@
  */
 
 #include "vmbin/handlers/scalar.h"
+#include "vmbin/handlers/scalar_special.h"
 
 #include <math.h>
 #include <string.h>
@@ -497,6 +498,19 @@ static runtimec_status_t scalar_binary(
                         error, 9,
                         "scalar handler: integer division by zero");
                 }
+                /*
+                 * `INT64_MIN / -1` 在 C 里是未定义行为（x86 的 `idiv` 抛 #DE，
+                 * 进程直接死）。裁决（2026-11-05）：二补数**回绕**——
+                 * 商等于被除数本人，和 Go 的 `q = x / -1` 一致。
+                 *
+                 * 这一条必须在这里判，不能只判除零：崩溃点上先崩、再谈值对不对。
+                 * 同一条判据在特化路径（`runtimec_scalar_divide_signed`）里也有，
+                 * 两处都改过——按判据同步，不按报错的那一处改。
+                 */
+                if (left_signed == INT64_MIN && right_signed == -1) {
+                    result_signed = INT64_MIN;
+                    break;
+                }
                 /* C 的截断方向：向零（matrix:22）。 */
                 result_signed = left_signed / right_signed;
                 break;
@@ -505,6 +519,11 @@ static runtimec_status_t scalar_binary(
                     return scalar_fail(
                         error, 10,
                         "scalar handler: integer remainder by zero");
+                }
+                /* `INT64_MIN % -1` 同理：C 不定义，回绕后余数是 0。 */
+                if (left_signed == INT64_MIN && right_signed == -1) {
+                    result_signed = 0;
+                    break;
                 }
                 /* C 的 % 保留被除数符号（matrix:68）。 */
                 result_signed = left_signed % right_signed;
@@ -696,6 +715,64 @@ static runtimec_status_t scalar_transcendental(
         runtimec_error_reset(&error);                                         \
         return scalar_unary_integer(frame, instruction, operation, &error);   \
     }
+
+
+/*
+ * `pow(x, y)` —— 二元超越函数，结果**恒 float64**（matrix:70，与一元那条同源）。
+ * 两个操作数先按值转 double 再算；`uint64` 走无符号值本身，不经 int64（matrix:26）。
+ *
+ * **为什么这里要有基础条目**：本条**不是**生产入口。生产走
+ * `execution_window → binrwir_program_specialize`，只要特化表里有对应行，
+ * 基础 opid 就被无条件改写成 `0x8xxx`，执行的是 `scalar_generated_power_*`。
+ *
+ * 补它的理由是**测试矩阵完整**：`handler_behavior` 按基础 opid 组织标量语义，
+ * 标量族 37 个算子只有 `pow` 缺条目。缺这一条会让「矩阵全覆盖」变成假话，
+ * 而不是让生产少一个能力。
+ */
+static runtimec_status_t scalar_power(binrwir_execution_frame_t *frame,
+                                      const binrwir_instruction_view_t *instruction,
+                                      runtimec_error_t *error) {
+    uint8_t left_bytes[SCALAR_BODY_CAPACITY];
+    uint8_t right_bytes[SCALAR_BODY_CAPACITY];
+    uint8_t result_bytes[SCALAR_BODY_CAPACITY];
+    scalar_type_t left_type;
+    scalar_type_t right_type;
+    scalar_type_t result_type;
+    int64_t ignored_signed = 0;
+    uint64_t ignored_unsigned = 0U;
+    double left_float = 0.0;
+    double right_float = 0.0;
+    double result_float;
+    runtimec_status_t status;
+
+    if (instruction->read_arguments.count != 2U ||
+        instruction->write_arguments.count != 1U) {
+        return scalar_fail(error, 36,
+                           "scalar handler: pow expects two reads and one write");
+    }
+    status = scalar_read_operand(frame, &instruction->read_arguments.data[0],
+                                 left_bytes, &left_type, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    status = scalar_read_operand(frame, &instruction->read_arguments.data[1],
+                                 right_bytes, &right_type, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    scalar_load(left_bytes, &left_type, &ignored_signed, &ignored_unsigned,
+                &left_float);
+    scalar_load(right_bytes, &right_type, &ignored_signed, &ignored_unsigned,
+                &right_float);
+    result_float = pow(left_float, right_float);
+    result_type.scalar_class = SCALAR_CLASS_FLOAT;
+    result_type.width = 8U;
+    memset(result_bytes, 0, sizeof(result_bytes));
+    scalar_store(result_bytes, &result_type, 0, 0U, result_float);
+    return vmbin_value_access_write_body(
+        frame, &instruction->write_arguments.data[0],
+        runtimec_bytes_view_make(result_bytes, result_type.width), error);
+}
 
 #define SCALAR_TRANSCENDENTAL_HANDLER(name, operation)                        \
     static runtimec_status_t name(                                            \
@@ -1065,16 +1142,45 @@ static runtimec_status_t scalar_cast(
         runtimec_bytes_view_make(result_bytes, target_type.width), error);
 }
 
-static runtimec_status_t scalar_handle_cast(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_error_t error;
+/*
+ * 纯转发的 handler：把 frame/instruction/exit 原样交给实现体，自己不做任何事。
+ *
+ * 为什么要宏而不是手写三行：这条包装的**全部内容**就是「准备 error 槽、说明
+ * output_exit 不在这里用、调用、返回」。手写时那四件事会各占一行，超过 3 行上限；
+ * 而为过上限把它们用逗号运算符挤成一行，是让代码以奇怪的方式通过检查——读的人
+ * 要在同一行里认出两个不相干的动作，而门禁想要的「一个函数一件事」反而更远了。
+ *
+ * 宏里藏着同样的四件事，但**函数体只剩一行调用**，形状与字符族的
+ * `VMBIN_HANDLER_*` 一致：参数准备归宏，逻辑函数只做一件事。
+ *
+ * `output_exit` 在这里确实用不到——转发目标只写 `error`，结构化退出由调用方
+ * 根据返回值处置。显式 `(void)` 是为了让这条「用不到」变成写下来的事实。
+ */
+#define SCALAR_FORWARDING_HANDLER(name, implementation)                       \
+    static runtimec_status_t name(                                            \
+        binrwir_execution_frame_t *frame,                                     \
+        const binrwir_instruction_view_t *instruction,                        \
+        binrwir_execution_exit_t *output_exit) {                              \
+        runtimec_error_t error;                                               \
+        (void)output_exit;                                                    \
+        runtimec_error_reset(&error);                                         \
+        return implementation(frame, instruction, &error);                    \
+    }
 
-    (void)output_exit;
-    runtimec_error_reset(&error);
-    return scalar_cast(frame, instruction, &error);
-}
+/* 带一个额外常量参数的同类转发（`scalar_pointer_equality` 的 invert 位）。 */
+#define SCALAR_FORWARDING_HANDLER_WITH_ARGUMENT(name, implementation, argument) \
+    static runtimec_status_t name(                                            \
+        binrwir_execution_frame_t *frame,                                     \
+        const binrwir_instruction_view_t *instruction,                        \
+        binrwir_execution_exit_t *output_exit) {                              \
+        runtimec_error_t error;                                               \
+        (void)output_exit;                                                    \
+        runtimec_error_reset(&error);                                         \
+        return implementation(frame, instruction, argument, &error);          \
+    }
+
+SCALAR_FORWARDING_HANDLER(scalar_handle_cast, scalar_cast)
+SCALAR_FORWARDING_HANDLER(scalar_handle_pow, scalar_power)
 
 /*
  * shl/shr — matrix:71 shift-count-masking：计数按「宽度减一」掩码，64 位就是低 6 位；
@@ -1399,16 +1505,69 @@ static runtimec_status_t scalar_compare(
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
-    status = scalar_result_type(&left_type, &right_type, &result_type);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return scalar_fail(
-            error, 29,
-            "scalar handler: signed and unsigned operands cannot compare");
-    }
     scalar_load(left_bytes, &left_type, &left_signed, &left_unsigned,
                 &left_float);
     scalar_load(right_bytes, &right_type, &right_signed, &right_unsigned,
                 &right_float);
+    /*
+     * 混合符号性（一侧有符号、一侧无符号）：**按精确数学值比较，不拒绝**
+     * （spec `05-runtime语义/11-指令派发与特化.kv`；matrix:28 的
+     * 「comparisons use exact mathematical values」，例子是 `-1` 小于
+     * `UINT64_MAX`）。
+     *
+     * 这与算术**分口径**：`u64 + i64` 与 `u64 & i64` 仍然拒绝（那是
+     * `scalar_result_type` 的判据）。所以这一支**不能**塞进
+     * `scalar_result_type`——那会把算术的规则一起放宽。
+     *
+     * 判据只认**符号性不同**，不认宽度不同：`int32` vs `int64` 是两个有符号数，
+     * 走下面的常规分支。
+     */
+    {
+        const int left_is_integer = left_type.scalar_class == SCALAR_CLASS_SIGNED ||
+                                    left_type.scalar_class == SCALAR_CLASS_UNSIGNED;
+        const int right_is_integer = right_type.scalar_class == SCALAR_CLASS_SIGNED ||
+                                     right_type.scalar_class == SCALAR_CLASS_UNSIGNED;
+        const int crosses_sign = left_is_integer && right_is_integer &&
+                                 left_type.scalar_class != right_type.scalar_class;
+
+        if (crosses_sign) {
+            int order;
+
+            if (left_type.scalar_class == SCALAR_CLASS_SIGNED) {
+                order = runtimec_scalar_compare_signed_unsigned(
+                    left_signed, right_unsigned);
+            } else {
+                order = runtimec_scalar_compare_unsigned_signed(
+                    left_unsigned, right_signed);
+            }
+            switch (comparison) {
+            case SCALAR_COMPARISON_EQUAL:
+                matched = order == 0;
+                break;
+            case SCALAR_COMPARISON_LESS:
+                matched = order < 0;
+                break;
+            case SCALAR_COMPARISON_LESS_EQUAL:
+                matched = order <= 0;
+                break;
+            case SCALAR_COMPARISON_GREATER:
+                matched = order > 0;
+                break;
+            default:
+                matched = order >= 0;
+                break;
+            }
+            result = (uint8_t)((matched != 0) != (invert != 0) ? 1U : 0U);
+            return vmbin_value_access_write_body(
+                frame, &instruction->write_arguments.data[0],
+                runtimec_bytes_view_make(&result, 1U), error);
+        }
+    }
+    status = scalar_result_type(&left_type, &right_type, &result_type);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return scalar_fail(error, 29,
+                           "scalar handler: comparison rejected an operand pair");
+    }
     if (result_type.scalar_class == SCALAR_CLASS_FLOAT) {
         switch (comparison) {
         case SCALAR_COMPARISON_EQUAL:
@@ -1681,16 +1840,12 @@ static runtimec_status_t scalar_pointer_equality(
         runtimec_bytes_view_make(&result, 1U), error);
 }
 
-static runtimec_status_t scalar_handle_ptreq(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    runtimec_error_t error;
-
-    (void)output_exit;
-    runtimec_error_reset(&error);
-    return scalar_pointer_equality(frame, instruction, 0, &error);
-}
+SCALAR_FORWARDING_HANDLER_WITH_ARGUMENT(scalar_handle_ptreq, scalar_pointer_equality, 0)
+/* ptreq·not：与 ptreq 同构，只把 invert 置 1——和 streq/streq·not、
+ * bool·eq/bool·neq 两对完全同形。不为它单开一条实现体：三对同构，
+ * 第四对也该同构，否则「取反」这件事就有四下写法。 */
+SCALAR_FORWARDING_HANDLER_WITH_ARGUMENT(scalar_handle_ptreq_not,
+                                        scalar_pointer_equality, 1)
 
 static runtimec_status_t scalar_handle_debugger(
     binrwir_execution_frame_t *frame,
@@ -1790,6 +1945,11 @@ static const binrwir_registry_entry_t scalar_entries[] = {
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_EXPONENTIAL,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
      .handler = scalar_handle_exp},
+    /* `pow` 的**基础条目**：为测试矩阵完整而存在，不是生产入口（生产走特化）。
+     * 见 `scalar_power` 的注释。 */
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_POWER,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = scalar_handle_pow},
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_LOGARITHM,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
      .handler = scalar_handle_log},
@@ -1844,6 +2004,9 @@ static const binrwir_registry_entry_t scalar_entries[] = {
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_POINTER_EQUAL,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
      .handler = scalar_handle_ptreq},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_POINTER_NOT_EQUAL,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = scalar_handle_ptreq_not},
 };
 
 const binrwir_registry_entry_t *runtimec_scalar_handler_entries(

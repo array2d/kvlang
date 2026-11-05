@@ -20,6 +20,7 @@
 
 #include "temp_println.h"
 
+#include <float.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -99,6 +100,52 @@ static int runtimec_temp_println_is(runtimec_string_view_t langtype,
  * 单个读参 → 输出文本。text 借用 scratch（足够放下本临时实现支持的定长标量），
  * 返回文本长度；不支持的类型返回 false 由调用方失败封闭。
  */
+/*
+ * 浮点值的唯一格式化实现——`float32` 与 `float64` **共用这一条**。
+ *
+ * 为什么共用：补 `.0` 的判据是「值的 kind 是浮点」，与宽度无关。为第二种宽度
+ * 再写一份，就是同一判据的第二处真相——两边迟早漂开，而漂开的形态是
+ * 「float32 打 `12`、float64 打 `12.0`」这种没人会立刻发现的不一致。
+ *
+ * 为什么用 `%g`：紧凑。`%f` 会把 `0.1` 打成 `0.100000`，把有效数字埋进一串零里。
+ *
+ * 为什么整数形态补 `.0`：**Python 阵营**，不是 C/Go/JS——
+ *   C `%g` → `12`、Go → `12`、JS → `12`、**Python → `12.0`**
+ * 两个理由：
+ *   1. 语料期望就是 `12.0`（`tutorial/09-operators/prefix_unary.kv` 的 `√144`）；
+ *   2. `12` 与 `12.0` 有歧义——前者看起来像 int64。一个浮点的打印结果若长得
+ *      像整数，读者就分不出它的 kind，这在调试里是实打实的误导。
+ *
+ * 判据是**值本身的 kind**（调用方已按 langtype 分流进来），不是事后看字符串
+ * 像不像整数；`inf`/`nan` 不补，它们不是「看起来像整数」。
+ */
+static int runtimec_temp_println_render_float(double value, char *scratch,
+                                              size_t capacity,
+                                              size_t *output_length) {
+    int written = snprintf(scratch, capacity, "%g", value);
+
+    if (written <= 0 || (size_t)written >= capacity) {
+        return 0;
+    }
+    /* 已含小数点或指数（`3.5`、`1e+20`）就原样用。 */
+    if (strpbrk(scratch, ".eE") == NULL) {
+        const int is_non_finite =
+            value != value || value > DBL_MAX || value < -DBL_MAX;
+
+        if (!is_non_finite) {
+            if ((size_t)written + 2U >= capacity) {
+                return 0;
+            }
+            scratch[written] = '.';
+            scratch[written + 1] = '0';
+            written += 2;
+            scratch[written] = '\0';
+        }
+    }
+    *output_length = (size_t)written;
+    return 1;
+}
+
 static int runtimec_temp_println_render(runtimec_string_view_t langtype,
                                         const uint8_t *body, size_t size,
                                         char *scratch, size_t capacity,
@@ -170,21 +217,29 @@ static int runtimec_temp_println_render(runtimec_string_view_t langtype,
         *output_length = length;
         return 1;
     }
+    /* 浮点两种宽度走**同一个**格式化实现，只差 memcpy 的目标类型。 */
     if (runtimec_temp_println_is(langtype, "float64")) {
         double value = 0.0;
-        int written;
 
         if (size != sizeof(value)) {
             return 0;
         }
         memcpy(&value, body, sizeof(value));
-        /* 与 byteseek 的显示格式一致：%g 风格，避免 "3.000000"。 */
-        written = snprintf(scratch, capacity, "%g", value);
-        if (written <= 0 || (size_t)written >= capacity) {
+        return runtimec_temp_println_render_float(value, scratch, capacity,
+                                                  output_length);
+    }
+    if (runtimec_temp_println_is(langtype, "float32")) {
+        float narrow = 0.0f;
+
+        if (size != sizeof(narrow)) {
             return 0;
         }
-        *output_length = (size_t)written;
-        return 1;
+        memcpy(&narrow, body, sizeof(narrow));
+        /* 窄化到 double 是**保值**的（float32 的每个值都能精确表示为 double），
+         * 所以这里不引入额外舍入；`%g` 对 double 打印再按需去掉尾零，
+         * 结果与直接在 float 上打印一致。 */
+        return runtimec_temp_println_render_float((double)narrow, scratch,
+                                                  capacity, output_length);
     }
     return 0;
 }

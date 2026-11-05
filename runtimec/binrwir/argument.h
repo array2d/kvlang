@@ -10,6 +10,12 @@
  * 约束：参数是「指针变量」——Program 只保存引用，不保存帧实参地址。只有
  *       STATIC 的 payload 是 body 地址（编译期成立、生命周期长于 compilation
  *       的静态 key）；其余 kind 的 payload 不得被当作地址使用。
+ *
+ *       **STATIC 的 payload 允许 `BINRWIR_BODY_ADDRESS_NONE`**：写目标的 key
+ *       允许在编码期尚不存在（「首次写入一个绝对 key」是合法常态）。此时地址
+ *       由执行期值访问写路径按符号池里的 key 解析——不存在则按写参 langtype
+ *       创建零值（复用 host 的 `ensure_zero_value`，不另造零值规则）。读目标
+ *       的 payload 不会为 NONE：编码期对读参仍要求 key 已存在。
  *       STATIC 与 LOCAL / FUNCTION 的 slot 是 Program 私有符号池下标（STATIC 存
  *       绝对路径文本），LITERAL 的 payload 是 Program 私有字面量池下标；池内容
  *       与下标的有效性由 program 层校验。阶段 1 的 vmbin 只按 key 访问，STATIC

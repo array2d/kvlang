@@ -18,6 +18,7 @@
 #include "vmbin/handlers/host.h"
 #include "vmbin/handlers/langtype.h"
 #include "vmbin/handlers/scalar.h"
+#include "vmbin/handlers/scalar_generated.h"
 #include "vmbin/handlers/scatter.h"
 #include "vmbin/handlers/string.h"
 #ifdef RUNTIMEC_TEMP_PRINTLN
@@ -185,6 +186,22 @@ runtimec_status_t runtimec_session_create(
         status = binrwir_registry_append(&session->builtin_registry, "scalar",
                                          scalar_entries, scalar_entry_count,
                                          error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            status = runtimec_session_forward(error, status, "builtin registry");
+            goto fail;
+        }
+    }
+    /*
+     * scalar_generated 模块：特化轮次产出的 opid 的 handler（1836 条）。
+     *
+     * 只生成不注册，等于没做：特化把 opid 改成 0x8000+ 之后，注册表查不到就是
+     * 全线 INVALID_INSTRUCTION。必须在任何一次特化之前装好——session 创建期
+     * 天然早于编译，顺序由生命周期保证，不靠调用顺序自觉。
+     */
+    {
+        status = binrwir_registry_append(
+            &session->builtin_registry, "scalar_generated",
+            scalar_generated_entries, scalar_generated_entry_count, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             status = runtimec_session_forward(error, status, "builtin registry");
             goto fail;

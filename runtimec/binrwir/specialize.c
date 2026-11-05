@@ -302,10 +302,19 @@ static int binrwir_specialize_carry_instructions(
         char tuple[BINRWIR_SPECIALIZE_TUPLE_CAPACITY];
         binrwir_operation_identifier_t specialized = 0U;
         uint32_t identifier = BINRWIR_IDENTIFIER_NONE;
+        /* 一条指令的参数项上限：读 4 + 写 2，与 builder 的容量一致。 */
+        binrwir_argument_t read_copies[8];
+        binrwir_argument_span_t read_arguments;
+        binrwir_argument_span_t write_arguments;
 
         if (binrwir_program_get_instruction(program, (uint32_t)ordinal,
                                             &instruction) !=
             RUNTIMEC_STATUS_SUCCESS) {
+            return 0;
+        }
+        if (instruction.read_arguments.count +
+                instruction.write_arguments.count >
+            sizeof(read_copies) / sizeof(read_copies[0])) {
             return 0;
         }
         const size_t tuple_size = binrwir_specialize_tuple(
@@ -317,12 +326,40 @@ static int binrwir_specialize_carry_instructions(
                 &specialized)) {
             specialized = instruction.instruction->operation_identifier;
         }
+        /*
+         * 参数项要拷一份再改 slot：`instruction` 的 span 是指向 Program 的
+         * 只读视图，直接写它会改到旧 Program。
+         */
+        {
+            size_t copy_ordinal;
+            binrwir_argument_t *copies = read_copies;
+
+            for (copy_ordinal = 0U;
+                 copy_ordinal < instruction.read_arguments.count +
+                                    instruction.write_arguments.count;
+                 ++copy_ordinal) {
+                const binrwir_argument_t *source =
+                    copy_ordinal < instruction.read_arguments.count
+                        ? &instruction.read_arguments.data[copy_ordinal]
+                        : &instruction.write_arguments.data[
+                              copy_ordinal - instruction.read_arguments.count];
+
+                copies[copy_ordinal] = *source;
+                binrwir_specialize_remap_argument(&copies[copy_ordinal],
+                                                  symbol_remap, symbol_count);
+            }
+            read_arguments.data = copies;
+            read_arguments.count = instruction.read_arguments.count;
+            write_arguments.data =
+                copies + instruction.read_arguments.count;
+            write_arguments.count = instruction.write_arguments.count;
+        }
         memset(&request, 0, sizeof(request));
         request.source_logical_program_counter =
             instruction.source_logical_program_counter;
         request.operation_identifier = specialized;
-        request.read_arguments = instruction.read_arguments;
-        request.write_arguments = instruction.write_arguments;
+        request.read_arguments = read_arguments;
+        request.write_arguments = write_arguments;
         if (binrwir_program_builder_add_instruction(builder, &request,
                                                     &identifier) !=
             RUNTIMEC_STATUS_SUCCESS) {
@@ -393,7 +430,8 @@ runtimec_status_t binrwir_program_specialize(
                                           symbol_count) ||
         !binrwir_specialize_carry_literals(program, builder, literal_remap,
                                            literal_count) ||
-        !binrwir_specialize_carry_instructions(program, &view, builder)) {
+        !binrwir_specialize_carry_instructions(program, &view, builder,
+                                              symbol_remap, symbol_count)) {
         status = RUNTIMEC_STATUS_INVALID;
     } else {
         status = binrwir_program_builder_finalize(builder, &specialized);
