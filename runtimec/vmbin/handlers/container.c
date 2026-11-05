@@ -1106,6 +1106,46 @@ static runtimec_status_t container_write_member(
  * 两步任一失败即置 exit 并返回 false——调用方只需 `if (!ok) return;`。
  */
 /*
+ * **成员索引**：给容器 base 建目录，之后成员才能被写与枚举。
+ *
+ * 这是「容器创建」维度里所有容器**共有**的那一半，与「值」分开：
+ *   - `map·new`：写空 body 的 marker（值）+ 本函数（索引）；
+ *   - `struct·new`：克隆原型子树（值，含默认字段）+ 本函数（索引）。
+ *
+ * 两者「值」的来源不同（marker vs 克隆），但**索引这一半完全一样**，
+ * 所以它只有这一处实现。`scatter.c` 的 `scatter_container_create` 是同一判据。
+ */
+static bool container_index_container(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, char *buffer,
+    size_t capacity, binrwir_execution_exit_t *output_exit) {
+    char message[256];
+    const size_t key_length = strlen(buffer);
+
+
+    /* 目录键以 '/' 结尾：kvspace 的目录枚举要求如此。 */
+    if (key_length + 2U > capacity) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                           instruction->source_logical_program_counter);
+        return false;
+    }
+    buffer[key_length] = '/';
+    buffer[key_length + 1U] = '\0';
+    message[0] = '\0';
+    const int mkindex_status = kvspaceMkindex(frame->kvspace_handle, buffer, 0U,
+                                              message, (uint32_t)sizeof(message));
+    buffer[key_length] = '\0';
+    if (mkindex_status != 0) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                           VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
+                           instruction->source_logical_program_counter);
+        return false;
+    }
+    return true;
+}
+
+/*
  * ── 容器的两个正交维度 ────────────────────────────────────────────────
  *
  * **「容器的创建」与「成员的写法」是两件不同的事，不许合并。**
@@ -1146,27 +1186,10 @@ static bool container_open_marker(binrwir_execution_frame_t *frame,
                                       output_exit) != RUNTIMEC_STATUS_SUCCESS) {
         return false;
     }
-    /* 目录键以 '/' 结尾：kvspace 的目录枚举要求如此。 */
-    key_length = strlen(buffer);
-    if (key_length + 2U > capacity) {
-        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                           RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
-                           instruction->source_logical_program_counter);
-        return false;
-    }
-    buffer[key_length] = '/';
-    buffer[key_length + 1U] = '\0';
-    message[0] = '\0';
-    const int mkindex_status = kvspaceMkindex(frame->kvspace_handle, buffer, 0U,
-                                              message, (uint32_t)sizeof(message));
-    buffer[key_length] = '\0';
-    if (mkindex_status != 0) {
-        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                           VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
-                           instruction->source_logical_program_counter);
-        return false;
-    }
-    return true;
+    (void)message;
+    (void)key_length;
+    return container_index_container(frame, instruction, buffer, capacity,
+                                     output_exit);
 }
 
 static void container_write_positional_members(
@@ -1396,13 +1419,18 @@ static void container_struct_create(binrwir_execution_frame_t *frame,
     char slot_key[VMBIN_HANDLER_KEY_CAPACITY];
 
     /*
-     * **创建维度共用 `container_open_marker`（marker + mkindex），成员维度用自己的
-     * 具名循环**（`container_struct_fields`）。不调 `container_create_variadic`：
-     * 那条的成员是位置型的，对 struct 是错的事实。
+     * **创建维度**：克隆原型（值，含默认字段）+ 建成员索引（共用那一段）。
+     * **成员维度**：自己的具名循环（`container_struct_fields`）。
+     *
+     * 不调 `container_create_variadic`：那条的成员是位置型的，对 struct 是错的事实；
+     * 也不用 marker 顶替克隆——marker 是空 body，会把原型里的默认字段丢掉。
      */
     if (instruction->read_arguments.count >= 1U &&
-        container_open_marker(frame, instruction, slot_key, sizeof(slot_key),
-                              output_exit)) {
+        container_target_key(frame, instruction, slot_key, sizeof(slot_key),
+                             output_exit) &&
+        container_struct_clone(frame, instruction, slot_key, output_exit) &&
+        container_index_container(frame, instruction, slot_key, sizeof(slot_key),
+                                  output_exit)) {
         (void)container_struct_fields(frame, instruction, slot_key, output_exit);
     }
 }
