@@ -3,8 +3,8 @@
 // 依据：04-layout语义/03-函数.kv、05-runtime语义/01-执行模型.kv。
 // 期望输出:
 //   42
-rwfunc add1(x:int64) -> (r:int64) {
-	x + 1 -> r
+rwfunc add1(*int64 $x) -> (*int64 $r) {
+	*x + 1 -> *r
 }
 
 rwfunc test() -> () {

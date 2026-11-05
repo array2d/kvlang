@@ -3,8 +3,8 @@
 // 依据：01-词法/04-标识符.kv，letter 含 unicode_letter。
 // 期望输出:
 //   42
-rwfunc 两倍(数值:int64) -> (结果:int64) {
-	数值 × 2 -> 结果
+rwfunc 两倍(*int64 $数值) -> (*int64 $结果) {
+	*数值 × 2 -> *结果
 }
 
 rwfunc test() -> () {

@@ -6,8 +6,8 @@
 //   42
 lib outer {
 	lib inner {
-		rwfunc add1(x:int64) -> (r:int64) {
-			x + 1 -> r
+		rwfunc add1(*int64 $x) -> (*int64 $r) {
+			*x + 1 -> *r
 		}
 	}
 }
