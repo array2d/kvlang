@@ -12,12 +12,14 @@
  *   - 处理函数不得缓存 V.body 内容或建立寄存器文件。
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "binrwir/execution_exit.h"
 #include "binrwir/execution_frame.h"
 #include "binrwir/instruction.h"
+#include "binrwir/operation_identifiers.h"
 #include "binrwir/program.h"
 #include "contract/error.h"
 #include "contract/status.h"
@@ -50,15 +52,48 @@ typedef struct binrwir_registry_entry {
 } binrwir_registry_entry_t;
 
 /*
- * 条目上限：catalog 当前 130 行，留余量到 192（够标准库扩展）。
- * 生成器 `--check` 读取本宏并与实际行数比对；运行期的超限失败是兜底。
- * 192 × 16 字节 = 3072 字节，随 session 走，符合 no-malloc 基线。
+ * 条目上限：基础能力行（catalog 130 行）+ 特化条目（生成器算出，见
+ * `binrwir/operation_identifiers.h` 的 `BINRWIR_SPECIALIZED_COUNT`）再加余量。
+ *
+ * 生成器 `--check` 校验「基础行 + 特化数 ≤ 本宏」，超了生成期红而不是运行期红。
+ * 运行期的超限失败仍保留作兜底——注入的表若绕过生成器，这里是最后一道。
+ *
+ * 尺寸：1923 × 24 字节 ≈ 46 KB，随 session 走。可以用，但**不能**拿整个 16 位
+ * opid 空间做稠密下标（65536 × 2 = 128 KB），那会让每个 session 先付 128 KB。
  */
-#define BINRWIR_REGISTRY_ENTRY_LIMIT 192U
+#define BINRWIR_REGISTRY_ENTRY_LIMIT 2048U
+
+/*
+ * 查找用**两段式**，不是一条线性扫：
+ *
+ *   特化区 0x8000–0xFEFF 是**稠密**的（`0x8000 + 序号`），直接下标 O(1)；
+ *   基础区是**稀疏**的（当前 87 个散布在 0x0001–0x0192），升序数组 + 二分。
+ *
+ * 为什么不统一用稠密表：基础区只用了 87 个位置却要占 32768 项（64 KB）；
+ * 为什么不统一用二分：特化 1836 条是每次执行都查的热路径，二分要 11 次比较，
+ * 而它们本来就是连续分配的，直接下标白拿 O(1)。
+ *
+ * 两张索引都在 `append` 末尾重建——装载期一次，运行期零维护。
+ */
+#define BINRWIR_REGISTRY_SPECIALIZED_INDEX_LIMIT \
+    (BINRWIR_OPERATION_IDENTIFIER_RESERVED_BASE - \
+     BINRWIR_SPECIALIZED_BASE)
 
 typedef struct binrwir_registry {
     binrwir_registry_entry_t storage[BINRWIR_REGISTRY_ENTRY_LIMIT];
     size_t entry_count;
+    /* 特化区：`specialized_index[opid - BINRWIR_SPECIALIZED_BASE]` → 条目下标 + 1
+     * （0 表示该 opid 没有条目）。存下标 + 1 是为了让 0 天然表示「空」，
+     * 不必另设哨兵。 */
+    uint16_t specialized_index[BINRWIR_REGISTRY_SPECIALIZED_INDEX_LIMIT];
+    /* 基础区：按 opid 升序的条目下标；查的时候二分。 */
+    uint16_t base_index[BINRWIR_REGISTRY_ENTRY_LIMIT];
+    size_t base_index_count;
+    /* 特化区实际占用的槽数。**rebuild 时算好存下来**，不在 find 里数——
+     * 每次分派都扫 2048 项的话，两段式索引省下的时间又被这条检查还回去了。 */
+    size_t specialized_index_count;
+    /* 索引是否已建。表被绕过 append 构造过时它是 false，find 会拒绝。 */
+    bool index_ready;
 } binrwir_registry_t;
 
 /*

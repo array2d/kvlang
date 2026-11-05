@@ -47,10 +47,13 @@ SIGNATURE_TABLE = SPEC / "native_rwir_decls.kv"
 # opid 常量头：`vmbin` 与 `vmkv` 同层并列，前者不得链后者，所以 handler 无法从
 # manifest 查自己的 opid。这份头由同一真源生成、同一 `--check` 校验，只含常量。
 OPERATION_IDENTIFIERS_HEADER = Path("runtimec/binrwir/operation_identifiers.h")
+# 特化查找表的唯一定义。头文件只放声明与计数，定义放这里——
+# 头里放数组定义会在每个 include 点复制一份。
+SPECIALIZATION_TABLE = Path("runtimec/binrwir/specialization_table.c")
 # 产物清单是封闭集合：--check 必须逐份比对，少一份就红。否则某份产物可以从校验
 # 里静默消失，而生成器照样打印 OK。
 ARTIFACTS = (MANIFEST, ALIAS_TABLE, GAPS, SIGNATURE_TABLE,
-             OPERATION_IDENTIFIERS_HEADER)
+             OPERATION_IDENTIFIERS_HEADER, SPECIALIZATION_TABLE)
 MATRIX = SPEC / "five-language-behavior-matrix.md"
 INSTRUCTION_HEADER = Path("runtimec/binrwir/instruction.h")
 REGISTRY_HEADER = Path("runtimec/binrwir/registry.h")
@@ -148,6 +151,20 @@ TYPE_SET_NAMES = {
 }
 
 # Constraint / result / alias vocabulary of the record. No fifth value may appear.
+#
+# `SAME_CLASS` 判的是**类**，不是**型**——这一条今晚被两个独立实现同时做错：
+#
+#   类有五种：signed / unsigned / float / bool / character。
+#   同类之内允许**不同宽度**（int8 与 int16）、**不同编码**（char/utf8 与 char/ascii）；
+#   跨类一律拒绝。
+#
+# 判据的权威实现在 `vmkv/encoder.c` 的 `vmkv_encoder_constraint_allows`（按
+# `vmkv_encoder_operand_class` 逐操作数取类再比对）。按「同型」展开会把
+# `bitand` 的 32 种压成 8 种、`concat` 的 9 种压成 3 种——数量少了四倍还不报错，
+# 因为生成器照样产出合法常量，只是少了条目。
+#
+# 所以：**展开特化组合时，`SAME_CLASS` = 同类即可，不是同型**。改这里之前先读
+# encoder 那段实现，别按字面理解「same」。
 CONSTRAINTS = ("NONE", "SAME_CLASS", "NUMERIC_COMPATIBLE", "NUMERIC_COMPARE")
 RESULT_RULES = ("NONE", "SAME_FIRST", "SAME_SECOND", "WIDEN", "WIDEN_INTEGER",
                 "BOOLEAN", "FLOAT64", "TARGET_TYPE", "IDENTITY", "CHARACTER_UTF8")
@@ -205,15 +222,21 @@ VALUE_ROWS = (
      ("signed-neg-abs-sign", "unsigned-neg-abs-sign"), "value"),
     ("SIGN", "sign", 0x000B, NUMBER, NUMBER, "NONE", "SAME_FIRST", "FORBIDDEN",
      ("signed-neg-abs-sign", "unsigned-neg-abs-sign"), "value"),
-    ("BITWISE_AND", "bitand", 0x000C, WIDE_INTEGER, WIDE_INTEGER, "SAME_CLASS", "SAME_FIRST",
+    # 位运算接受**全整数**（SI*/UI* 八种），不是只有 64 位。
+    #
+    # 依据：spec `05-runtime语义/11-指令派发与特化.kv`「`bitand bitor bitxor shl shr`：
+    # 整型（SI*/UI*）；同符号不同宽度按 promotion，混合符号直接 TypeError」——没有
+    # 只说 64 位；`scalar.c` 的五个 handler 也确实实现了 8 种宽度。三方里两方说 8 种，
+    # 少数派是这里曾用的 `WIDE_INTEGER`，所以改本表而不是改 spec。
+    ("BITWISE_AND", "bitand", 0x000C, INTEGER, INTEGER, "SAME_CLASS", "WIDEN",
      "FORBIDDEN", ("mixed-signed-unsigned-arithmetic",), "value"),
-    ("BITWISE_OR", "bitor", 0x000D, WIDE_INTEGER, WIDE_INTEGER, "SAME_CLASS", "SAME_FIRST",
+    ("BITWISE_OR", "bitor", 0x000D, INTEGER, INTEGER, "SAME_CLASS", "WIDEN",
      "FORBIDDEN", ("mixed-signed-unsigned-arithmetic",), "value"),
-    ("BITWISE_XOR", "bitxor", 0x000E, WIDE_INTEGER, WIDE_INTEGER, "SAME_CLASS", "SAME_FIRST",
+    ("BITWISE_XOR", "bitxor", 0x000E, INTEGER, INTEGER, "SAME_CLASS", "WIDEN",
      "FORBIDDEN", ("mixed-signed-unsigned-arithmetic",), "value"),
-    ("SHIFT_LEFT", "shl", 0x000F, WIDE_INTEGER, WIDE_INTEGER, "SAME_CLASS", "SAME_FIRST",
+    ("SHIFT_LEFT", "shl", 0x000F, INTEGER, INTEGER, "SAME_CLASS", "WIDEN",
      "FORBIDDEN", ("shift-count-masking", "mixed-signed-unsigned-arithmetic"), "value"),
-    ("SHIFT_RIGHT", "shr", 0x0010, WIDE_INTEGER, WIDE_INTEGER, "SAME_CLASS", "SAME_FIRST",
+    ("SHIFT_RIGHT", "shr", 0x0010, INTEGER, INTEGER, "SAME_CLASS", "WIDEN",
      "FORBIDDEN", ("shift-count-masking", "mixed-signed-unsigned-arithmetic"), "value"),
     ("SQUARE_ROOT", "sqrt", 0x0011, NUMBER, FLOAT64, "NONE", "FLOAT64", "FORBIDDEN",
      ("float-transcendental-result-kind",), "value"),
@@ -684,6 +707,27 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
             f"{len(rows)} capability rows + {len(RETIRED_ROWS)} retired rows exceed "
             f"BINRWIR_REGISTRY_ENTRY_LIMIT ({entry_limit}) in {REGISTRY_HEADER}")
 
+    # 浮点提升：`WIDEN`/`WIDEN_INTEGER`/`SAME_FIRST` 的行里，不得出现
+    # 「操作数含 float32、不含 float64、结果 float64」。
+    #
+    # 为什么这条要进生成期校验：`float32 + float32` 的结果是 float32，
+    # `float32 + int16` 也是 float32——只有 float64 参与才升。写错时不报任何
+    # 错，只是把 102 条特化的结果类型标成 float64，而那会把一次多余的类型
+    # 提升固化进 opid，之后改都改不回来。
+    float32_slip = 0
+    for row in rows:
+        if row.result_rule not in ("WIDEN", "WIDEN_INTEGER", "SAME_FIRST"):
+            continue
+        for combination in specialization_combinations(row):
+            operands, result = combination[:-1], combination[-1]
+            if ("float32" in operands and "float64" not in operands
+                    and result == "float64"):
+                float32_slip += 1
+    if float32_slip:
+        findings.append(
+            f"{float32_slip} specialization(s) promote float32 without float64 "
+            f"in the operand tuple — WIDEN keeps float32 unless float64 takes part")
+
     # 保留区（>= RESERVED_BASE）留给 FOREIGN 这类结构标记，能力行不得占用。
     # 判据是白名单：opid 必须严格落在 (0, reserved_base)，不是「不许等于某个值」。
     for row in rows:
@@ -1023,6 +1067,161 @@ def operation_suffix(identifier: str) -> str:
     return identifier[len(prefix):] if identifier.startswith(prefix) else identifier
 
 
+# ── 特化展开 ──────────────────────────────────────────────────────────────
+#
+# 规则只有一条，所有行同一个：
+#
+#   组合 = 读掩码的**全笛卡尔积**（两个读参就是 |mask|²）
+#        → 按 constraint 过滤
+#        → 按 result_rule 定结果类型
+#
+# 一元算子取 |mask| 而不是 |mask|²；`cast` 是源 × 目标。
+#
+# **不按算子另立规则**：今晚两个独立实现都栽在「add 用全笛卡尔、SAME_CLASS 又
+# 退化成同型」这种两套语义上。语义只有一个来源：`vmkv/encoder.c` 的
+# `vmkv_encoder_constraint_allows`。
+
+TYPE_BITS = (
+    (0, "int8"), (1, "int16"), (2, "int32"), (3, "int64"),
+    (4, "uint8"), (5, "uint16"), (6, "uint32"), (7, "uint64"),
+    (8, "float32"), (9, "float64"), (10, "bool"),
+    (11, "char/utf8"), (12, "char/utf32"), (13, "char/ascii"),
+    (14, "array"), (15, "stringkeymap"), (16, "structref"),
+    (17, "ext"), (18, "pointer"),
+)
+OPERAND_CLASS = {
+    "int8": "signed", "int16": "signed", "int32": "signed", "int64": "signed",
+    "uint8": "unsigned", "uint16": "unsigned", "uint32": "unsigned",
+    "uint64": "unsigned",
+    "float32": "float", "float64": "float",
+    "bool": "bool",
+    "char/utf8": "character", "char/utf32": "character",
+    "char/ascii": "character",
+    "array": "array", "stringkeymap": "stringkeymap",
+    "structref": "structref", "ext": "ext", "pointer": "pointer",
+}
+NUMERIC_CLASSES = ("signed", "unsigned", "float")
+TYPE_WIDTH = {
+    "int8": 1, "int16": 2, "int32": 4, "int64": 8,
+    "uint8": 1, "uint16": 2, "uint32": 4, "uint64": 8,
+    "float32": 4, "float64": 8,
+}
+# 一元算子：读参一个。其余按二元处理；`cast` 单独处理。
+UNARY_OPERATORS = ("abs", "neg", "sign", "sqrt", "exp", "log", "not")
+CAST_OPERATOR = "cast"
+
+
+def type_names(mask: int) -> list[str]:
+    return [name for bit, name in TYPE_BITS if mask >> bit & 1]
+
+
+def constraint_allows(constraint: str, operand_types: list[str]) -> bool:
+    """逐字照 `vmkv/encoder.c` 的 `vmkv_encoder_constraint_allows`。"""
+    classes = [OPERAND_CLASS[name] for name in operand_types]
+    if constraint == "NONE":
+        return True
+    if constraint == "SAME_CLASS":
+        # 同类，不是同型：int8 与 int16 同属 signed，char/utf8 与 char/ascii 同属 character。
+        return all(entry == classes[0] for entry in classes)
+    if constraint == "NUMERIC_COMPATIBLE":
+        if not all(entry in NUMERIC_CLASSES for entry in classes):
+            return False
+        return not ("signed" in classes and "unsigned" in classes)
+    if constraint == "NUMERIC_COMPARE":
+        return all(entry in NUMERIC_CLASSES for entry in classes)
+    return False
+
+
+def result_of(rule: str, operand_types: list[str]) -> str | None:
+    """`result_rule` → 结果类型。None 表示「由安装签名给出」，不参与特化。"""
+    if rule == "BOOLEAN":
+        return "bool"
+    if rule == "FLOAT64":
+        return "float64"
+    if rule == "CHARACTER_UTF8":
+        return "char/utf8"
+    if rule == "SAME_FIRST":
+        return operand_types[0]
+    if rule == "SAME_SECOND" and len(operand_types) > 1:
+        return operand_types[1]
+    if rule in ("WIDEN", "WIDEN_INTEGER"):
+        # matrix:77 — 宽度取较宽者，与顺序无关。
+        #
+        # 浮点只在**有 float64 参与**时升 float64，不是「见 float 就升」：
+        # `float32,float32` 的结果是 float32，`float32,int16` 也是 float32。
+        # 早先写成「任一 float → float64」会把 102 条错标成 float64 结果，
+        # 而 float32 与 float64 是**两种宽度**，合并它们等于宣称 float32 加法
+        # 产出 float64——那会把一次多余的类型提升固化进 opid。
+        if "float64" in operand_types:
+            return "float64"
+        widest = operand_types[0]
+        for entry in operand_types[1:]:
+            if TYPE_WIDTH[entry] > TYPE_WIDTH[widest]:
+                widest = entry
+        return widest
+    return None
+
+
+def specialization_combinations(row: Row) -> list[tuple[str, ...]]:
+    """展开一行。返回排好序、去重的元组列表（读参在前、写参在后）。"""
+    read_types = type_names(row.read_mask)
+    if not read_types:
+        return []
+    if row.operator == CAST_OPERATOR:
+        tuples = [(source, target, target)
+                  for source in read_types for target in read_types
+                  if constraint_allows(row.constraint, [source, target])]
+    elif row.operator in UNARY_OPERATORS:
+        tuples = [(entry,) for entry in read_types
+                  if constraint_allows(row.constraint, [entry])]
+    else:
+        # 二元：**全笛卡尔积**，然后按 constraint 过滤。
+        tuples = [(left, right) for left in read_types for right in read_types
+                  if constraint_allows(row.constraint, [left, right])]
+    finished = []
+    for operand_types in tuples:
+        resolved = result_of(row.result_rule, list(operand_types))
+        finished.append(operand_types if resolved is None
+                        else operand_types + (resolved,))
+    return sorted(set(finished))
+
+
+def tuple_text(operand_types: tuple[str, ...]) -> str:
+    """元组串：读参按声明序在前、写参在后；**同型也写全**。
+
+    写全不是形式要求：`(base_opid, 元组串)` 是特化的唯一键。省略重复项会让
+    `add_int64` 与 `add_int64_int64_int64` 两个名字指同一条，而那正是
+    「同一事实两种写法」的老毛病。
+    """
+    return ",".join(operand_types)
+
+
+def specialization_suffix(operand_types: tuple[str, ...]) -> str:
+    """C 标识符后缀：类型名规范化（`char/utf8` → `CHAR_UTF8`），用下划线连接。"""
+    parts = []
+    for name in operand_types:
+        parts.append(name.replace("/", "_").replace("-", "_").upper())
+    return "_".join(parts)
+
+
+def build_specializations(rows: list[Row]) -> list[tuple[Row, tuple[str, ...], int]]:
+    """全部特化条目，按 (base opid, 元组串) 排序后分配连续 opid。
+
+    顺序必须确定且稳定：Program 是地址化的、要跨进程一致，序号不稳等于 Program
+    不可比。规则 = base_opid 升序，同 base 内按元组串字典序。
+    """
+    entries: list[tuple[Row, tuple[str, ...]]] = []
+    for row in rows:
+        combinations = specialization_combinations(row)
+        # 只有展开出多种组合的行才特化；单组合的行沿用原 opid。
+        if len(combinations) <= 1:
+            continue
+        entries.extend((row, combination) for combination in combinations)
+    entries.sort(key=lambda item: (item[0].opid, tuple_text(item[1])))
+    return [(row, combination, 0x8000 + index)
+            for index, (row, combination) in enumerate(entries)]
+
+
 def render_operation_identifiers(rows: list[Row], retired: tuple) -> str:
     """Emit the opid constants as a header both `binrwir` and `vmbin` may include.
 
@@ -1071,13 +1270,88 @@ def render_operation_identifiers(rows: list[Row], retired: tuple) -> str:
         lines.append(
             f"#define BINRWIR_OPERATION_IDENTIFIER_{operation_suffix(identifier)} "
             f"UINT16_C(0x{opid:04X})")
+
+    specializations = build_specializations(rows)
     lines += [
         "",
-        "#ifdef __cplusplus",
+        "/*",
+        " * ── 特化 opid（0x8000–0xFEFF）───────────────────────────────────────────",
+        " *",
+        " * 一个算子按操作数的具体类型组合拆成多条，每条一个 opid。展开规则只有一条：",
+        " *   读掩码全笛卡尔积 → constraint 过滤 → result_rule 定结果。",
+        " *",
+        " * 分配：0x8000 + 序号，序号来自按 (base opid, 元组串) 排序后的列表。",
+        " * 顺序必须稳定——Program 是地址化的、要跨进程一致。",
+        " *",
+        " * 元组串 = 读参按声明序在前、写参在后，**同型也写全**。写全是唯一性前提：",
+        " * 省略重复项会让 `add_int64` 与 `add_int64_int64_int64` 指同一条。",
+        f" * 统计：{len(specializations)} 条。",
+        " */",
+        f"#define BINRWIR_SPECIALIZED_COUNT UINT16_C({len(specializations)})",
+        f"#define BINRWIR_SPECIALIZED_BASE UINT16_C(0x8000)",
+    ]
+    for row, operand_types, opid in specializations:
+        lines.append(
+            f"#define BINRWIR_OPERATION_IDENTIFIER_{operation_suffix(row.identifier)}_"
+            f"{specialization_suffix(operand_types)} UINT16_C(0x{opid:04X})")
+
+    lines += [
+        "",
+        "/*",
+        " * 查找表：特化轮次用 `(base opid, 元组串)` 查目标 opid。",
+        " *",
+        " * 表与上面那批常量**同源同批生成**，条数必须相等——`--check` 逐项比对。",
+        " * 表放在头文件里而不是 .c：`binrwir` 与 `vmbin` 都要读它，而 `vmbin` 不得",
+        " * 链 `vmkv`；生成物多一份就多一处对账。",
+        " */",
+        "typedef struct binrwir_specialization {",
+        "    /* 用 uint16_t 而不是 binrwir_operation_identifier_t：后者定义在",
+        "     * binrwir/instruction.h，本头若 include 它就成环（instruction.h 将来",
+        "     * 可能反过来要这张表）。opid 是 16 位是 wire 事实，这里照写即可。 */",
+        "    uint16_t base_operation_identifier;",
+        "    const char *operand_types;",
+        "    uint16_t specialized_operation_identifier;",
+        "} binrwir_specialization_t;",
+        "",
+        "#define BINRWIR_SPECIALIZATION_TABLE_COUNT "
+        f"UINT16_C({len(specializations)})",
+        "",
+        "/* 定义在 binrwir/specialization_table.c：头里只放声明与计数。 */",
+        "extern const binrwir_specialization_t "
+        "binrwir_specializations[BINRWIR_SPECIALIZATION_TABLE_COUNT];",
+        "",
+        "#if defined(__cplusplus)",
         "}",
         "#endif",
         "",
         "#endif",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def render_specialization_table(rows: list[Row]) -> str:
+    """查找表的**定义**——单独一份 .c，因为头文件里只能放声明。"""
+    specializations = build_specializations(rows)
+    lines = [
+        "/*",
+        " * 组件：binrwir/specialization_table（生成物，勿手改）",
+        " * 作用：特化查找表的唯一定义。常量与计数在 operation_identifiers.h。",
+        " * 约束：由 tools/architecture/generate_rwir_catalog.py 生成并校验；",
+        " *       条数必须等于 BINRWIR_SPECIALIZATION_TABLE_COUNT。",
+        f" * 统计：{len(specializations)} 行。",
+        " */",
+        "",
+        '#include "binrwir/operation_identifiers.h"',
+        "",
+        "const binrwir_specialization_t binrwir_specializations[] = {",
+    ]
+    for row, operand_types, opid in specializations:
+        lines.append(
+            f'    {{BINRWIR_OPERATION_IDENTIFIER_{operation_suffix(row.identifier)}, '
+            f'"{tuple_text(operand_types)}", UINT16_C(0x{opid:04X})}},')
+    lines += [
+        "};",
         "",
     ]
     return "\n".join(lines)
@@ -1136,6 +1410,7 @@ def main() -> int:
         SIGNATURE_TABLE: render_signature_table(rows),
         OPERATION_IDENTIFIERS_HEADER: render_operation_identifiers(rows,
                                                                    RETIRED_ROWS),
+        SPECIALIZATION_TABLE: render_specialization_table(rows),
     }
 
     if not arguments.check:

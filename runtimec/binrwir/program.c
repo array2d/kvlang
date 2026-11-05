@@ -280,14 +280,36 @@ static int binrwir_program_text_size(
     return 1;
 }
 
+/*
+ * 字节池里每条 wire 的起点必须 8 字节对齐。
+ *
+ * 为什么：wire 布局是 `[16 字节头][body][attr]`，body = wire + 16 只保证 8 的
+ * 倍数**当且仅当** wire 起点也是 8 的倍数。而特化后的 handler 会直接
+ * `*(const int64_t *)body` 取标量——x86 容忍未对齐，**aarch64 是 UB**，JIT 出
+ * 单条 `ldr` 就真崩。
+ *
+ * shm 侧没有这个问题：`kvspace-c` 自己强制 `off%8==0 && val%8==0`。只有 Program
+ * 的私有字面量池需要这里补。
+ */
+#define BINRWIR_PROGRAM_POOL_ALIGNMENT 8U
+
+static size_t binrwir_program_pool_padded_size(size_t size) {
+    return (size + BINRWIR_PROGRAM_POOL_ALIGNMENT - 1U) /
+           BINRWIR_PROGRAM_POOL_ALIGNMENT * BINRWIR_PROGRAM_POOL_ALIGNMENT;
+}
+
 static int binrwir_program_bytes_size(
     const binrwir_program_literal_record_t *literals, size_t literal_count,
     size_t *output_size) {
     size_t ordinal;
 
     for (ordinal = 0U; ordinal < literal_count; ++ordinal) {
-        if (!binrwir_program_size_add(output_size,
-                                      literals[ordinal].wire_bytes.size)) {
+        /* 累加**补齐后**的长度：池的总大小与逐条起点必须用同一套算术，
+         * 否则分配够了下标却越界。 */
+        if (!binrwir_program_size_add(
+                output_size,
+                binrwir_program_pool_padded_size(
+                    literals[ordinal].wire_bytes.size))) {
             return 0;
         }
     }
@@ -307,7 +329,14 @@ static runtimec_string_view_t binrwir_program_copy_text(
     return runtimec_string_view_make(copy, text.size);
 }
 
-/* 深拷贝一段字节进 Program 字节池，返回指向副本的视图。 */
+/*
+ * 深拷贝一段字节进 Program 字节池，返回指向副本的视图。
+ *
+ * 每条 wire 的起点补到 8 的倍数（理由见 `binrwir_program_bytes_size` 上方）。
+ * 填充字节写成 0：它们不属于任何视图，但 memset 让「同一份 Program 两次构建
+ * 字节相同」这条性质继续成立——否则比较两棵 Program 会因为填充区是栈残留而
+ * 假不等。
+ */
 static runtimec_bytes_view_t binrwir_program_copy_bytes(
     binrwir_program_t *program, runtimec_bytes_view_t bytes,
     size_t *bytes_offset) {
@@ -316,7 +345,7 @@ static runtimec_bytes_view_t binrwir_program_copy_bytes(
     if (bytes.size != 0U) {
         memcpy(copy, bytes.data, bytes.size);
     }
-    *bytes_offset += bytes.size;
+    *bytes_offset += binrwir_program_pool_padded_size(bytes.size);
     return runtimec_bytes_view_make(copy, bytes.size);
 }
 
@@ -713,7 +742,7 @@ static void binrwir_program_release(binrwir_program_t *program) {
                                   _Alignof(char));
     binrwir_program_release_array(allocator, program->pool_bytes,
                                   program->pool_bytes_size, sizeof(uint8_t),
-                                  _Alignof(uint8_t));
+                                  _Alignof(uint64_t));
     memset(program, 0, sizeof(*program));
 }
 
@@ -833,9 +862,11 @@ static runtimec_status_t binrwir_program_allocate_storage(
     }
     program->pool_text = (char *)binrwir_program_allocate_exact(
         allocator, program->pool_text_size, sizeof(char), _Alignof(char));
+    /* 分配对齐用 uint64_t：池里每条 wire 自己起点 8 对齐，池基址必须同样对齐，
+     * 否则 `wire 起点对齐` 这条性质整体平移失效。 */
     program->pool_bytes = (uint8_t *)binrwir_program_allocate_exact(
         allocator, program->pool_bytes_size, sizeof(uint8_t),
-        _Alignof(uint8_t));
+        _Alignof(uint64_t));
     if ((program->pool_text_size != 0U && program->pool_text == NULL) ||
         (program->pool_bytes_size != 0U && program->pool_bytes == NULL)) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;

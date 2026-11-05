@@ -25,7 +25,64 @@ runtimec_status_t binrwir_registry_initialize(
         return RUNTIMEC_STATUS_INVALID;
     }
     memset(registry, 0, sizeof(*registry));
+    /* 空表也是一张可用的表：零条目是合法状态（未装 any builtin 的 session
+     * 依赖它）。索引立即就绪，find 能回答「表里没有」。 */
+    registry->index_ready = true;
     return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 重建两张索引。装载期在每次 append 末尾调用一次——条目数是个位数到百位数，
+ * 重建成本可以忽略；运行期零维护，find 不加锁、不改表。
+ *
+ * 用「重建」而不是「增量插入」：增量插入要在两处维护同一不变量（存储顺序与
+ * 索引一致性），而重建只有一处。装载不是热路径，不值得为它省这一次 O(n)。
+ */
+static void binrwir_registry_rebuild_index(binrwir_registry_t *registry) {
+    size_t entry_ordinal;
+    size_t base_count = 0U;
+
+    memset(registry->specialized_index, 0, sizeof(registry->specialized_index));
+    registry->base_index_count = 0U;
+    registry->specialized_index_count = 0U;
+
+    for (entry_ordinal = 0U; entry_ordinal < registry->entry_count;
+         ++entry_ordinal) {
+        const binrwir_operation_identifier_t identifier =
+            registry->storage[entry_ordinal].operation_identifier;
+
+        if (identifier >= BINRWIR_SPECIALIZED_BASE &&
+            identifier < BINRWIR_OPERATION_IDENTIFIER_RESERVED_BASE) {
+            /* 特化区：直接下标。`+1` 让 0 表示「没有条目」。 */
+            const size_t offset =
+                (size_t)(identifier - BINRWIR_SPECIALIZED_BASE);
+            registry->specialized_index[offset] = (uint16_t)(entry_ordinal + 1U);
+            registry->specialized_index_count += 1U;
+        } else if (identifier < BINRWIR_SPECIALIZED_BASE) {
+            registry->base_index[base_count] = (uint16_t)entry_ordinal;
+            base_count += 1U;
+        }
+        /* 保留区（>= RESERVED_BASE）不进任何索引：append 已经拒了结构标记，
+         * 走到这里说明表被绕过写坏，find 会因索引缺失返回 UNSUPPORTED。 */
+    }
+    /* 基础区要能二分，必须按 opid 升序。插入排序：条目数是个位数到百位数，
+     * 且装载期只跑一次——这里选「显然正确」而不是「常数更小」。 */
+    for (size_t left = 1U; left < base_count; ++left) {
+        const uint16_t carried = registry->base_index[left];
+        const binrwir_operation_identifier_t carried_identifier =
+            registry->storage[carried].operation_identifier;
+        size_t position = left;
+
+        while (position > 0U &&
+               registry->storage[registry->base_index[position - 1U]]
+                       .operation_identifier > carried_identifier) {
+            registry->base_index[position] = registry->base_index[position - 1U];
+            position -= 1U;
+        }
+        registry->base_index[position] = carried;
+    }
+    registry->base_index_count = base_count;
+    registry->index_ready = true;
 }
 
 runtimec_status_t binrwir_registry_reset(
@@ -103,15 +160,21 @@ runtimec_status_t binrwir_registry_append(
     memcpy(&registry->storage[registry->entry_count], entries,
            entry_count * sizeof(*entries));
     registry->entry_count += entry_count;
+    binrwir_registry_rebuild_index(registry);
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/* 线性查找：注册表是 session 拥有的只读小表，不引入第二条索引。 */
+/*
+ * 查找。两段式：特化区直接下标 O(1)，基础区二分 O(log n)。
+ *
+ * 保留区（>= RESERVED_BASE）与表外 opid 一律 `UNSUPPORTED`——**不是 INVALID**：
+ * INVALID 只说「请求本身不成立」，而这里请求是好的，只是本执行器不处理它。
+ */
 runtimec_status_t
 binrwir_registry_find(const binrwir_registry_t *registry,
                             binrwir_operation_identifier_t operation_identifier,
                             const binrwir_registry_entry_t **output_entry) {
-    size_t entry_ordinal;
+    size_t entry_ordinal = SIZE_MAX;
 
     if (output_entry != NULL) {
         *output_entry = NULL;
@@ -124,21 +187,66 @@ binrwir_registry_find(const binrwir_registry_t *registry,
         output_entry == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    for (entry_ordinal = 0U; entry_ordinal < registry->entry_count;
-         ++entry_ordinal) {
-        const binrwir_registry_entry_t *entry = &registry->storage[entry_ordinal];
-
-        /* 装载期已拒绝空 handler，走到这里说明表被绕过 append 写坏了。
-         * 返回 INVALID 而不是跳过：跳过会让「注册了但没实现」伪装成「没注册」，
-         * 两者在调用方看来都是 UNSUPPORTED。 */
-        if (entry->handler == NULL) {
-            return RUNTIMEC_STATUS_INVALID;
-        }
-        if (entry->operation_identifier == operation_identifier) {
-            *output_entry = entry;
-            return RUNTIMEC_STATUS_SUCCESS;
-        }
+    /* 表被绕过 append 构造过（没走过索引重建）：拒绝，不去线性兜底。
+     * 兜底会让「表坏了」看起来像「表是好的只是没有这条」。 */
+    if (!registry->index_ready) {
+        return RUNTIMEC_STATUS_INVALID;
     }
-    /* 没有这一条不是错误，是「本执行器不处理」：交 route handoff。 */
-    return RUNTIMEC_STATUS_UNSUPPORTED;
+    /*
+     * 绕过 append 直接写 `storage` 的情形：索引里查不到，但存储里可能有。
+     * 那说明表被写坏过（append 是唯一合法入口，它每次都重建索引）。
+     *
+     * 判据是「索引覆盖的条目数 < 存储条目数」——两者不等即表被绕过过。
+     * 此时返回 INVALID 而不是 UNSUPPORTED：`UNSUPPORTED` 是「本执行器不处理
+     * 这个能力」，而这里根本没有一张可信的表。
+     */
+    if (registry->base_index_count + registry->specialized_index_count !=
+        registry->entry_count) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    if (operation_identifier >= BINRWIR_SPECIALIZED_BASE &&
+        operation_identifier < BINRWIR_OPERATION_IDENTIFIER_RESERVED_BASE) {
+        const size_t offset =
+            (size_t)(operation_identifier - BINRWIR_SPECIALIZED_BASE);
+        const uint16_t slot = registry->specialized_index[offset];
+
+        if (slot == 0U) {
+            return RUNTIMEC_STATUS_UNSUPPORTED;
+        }
+        entry_ordinal = (size_t)(slot - 1U);
+    } else if (operation_identifier < BINRWIR_SPECIALIZED_BASE) {
+        size_t low = 0U;
+        size_t high = registry->base_index_count;
+
+        while (low < high) {
+            const size_t middle = low + (high - low) / 2U;
+            const binrwir_operation_identifier_t probe =
+                registry->storage[registry->base_index[middle]]
+                    .operation_identifier;
+
+            if (probe < operation_identifier) {
+                low = middle + 1U;
+            } else {
+                high = middle;
+            }
+        }
+        if (low >= registry->base_index_count ||
+            registry->storage[registry->base_index[low]]
+                    .operation_identifier != operation_identifier) {
+            return RUNTIMEC_STATUS_UNSUPPORTED;
+        }
+        entry_ordinal = registry->base_index[low];
+    } else {
+        /* 保留区：结构标记与临时实现的 opid 不进注册表。 */
+        return RUNTIMEC_STATUS_UNSUPPORTED;
+    }
+    /* 装载期已拒绝空 handler，走到这里说明表被绕过 append 写坏了。
+     * 返回 INVALID 而不是跳过：跳过会让「注册了但没实现」伪装成「没注册」，
+     * 两者在调用方看来都是 UNSUPPORTED。 */
+    if (entry_ordinal >= registry->entry_count ||
+        registry->storage[entry_ordinal].handler == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    *output_entry = &registry->storage[entry_ordinal];
+    return RUNTIMEC_STATUS_SUCCESS;
 }

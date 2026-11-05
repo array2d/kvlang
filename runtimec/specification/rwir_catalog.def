@@ -122,41 +122,41 @@ RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SIGN, "sign", 0x000B,
                         "signed-neg-abs-sign,unsigned-neg-abs-sign")  /* number -> number */
 /* behavior-decision: mixed-signed-unsigned-arithmetic */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BITWISE_AND, "bitand", 0x000C,
-                        0x00000088, 0x00000088,
+                        0x000000FF, 0x000000FF,
                         RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
-                        RUNTIMEC_RWIR_RESULT_SAME_FIRST,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
                         RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
-                        "mixed-signed-unsigned-arithmetic")  /* 64-bit integer -> 64-bit integer */
+                        "mixed-signed-unsigned-arithmetic")  /* integer -> integer */
 /* behavior-decision: mixed-signed-unsigned-arithmetic */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BITWISE_OR, "bitor", 0x000D,
-                        0x00000088, 0x00000088,
+                        0x000000FF, 0x000000FF,
                         RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
-                        RUNTIMEC_RWIR_RESULT_SAME_FIRST,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
                         RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
-                        "mixed-signed-unsigned-arithmetic")  /* 64-bit integer -> 64-bit integer */
+                        "mixed-signed-unsigned-arithmetic")  /* integer -> integer */
 /* behavior-decision: mixed-signed-unsigned-arithmetic */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BITWISE_XOR, "bitxor", 0x000E,
-                        0x00000088, 0x00000088,
+                        0x000000FF, 0x000000FF,
                         RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
-                        RUNTIMEC_RWIR_RESULT_SAME_FIRST,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
                         RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
-                        "mixed-signed-unsigned-arithmetic")  /* 64-bit integer -> 64-bit integer */
+                        "mixed-signed-unsigned-arithmetic")  /* integer -> integer */
 /* behavior-decision: shift-count-masking */
 /* behavior-decision: mixed-signed-unsigned-arithmetic */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SHIFT_LEFT, "shl", 0x000F,
-                        0x00000088, 0x00000088,
+                        0x000000FF, 0x000000FF,
                         RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
-                        RUNTIMEC_RWIR_RESULT_SAME_FIRST,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
                         RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
-                        "shift-count-masking,mixed-signed-unsigned-arithmetic")  /* 64-bit integer -> 64-bit integer */
+                        "shift-count-masking,mixed-signed-unsigned-arithmetic")  /* integer -> integer */
 /* behavior-decision: shift-count-masking */
 /* behavior-decision: mixed-signed-unsigned-arithmetic */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SHIFT_RIGHT, "shr", 0x0010,
-                        0x00000088, 0x00000088,
+                        0x000000FF, 0x000000FF,
                         RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
-                        RUNTIMEC_RWIR_RESULT_SAME_FIRST,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
                         RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
-                        "shift-count-masking,mixed-signed-unsigned-arithmetic")  /* 64-bit integer -> 64-bit integer */
+                        "shift-count-masking,mixed-signed-unsigned-arithmetic")  /* integer -> integer */
 /* behavior-decision: float-transcendental-result-kind */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SQUARE_ROOT, "sqrt", 0x0011,
                         0x000003FF, 0x00000200,
