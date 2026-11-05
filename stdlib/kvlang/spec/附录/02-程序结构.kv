@@ -18,7 +18,7 @@ rwfunc_decl  = "rwfunc" ident "(" [ param_list ] ")"
               "{" { statement } "}"
 
 param_list  = param { "," param }
-param       = ident ":" type_expr          (* 类型必须标注 *)
+param       = ident ":" type_expr          (* 类型必须标注，且为单一类型：不得含并集 A|B *)
             | ident ":" type_expr "..."    (* 变参：仅限末位读参；写参不可变参 *)
 
 statement   = instruction | if_stmt | while_stmt | for_stmt | block_stmt

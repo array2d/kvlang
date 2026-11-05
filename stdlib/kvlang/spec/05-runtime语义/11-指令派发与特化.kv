@@ -76,13 +76,17 @@ layout 的 `specialize`（定槽上 kind 标注）与 binircompiler 的按实参
   混合符号直接 TypeError。
 - `neg abs`：任意数值（结果同操作数；无符号按回绕/恒等，见 [[种类与定宽类型]]）。
 - `sign`：任意数值（结果同操作数；无符号按 0/1）。
-- `sqrt exp log pow`：任意数值，结果恒 `float64`。
-- `eq neq lt le gt ge`：任意数值与 `bool`，结果 `bool`；跨类混合（int 与
-  float、int 与 uint）由 runtime 按值比较。
-- `and or not`：`bool`。
+- `sqrt exp log pow`：任意数值，结果恒 `float64`。`sqrt`/`exp`/`log` 一元，`pow(x,y)` 二元。
+- `eq neq lt le gt ge`：**任意数值**（10 种），结果 `bool`；跨类混合（int 与
+  float、int 与 uint）由 runtime 按值比较。`bool` 之间的相等走 `bool·eq` / `bool·neq`
+  两个独立行，**不在本行掩码内**。
+- `and or not`：**任意数值与 `bool`**（11 种），结果 `bool`；数值非零即真（见
+  [[五语言行为矩阵]] 的 `logical-operators-truthy`）。
 - 类型构造器（`int64(x)` 等）：任意数值/布尔/char，结果为目标 kind。
 
 本表是**接受集合**；promotion 表在此之上定槽上的 kind 标注与结果类型。
+**这些并集只属于 rwir 算子声明**：`rwfunc` 的参数与返回值必须是单一类型，不得含并集
+（见 [[langtype签名类型表达式]]）——算子有编译期特化器把并集收敛成唯一 opid，用户函数没有。
 `int × uint` 在算术/位运算里两个集合都接受，但混合符号按
 [[种类与定宽类型]] 直接 TypeError；比较类按精确数学值比较，不报错。
 
