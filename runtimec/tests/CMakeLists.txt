@@ -220,12 +220,34 @@ target_include_directories(runtimec_kv_runner PRIVATE
     "${RUNTIMEC_INCLUDE_DIRECTORY}"
     "${KVSPACE_INCLUDE_DIRECTORY}")
 target_link_libraries(runtimec_kv_runner PRIVATE
-    runtimec_contract runtimec_host runtimec_binrwir runtimec_vmkv
-    runtimec_engine "${CMAKE_DL_LIBS}")
+    runtimec_kv_runner_vmbin runtimec_kv_runner_vmkv runtimec_kv_runner_engine
+    runtimec_contract runtimec_host runtimec_binrwir
+    "${CMAKE_DL_LIBS}")
 runtimec_test_warnings(runtimec_kv_runner)
-# 骨架阶段**不注册 ctest**：运行器还没接执行链，不产出 pass 数。
-# 一个不执行的 runner 若进 ctest 并显示通过，就是「永远绿的 runner」——
-# 与「Skipped 伪装成通过」同族。执行链接通、能真正判 pass/fail 后再注册。
+# 三个 `runtimec_kv_runner_*` 副本在 runtimec/CMakeLists.txt 里定义（带
+# RUNTIMEC_TEMP_PRINTLN）。这里只用，不再定义——**副本必须与产品库共用同一份
+# 源文件表**，否则两边会漂移。
+#
+# 注册进 ctest，退出码三态（见 kv_runner.c 末尾）：
+#   1  有失败
+#   0  executed > 0 且全相符
+#   77 executed == 0（全是 blocked / 只编过）—— CTest 的 SKIP 约定
+#
+# 为什么现在就能注册：77 不伪装成绿，也不制造长期红。等 println 接上、executed
+# 大于 0，它会**自动**从 SKIP 转成 0 或 1——转换那一刻就是行为层真正开始工作
+# 的时刻，谁都看得见。这比「等 executed > 0 再注册」好：后者看不到它什么时候
+# 开始真的验。
+#
+# 需要 layout 与 kvspace 两个动态库的路径；缺一个就 SKIP（由 runner 自己返回 77，
+# 不是在 CMake 里判断——判断逻辑只留一处）。
+add_test(NAME runtimec.kv.corpus
+    COMMAND runtimec_kv_runner
+        "${CMAKE_CURRENT_SOURCE_DIR}/kv"
+        "${RUNTIMEC_TEST_LAYOUT_LIBRARY}"
+        "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+set_tests_properties(runtimec.kv.corpus PROPERTIES
+    LABELS "runtimec;scaffold;corpus"
+    SKIP_RETURN_CODE 77)
 
 add_executable(runtimec_vmkv_end_to_end_test vmkv_end_to_end_test.c)
 target_compile_features(runtimec_vmkv_end_to_end_test PRIVATE c_std_11)
@@ -317,6 +339,52 @@ add_test(NAME runtimec.host.set_wire COMMAND runtimec_host_set_wire_test)
 set_tests_properties(runtimec.host.set_wire PROPERTIES
     SKIP_RETURN_CODE 77
     LABELS "runtimec;scaffold;host;wire")
+
+# 字面量池对齐：每条 wire 起点 8 字节对齐（body 继承）。x86 容忍未对齐所以
+# 看不出问题，aarch64 是 UB，JIT 出单条 ldr 就真崩。
+add_executable(runtimec_literal_alignment_test binrwir_literal_alignment_test.c)
+target_compile_features(runtimec_literal_alignment_test PRIVATE c_std_11)
+target_include_directories(runtimec_literal_alignment_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_literal_alignment_test PRIVATE
+    runtimec_contract runtimec_binrwir)
+runtimec_test_warnings(runtimec_literal_alignment_test)
+add_test(NAME runtimec.binrwir.literal_alignment
+    COMMAND runtimec_literal_alignment_test)
+set_tests_properties(runtimec.binrwir.literal_alignment PROPERTIES
+    LABELS "runtimec;scaffold;binrwir;alignment")
+
+# 分派层不得覆盖 handler 写的诊断码：精确码（如 0x4304 值宽不符）必须原样保留。
+add_executable(runtimec_dispatch_diagnostic_test
+    binrwir_dispatch_diagnostic_test.c)
+target_compile_features(runtimec_dispatch_diagnostic_test PRIVATE c_std_11)
+target_include_directories(runtimec_dispatch_diagnostic_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_dispatch_diagnostic_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmbin)
+runtimec_test_warnings(runtimec_dispatch_diagnostic_test)
+add_test(NAME runtimec.binrwir.dispatch_diagnostic
+    COMMAND runtimec_dispatch_diagnostic_test)
+set_tests_properties(runtimec.binrwir.dispatch_diagnostic PROPERTIES
+    LABELS "runtimec;scaffold;binrwir;diagnostics")
+
+# 特化轮次：同型命中改 opid、跨类型保留原 opid（不拒绝整条 Program）、幂等。
+add_executable(runtimec_specialize_test binrwir_specialize_test.c)
+target_compile_features(runtimec_specialize_test PRIVATE c_std_11)
+target_include_directories(runtimec_specialize_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_specialize_test PRIVATE
+    runtimec_contract runtimec_binrwir)
+runtimec_test_warnings(runtimec_specialize_test)
+add_test(NAME runtimec.binrwir.specialize COMMAND runtimec_specialize_test)
+set_tests_properties(runtimec.binrwir.specialize PROPERTIES
+    LABELS "runtimec;scaffold;binrwir;specialize")
 
 add_executable(runtimec_binrwir_format_test binrwir_format_test.c)
 target_compile_features(runtimec_binrwir_format_test PRIVATE c_std_11)
@@ -478,11 +546,18 @@ add_test(NAME runtimec.architecture.layer_selftest
     COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/../tools/architecture/check_layers.py"
             --selftest)
+# handler 体积：运算类 >3 行、复杂类型 >5 行需人工审查；另含条目表自检与
+# 族-算子对照表一致性。判据是「可审查性」——超限说明函数里在分岔。
+add_test(NAME runtimec.architecture.handler_size
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../tools/architecture/check_handler_size.py"
+            --source-root "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set_tests_properties(
     runtimec.architecture.layers
     runtimec.architecture.names
     runtimec.architecture.behavior_matrix
     runtimec.architecture.layer_selftest
+    runtimec.architecture.handler_size
     PROPERTIES LABELS "runtimec;scaffold;architecture")
 
 if(UNIX)
@@ -494,3 +569,39 @@ if(UNIX)
     set_tests_properties(runtimec.interface.exports PROPERTIES
         LABELS "runtimec;scaffold;interface")
 endif()
+
+add_executable(runtimec_handler_behavior_test handler_behavior_test.c)
+target_compile_features(runtimec_handler_behavior_test PRIVATE c_std_11)
+target_include_directories(runtimec_handler_behavior_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_handler_behavior_test PRIVATE
+    runtimec_contract runtimec_binrwir runtimec_vmbin)
+runtimec_test_warnings(runtimec_handler_behavior_test)
+add_test(NAME runtimec.vmbin.handler_behavior
+    COMMAND runtimec_handler_behavior_test)
+set_tests_properties(runtimec.vmbin.handler_behavior PROPERTIES
+    LABELS "runtimec;scaffold;vmbin;behavior")
+
+# 变参 `...` 的落点纯度：只许落在签名行锚点的 dynamic 字节，不许进参数类型串。
+#
+# 判据见 stdlib/kvlang/spec/03-类型系统/22-storetype-def族与签名行.kv 的「铁律」段。
+# 依赖真 layout 库 + 真 kvspace；缺任一即返回 77。layout 拒载 fixture 算失败。
+add_executable(runtimec_variadic_purity_test variadic_purity_test.c)
+target_compile_features(runtimec_variadic_purity_test PRIVATE c_std_11)
+target_compile_definitions(runtimec_variadic_purity_test PRIVATE _GNU_SOURCE)
+target_include_directories(runtimec_variadic_purity_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_variadic_purity_test PRIVATE
+    runtimec_contract runtimec_host "${CMAKE_DL_LIBS}")
+runtimec_test_warnings(runtimec_variadic_purity_test)
+add_test(NAME runtimec.architecture.variadic_purity
+    COMMAND runtimec_variadic_purity_test
+            "${RUNTIMEC_KVSPACE_LIBRARY_PATH}"
+            "${KVLANG_LAYOUT_LIBRARY}")
+set_tests_properties(runtimec.architecture.variadic_purity PROPERTIES
+    SKIP_RETURN_CODE 77
+    LABELS "runtimec;scaffold;architecture;variadic")

@@ -244,10 +244,128 @@ int main(void) {
         EXPECT(registry.entry_count == 1U);
     }
 
+    /*
+     * ⑪ 索引正确性：基础区与特化区各自能查到，且**区外 opid 返回 UNSUPPORTED**。
+     *
+     * 两段式索引的风险在于「落在两个区之间」的 opid：`0x8000` 之前的基础区末尾、
+     * `0xFEFF` 之后的保留区，都必须落到 UNSUPPORTED 而不是越界读或误命中。
+     */
+    {
+        binrwir_registry_t registry;
+        binrwir_registry_entry_t entries[3];
+        const binrwir_registry_entry_t *found = NULL;
+
+        EXPECT(binrwir_registry_initialize(&registry) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        /* 一条基础区（0x0192）、两条特化区（0x8000 / 0x8005）。 */
+        entries[0].operation_identifier = UINT16_C(0x0192);
+        entries[0].flags = BINRWIR_REGISTRY_FLAG_NONE;
+        entries[0].handler = unused_handler;
+        entries[1].operation_identifier = UINT16_C(0x8000);
+        entries[1].flags = BINRWIR_REGISTRY_FLAG_NONE;
+        entries[1].handler = unused_handler;
+        entries[2].operation_identifier = UINT16_C(0x8005);
+        entries[2].flags = BINRWIR_REGISTRY_FLAG_NONE;
+        entries[2].handler = unused_handler;
+        EXPECT(binrwir_registry_append(&registry, "mixed", entries, 3U, NULL) ==
+               RUNTIMEC_STATUS_SUCCESS);
+
+        EXPECT(binrwir_registry_find(&registry, UINT16_C(0x0192), &found) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(found != NULL && found->operation_identifier == UINT16_C(0x0192));
+        EXPECT(binrwir_registry_find(&registry, UINT16_C(0x8000), &found) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(found != NULL && found->operation_identifier == UINT16_C(0x8000));
+        EXPECT(binrwir_registry_find(&registry, UINT16_C(0x8005), &found) ==
+               RUNTIMEC_STATUS_SUCCESS);
+
+        /* 区内空隙：0x8001..0x8004 没注册。 */
+        EXPECT(binrwir_registry_find(&registry, UINT16_C(0x8003), &found) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+        EXPECT(found == NULL);
+        /* 基础区未注册。 */
+        EXPECT(binrwir_registry_find(&registry, UINT16_C(0x0193), &found) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+        /* 保留区：结构标记与临时实现不进注册表。 */
+        EXPECT(binrwir_registry_find(
+                   &registry, BINRWIR_OPERATION_IDENTIFIER_FOREIGN, &found) ==
+               RUNTIMEC_STATUS_UNSUPPORTED);
+        EXPECT(binrwir_registry_find(
+                   &registry, BINRWIR_OPERATION_IDENTIFIER_RESERVED_BASE,
+                   &found) == RUNTIMEC_STATUS_UNSUPPORTED);
+    }
+
+    /*
+     * ⑫ 重复 opid 在 append 期硬失败——索引不能让覆盖变成静默。
+     *
+     * 建了索引之后，「后写的覆盖先写的」会变成一条极难发现的路径：find 永远
+     * 返回最后一个，而两个模块都以为自己在生效。这条必须继续红在装载期。
+     */
+    {
+        binrwir_registry_t registry;
+        binrwir_registry_entry_t first;
+        binrwir_registry_entry_t duplicate;
+        runtimec_error_t error;
+
+        EXPECT(binrwir_registry_initialize(&registry) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        first.operation_identifier = UINT16_C(0x8007);
+        first.flags = BINRWIR_REGISTRY_FLAG_NONE;
+        first.handler = unused_handler;
+        EXPECT(binrwir_registry_append(&registry, "first", &first, 1U, NULL) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        duplicate.operation_identifier = UINT16_C(0x8007);
+        duplicate.flags = BINRWIR_REGISTRY_FLAG_EFFECT;
+        duplicate.handler = unused_handler;
+        EXPECT(binrwir_registry_append(&registry, "second", &duplicate, 1U,
+                                       &error) == RUNTIMEC_STATUS_INVALID);
+        EXPECT(registry.entry_count == 1U);
+        /* 原条目的 flags 未被覆盖。 */
+        EXPECT(registry.storage[0].flags == BINRWIR_REGISTRY_FLAG_NONE);
+    }
+
+    /*
+     * ⑬ `specialized_index_count` 必须等于实际非零槽数。
+     *
+     * 这个字段是 find 的绕过节检测唯一依赖：它若与索引不一致，检测就会
+     * 误判——少了会把好表判成坏表，多了会放过坏表。而 find 每次分派都走，
+     * 所以它必须是**rebuild 算好存下来的整数**，不能现场扫（那等于把两段式
+     * 索引省下的时间又还回去）。
+     */
+    {
+        binrwir_registry_t registry;
+        binrwir_registry_entry_t entries[3];
+        size_t actual = 0U;
+        size_t ordinal;
+
+        EXPECT(binrwir_registry_initialize(&registry) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        entries[0].operation_identifier = UINT16_C(0x0192);
+        entries[0].flags = BINRWIR_REGISTRY_FLAG_NONE;
+        entries[0].handler = unused_handler;
+        entries[1].operation_identifier = UINT16_C(0x8000);
+        entries[1].flags = BINRWIR_REGISTRY_FLAG_NONE;
+        entries[1].handler = unused_handler;
+        entries[2].operation_identifier = UINT16_C(0x8010);
+        entries[2].flags = BINRWIR_REGISTRY_FLAG_NONE;
+        entries[2].handler = unused_handler;
+        EXPECT(binrwir_registry_append(&registry, "count", entries, 3U,
+                                       NULL) == RUNTIMEC_STATUS_SUCCESS);
+        for (ordinal = 0U;
+             ordinal < BINRWIR_REGISTRY_SPECIALIZED_INDEX_LIMIT; ++ordinal) {
+            if (registry.specialized_index[ordinal] != 0U) {
+                actual += 1U;
+            }
+        }
+        EXPECT(registry.specialized_index_count == actual);
+        EXPECT(registry.specialized_index_count == 2U);
+        EXPECT(registry.base_index_count == 1U);
+    }
+
     if (failures != 0) {
         printf("binrwir_registry_corrupt_test: %d failure(s)\n", failures);
         return 1;
     }
-    printf("binrwir_registry_corrupt_test: OK (12 groups)\n");
+    printf("binrwir_registry_corrupt_test: OK (15 groups)\n");
     return 0;
 }

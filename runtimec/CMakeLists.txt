@@ -145,6 +145,52 @@ runtimec_add_component(runtimec_vmkv vmkv)
 runtimec_add_component(runtimec_binrwir_compiler binrwir_compiler)
 runtimec_add_component(runtimec_vmbin vmbin)
 runtimec_add_component(runtimec_engine engine)
+
+# 语料 runner 专用副本：同样的源文件，额外定义 RUNTIMEC_TEMP_PRINTLN。
+#
+# 为什么复制而不在原目标上开宏：`kvlang_runtimec_scaffold`（产品库）链接的是
+# 上面那三个原目标。宏一开，println 就进了产品库——而它不属于 runtimec 的能力
+# （spec 05-runtime语义/07-notinmyrwircaps：归 term runtime）。复制三份、
+# 只给副本定义宏，产品库的符号表不受影响。
+#
+# 三个组件都要（缺一个的表现是「执行成功但零输出」，所有断言都过只有 stdout 空）：
+#   vmbin  → handler 实现    vmkv → 按实参个数展开变参    engine → 注册进 builtin 表
+foreach(temporary_component vmbin vmkv engine)
+    file(GLOB_RECURSE temporary_sources CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/${temporary_component}/*.c")
+    if(NOT temporary_sources)
+        message(FATAL_ERROR
+            "temporary println component ${temporary_component} has no sources")
+    endif()
+    set(temporary_target runtimec_kv_runner_${temporary_component})
+    add_library(${temporary_target} STATIC ${temporary_sources})
+    runtimec_configure_target(${temporary_target})
+    target_compile_definitions(${temporary_target}
+        PRIVATE RUNTIMEC_TEMP_PRINTLN=1)
+    target_link_libraries(${temporary_target}
+        PUBLIC runtimec_contract runtimec_host runtimec_binrwir)
+    add_library(kvlang::kv_runner_${temporary_component}
+        ALIAS ${temporary_target})
+endforeach()
+
+# 副本之间必须**互相**链接，不能一部分副本、一部分原目标。
+#
+# 反例：engine 副本若链接原 `runtimec_vmbin`，而 runner 又链接 vmbin 副本，
+# 则 vmbin 的全部符号进两次——`temp_println` 的 handler 表出现两份定义，
+# 静态链接器按先见者取，行为取决于链接顺序。那是最难查的一类：
+# 编译过、跑起来也可能对，只是 println 有时有有时没有。
+#
+# 依赖关系照抄原目标（`runtimec_vmbin`/`runtimec_vmkv`/`runtimec_engine` 的
+# PRIVATE 列表），只把三个被复制的名字换成副本。kvspace 与 libm 也要照抄——
+# `vmbin` 的 container handler 直接调 `kvspaceSetValue`/`kvspaceXvalueHeadNewSlack`。
+target_link_libraries(runtimec_kv_runner_vmbin
+    PRIVATE runtimec_contract runtimec_binrwir
+            "${RUNTIMEC_KVSPACE_LIBRARY_PATH}" m)
+target_link_libraries(runtimec_kv_runner_engine
+    PRIVATE
+        runtimec_kv_runner_vmkv
+        runtimec_kv_runner_vmbin
+        runtimec_binrwir_compiler)
 # 能力行探测工具：分类器，不是测试（不进 ctest，没有期望值）。
 # 位置 tools/capability_probe/，四线作者共用一个口径。
 add_executable(capability_probe
