@@ -17,6 +17,7 @@
 #include "contract/diagnostic_band.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -25,8 +26,11 @@
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
 #include "binrwir/program.h"
+#include "contract/member_key_text.h"
 #include "contract/status.h"
 #include "kvspace/kvspace.h"
+#include "vmbin/frame_target_key.h"
+#include "vmbin/handlers/handler_call.h"
 #include "vmbin/value_access.h"
 #include "vmbin/vthread_status.h"
 
@@ -222,60 +226,6 @@ static runtimec_status_t runtimec_host_store_int64(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/*
- * 把一次 `kvspaceGet` 读到的字节写进写参。空值（`NULL` 或长度 0）是**合法的
- * 结果**（key 存在但体为空），不是错误——直接成功返回，不写写参。
- *
- * 一句话目的：**把读到的值落到写参上**。
- */
-static runtimec_status_t runtimec_host_store_read_value(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction, const uint8_t *value,
-    uint32_t value_size, binrwir_execution_exit_t *output_exit,
-    uint32_t source_program_counter) {
-    runtimec_error_t error;
-
-    if (value == NULL || value_size == 0U) {
-        return RUNTIMEC_STATUS_SUCCESS;
-    }
-    runtimec_error_reset(&error);
-    if (vmbin_value_access_write(
-            frame, &instruction->write_arguments.data[0],
-            runtimec_bytes_view_make(value, (size_t)value_size),
-            &error) != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                  RUNTIMEC_HOST_DIAG_WRITE_FAILED, source_program_counter);
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
-}
-
-/*
- * `kvspace·get(key) -> v`：读一个 key 的整条 wire 写进写参。
- * **成功才写写参，失败只写 `exit`**。
- */
-static runtimec_status_t runtimec_host_kvspace_get(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    const uint32_t source_program_counter =
-        instruction->source_logical_program_counter;
-    char keys[1][RUNTIMEC_HOST_KEY_CAPACITY];
-    uint8_t *value = NULL;
-    uint32_t value_size = 0U;
-    void *handle = NULL;
-
-    if (instruction->write_arguments.count != 1U ||
-        !runtimec_host_prepare_call(frame, instruction, output_exit, 1U,
-                                    &handle, keys)) {
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    if (kvspaceGet(handle, keys[0], 1, &value, &value_size) != 0) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                                  RUNTIMEC_HOST_DIAG_BACKEND_FAILED, source_program_counter);
-    }
-    return runtimec_host_store_read_value(frame, instruction, value, value_size,
-                                          output_exit, source_program_counter);
-}
 
 /*
  * `kvspace·set(key, value)`：两个读参。顺序依据旧运行时
@@ -286,99 +236,6 @@ static runtimec_status_t runtimec_host_kvspace_get(
  * 给出的是 body 本身，不含 head——而 `kvspaceSetValue` 要的是完整 XValue。
  * 这里用 `read` 取整值（与 temp_println 同一口径），缺失或长度不符即失败。
  */
-/*
- * 把读参解析成**完整 wire**（head + body + attr）。
- *
- * 整值写要的是完整 wire，不是 body。这里曾直接 `locate` 后把 `read_bytes` 交给
- * `kvspaceSetValue`：对字面量那是对的（`locate` 对字面量给整条 wire），但对**普通
- * 槽**它给的是 body，于是写进去的是一条没有 head 的裸缓冲——静默失败或写成畸形值。
- *
- * 判据只认 `locate` 自己给的 `is_whole_wire`，**不自己推断该不该剥**。
- *
- * 一句话目的：**把一个参数项变成可以整值写出的字节**。
- */
-static bool runtimec_host_whole_wire(
-    const binrwir_execution_frame_t *frame,
-    const binrwir_argument_t *argument, runtimec_bytes_view_t *output_wire,
-    binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
-    vmbin_value_location_t location;
-    runtimec_error_t error;
-
-    runtimec_error_reset(&error);
-    if (vmbin_value_access_locate(frame, argument, &location, &error) !=
-        RUNTIMEC_STATUS_SUCCESS) {
-        runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                           RUNTIMEC_HOST_DIAG_OPERAND_INVALID, source_program_counter);
-        return false;
-    }
-    if (location.is_whole_wire) {
-        *output_wire =
-            runtimec_bytes_view_make(location.read_bytes, location.size);
-        return true;
-    }
-    /* body 视图 → 还原整条 wire：基址经合同逆入口，总长从 wire 头读出
-     * （attr 区没有独立长度前缀，所以只能从 head 拿）。 */
-    {
-        const runtimec_xvalue_address_t xvalue_address =
-            runtimec_value_body_xvalue_address(
-                (runtimec_value_body_address_t)(uintptr_t)location.read_bytes);
-        const kvspaceXvalueHead *head;
-
-        if (xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE) {
-            runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                               RUNTIMEC_HOST_DIAG_MALFORMED_WIRE, source_program_counter);
-            return false;
-        }
-        head = (const kvspaceXvalueHead *)(uintptr_t)xvalue_address;
-        *output_wire = runtimec_bytes_view_make(
-            (const void *)(uintptr_t)xvalue_address,
-            (size_t)KVSPACE_XVALUE_HEAD_LEN +
-                (size_t)kvspaceXvalueHeadLen(head) +
-                (size_t)kvspaceXvalueHeadAttrsLen(head));
-        return true;
-    }
-}
-
-/*
- * `kvspace·set(key, value)`：整值写。
- *
- * **不创建 key**——rwir 只容许触碰已经存在的 key，创建走生命周期指令。这里直接
- * 调 `kvspaceSetValue`，没有「目标不存在就建」的分支。
- */
-static runtimec_status_t runtimec_host_kvspace_set(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    const uint32_t source_program_counter =
-        instruction->source_logical_program_counter;
-    char keys[1][RUNTIMEC_HOST_KEY_CAPACITY];
-    char message[256];
-    void *handle = NULL;
-    runtimec_bytes_view_t wire;
-
-    if (instruction->read_arguments.count != 2U) {
-        *output_exit = (binrwir_execution_exit_t){0};
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  RUNTIMEC_HOST_DIAG_ARITY, source_program_counter);
-    }
-    *output_exit = (binrwir_execution_exit_t){0};
-    if (runtimec_vthread_status_handle(frame, &handle) !=
-            RUNTIMEC_STATUS_SUCCESS ||
-        runtimec_host_static_key(frame, &instruction->read_arguments.data[0],
-                                 keys[0], RUNTIMEC_HOST_KEY_CAPACITY) !=
-            RUNTIMEC_STATUS_SUCCESS ||
-        !runtimec_host_whole_wire(frame, &instruction->read_arguments.data[1],
-                                  &wire, output_exit, source_program_counter)) {
-        return RUNTIMEC_STATUS_ERROR;
-    }
-    message[0] = '\0';
-    /* 第 4 参（resolve）语义与旧实现一致：写侧不跟随 Ptr。 */
-    return runtimec_host_finish_call(
-        output_exit,
-        kvspaceSetValue(handle, keys[0], wire.data, (uint32_t)wire.size,
-                        message, sizeof(message)),
-        source_program_counter);
-}
 
 /*
  * `kvspace·watch(key, target)`：读参 1 是 key、读参 2 是期望值；
@@ -648,7 +505,7 @@ static runtimec_status_t runtimec_host_vthread_not_implemented(
  * 定位后取值，结果按各算子的既定语义写入写参或直接生效。
  *
  * 取参顺序全部按旧运行时 `runtime/src/rwir_kv.c` 核过，不是按「自然顺序」猜的：
- *   单路径（del / deltree / rmindexext）→ `run_path_op`，第 1 读参是路径；
+ *   单路径（del / deltree / delextindex）→ `run_path_op`，第 1 读参是路径；
  *   双路径（cp / cpdir / cplist）→ `run_two_path_op`，src、dst 依次；
  *   mkindex → 路径 + capacity；extindex → 路径 + ext 路径；
  *   listlen → 路径，写 int64；listat → 路径 + 下标，写 char。
@@ -676,28 +533,49 @@ static runtimec_status_t runtimec_host_single_path_operation(
         instruction->source_logical_program_counter);
 }
 
-/* 双路径操作：读参 1 是源、读参 2 是目标，无写参。 */
-/* 双路径操作：读参 1 是源、读参 2 是目标，无写参。 */
-static runtimec_status_t runtimec_host_two_path_operation(
+/*
+ * 复制族（`cp` / `cpdir` / `cplist`）：**src 是读参、dst 是写参**。
+ *
+ * 形状来自 `specification/kvspace-family.md` §二：复制的目标不是一个「值的位置」，
+ * 而是**这次写的落点**——按 #632「写侧带类型」，dst 必须是写参，否则「写哪」这件事
+ * 在指令里没有位置。`cp` / `cplist` 的 dst 同时是结果槽（结果 = dst 接到的值，
+ * 同类型）；`cpdir` 不产生值，但仍占写参位（它就是写目标）。
+ *
+ * 声明的 `write_count` 由各算子给出：`cp`/`cplist` 为 1（结果槽即 dst），
+ * `cpdir` 也为 1（dst 是写目标）——三者的写参语义相同，差别只在中段是否回写值。
+ */
+static runtimec_status_t runtimec_host_copy_operation(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit,
     int (*operation)(void *handle, const char *source,
                      const char *destination, char *error,
                      uint32_t error_capacity)) {
-    char keys[2][RUNTIMEC_HOST_KEY_CAPACITY];
+    char keys[1][RUNTIMEC_HOST_KEY_CAPACITY];
+    char destination[RUNTIMEC_HOST_KEY_CAPACITY];
     char message[256];
     void *handle = NULL;
+    const uint32_t source_program_counter =
+        instruction->source_logical_program_counter;
 
-    if (!runtimec_host_prepare_call(frame, instruction, output_exit, 2U,
+    if (instruction->write_arguments.count != 1U ||
+        !runtimec_host_prepare_call(frame, instruction, output_exit, 1U,
                                     &handle, keys)) {
         return RUNTIMEC_STATUS_ERROR;
+    }
+    if (runtimec_host_static_key(frame,
+                                 &instruction->write_arguments.data[0],
+                                 destination, sizeof(destination)) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                  source_program_counter);
     }
     message[0] = '\0';
     return runtimec_host_finish_call(
         output_exit,
-        operation(handle, keys[0], keys[1], message, sizeof(message)),
-        instruction->source_logical_program_counter);
+        operation(handle, keys[0], destination, message, sizeof(message)),
+        source_program_counter);
 }
 
 /*
@@ -728,7 +606,7 @@ static runtimec_status_t runtimec_host_kvspace_delete_tree(
     return runtimec_host_single_path_operation(frame, instruction, output_exit,
                                                kvspaceDelTree);
 }
-static runtimec_status_t runtimec_host_kvspace_remove_index_extension(
+static runtimec_status_t runtimec_host_kvspace_delete_extension_index(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
@@ -740,21 +618,21 @@ static runtimec_status_t runtimec_host_kvspace_copy(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
-    return runtimec_host_two_path_operation(frame, instruction, output_exit,
+    return runtimec_host_copy_operation(frame, instruction, output_exit,
                                             kvspaceCp);
 }
 static runtimec_status_t runtimec_host_kvspace_copy_directory(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
-    return runtimec_host_two_path_operation(frame, instruction, output_exit,
+    return runtimec_host_copy_operation(frame, instruction, output_exit,
                                             kvspaceCpTree);
 }
 static runtimec_status_t runtimec_host_kvspace_copy_list(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
-    return runtimec_host_two_path_operation(frame, instruction, output_exit,
+    return runtimec_host_copy_operation(frame, instruction, output_exit,
                                             kvspaceCpList);
 }
 
@@ -788,16 +666,29 @@ static runtimec_status_t runtimec_host_kvspace_make_index(
 }
 
 /*
- * `kvspace·extindex(path, ext_path)`：两个路径，都是 STATIC。
- * 注意第二个是**字符串参数**而非存储操作对象，但它同样是编码期确定的路径。
+ * `kvspace·extindex(path, ext_path)`：两个路径，**都是读参**。
+ *
+ * 与复制族不同：`ext_path` 不是「这次写的落点」，而是「要挂上去的另一个位置」，
+ * 它不承担写入语义（`extindex` 不动任何一方的值，只登记关联）。按 §二，它保持
+ * 两读参零写参。
  */
-/* `kvspace·mkindexext(path, extpath)`：两个路径，调 ABI。 */
 static runtimec_status_t runtimec_host_kvspace_extension_index(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
-    return runtimec_host_two_path_operation(frame, instruction, output_exit,
-                                            kvspaceMkindexExt);
+    char keys[2][RUNTIMEC_HOST_KEY_CAPACITY];
+    char message[256];
+    void *handle = NULL;
+
+    if (!runtimec_host_prepare_call(frame, instruction, output_exit, 2U,
+                                    &handle, keys)) {
+        return RUNTIMEC_STATUS_ERROR;
+    }
+    message[0] = '\0';
+    return runtimec_host_finish_call(
+        output_exit,
+        kvspaceMkindexExt(handle, keys[0], keys[1], message, sizeof(message)),
+        instruction->source_logical_program_counter);
 }
 
 /*
@@ -894,13 +785,518 @@ static runtimec_status_t runtimec_host_kvspace_list_at(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+/*
+ * 把一条**已经造好的** wire 写进写参指向的 key，并完成绑定。
+ *
+ * 与 `vmbin_handler_write_new_value` 的分工：那个按写槽声明的 langtype **另造**一条
+ * SLACK wire（适用于 `compactarray·new` 这类「给我一串字节、按槽类型包起来」）；
+ * 这里收的是**成品 wire**——指针的 head 已经有 ptr=PTR 与 target kindexpr，再包一层
+ * 就毁了它。
+ *
+ * 两个动作缺一不可：写存储、绑槽。只写不绑 → 后续读该槽 `UNBOUND_SLOT`。
+ */
+static runtimec_status_t runtimec_host_write_pointer_wire(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, const uint8_t *wire,
+    size_t wire_size, binrwir_execution_exit_t *output_exit) {
+    const uint32_t source_program_counter =
+        instruction->source_logical_program_counter;
+    char key[RUNTIMEC_HOST_KEY_CAPACITY];
+    char message[256];
+    runtimec_error_t error;
+    runtimec_status_t status;
+
+    runtimec_error_reset(&error);
+    status = vmbin_value_access_argument_key(
+        frame, &instruction->write_arguments.data[0], key, sizeof(key), &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                  source_program_counter);
+    }
+    message[0] = '\0';
+    if (kvspaceSetValue(frame->kvspace_handle, key, wire, (uint32_t)wire_size,
+                        message, sizeof(message)) != 0) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                                  RUNTIMEC_HOST_DIAG_BACKEND_FAILED,
+                                  source_program_counter);
+    }
+    status = vmbin_value_access_bind_write_target(
+        frame, &instruction->write_arguments.data[0],
+        runtimec_key_view_make(key, strlen(key)), &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, status,
+                                  RUNTIMEC_HOST_DIAG_WRITE_FAILED,
+                                  source_program_counter);
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+
+/*
+ * `vthread·pc() -> (int32 vid, [2]int32 [stackid, s0])`——读当前执行位置。
+ *
+ * 契约见 spec `05-runtime语义/02-执行模型-续.kv:26-40`，三条要点：
+ *
+ *   1. **纯读**：不创建、不修改任何 key，也不改变执行位置；
+ *   2. **两个结果都要**：`result0` 是 vid，`result1` 是 `[stackid, s0]`
+ *      （`[0]` 帧序号、`[1]` 该帧内的**指令轴坐标**）；
+ *   3. **任一结果取不到 ⇒ 具名失败，不得用 0 顶替**——0 是合法的 stackid，
+ *      顶替会制造一个假位置，而假位置在崩溃恢复里比「读不到」危险得多。
+ *
+ * ── 数据从哪来 ────────────────────────────────────────────────────────
+ *
+ * 帧结构里**没有** vid 与 stackid 字段，只有 `frame_path`（`/vthread/{vid}/[d]`）——
+ * 那是调用入口原样写入的，本层不重新拼接（拼了就成第二份地址）。所以这里**解析**它：
+ * vid 取第二个斜杠之前的段，stackid 取方括号内的整数。
+ *
+ * `s0` 取 `frame->logical_program_counter`：spec 明写它要的是「当前指令在帧内的
+ * 指令轴坐标」，而解释器的游标正是这个。**不用 `‥pc`**——spec 同一节写明
+ * 「两者不是同一事实，不得互相推导」（`‥pc` 存的是 source pc）。
+ */
+static runtimec_status_t runtimec_host_vthread_pc(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    const uint32_t source_program_counter =
+        instruction->source_logical_program_counter;
+    int32_t vthread_identifier = 0;
+    int32_t stack_identifier = 0;
+    bool have_stack = false;
+    size_t ordinal;
+    size_t root_end = 0U;
+    unsigned slash_count = 0U;
+    int32_t position[2];
+    int32_t vid_result;
+
+    *output_exit = (binrwir_execution_exit_t){0};
+    if (instruction->read_arguments.count != 0U ||
+        instruction->write_arguments.count != 2U) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_ARITY,
+                                  source_program_counter);
+    }
+    if (frame == NULL || frame->frame_path.size == 0U ||
+        frame->frame_path.data == NULL) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                  source_program_counter);
+    }
+    /*
+     * 解析 `/vthread/{vid}/[d]`。两段都有严格判据：
+     *   vid 必须全数字且非空（vid 是**数字**，spec `02-kvspace模型/02-结构域.kv`）；
+     *   stackid 必须方括号包着且全数字。
+     * 任何一条不满足都失败——**不猜**，猜出来的位置比读不到更坏。
+     */
+    for (ordinal = 0U; ordinal < frame->frame_path.size; ++ordinal) {
+        if (frame->frame_path.data[ordinal] == '/' && ordinal != 0U) {
+            slash_count += 1U;
+            if (slash_count == 2U) {
+                root_end = ordinal;
+                break;
+            }
+        }
+    }
+    if (root_end == 0U) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                  source_program_counter);
+    }
+    {
+        /* `/vthread/` 之后到 `root_end` 之前是 vid 文本。 */
+        const size_t prefix = sizeof("/vthread/") - 1U;
+        size_t index;
+
+        if (root_end <= prefix) {
+            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                      RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                      source_program_counter);
+        }
+        for (index = prefix; index < root_end; ++index) {
+            const char character = frame->frame_path.data[index];
+
+            if (character < '0' || character > '9') {
+                return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                          RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                          source_program_counter);
+            }
+            vthread_identifier = vthread_identifier * 10 + (character - '0');
+        }
+        /* 方括号段：从 `root_end + 1` 起。 */
+        for (index = root_end + 1U; index < frame->frame_path.size; ++index) {
+            const char character = frame->frame_path.data[index];
+
+            if (character == '[') {
+                have_stack = true;
+                continue;
+            }
+            if (!have_stack) {
+                return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                          RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                          source_program_counter);
+            }
+            if (character == ']') {
+                break;
+            }
+            if (character < '0' || character > '9') {
+                /* 帧号可以是 `[2.2]` 这种带序号的形态（见 kv_runner 的
+                 * `g_frame_serial`）。序号不是 stackid 的一部分，遇到非数字
+                 * 就停——但**已经拿到的整数部分必须非空**，否则仍是失败。 */
+                break;
+            }
+            stack_identifier = stack_identifier * 10 + (character - '0');
+        }
+        /* `[0]` 是合法的根帧号，所以不能用「值为 0」判断没取到。为此记录
+         * 是否真的进过方括号：进了就算取到，没进就失败。 */
+        if (!have_stack) {
+            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                      RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                      source_program_counter);
+        }
+    }
+    vid_result = vthread_identifier;
+    position[0] = stack_identifier;
+    position[1] = (int32_t)frame->logical_program_counter;
+    if (vmbin_value_access_write_body(
+            frame, &instruction->write_arguments.data[0],
+            runtimec_bytes_view_make((const uint8_t *)(const void *)&vid_result,
+                                     sizeof(vid_result)),
+            NULL) != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_WRITE_FAILED,
+                                  source_program_counter);
+    }
+    /*
+     * 第二结果是 `[2]int32`（8 字节）。**按声明的形状写**：spec 说它是 `[2]int32`，
+     * 而 write_body 要求与当前 body 等长——若槽还没按该形状建（局部未物化），
+     * 这里会失败而不是写入一个错长度的值。
+     */
+    if (vmbin_value_access_write_body(
+            frame, &instruction->write_arguments.data[1],
+            runtimec_bytes_view_make((const uint8_t *)(const void *)position,
+                                     sizeof(position)),
+            NULL) != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_WRITE_FAILED,
+                                  source_program_counter);
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * `kvspace/key·abs(x) -> *T`：取址。产一个 Ptr，body = 操作数所在的**绝对 key 路径**。
+ *
+ * 与 `kvspace·` 族分开的原因：本族的 base 是一次存储访问的基座，而本算子收的是
+ * **key 表达式**本身——它不读写那个位置的值，只把「位置」变成一等值。
+ *
+ * 三条判据：
+ *   1. **键从值访问层取**（`vmbin_value_access_argument_key`：LOCAL 拼帧路径、
+ *      STATIC 用符号池文本）。本文件不拼 key——拼了就成第二份地址解析。
+ *   2. **结果必须是指针形态**：`kvspaceNewPtr` 把 `*` 写进 **langtype**（不再有
+ *      head ptr 位）、body=目标路径、
+ *      attr 带 target kindexpr。不手拼 wire。
+ *   3. **不可寻址即失败**：字面量、函数引用、算出来的表达式都没有位置可言，
+ *      返回具名诊断，不猜一个 key 出来。
+ */
+/*
+ * 按取址操作的读参造一条 Ptr wire：`*` + 目标类型（`kvspaceNewPtr` 自补 `*`）。
+ *
+ * 单独成函数的原因：handler 只负责「取 key → 造 wire → 走创建型写」这条编排，
+ * 而「类型怎么取、前缀怎么剥」是另一件事，两者的失败出口也不同。
+ */
+static runtimec_status_t runtimec_host_build_pointer_wire(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, const char *target,
+    uint8_t **output_wire, uint32_t *output_wire_size,
+    runtimec_error_t *error) {
+    runtimec_string_view_t declared;
+    char kindexpr[RUNTIMEC_HOST_KEY_CAPACITY];
+    size_t kindexpr_size = 0U;
+    runtimec_status_t status;
+
+    /*
+     * `target` 是**寻址面**的 key 文本，恒 utf8（`frame_target_key` 原样拼接
+     * frame_path 与符号名，不做编码转换）——「值默认 utf32」只适用于值，
+     * 指针 body 是目标 key 路径，永远 utf8（规范 `26-字符串编码` §一）。
+     */
+    status = vmbin_value_access_langtype(
+        frame, &instruction->read_arguments.data[0], &declared, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS || declared.size == 0U) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    /* 逐层剥 `*`/`@`：读参本身可能就是一个指针（**T），只保留基类型。 */
+    while (kindexpr_size < declared.size &&
+           (declared.data[kindexpr_size] == '*' ||
+            declared.data[kindexpr_size] == '@')) {
+        kindexpr_size += 1U;
+    }
+    if (declared.size == kindexpr_size ||
+        declared.size - kindexpr_size + 1U > sizeof(kindexpr)) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    memcpy(kindexpr, declared.data + kindexpr_size, declared.size - kindexpr_size);
+    kindexpr[declared.size - kindexpr_size] = '\0';
+    if (kvspaceNewPtr(kindexpr, target, output_wire, output_wire_size) != 0 ||
+        *output_wire == NULL) {
+        return RUNTIMEC_STATUS_ERROR;
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 取址 handler 的前半段：核 arity → 取读参的绝对 key → 造 Ptr wire。
+ *
+ * 失败一律走 `runtimec_host_fail` 并返回它的状态：调用方只判成功与否，
+ * 不需要再区分「arity 错 / key 取不到 / wire 造不出」——那三类已经在 output_exit
+ * 的诊断码上分开了。
+ */
+static runtimec_status_t runtimec_host_address_of_wire(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, char *target,
+    size_t target_capacity, uint8_t **output_wire, uint32_t *output_wire_size,
+    runtimec_error_t *error, binrwir_execution_exit_t *output_exit) {
+    const uint32_t source_program_counter =
+        instruction->source_logical_program_counter;
+    runtimec_status_t status;
+
+    if (instruction->read_arguments.count != 1U ||
+        instruction->write_arguments.count != 1U) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_ARITY,
+                                  source_program_counter);
+    }
+    status = vmbin_value_access_argument_key(
+        frame, &instruction->read_arguments.data[0], target, target_capacity,
+        error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                  source_program_counter);
+    }
+    status = runtimec_host_build_pointer_wire(frame, instruction, target,
+                                              output_wire, output_wire_size,
+                                              error);
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    return runtimec_host_fail(
+        output_exit,
+        status == RUNTIMEC_STATUS_ERROR ? RUNTIMEC_STATUS_ERROR
+                                        : RUNTIMEC_STATUS_INVALID,
+        status == RUNTIMEC_STATUS_ERROR ? RUNTIMEC_HOST_DIAG_BACKEND_FAILED
+                                        : RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+        source_program_counter);
+}
+
+static runtimec_status_t runtimec_host_key_address_of(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    char target[RUNTIMEC_HOST_KEY_CAPACITY];
+    uint8_t *wire = NULL;
+    uint32_t wire_size = 0U;
+    runtimec_error_t error;
+    runtimec_status_t status;
+
+    runtimec_error_reset(&error);
+    *output_exit = (binrwir_execution_exit_t){0};
+    status = runtimec_host_address_of_wire(frame, instruction, target,
+                                           sizeof(target), &wire, &wire_size,
+                                           &error, output_exit);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    /*
+     * 走**创建型**的整值写（`vmbin_handler_write_new_value`），不走 `value_access_write`。
+     *
+     * 后者是「原地写」：长度必须与当前 body **完全相等**（`value_access.h` 的
+     * `SIZE_MISMATCH`）。而取址产出的是一条**新的** wire——长度由目标 key 决定，
+     * 与写槽当前宽度无关（实测：写槽 8 字节、指针 wire 16+路径长，直接原地写
+     * 报 `0x4606`）。创建型路径才是「造一条 wire 并写进目标 key」的共同语义，
+     * 且它顺带完成绑定（少那一步，后续读该槽是 `UNBOUND_SLOT`）。
+     *
+     * `bytes` 传 NULL 是因为整条 wire 已经造好了：该函数按写参声明的 langtype
+     * 另造 wire 的用法不适用于本算子（指针的 langtype 来自目标而非写槽声明）。
+     */
+    {
+        runtimec_status_t created = runtimec_host_write_pointer_wire(
+            frame, instruction, wire, (size_t)wire_size, output_exit);
+        free(wire);
+        return created;
+    }
+}
+
+/*
+ * `member_key_text` 的诊断码 → 本层 `detail_code`。
+ *
+ * 两个域名**不能混**（见 `handler_call.h` 的枚举注释）：contract 的 1..5 直接进
+ * `detail_code` 的话，看日志的人分不出「3」是 contract 的 `UNSUPPORTED_LANGTYPE`
+ * 还是执行窗口的 3。转码是这一步的职责。
+ *
+ * **`switch` 不带 `default`**：contract 层将来加诊断时 `-Wswitch` 会在这里报警，
+ * 提醒补映射。末尾的 `return` 在 `switch` 之外，所以不破坏这个检查——它兜的是
+ * 「运行期传进来一个枚举里没有的数」，不是「漏了一个 case」。
+ *
+ * 不认识的码报 `MALFORMED_BODY` 而不是 `NONE`：`0` 恒为「未设置」，失败路径
+ * 永远不许上报 0（`contract/diagnostic_band.h` 的约束）。
+ */
+static vmbin_handler_call_diagnostic_t runtimec_host_key_tostr_diagnostic(
+    int64_t code) {
+    switch ((runtimec_member_key_text_diagnostic_t)code) {
+    case RUNTIMEC_MEMBER_KEY_TEXT_DIAG_INSUFFICIENT_CAPACITY:
+        return VMBIN_HANDLER_CALL_DIAG_INSUFFICIENT_CAPACITY;
+    case RUNTIMEC_MEMBER_KEY_TEXT_DIAG_UNSUPPORTED_LANGTYPE:
+        return VMBIN_HANDLER_CALL_DIAG_UNSUPPORTED_LANGTYPE;
+    case RUNTIMEC_MEMBER_KEY_TEXT_DIAG_MALFORMED_BODY:
+        return VMBIN_HANDLER_CALL_DIAG_MALFORMED_BODY;
+    case RUNTIMEC_MEMBER_KEY_TEXT_DIAG_NON_FINITE:
+        return VMBIN_HANDLER_CALL_DIAG_NON_FINITE;
+    case RUNTIMEC_MEMBER_KEY_TEXT_DIAG_INVALID_REQUEST:
+        return VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY;
+    }
+    return VMBIN_HANDLER_CALL_DIAG_MALFORMED_BODY;
+}
+
+/*
+ * `kvspace/key·tostr(value) -> 键文本`：值 → 成员键文本（逐字铁律的唯一实现）。
+ *
+ * 它**不碰存储**——不读 base、不拼父路径、不定位目标。这些属于定位算子
+ * （`kvspace/key·resolveptr`）。本算子只回答一个问题：**这个值作成员键时，
+ * 路径段是什么文本**。
+ *
+ * ── 为什么用上界栈缓冲，不用两段式 ────────────────────────────────────
+ *
+ * `contract/member_key_text` 是两段式的（缓冲不足时回报所需长度、调用方重试）。
+ * **本 handler 故意不用它那一半能力**，因为这里有一个**有据可依的上界**：键文本
+ * 若长于 `VMBIN_HANDLER_KEY_TEXT_MAXIMUM`（1023），拼上父路径后必然超过存储能
+ * 表达的完整 key 上界，定位算子那边一定以 `KEY_TOO_LONG` 拒绝。所以按 1023 + 1
+ * 开栈缓冲是「按最大可能长度开空间」，不是「拍一个数试试看」——`0x4501` 治的是
+ * 后者。**不是忘了两段式**：两段式仍是 contract 层的能力，别的调用方仍该用。
+ *
+ * ── 为什么报 `0x4A` 段码而不是 `0x46` 段码 ────────────────────────────
+ *
+ * 本算子的失败全部来自「值 → 文本」这一步，与存储访问无关。`0x4A00` 是搬运层段
+ * （`handler_call.h`），`0x4600` 是 host 存储段。**这不是分层错误，是失败来源
+ * 不同**——把它硬塞进 host 段会让「host 段码 = 存储访问出错」这条判据失真。
+ */
+/*
+ * 读参 → (声明 langtype, 值体视图)。两个失败各自具名，不合并成一条：
+ *
+ *   取不到类型 ⇒ `UNSUPPORTED_LANGTYPE`（搬运层段 `0x4A07`）——值定位得到，
+ *              只是没有类型。**不是** `KEY_UNRESOLVED`（host 段 `0x4603`）。
+ *   定位失败   ⇒ `OPERAND_INVALID`（host 段 `0x4605`）——这才是真的拿不到值。
+ */
+static runtimec_status_t runtimec_host_key_tostr_operand(
+    binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
+    runtimec_string_view_t *output_langtype, vmbin_value_location_t *output_value,
+    binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
+    runtimec_error_t error;
+    runtimec_status_t status;
+
+    runtimec_error_reset(&error);
+    /*
+     * 类型取**声明** langtype，不取值上带的：槽可以是 None（空 body、wire 里
+     * 没有 langtype 记录），那时只有声明类型答得出这个值该按什么种类格式化。
+     */
+    status = vmbin_value_access_langtype(frame, argument, output_langtype,
+                                         &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(
+            output_exit, RUNTIMEC_STATUS_UNSUPPORTED,
+            VMBIN_HANDLER_CALL_DIAG_UNSUPPORTED_LANGTYPE,
+            source_program_counter);
+    }
+    /* 零拷贝取 body：`locate_body` 对字面量与绑定都给只读视图。 */
+    status = vmbin_value_access_locate_body(frame, argument, output_value,
+                                            &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, status,
+                                  RUNTIMEC_HOST_DIAG_OPERAND_INVALID,
+                                  source_program_counter);
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * `member_key_text` 失败 → 结构化 exit。
+ *
+ * 两条路径的分流判据是**可重试性**：
+ *   `INSUFFICIENT_CAPACITY` 且所需长度超过存储上界 ⇒ `KEY_TOO_LONG`
+ *   （搬运层段 `0x4A0A`，**不可重试**：换多大缓冲都写不进存储）；
+ *   其余 ⇒ 按 contract 诊断转码。
+ *
+ * 合成一条会让调用方无限重试——contract 那句「给我更大的缓冲」在这里不成立，
+ * 因为缓冲已经是存储极限。
+ */
+static runtimec_status_t runtimec_host_key_tostr_fail(
+    binrwir_execution_exit_t *output_exit, runtimec_status_t status,
+    int64_t diagnostic, size_t required_length, uint32_t source_program_counter) {
+    if (status == RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY &&
+        required_length > VMBIN_HANDLER_KEY_TEXT_MAXIMUM) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_UNSUPPORTED,
+                                  VMBIN_HANDLER_CALL_DIAG_KEY_TOO_LONG,
+                                  source_program_counter);
+    }
+    return runtimec_host_fail(output_exit, status,
+                              (uint32_t)runtimec_host_key_tostr_diagnostic(
+                                  diagnostic),
+                              source_program_counter);
+}
+
+static runtimec_status_t runtimec_host_key_tostr(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    const uint32_t source_program_counter =
+        instruction->source_logical_program_counter;
+    char key_text[VMBIN_HANDLER_KEY_TEXT_MAXIMUM + 1U];
+    runtimec_string_view_t langtype;
+    vmbin_value_location_t value;
+    runtimec_error_t error;
+    runtimec_status_t status;
+    size_t key_length = 0U;
+
+    runtimec_error_reset(&error);
+    *output_exit = (binrwir_execution_exit_t){0};
+    /*
+     * arity 报**搬运层段**（`0x4A01`）而不是 host 段（`0x4601`）：本算子的全部
+     * 失败都发生在「值 → 文本」这一步，与存储访问无关。
+     */
+    if (instruction->read_arguments.count != 1U ||
+        instruction->write_arguments.count != 1U) {
+        return runtimec_host_fail(
+            output_exit, RUNTIMEC_STATUS_INVALID,
+            VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY, source_program_counter);
+    }
+    status = runtimec_host_key_tostr_operand(
+        frame, &instruction->read_arguments.data[0], &langtype, &value,
+        output_exit, source_program_counter);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    status = runtimec_member_key_text(
+        langtype, runtimec_bytes_view_make(value.read_bytes, value.size),
+        key_text, sizeof(key_text), &key_length, &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_key_tostr_fail(output_exit, status, error.code,
+                                            key_length, source_program_counter);
+    }
+    /* 走创建型出口：造 char/utf8 wire、整条写进读参、并完成绑定。 */
+    return vmbin_handler_write_new_value(
+        frame, instruction, (const uint8_t *)key_text, key_length, output_exit);
+}
+
 static const binrwir_registry_entry_t runtimec_host_entry_table[] = {
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_GET,
-     .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
-     .handler = runtimec_host_kvspace_get},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_SET,
-     .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
-     .handler = runtimec_host_kvspace_set},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_VTHREAD_PC,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = runtimec_host_vthread_pc},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KEY_ADDRESS_OF,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = runtimec_host_key_address_of},
+    /* `key·tostr`：值 → 成员键文本。不碰存储，故不是 EFFECT；也不让出控制权。 */
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KEY_TOSTRING,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = runtimec_host_key_tostr},
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_WATCH,
      .flags = BINRWIR_REGISTRY_FLAG_MAY_YIELD,
      .handler = runtimec_host_kvspace_watch},
@@ -956,9 +1352,9 @@ static const binrwir_registry_entry_t runtimec_host_entry_table[] = {
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_EXTENSION_INDEX,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
      .handler = runtimec_host_kvspace_extension_index},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_REMOVE_INDEX_EXTENSION,
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_DELETE_EXTENSION_INDEX,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
-     .handler = runtimec_host_kvspace_remove_index_extension},
+     .handler = runtimec_host_kvspace_delete_extension_index},
 };
 
 const binrwir_registry_entry_t *runtimec_host_handler_entries(

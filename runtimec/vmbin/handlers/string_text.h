@@ -98,6 +98,37 @@ runtimec_status_t string_text_encode_utf8(const string_text_t *text,
                                           uint8_t *output, size_t capacity,
                                           size_t *output_size);
 
+/*
+ * 两个操作数的**共同编码**：`string·concat` 的结果该用什么编码写出。
+ *
+ * 规则（矩阵 `character-concat-kind`，2026-11-06 用户裁决）：
+ *
+ *   | 左      | 右      | 结果      |
+ *   |---------|---------|-----------|
+ *   | utf32   | utf32   | utf32     |
+ *   | utf8    | utf8    | utf8      |
+ *   | ascii   | utf8/32 | 另一侧    |
+ *   | utf8    | utf32   | INVALID   |
+ *
+ * **`char/ascii` 提升而不拒绝**：它是 utf8 与 utf32 的共同子集，拼接没有歧义
+ * （C `strcat`、Go `+`、Python `+` 没有一家拒）。拒它只会让 `"a" + ascii_var`
+ * 无端报错。
+ *
+ * **utf8 + utf32 拒绝**：两种变长/定宽表示之间没有共同编码，必须由源码显式
+ * 转换——静默选一个会让同一份程序在不同输入上产出不同字节布局。
+ *
+ * 剥前导 `[dims]` 再比：`[]char/X` 与 `char/X` 是同一种编码，维度是形态不是编码。
+ *
+ * `*output` 写成**裸种类名**（`char/utf32` 这类，不带维度段）——它是
+ * `string_text_encode` 的直接输入。
+ *
+ * 判据放在本模块而不是 `string.c`：ascii 提升是**编码层知识**，与三种编码的
+ * 解码器/编码器同处才只有一份真相。
+ */
+runtimec_status_t string_text_common_encoding(runtimec_string_view_t left,
+                                              runtimec_string_view_t right,
+                                              runtimec_string_view_t *output);
+
 #ifdef __cplusplus
 }
 #endif

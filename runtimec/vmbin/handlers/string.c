@@ -44,38 +44,6 @@
     (STRING_CODEPOINT_CAPACITY * RUNTIMEC_CHAR_CODEC_UTF8_MAX_BYTES)
 #define STRING_KEY_CAPACITY 512U
 
-/* 码点序列 → UTF-8 字节（拼接的结果恒为 char/utf8，见行为矩阵）。 */
-static runtimec_status_t string_encode_utf8(const string_text_t *text,
-                                            uint8_t *output,
-                                            size_t capacity,
-                                            size_t *output_size) {
-    size_t written = 0U;
-
-    *output_size = 0U;
-    /* 先折回 4 字节码点的字节序列：char_codec 的入口形态就是它。 */
-    {
-        uint8_t codepoint_bytes[STRING_CODEPOINT_CAPACITY * 4U];
-
-        for (size_t ordinal = 0U; ordinal < text->count; ++ordinal) {
-            const uint32_t codepoint = text->codepoints[ordinal];
-
-            codepoint_bytes[ordinal * 4U] = (uint8_t)(codepoint & 0xFFU);
-            codepoint_bytes[ordinal * 4U + 1U] =
-                (uint8_t)((codepoint >> 8U) & 0xFFU);
-            codepoint_bytes[ordinal * 4U + 2U] =
-                (uint8_t)((codepoint >> 16U) & 0xFFU);
-            codepoint_bytes[ordinal * 4U + 3U] =
-                (uint8_t)((codepoint >> 24U) & 0xFFU);
-        }
-        /* codec 要求容量比输出多留 1 字节（调用方原有约定），这里照传。 */
-        if (!runtimec_char_utf32_to_utf8(codepoint_bytes, text->count * 4U,
-                                         (char *)output, capacity, &written)) {
-            return RUNTIMEC_STATUS_INVALID;
-        }
-    }
-    *output_size = written;
-    return RUNTIMEC_STATUS_SUCCESS;
-}
 
 /*
  * 按编码规定的**单位**数出长度。
@@ -219,17 +187,23 @@ static inline void string_compare_build(const string_text_t *left,
 VMBIN_HANDLER_BINARY_TEXT_SCALAR(string_compare_handler, string_compare_build,
                                  int64_t)
 
+/* 拼接结果：Buffer 与长度一起传递，免得每层各开一份同尺寸栈缓冲。 */
+typedef struct runtimec_string_concat_result {
+    uint8_t bytes[VMBIN_HANDLER_CREATE_BUFFER_CAPACITY];
+    size_t length;
+} runtimec_string_concat_result_t;
+
 /*
- * 把两段文本接起来并编码成 UTF-8。**成功才写 `*output_length`，失败只写 `exit`**。
+ * 两侧文本拼接并编码 —— **逻辑函数只做这一件**：接起来、按共同编码写出。
  *
- * 操作数可以任意编码（解码器由宏按 opid 选好），但**结果恒为 char/utf8**
- * （行为矩阵 string-concat-result-kind，五语言 consensus）——不按操作数种类推，
- * 也不沿用操作数的编码。
+ * 编码不由它决定（那是 `string_text_common_encoding` 的事），它只拿结果。
+ * 容量不足与码点超限各自具名失败，不截断。
  */
-static void string_concat_encode(const string_text_t *left,
-                                 const string_text_t *right, uint8_t *buffer,
-                                 size_t capacity, size_t *output_length,
-                                 binrwir_execution_exit_t *output_exit) {
+static void string_concat_of(const string_text_t *left,
+                             const string_text_t *right,
+                             runtimec_string_view_t common, uint8_t *buffer,
+                             size_t capacity, size_t *output_length,
+                             binrwir_execution_exit_t *output_exit) {
     string_text_t joined;
 
     *output_length = 0U;
@@ -243,13 +217,109 @@ static void string_concat_encode(const string_text_t *left,
     memcpy(joined.codepoints, left->codepoints, left->count * sizeof(uint32_t));
     memcpy(joined.codepoints + left->count, right->codepoints,
            right->count * sizeof(uint32_t));
-    if (string_encode_utf8(&joined, buffer, capacity, output_length) !=
+    if (string_text_encode(common, &joined, buffer, capacity, output_length) !=
         RUNTIMEC_STATUS_SUCCESS) {
         *output_length = 0U;
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
                            VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
                            output_exit->logical_program_counter);
     }
+}
+
+
+
+/*
+ * `string·concat` 的完整流程：arity → 共同编码 → 解码两侧 → 拼起来编码 → 写回。
+ *
+ * 每一段的判据都在別处（`string_text_common_encoding` 判编码、`string_text_decode_argument`
+ * 解码、`string_text_encode` 编码、`write_new_value` 写回），本函数只把它们按
+ * 顺序串起来——**不重新判断任何一件事**。
+ */
+static runtimec_status_t string_concat_pipeline(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    runtimec_string_concat_result_t *output, binrwir_execution_exit_t *output_exit) {
+    runtimec_string_view_t left_langtype;
+    runtimec_string_view_t right_langtype;
+    runtimec_string_view_t common;
+    string_text_t left_text;
+    string_text_t right_text;
+    runtimec_error_t error;
+    runtimec_status_t status;
+
+    runtimec_error_reset(&error);
+    status = vmbin_value_access_langtype(
+        frame, &instruction->read_arguments.data[0], &left_langtype, &error);
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = vmbin_value_access_langtype(
+            frame, &instruction->read_arguments.data[1], &right_langtype, &error);
+    }
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = string_text_common_encoding(left_langtype, right_langtype,
+                                             &common);
+    }
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = string_text_decode_argument(
+            frame, &instruction->read_arguments.data[0], &left_text, &error);
+    }
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = string_text_decode_argument(
+            frame, &instruction->read_arguments.data[1], &right_text, &error);
+    }
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           VMBIN_HANDLER_CALL_DIAG_UNSUPPORTED_LANGTYPE,
+                           instruction->source_logical_program_counter);
+        return RUNTIMEC_STATUS_ERROR;
+    }
+    string_concat_of(&left_text, &right_text, common, output->bytes,
+                     sizeof(output->bytes), &output->length, output_exit);
+    if (output_exit->kind != BINRWIR_EXECUTION_EXIT_NONE) {
+        return RUNTIMEC_STATUS_ERROR;
+    }
+    return vmbin_handler_write_new_value(frame, instruction, output->bytes,
+                                         output->length, output_exit);
+}
+
+/*
+ * `string·concat` handler：两段文本接起来，按**操作数的共同编码**写出。
+ *
+ * ── 结果编码跟随操作数（矩阵 `character-concat-kind`，2026-11-06 裁决）──
+ *
+ * 两个 utf32 ⇒ utf32、两个 utf8 ⇒ utf8、ascii 提升到另一侧、utf8 + utf32 ⇒ 失败。
+ * 判据在 `string_text_common_encoding`（编码层知识），本文件只拿结果。
+ *
+ * **为什么不再恒 utf8**：字面量默认 utf32、concat 恒产 utf8，两者相撞会让同一个
+ * 表达式在类型推导里出现 `[]char/utf32|char/utf8` 的并集——根源就是这里把操作数
+ * 的编码抹掉了。
+ *
+ * ── 为什么展开了 `VMBIN_HANDLER_BINARY_TEXT_CREATE` ──────────────────
+ *
+ * 那个宏**已经取好两侧 langtype**却不传给逻辑函数，而共同编码判定恰恰要它们。
+ * 给一个只有本算子使用的宏加参数，会让它变成「为唯一用户定制的通用宏」。展开时
+ * **逐段保留了宏原来的行为**：arity 校验、两侧定位、两侧取类型、两侧解码、错误
+ * 出口、以及最后的 `write_new_value`。
+ */
+/* 逻辑主体：arity → 共同编码 → 解码 → 拼接编码 → 写回。 */
+static inline runtimec_status_t string_concat_execute(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    runtimec_string_concat_result_t result;
+
+    VMBIN_HANDLER_REQUIRE_ARITY(instruction, 2U, 1U, output_exit);
+    return string_concat_pipeline(frame, instruction, &result, output_exit);
+}
+
+/*
+ * 注册用的薄封装：主体是 `static inline`，注册表要的是函数地址，两件事各自
+ * 独立；薄封装只在**本文件**定义一次，注册表里因此只有一份地址。
+ */
+static runtimec_status_t string_concat_handler(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    return string_concat_execute(frame, instruction, output_exit);
 }
 
 /*
@@ -260,16 +330,6 @@ VMBIN_HANDLER_UNARY_TEXT_SCALAR(string_length_handler, string_length_build,
                                 int64_t)
 
 
-/* 逻辑函数：一句话——把两段文本接起来。 */
-static inline void string_concat_build(const string_text_t *left,
-                                       const string_text_t *right,
-                                       uint8_t *buffer, size_t capacity,
-                                       size_t *output_length,
-                                       binrwir_execution_exit_t *output_exit) {
-    string_concat_encode(left, right, buffer, capacity, output_length, output_exit);
-}
-
-VMBIN_HANDLER_BINARY_TEXT_CREATE(string_concat_handler, string_concat_build)
 
 
 /*

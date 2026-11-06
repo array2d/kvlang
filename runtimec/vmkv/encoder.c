@@ -374,11 +374,22 @@ static bool vmkv_encoder_parse_parameter_reference(runtimec_key_view_t key,
                                                    bool *output_write) {
     *output_ordinal = 0U;
     *output_write = false;
-    if (key.size < 6U || key.data[0] != '*' ||
-        memcmp(key.data, "*[0,", 4U) != 0) {
+    /*
+     * `*` 已由上层剥掉（解引用记进 dereference 位），这里只认槽文本 `[0,±k]`。
+     * 两种写法都收：`*[...]`（未剥的历史形态）与 `[...]`（当前形态）——
+     * 但**只把 `[0,` 当形参槽**：`[d,±k]` 的 d≠0 是帧坐标表达式，归上层拒绝。
+     */
+    const size_t prefix = key.size >= 5U && key.data != NULL &&
+                                  memcmp(key.data, "*[0,", 4U) == 0
+                              ? 4U
+                              : (key.size >= 4U && key.data != NULL &&
+                                         memcmp(key.data, "[0,", 3U) == 0
+                                     ? 3U
+                                     : 0U);
+    if (prefix == 0U || key.size < prefix + 2U) {
         return false;
     }
-    size_t cursor = 4U;
+    size_t cursor = prefix;
     bool negative = false;
     if (key.data[cursor] == '-' || key.data[cursor] == '+') {
         negative = key.data[cursor] == '-';
@@ -571,7 +582,7 @@ static runtimec_status_t vmkv_encode_static_argument_into(
     }
     output_argument->argument_index = argument_index;
     output_argument->reference_kind = (uint8_t)BINRWIR_REFERENCE_STATIC;
-    output_argument->reserved_8_bits = 0U;
+    output_argument->dereference = 0U;
     output_argument->slot = symbol_index;
     output_argument->payload = body_address;
     return RUNTIMEC_STATUS_SUCCESS;
@@ -639,6 +650,37 @@ static runtimec_status_t vmkv_encoder_map_argument(
     binrwir_argument_t *output, runtimec_program_counter_t logical_program_counter,
     runtimec_error_t *error) {
     *output = (binrwir_argument_t){0};
+    /*
+     * `*p` 的 `*` 是**引用标记**，不是键文本的一部分：剥掉它，把「跟一跳」记在
+     * 参数项的 dereference 位上。不剥的后果实测过——它被当成畸形帧槽串整条拒绝
+     * （`framed slot expression is not representable`），`&x -> p; *p` 整族进不了
+     * BinRWIR。
+     *
+     * **`*` 一律不在 key 文本里**：`*name`（局部/静态解引用）与 `*[0,±k]`
+     * （形参槽解引用）在这里统一剥掉，含义只由 dereference 位承载——同一个含义
+     * 两种编码，消费者就要记两套规则，那是「一个编码一个含义」的反面。
+     * 剥完的 `[0,±k]` 继续交给形参解析；`[d,±k]`（d≠0）仍是不可表示的帧槽。
+     * `**p` 目前没有语义，失败封闭而不是猜「跟两跳」。
+     */
+    vmkv_rwir_argument_view_t dereferenced_view = *source_argument;
+    bool has_dereference = false;
+    if (dereferenced_view.key.size >= 2U &&
+        dereferenced_view.key.data != NULL &&
+        dereferenced_view.key.data[0] == '*') {
+        if (dereferenced_view.key.data[1] == '*') {
+            return vmkv_encoder_fail(
+                error, RUNTIMEC_STATUS_UNSUPPORTED,
+                VMKV_ENCODER_DIAG_DYNAMIC_KEY,
+                "vmkv encoder: multi-level pointer following is not "
+                "representable",
+                logical_program_counter);
+        }
+        dereferenced_view.key = runtimec_key_view_make(
+            dereferenced_view.key.data + 1U,
+            dereferenced_view.key.size - 1U);
+        has_dereference = true;
+    }
+    source_argument = &dereferenced_view;
     uint32_t argument_index = 0U;
     runtimec_status_t status = vmkv_encoder_take_operand_argument_index(
         function, &argument_index, logical_program_counter, error);
@@ -662,8 +704,12 @@ static runtimec_status_t vmkv_encoder_map_argument(
         return RUNTIMEC_STATUS_SUCCESS;
     }
     if (source_argument->key_addressability == VMKV_KEY_ADDRESSABILITY_STATIC) {
-        return vmkv_encode_static_argument_into(
+        status = vmkv_encode_static_argument_into(
             request, builder, source_argument, argument_index, output, error);
+        if (status == RUNTIMEC_STATUS_SUCCESS && has_dereference) {
+            output->dereference = 1U;
+        }
+        return status;
     }
     uint16_t parameter_ordinal = 0U;
     bool writes_parameter = false;
@@ -685,10 +731,24 @@ static runtimec_status_t vmkv_encoder_map_argument(
         output->reference_kind =
             (uint8_t)(writes_parameter ? BINRWIR_REFERENCE_PARAMETER_WRITE
                                        : BINRWIR_REFERENCE_PARAMETER_READ);
+        /*
+         * **形参引用上的 `*` 是引用语法，不是解引用**：`*[0,±k]` 表示「调用方
+         * 第 k 个槽」，槽文本剥星只是统一写法；真正是否跟指针由调用方那个值
+         * 自己决定（执行期按 head ptr 判）。这里**不能**置 dereference——
+         * 置了就等于「所有形参引用都要跟一跳」，实测会让 10 条函数调用用例
+         * 在 pc=1 报「解引用目标不是指针」。
+         */
+        output->dereference = 0U;
         return RUNTIMEC_STATUS_SUCCESS;
     }
-    /* 帧内槽表达式 `*[d,±k]`（d 非 0）或畸形指针串：没有可编译的槽契约。 */
-    if (source_argument->key.size != 0U && source_argument->key.data[0] == '*') {
+    /*
+     * 帧内槽表达式 `[d,±k]`（d 非 0）或畸形串：没有可编译的槽契约。
+     *
+     * `*` 已经在这一层**统一剥掉**并记进 dereference 位（`*name` 与 `*[0,±k]`
+     * 是同一种含义，不许两种编码），所以走到这里还以 `[` 开头、又没被形参解析
+     * 认领的，只能是帧坐标表达式。
+     */
+    if (source_argument->key.size != 0U && source_argument->key.data[0] == '[') {
         return vmkv_encoder_fail(
             error, RUNTIMEC_STATUS_UNSUPPORTED, VMKV_ENCODER_DIAG_DYNAMIC_KEY,
             "vmkv encoder: framed slot expression is not representable",
@@ -746,6 +806,9 @@ static runtimec_status_t vmkv_encoder_map_argument(
                                            : BINRWIR_REFERENCE_LOCAL);
     output->slot = symbol_index;
     output->payload = 0U;
+    if (has_dereference) {
+        output->dereference = 1U;
+    }
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
@@ -1110,6 +1173,42 @@ static runtimec_status_t vmkv_encoder_encode_temporary_output(
 }
 #endif /* RUNTIMEC_TEMP_PRINTLN */
 
+/*
+ * 该侧在「能力行含 POINTER 位」时是否应拒绝整条指令。
+ * 规则见调用点注释：单一位只信能力行；多位并集看操作数槽的声明类型；
+ * 没有操作数可核对时拒绝（不猜）。
+ *
+ * **后两条分支今天不可达**，且这是**已知且刻意**的：catalog 里 `0x00040000`
+ * 只出现 3 处（`ptreq` / `ptreq·not` 的读侧、`kvspace/key·abs` 的写侧），
+ * 全是单一位，没有任何一行把 POINTER 与其它位并集。保留它们是因为它们防的是
+ * 「将来有人加一条并集行」——删掉分支等于把规则一起删掉。**不要把它们算进
+ * 覆盖率：没有用例能走到。**
+ */
+static bool vmkv_encoder_side_rejects_pointer(
+    uint32_t type_set, const vmkv_rwir_argument_view_t *arguments,
+    size_t argument_count) {
+    size_t ordinal;
+
+    if ((type_set & VMKV_RWIR_TYPE_SET_POINTER) == 0U) {
+        return false;
+    }
+    if (type_set == VMKV_RWIR_TYPE_SET_POINTER) {
+        return false;
+    }
+    if (arguments == NULL || argument_count == 0U) {
+        return true;
+    }
+    for (ordinal = 0U; ordinal < argument_count; ++ordinal) {
+        const runtimec_string_view_t declared =
+            arguments[ordinal].parameter_type_name;
+        if (declared.data != NULL && declared.size != 0U &&
+            declared.data[0] == '*') {
+            return true;
+        }
+    }
+    return false;
+}
+
 runtimec_status_t vmkv_encode_instruction(
     vmkv_encoder_t *encoder, const vmkv_encode_request_t *request,
     binrwir_program_builder_t *builder,
@@ -1206,17 +1305,45 @@ runtimec_status_t vmkv_encode_instruction(
         output_instruction->aliasing_declared = false;
         return RUNTIMEC_STATUS_SUCCESS;
     }
-    /* 指针性与扩展类别不在 langtype 文本里（指针性在 XValue head 的 ptr 位），
-     * 本阶段一律不猜。 */
+    /*
+     * 指针性与扩展类别不在 langtype 文本里（指针性在 XValue head 的 ptr 位）。
+     *
+     * **两者的拒绝条件不同，不许合成一个判据**：
+     *   - EXTENSION（bit17）是**存储形态**，本阶段仍不支持，照旧整条拒绝；
+     *   - POINTER（bit18）是**值类别**。能力行把它写在**写侧**且掩码只有这一位时
+     *     （`kvspace/key·abs`，`rwir_catalog.def:963`），含义是「结果一定是指针」，
+     *     这类指令的参数并没有裸指针文本——整条拒绝就把 `&x` 挡死了。
+     *
+     * 判据按可得信息分三层（拿不到就失败封闭；不去 `/lib/<op>` 另读一份签名，
+     * 那是第二份真相）：
+     *   1. 该侧掩码**只有 POINTER 一位** ⇒ 信能力行，放行；
+     *   2. 该侧是**多位并集** ⇒ 不看行，改看该侧每个操作数槽自己的声明类型，
+     *      任一以 `*` 开头即拒绝；
+     *   3. 该侧没有任何操作数却声称含 POINTER ⇒ 无从核对，拒绝。
+     */
     if ((capability->read_parameter_type_set &
-         (VMKV_RWIR_TYPE_SET_POINTER | VMKV_RWIR_TYPE_SET_EXTENSION)) != 0U ||
+         VMKV_RWIR_TYPE_SET_EXTENSION) != 0U ||
         (capability->write_parameter_type_set &
-         (VMKV_RWIR_TYPE_SET_POINTER | VMKV_RWIR_TYPE_SET_EXTENSION)) != 0U) {
+         VMKV_RWIR_TYPE_SET_EXTENSION) != 0U) {
         return vmkv_encoder_fail(
             error, RUNTIMEC_STATUS_UNSUPPORTED,
             VMKV_ENCODER_DIAG_UNMAPPED_PARAMETER_TYPE,
-            "vmkv encoder: pointer and extension parameters are not "
-            "representable from RWIR text yet",
+            "vmkv encoder: extension parameters are not representable from "
+            "RWIR text yet",
+            logical_program_counter);
+    }
+    if (vmkv_encoder_side_rejects_pointer(
+            capability->read_parameter_type_set,
+            source_instruction->read_arguments,
+            source_instruction->read_argument_count) ||
+        vmkv_encoder_side_rejects_pointer(
+            capability->write_parameter_type_set,
+            source_instruction->write_arguments,
+            source_instruction->write_argument_count)) {
+        return vmkv_encoder_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED,
+            VMKV_ENCODER_DIAG_UNMAPPED_PARAMETER_TYPE,
+            "vmkv encoder: a pointer operand has no representable type text",
             logical_program_counter);
     }
     const size_t read_count = source_instruction->read_argument_count;

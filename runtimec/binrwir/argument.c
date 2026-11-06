@@ -60,7 +60,7 @@ runtimec_status_t binrwir_argument_create(
     }
     output_argument->argument_index = argument_index;
     output_argument->reference_kind = (uint8_t)reference_kind;
-    output_argument->reserved_8_bits = 0U;
+    output_argument->dereference = 0U;
     output_argument->slot = slot;
     output_argument->payload = payload;
     return RUNTIMEC_STATUS_SUCCESS;
@@ -70,7 +70,7 @@ runtimec_status_t binrwir_argument_validate(
     const binrwir_argument_t *argument) {
     if (argument == NULL ||
         argument->argument_index == BINRWIR_ARGUMENT_INDEX_NONE ||
-        argument->reserved_8_bits != 0U ||
+        argument->dereference > 1U ||
         !binrwir_reference_kind_is_known(argument->reference_kind) ||
         binrwir_argument_shape_is_invalid(argument->reference_kind,
                                           argument->slot,

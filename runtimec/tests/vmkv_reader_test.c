@@ -99,7 +99,7 @@ static uint8_t *make_wire(const uint8_t *body, size_t body_size,
     memset(&head, 0, sizeof(head));
     kvspaceXvalueHeadSetLen(&head, (uint64_t)body_size);
     kvspaceXvalueHeadSetAttrsLen(&head, (uint32_t)attr_size);
-    head.storetype = KVSPACE_XVALUE_ST_SLACK;
+    head.layout = KVSPACE_XVALUE_LAYOUT_LENGTH;
     memcpy(wire, &head, KVSPACE_XVALUE_HEAD_LEN);
     if (body_size != 0U) {
         memcpy(wire + KVSPACE_XVALUE_HEAD_LEN, body, body_size);

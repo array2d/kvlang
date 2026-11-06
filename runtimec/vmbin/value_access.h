@@ -45,7 +45,10 @@ typedef enum vmbin_value_access_diagnostic {
     VMBIN_VALUE_ACCESS_DIAG_LITERAL_IS_READ_ONLY = UINT32_C(0x4400) + 5U,
     VMBIN_VALUE_ACCESS_DIAG_SIZE_MISMATCH = UINT32_C(0x4400) + 6U,
     VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE = UINT32_C(0x4400) + 7U,
-    VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE = UINT32_C(0x4400) + 8U
+    VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE = UINT32_C(0x4400) + 8U,
+    /* 参数带 dereference=1，但它指向的值 head 不是 Ptr（没有可跟的一跳）。 */
+    VMBIN_VALUE_ACCESS_DIAG_DEREFERENCE_TARGET_IS_NOT_POINTER =
+        UINT32_C(0x4400) + 9U
 } vmbin_value_access_diagnostic_t;
 
 /*
@@ -55,8 +58,24 @@ typedef enum vmbin_value_access_diagnostic {
  * 「println 的值格式非法」。那造成过一整晚的误判——**不是细心能解决的，是
  * 命名空间缺失**。这两条断言把「漏加偏移」变成编译期错误。
  */
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST, RUNTIMEC_DIAGNOSTIC_BAND_VALUE_ACCESS),
+               "VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST must stay inside its diagnostic band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE, RUNTIMEC_DIAGNOSTIC_BAND_VALUE_ACCESS),
+               "VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE must stay inside its diagnostic band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT, RUNTIMEC_DIAGNOSTIC_BAND_VALUE_ACCESS),
+               "VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT must stay inside its diagnostic band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_VALUE_ACCESS_DIAG_MISSING_LITERAL, RUNTIMEC_DIAGNOSTIC_BAND_VALUE_ACCESS),
+               "VMBIN_VALUE_ACCESS_DIAG_MISSING_LITERAL must stay inside its diagnostic band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_VALUE_ACCESS_DIAG_LITERAL_IS_READ_ONLY, RUNTIMEC_DIAGNOSTIC_BAND_VALUE_ACCESS),
+               "VMBIN_VALUE_ACCESS_DIAG_LITERAL_IS_READ_ONLY must stay inside its diagnostic band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_VALUE_ACCESS_DIAG_SIZE_MISMATCH, RUNTIMEC_DIAGNOSTIC_BAND_VALUE_ACCESS),
+               "VMBIN_VALUE_ACCESS_DIAG_SIZE_MISMATCH must stay inside its diagnostic band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE, RUNTIMEC_DIAGNOSTIC_BAND_VALUE_ACCESS),
+               "VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE must stay inside its diagnostic band");
 _Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE, RUNTIMEC_DIAGNOSTIC_BAND_VALUE_ACCESS),
                "VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE must stay inside its diagnostic band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_VALUE_ACCESS_DIAG_DEREFERENCE_TARGET_IS_NOT_POINTER, RUNTIMEC_DIAGNOSTIC_BAND_VALUE_ACCESS),
+               "VMBIN_VALUE_ACCESS_DIAG_DEREFERENCE_TARGET_IS_NOT_POINTER must stay inside its diagnostic band");
 /* 本枚举没有 `NONE = 0`：值访问不产生「没有诊断」的出口。 */
 
 
@@ -123,7 +142,20 @@ runtimec_status_t vmbin_value_access_langtype(
     runtimec_string_view_t *output_langtype, runtimec_error_t *error);
 
 /*
- * 一个参数项值头里的 **ref 字节**（`KVSPACE_REF_INLINE` / `KVSPACE_REF_PTR` / `KVSPACE_REF_EXT`）。
+ * **值的形态**：普通值 / 指针 / 扩展。
+ *
+ * 只有这三种；它们由 **langtype 首字符**（`*` / `@` / 其它）决定——head 里已经
+ * 没有 ptr 字节了（见 kvspace `xvalue_head.h` 的新布局）。所以这里不读任何 head
+ * 字段，也不引用 kvspace 的 `KVSPACE_REF_*` 常量（它们随 head 一起退役）。
+ */
+typedef enum vmbin_value_access_form {
+    VMBIN_VALUE_ACCESS_FORM_VALUE = 0,
+    VMBIN_VALUE_ACCESS_FORM_POINTER = 1,
+    VMBIN_VALUE_ACCESS_FORM_EXTENSION = 2
+} vmbin_value_access_form_t;
+
+/*
+ * 一个参数项值的**形态**（`VMBIN_VALUE_ACCESS_FORM_*`）。
  *
  * 为什么必须从 head 读、不能从 langtype 串里找：layout 把 `*`/`@` 前缀**剥进
  * head 的 ref 字节**，wire 的 langtype 串里根本没有那个前缀（spec
@@ -138,9 +170,9 @@ runtimec_status_t vmbin_value_access_langtype(
  * 读不到（坏 wire、非法的 storetype、地址不可逆）返回 UNSUPPORTED 并把输出清零
  * ——**不猜**。读到就返回 SUCCESS，output_reference 是那三个已知取值之一。
  */
-runtimec_status_t vmbin_value_access_reference_kind(
+runtimec_status_t vmbin_value_access_form(
     const binrwir_execution_frame_t *frame,
-    const binrwir_argument_t *argument, uint8_t *output_reference,
+    const binrwir_argument_t *argument, uint8_t *output_form,
     runtimec_error_t *error);
 
 /*

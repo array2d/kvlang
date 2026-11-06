@@ -55,7 +55,7 @@
  *   :64 character-concat-kind — 结果恒 char/utf8。
  *   :65 character-equality-by-text — 按解码后的码点序列比较，种类可以不同。
  *   :66 pointer-equality — 按目标 key 比身份；None equals None；指针对非指针 INVALID。
- *       （ptreq 待 `vmbin_value_access_reference_kind` 落地后补）
+ *       （ptreq 走 `vmbin_value_access_form`）
  *
  * opid 与 catalog 行号见下方 `scalar_entries` 各处注释。
  */
@@ -1501,7 +1501,7 @@ SCALAR_BOOLEAN_HANDLER(scalar_handle_bool_neq, 1)
  * **指针 vs None 是合法比较、结果为假**，不是 INVALID——matrix:66 原文是
  * 「a pointer carrying a target never equals None」。INVALID 只留给
  * 「指针对非指针非 None」。
- * 这两件事都由 `vmbin_value_access_reference_kind` 与 `_read_body` 提供，
+ * 这两件事都由 `vmbin_value_access_form` 与 `_read_body` 提供，
  * 本实现不写任何偏移算术、不从 body 形状猜类型。
  *
  * `@ext` 的「相等」未定义（定位串相同 ≠ 同一个扩展对象），按裁决返回
@@ -1516,8 +1516,8 @@ static runtimec_status_t scalar_pointer_equality(
     runtimec_bytes_buffer_t left_buffer = {left_bytes, 0U, sizeof(left_bytes)};
     runtimec_bytes_buffer_t right_buffer = {
         right_bytes, 0U, sizeof(right_bytes)};
-    uint8_t left_reference = KVSPACE_REF_INLINE;
-    uint8_t right_reference = KVSPACE_REF_INLINE;
+    uint8_t left_form = VMBIN_VALUE_ACCESS_FORM_VALUE;
+    uint8_t right_form = VMBIN_VALUE_ACCESS_FORM_VALUE;
     uint8_t result;
     runtimec_status_t status;
 
@@ -1527,18 +1527,19 @@ static runtimec_status_t scalar_pointer_equality(
                            "scalar handler: ptreq expects two reads and one "
                            "write");
     }
-    status = vmbin_value_access_reference_kind(
-        frame, &instruction->read_arguments.data[0], &left_reference, error);
+    status = vmbin_value_access_form(
+        frame, &instruction->read_arguments.data[0], &left_form, error);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = vmbin_value_access_reference_kind(
-            frame, &instruction->read_arguments.data[1], &right_reference,
+        status = vmbin_value_access_form(
+            frame, &instruction->read_arguments.data[1], &right_form,
             error);
     }
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
     /* @ext 的相等语义未定，两侧任一命中就明确拒绝，不猜。 */
-    if (left_reference == KVSPACE_REF_EXT || right_reference == KVSPACE_REF_EXT) {
+    if (left_form == VMBIN_VALUE_ACCESS_FORM_EXTENSION ||
+        right_form == VMBIN_VALUE_ACCESS_FORM_EXTENSION) {
         return scalar_fail(
             error, 34,
             "scalar handler: ptreq on @ext is undefined (locator equality is "
@@ -1565,8 +1566,8 @@ static runtimec_status_t scalar_pointer_equality(
         return status;
     }
     {
-        const int left_is_pointer = left_reference == KVSPACE_REF_PTR;
-        const int right_is_pointer = right_reference == KVSPACE_REF_PTR;
+        const int left_is_pointer = left_form == VMBIN_VALUE_ACCESS_FORM_POINTER;
+        const int right_is_pointer = right_form == VMBIN_VALUE_ACCESS_FORM_POINTER;
         /* None：不是指针、且 body 为空（spec 03-类型系统/03 的两条判据合取）。 */
         const int left_is_none = !left_is_pointer && left_buffer.size == 0U;
         const int right_is_none = !right_is_pointer && right_buffer.size == 0U;

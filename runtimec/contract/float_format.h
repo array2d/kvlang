@@ -82,6 +82,40 @@ bool runtimec_float_format_shortest(double value, runtimec_float_domain_t domain
                                     char *output, size_t capacity,
                                     size_t *output_length);
 
+/*
+ * ── 核心算法出口（呈现层之间的唯一共享点）────────────────────────────
+ *
+ * 浮点文本有**一个核心算法**与**两种呈现层**（spec `05-runtime语义/03-成员访问.kv`
+ * 的「浮点文本」节）：
+ *
+ *   | 呈现层 | 整数值 | 负零 | 非有限 |
+ *   |---|---|---|---|
+ *   | 成员键 | 不带 `.0` | 归一 `"0"` | NaN 报错、±Inf 成键 |
+ *   | 显示   | 带 `.0`   | 保留符号 | 一律输出文本 |
+ *
+ * 两层**必须共用核心算法**（最短往返数字串 + 十进制指数），否则会出现
+ * 「键写 `1e-05`、显示写 `0.00001`」这类无谓分歧；**但呈现规则各自实现**——
+ * 上面三处分叉由用途决定，不是两套算法。
+ *
+ * 这两个函数就是那个共享核心。它们不做任何呈现决定（不补 `.0`、不归一负零、
+ * 不判非有限值该不该报错），只回答「数字串与指数是什么」和「非有限值的固定串
+ * 是什么」。
+ */
+bool runtimec_float_format_core(double value, runtimec_float_domain_t domain,
+                                char *digits, size_t digits_capacity,
+                                int *exponent, bool *negative);
+
+/*
+ * 非有限值的固定串：`nan` / `inf` / `-inf`。有限值返回 false。
+ *
+ * 键层写 `"inf"`/`"-inf"` **必须**调这个，不许自己拼字面量——否则同一个串
+ * 有两处真相。NaN 该不该接受由调用方（呈现层）决定：显示层输出 `nan`，
+ * 键层判定为不合法。本函数不替它们做这个决定。
+ */
+bool runtimec_float_format_non_finite_text(double value, char *output,
+                                           size_t capacity,
+                                           size_t *output_length);
+
 #ifdef __cplusplus
 }
 #endif

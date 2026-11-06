@@ -1289,10 +1289,10 @@ static bool container_index_container(
  *
  * ⇒ **「值」与「成员索引」是容器的两样东西，写值不等于声明容器。**
  */
-static bool container_open_marker(binrwir_execution_frame_t *frame,
-                                  const binrwir_instruction_view_t *instruction,
-                                  char *buffer, size_t capacity,
-                                  binrwir_execution_exit_t *output_exit) {
+bool runtimec_container_open_marker(binrwir_execution_frame_t *frame,
+                                    const binrwir_instruction_view_t *instruction,
+                                    char *buffer, size_t capacity,
+                                    binrwir_execution_exit_t *output_exit) {
     char message[256];
     size_t key_length;
 
@@ -1345,7 +1345,7 @@ static void container_create_variadic(
     binrwir_execution_exit_t *output_exit) {
     char slot_key[VMBIN_HANDLER_KEY_CAPACITY];
 
-    if (container_open_marker(frame, instruction, slot_key, sizeof(slot_key),
+    if (runtimec_container_open_marker(frame, instruction, slot_key, sizeof(slot_key),
                               output_exit)) {
         container_write_positional_members(frame, instruction, slot_key,
                                            output_exit);

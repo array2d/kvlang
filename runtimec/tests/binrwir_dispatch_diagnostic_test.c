@@ -143,7 +143,7 @@ static runtimec_status_t test_build_program(const runtimec_allocator_t *allocato
 
         memset(&head, 0, sizeof(head));
         kvspaceXvalueHeadSetLen(&head, sizeof(body_value));
-        head.storetype = KVSPACE_XVALUE_ST_SHORT;
+        head.layout = KVSPACE_XVALUE_LAYOUT_LENGTH;
         memcpy(wire, &head, KVSPACE_XVALUE_HEAD_LEN);
         memcpy(wire + KVSPACE_XVALUE_HEAD_LEN, &body_value, sizeof(body_value));
         status = binrwir_program_builder_add_literal(

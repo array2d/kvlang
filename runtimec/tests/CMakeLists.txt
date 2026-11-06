@@ -30,6 +30,18 @@ add_test(NAME runtimec.contracts COMMAND runtimec_contracts_test)
 set_tests_properties(runtimec.contracts PROPERTIES
  LABELS "runtimec;scaffold;contracts")
 
+# langtype 形态判定：文本 → form。**不测格式化**，那属于 member_key_text。
+add_executable(runtimec_langtype_test langtype_test.c)
+target_compile_features(runtimec_langtype_test PRIVATE c_std_11)
+target_include_directories(runtimec_langtype_test PRIVATE
+ "${CMAKE_CURRENT_SOURCE_DIR}/.."
+ "${RUNTIMEC_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_langtype_test PRIVATE runtimec_contract)
+runtimec_test_warnings(runtimec_langtype_test)
+add_test(NAME runtimec.langtype COMMAND runtimec_langtype_test)
+set_tests_properties(runtimec.langtype PROPERTIES
+ LABELS "runtimec;scaffold;contracts;langtype")
+
 # 真实 kvspace 后端用例：库路径由 RUNTIMEC_KVSPACE_LIBRARY 给出；没有库或
 # 没有 shm 目录时返回 77 跳过，不让缺依赖看起来像通过。
 add_executable(runtimec_host_kvspace_backend_test
@@ -164,6 +176,45 @@ find_library(RUNTIMEC_TEST_LAYOUT_LIBRARY
  NAMES kvlanglayout
  PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../../lib"
  NO_DEFAULT_PATH)
+
+# ── 「缺依赖」必须是红，不能是绿 ────────────────────────────────────────────
+#
+# 缺库时 `find_library` 给出 `...-NOTFOUND`，用例拿它当 dlopen 路径 → runner
+# 返回 77 → ctest 记 Skipped。而 ctest 3.28 的汇总把这算进「通过」：
+#
+#     ***Skipped ...   →   100% tests passed, 0 tests failed out of 44
+#     exit=0
+#
+# 实测（2026-11-06，干净树无 lib/）：上面两行就是当时的真实输出。于是「一条
+# 布局用例都没跑」与「全绿」在报告上无法区分——这正是本仓反复清除的假信号。
+#
+# 修法取**最小面**：不造新框架、不改 ctest 行为，只在 configure 期把「库找不到」
+# 变成一条**必定失败**的用例。它出现在汇总里是红的，不是沉默的 Skipped。
+#
+# 为什么是「红」而不是「配置期 FATAL_ERROR」：缺 lib/ 在**构建**层面是可恢复的
+# 环境问题（先 `make layout`），不该让整个 configure 失败；但**报告**层面上，
+# 「有依赖用例没跑」必须与人看见的红一致。用一条恒定失败的用例表达，比提升为
+# 配置错误更贴近事实：configure 本身没出错，缺的是测试的依赖。
+#
+# 反向对照（有 lib/ 时）：本用例不注册，44 条照旧，43/44；唯一红仍是
+# `runtimec.kv.corpus`，不受本改动影响。
+function(runtimec_require_library library_path library_purpose)
+  if(library_path)
+    return()
+  endif()
+  set(dependent_tests "${ARGN}")
+  string(JOIN "、" dependent_tests_text ${dependent_tests})
+  add_test(NAME runtimec.dependency.${library_purpose}
+   COMMAND "${CMAKE_COMMAND}" -E echo
+    "MISSING DEPENDENCY: ${library_purpose} was not found, so ${dependent_tests_text} cannot run.")
+  set_tests_properties(runtimec.dependency.${library_purpose} PROPERTIES
+   FAIL_REGULAR_EXPRESSION "MISSING DEPENDENCY"
+   LABELS "runtimec;dependency")
+endfunction()
+
+runtimec_require_library(
+  "${RUNTIMEC_TEST_LAYOUT_LIBRARY}" "layout_library"
+  "runtimec.kv.corpus" "runtimec.vmkv.end_to_end")
 # kv 用例运行器：以 kvlang 语法为单位的三态判据（pass/fail/blocked）。
 #
 # 与 C 用例的分工：C 用例证明「组件按契约工作」，本运行器证明「一段 kvlang 程序
@@ -279,25 +330,6 @@ add_test(NAME runtimec.vmbin.execute COMMAND runtimec_vmbin_execute_test)
 set_tests_properties(runtimec.vmbin.execute PROPERTIES
  LABELS "runtimec;scaffold;vmbin;execute")
 
-# `kvspace·set` 的 wire 完整性：写出去的必须是完整 wire，不是裸 body。
-# 断言比对**整条 wire**而非值相等——后者在 bug 存在时照样绿（body 字节可能
-# 一字不差，缺的是 head 与 attr）。缺 kvspace 库时用例自身返回 77。
-add_executable(runtimec_host_set_wire_test host_kvspace_set_wire_test.c)
-target_compile_features(runtimec_host_set_wire_test PRIVATE c_std_11)
-target_include_directories(runtimec_host_set_wire_test PRIVATE
- "${CMAKE_CURRENT_SOURCE_DIR}/.."
- "${RUNTIMEC_INCLUDE_DIRECTORY}"
- "${KVSPACE_INCLUDE_DIRECTORY}")
-target_link_libraries(runtimec_host_set_wire_test PRIVATE
- runtimec_contract runtimec_binrwir runtimec_vmbin
- "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
-set_target_properties(runtimec_host_set_wire_test PROPERTIES
- BUILD_RPATH "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}")
-runtimec_test_warnings(runtimec_host_set_wire_test)
-add_test(NAME runtimec.host.set_wire COMMAND runtimec_host_set_wire_test)
-set_tests_properties(runtimec.host.set_wire PROPERTIES
- SKIP_RETURN_CODE 77
- LABELS "runtimec;scaffold;host;wire")
 
 # 字面量池对齐：每条 wire 起点 8 字节对齐（body 继承）。x86 容忍未对齐所以
 # 看不出问题，aarch64 是 UB，JIT 出单条 ldr 就真崩。
@@ -556,6 +588,13 @@ set_tests_properties(runtimec.architecture.variadic_purity PROPERTIES
  SKIP_RETURN_CODE 77
  LABELS "runtimec;scaffold;architecture;variadic")
 
+# 同一缺陷的第二处判定点：`KVLANG_LAYOUT_LIBRARY`（顶层 CMakeLists 的 find_library，
+# 作用域是仓库 lib/）缺失时，下面两条同样拿到 `-NOTFOUND` → 返回 77 → 记 Skipped
+# → 被算进「通过」。判据与修法同上，不在两处各写一套。
+runtimec_require_library(
+  "${KVLANG_LAYOUT_LIBRARY}" "kvlang_layout_library"
+  "runtimec.architecture.variadic_purity" "runtimec.engine.absolute_write")
+
 # 以下三个测试源文件早已在 HEAD 里、能编译，但从未出现在任何 add_test 中——
 # 「未注册」的后果与「注册被覆盖」一样：改坏了不会有任何东西红。
 add_executable(runtimec_scalar_generated_test scalar_generated_test.c)
@@ -766,3 +805,36 @@ add_test(NAME runtimec.engine.absolute_write
 set_tests_properties(runtimec.engine.absolute_write PROPERTIES
  SKIP_RETURN_CODE 77
  LABELS "runtimec;scaffold;engine;absolute-write")
+
+# member_key_text：值 → 成员键文本（逐字铁律的唯一实现）。**不测 langtype 形态**
+# ——那在 runtimec.langtype；这里测「给定形态下的文本」与四条拒绝的各自消息。
+add_executable(runtimec_member_key_text_test member_key_text_test.c)
+target_compile_features(runtimec_member_key_text_test PRIVATE c_std_11)
+target_include_directories(runtimec_member_key_text_test PRIVATE
+ "${CMAKE_CURRENT_SOURCE_DIR}/.."
+ "${RUNTIMEC_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_member_key_text_test PRIVATE runtimec_contract)
+runtimec_test_warnings(runtimec_member_key_text_test)
+add_test(NAME runtimec.member_key_text COMMAND runtimec_member_key_text_test)
+set_tests_properties(runtimec.member_key_text PROPERTIES
+ LABELS "runtimec;scaffold;contracts;member_key_text")
+
+# key·tostr handler：值 → 成员键文本。**样板 C**（真 kvspace 句柄 + 手搭 frame）：
+# 假 frame 测不到写存储与绑定，完整 session 会把 layout/编码器拉进来导致红了分不清环节。
+add_executable(runtimec_key_tostr_handler_test key_tostr_handler_test.c)
+target_compile_features(runtimec_key_tostr_handler_test PRIVATE c_std_11)
+target_include_directories(runtimec_key_tostr_handler_test PRIVATE
+ "${CMAKE_CURRENT_SOURCE_DIR}/.."
+ "${RUNTIMEC_INCLUDE_DIRECTORY}"
+ "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_key_tostr_handler_test PRIVATE
+ runtimec_contract runtimec_binrwir runtimec_vmbin
+ "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+set_target_properties(runtimec_key_tostr_handler_test PROPERTIES
+ BUILD_RPATH "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}")
+runtimec_test_warnings(runtimec_key_tostr_handler_test)
+add_test(NAME runtimec.key.tostr_handler
+ COMMAND runtimec_key_tostr_handler_test)
+set_tests_properties(runtimec.key.tostr_handler PROPERTIES
+ SKIP_RETURN_CODE 77
+ LABELS "runtimec;scaffold;vmbin;handler;key")

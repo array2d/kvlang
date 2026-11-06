@@ -310,6 +310,51 @@ static bool runtimec_float_format_write_fixed(const char *digits, int exponent,
     return true;
 }
 
+/*
+ * 核心算法出口：**只转发**，不复制实现。
+ *
+ * 这两个函数存在的原因是分层，不是新能力：显示层与键层要共用「最短往返 + 指数」
+ * 与「非有限值固定串」，但那两段今天是 `static`。开出口比复制一份好——复制就是
+ * 同一规则的两处真相，两边迟早漂开，而漂开的表现是「同一个值在两处显示不同」。
+ *
+ * 本文件的 `shortest` 与两个 `static` 一行未改：改它们的门禁是「println 输出
+ * 零变化」，那要用 ctest 证明，不是顺手重构。
+ */
+bool runtimec_float_format_core(double value, runtimec_float_domain_t domain,
+                                char *digits, size_t digits_capacity,
+                                int *exponent, bool *negative) {
+    int computed_exponent = 0;
+    bool computed_negative = false;
+
+    if (digits == NULL || exponent == NULL || negative == NULL ||
+        digits_capacity == 0U) {
+        return false;
+    }
+    digits[0] = '\0';
+    if (!runtimec_float_format_shortest_digits(value, domain, digits,
+                                               digits_capacity,
+                                               &computed_exponent,
+                                               &computed_negative)) {
+        return false;
+    }
+    /* 去尾零属于「最短」，不属于呈现层——两个呈现层都要这一步。 */
+    runtimec_float_format_trim_digits(digits);
+    *exponent = computed_exponent;
+    *negative = computed_negative;
+    return true;
+}
+
+bool runtimec_float_format_non_finite_text(double value, char *output,
+                                           size_t capacity,
+                                           size_t *output_length) {
+    if (output_length == NULL) {
+        return false;
+    }
+    *output_length = 0U;
+    return runtimec_float_format_non_finite(value, output, capacity,
+                                            output_length);
+}
+
 bool runtimec_float_format_shortest(double value, runtimec_float_domain_t domain,
                                     char *output, size_t capacity,
                                     size_t *output_length) {

@@ -45,7 +45,7 @@ static void test_value_initialize(test_value_t *value, size_t body_size) {
 
     memset(&head, 0, sizeof(head));
     kvspaceXvalueHeadSetLen(&head, body_size);
-    head.storetype = KVSPACE_XVALUE_ST_SHORT;
+    head.layout = KVSPACE_XVALUE_LAYOUT_LENGTH;
     memset(value->storage, 0, sizeof(value->storage));
     memcpy(value->storage, &head, sizeof(head));
     value->body_size = body_size;
@@ -249,7 +249,7 @@ static runtimec_status_t test_program_build(
             }
             memset(&head, 0, sizeof(head));
             kvspaceXvalueHeadSetLen(&head, source->literal_sizes[ordinal]);
-            head.storetype = KVSPACE_XVALUE_ST_SHORT;
+            head.layout = KVSPACE_XVALUE_LAYOUT_LENGTH;
             memcpy(literal_wire, &head, KVSPACE_XVALUE_HEAD_LEN);
             memcpy(literal_wire + KVSPACE_XVALUE_HEAD_LEN,
                    source->literal_bytes[ordinal],

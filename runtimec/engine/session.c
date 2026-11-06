@@ -13,6 +13,7 @@
 
 #include "binrwir_compiler/compiler.h"
 #include "engine/compilation_repository.h"
+#include "engine/frame_state.h"
 #include "binrwir/registry.h"
 #include "vmbin/handlers/container.h"
 #include "vmbin/handlers/host.h"
@@ -58,6 +59,16 @@ struct runtimec_session_t {
     uint64_t checkpoint_sequence;
     /* kvspace 句柄：调用方的，session 只借用；EventHandler 需要存储时经此取。 */
     void *kvspace_handle;
+    /*
+     * **跨 execute 存活的帧状态表**（`engine/frame_state.h`）。
+     *
+     * 窗口一次 execute 的生命周期 ≠ 一帧从建立到 DONE 的生命周期。驱动靠「对同一
+     * frame_path 再 execute 一次」来 resume，若每次 execute 都重建绑定表，父帧在
+     * 指令里绑过的局部槽就随旧表一起消失（`strings.kv` 的 `0x4501`）。
+     *
+     * 表按值持有在这里，条目与绑定表归 `engine/frame_state` 管理。
+     */
+    runtimec_frame_state_table_t frames;
 };
 
 static runtimec_status_t runtimec_session_fail(runtimec_error_t *error,
@@ -122,6 +133,8 @@ runtimec_status_t runtimec_session_create(
     session->options = *options;
     /* 借用调用方的句柄：session 不连接、不关闭，只透传给执行期。 */
     session->kvspace_handle = options->kvspace_handle;
+    /* 帧状态表只置空，不分配：没有执行就没有帧。 */
+    runtimec_frame_state_table_initialize(&session->frames, allocator);
 
     /*
      * builtin 注册表：置空后按模块追加。零条目是合法状态——不装任何 builtin 的
@@ -338,6 +351,11 @@ runtimec_status_t runtimec_session_destroy(runtimec_session_t *session) {
     }
     const runtimec_allocator_t allocator = session->options.allocator;
     runtimec_status_t status = RUNTIMEC_STATUS_SUCCESS;
+    /*
+     * 帧状态兜底：DONE/ERROR 时会话已经关过每一帧，这里只剩异常路径的残留。
+     * **先清帧再拆依赖**：绑定表里存的是 kvspace 地址，拆 kvspace 之前让它归零。
+     */
+    runtimec_frame_state_table_release(&session->frames);
     if (session->compilation_repository != NULL) {
         status = runtimec_compilation_repository_destroy(
             session->compilation_repository);
@@ -420,6 +438,19 @@ runtimec_status_t runtimec_session_get_runtime_components(
     output_components->compilation_repository =
         session->compilation_repository;
     output_components->builtin_registry = &session->builtin_registry;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+runtimec_status_t runtimec_session_get_frame_state(
+    runtimec_session_t *session,
+    runtimec_frame_state_table_t **output_frame_state) {
+    if (output_frame_state != NULL) {
+        *output_frame_state = NULL;
+    }
+    if (session == NULL || output_frame_state == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    *output_frame_state = &session->frames;
     return RUNTIMEC_STATUS_SUCCESS;
 }
 

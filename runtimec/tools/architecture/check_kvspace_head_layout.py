@@ -136,10 +136,12 @@ def backend_candidates(frontend_path: str, soname: str) -> list[str]:
 
 # ---------------------------------------------------------------------------------------
 # 后端覆盖：head 布局由**后端**决定，前端只是个转发壳。只探 shm 会让「durable 还是 8 字节」
-# 在验收阶段才暴露。这里对每个能被前端装载的后端各写一个值、读回 head 大小。
+# 在验收阶段才暴露。这里对每个能被前端装载的后端各写一个值、读回原始字节判布局。
 #
-# 判据用 `kvspaceGetHead` 的 `headlen`，不是某个后端的私有导出：`kvspaceGetHead` 是
-# 两个后端都实现的 C ABI，而值构造函数（`kvspaceXvalueHeadNewSlack`）只有 kvspace-c 有。
+# 判据是 `kvspaceGet` 读回的**整条 wire 的字节**，不是某个后端的私有导出，也不是
+# `headlen` 字段：后者来自 `kvspaceGetHead` + 一个手抄的 head 结构体，那一对已按
+# `kvspace/include/kvspace/kvspace.h` 删除（手抄结构体是第二份字段真相，字段一改副本
+# 不跟着变）。`kvspaceGet` 是两个后端都实现的 C ABI，返回值含 head，足够判布局。
 # ---------------------------------------------------------------------------------------
 # DSN 里给的是**文件路径**不是目录：shm 后端会自己拼 `.sbo.head` 等后缀，
 # 直接传一个已存在的目录会被 O_RDWR 打开成功、随后格式校验失败。
@@ -161,36 +163,25 @@ def _load_frontend(frontend_path: str):
         ctypes.c_uint32, ctypes.c_uint64, ctypes.c_char_p,
         ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)), ctypes.c_char_p,
         ctypes.c_uint32]
-    library.kvspaceGetHead.restype = ctypes.c_int
-    library.kvspaceGetHead.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
-                                       ctypes.POINTER(KvspaceHead)]
+    library.kvspaceGet.restype = ctypes.c_int
+    library.kvspaceGet.argtypes = [
+        ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int,
+        ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
+        ctypes.POINTER(ctypes.c_uint32)]
     return library
-
-
-class KvspaceHead(ctypes.Structure):
-    _fields_ = [
-        ("headlen", ctypes.c_uint16),
-        ("ref", ctypes.c_uint8),
-        ("storetype", ctypes.c_uint8),
-        ("body_len", ctypes.c_int32),
-        ("ndim", ctypes.c_int32),
-        ("dims", ctypes.c_int32 * 8),
-        ("langtype", ctypes.c_char * 256),
-        ("langtype_len", ctypes.c_int32),
-        ("body_offset", ctypes.c_int32),
-        ("body_cap", ctypes.c_uint64),
-    ]
 
 
 def probe_backend(frontend_path: str, scheme: str, dsn_template: str,
                   backend_path: str | None) -> tuple[str, str]:
-    """Write one value through the frontend and read its head back.
+    """Write one value through the frontend and read the raw wire back.
 
     值不是裸 body：后端会把它当 wire 解析并按各自 head 布局校验。所以**让后端自己造**
-    ——用 `kvspaceWriteNewPlace`，这是两个后端都实现的 C ABI 入口（不像
-    `kvspaceXvalueHeadNewSlack`，只有 kvspace-c 有）。
+    ——用 `kvspaceWriteNewPlace`，这是两个后端都实现的 C ABI 入口。
 
-    判据是 `kvspaceGetHead` 回报的 `headlen`：8 字节版报 8，16 字节版报 16。
+    **判据是读回的原始字节，不是 `headlen` 字段。**
+    原先用 `kvspaceGetHead` 的 `headlen`（8 或 16）——那个「解码结构体 + 取头函数」
+    已按 `kvspace/include/kvspace/kvspace.h` 删除（手抄结构体是第二份字段真相）。
+    现在用 `kvspaceGet` 拿整条 wire，直接按字节判布局，与 `probe_library` 同一套判据。
     """
     if backend_path is None:
         return RESULT_SKIPPED, "backend library is not built"
@@ -213,15 +204,28 @@ def probe_backend(frontend_path: str, scheme: str, dsn_template: str,
             if status != 0:
                 return RESULT_UNKNOWN, (
                     f"write failed: {error_buffer.value.decode(errors='replace')}")
-            head = KvspaceHead()
-            status = library.kvspaceGetHead(handle, b"/probe/value", ctypes.byref(head))
-            if status != 0:
+            wire = ctypes.POINTER(ctypes.c_uint8)()
+            wire_len = ctypes.c_uint32(0)
+            status = library.kvspaceGet(
+                handle, b"/probe/value", 1, ctypes.byref(wire),
+                ctypes.byref(wire_len))
+            if status != 0 or wire_len.value == 0:
                 return RESULT_UNKNOWN, "read failed"
-            if head.headlen == EXPECTED_HEAD_LEN:
-                return RESULT_SIXTEEN, f"headlen={head.headlen}"
-            if head.headlen == LEGACY_HEAD_LEN:
-                return RESULT_EIGHT, f"headlen={head.headlen}"
-            return RESULT_UNKNOWN, f"headlen={head.headlen} matches no known layout"
+            data = bytes(wire[index] for index in range(int(wire_len.value)))
+            if len(data) < 12:
+                return RESULT_UNKNOWN, f"wire too short: {len(data)} bytes"
+            bodylen = int.from_bytes(data[0:8], "little")
+            attrslen = int.from_bytes(data[8:12], "little")
+            if (bodylen == EXPECTED_BODY and
+                    attrslen == LANGTYPE_RECORD_BYTES and
+                    len(data) == EXPECTED_HEAD_LEN + bodylen + attrslen):
+                return RESULT_SIXTEEN, (
+                    f"bodylen={bodylen} attrslen={attrslen} total={len(data)}")
+            if int.from_bytes(data[0:6], "little") == EXPECTED_BODY:
+                return RESULT_EIGHT, f"u48 len={EXPECTED_BODY} total={len(data)}"
+            return RESULT_UNKNOWN, (
+                f"bodylen={bodylen} attrslen={attrslen} total={len(data)} "
+                "matches no known layout")
         finally:
             library.kvspaceClose(handle)
 def run_main(arguments: list[str],
@@ -374,28 +378,22 @@ def expect(condition: bool, message: str, failures: list[str]) -> None:
 
 
 STUB_BACKEND = """/* 最小后端：补齐前端会 dlsym 的全部符号，head 长度由 HEAD_LEN 决定。
-   探针判的是它写出来的 wire 与 GetHead 报告的 headlen，所以这个 stub 必须真的按
-   各自布局写字节——否则测的是 stub 而不是探针。 */
+   探针判的是它写出来的 wire 字节，所以这个 stub 必须真的按各自布局写字节
+   ——否则测的是 stub 而不是探针。 */
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define HEAD_LEN __HEAD_LEN__
 
-typedef struct { uint16_t headlen; uint8_t ref; uint8_t storetype; int32_t body_len;
-                 int32_t ndim; int32_t dims[8]; char langtype[256];
-                 int32_t langtype_len; int32_t body_offset; uint64_t body_cap; }
-        kvspaceHead_t;
-
 static uint8_t g_wire[128];
+static uint32_t g_wire_len = 0;
 
 void *kvspaceConnect(const char *dsn) { (void)dsn; return (void *)0x1000; }
 void kvspaceClose(void *h) { (void)h; }
 int kvspaceSetValue(void *h, const char *k, const uint8_t *v, uint32_t n,
                     char *e, uint32_t ec)
     { (void)h;(void)k;(void)v;(void)n;(void)e;(void)ec; return 0; }
-int kvspaceGet(void *h, const char *k, int r, uint8_t **o, uint32_t *n)
-    { (void)h;(void)k;(void)r; *o=NULL; *n=0; return 0; }
 int kvspaceGetPart(void *h, const char *k, uint32_t o, uint8_t *b, uint32_t c,
                    uint32_t *n)
     { (void)h;(void)k;(void)o;(void)b;(void)c; *n=0; return 0; }
@@ -439,7 +437,9 @@ int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetyp
     const unsigned record = 3 + lt;
 #if __HEAD_LEN__ == 16
     /* [bodylen:u64][attrslen:u32][storetype][ptr][pad:2][body][attrs] */
-    memcpy(g_wire + 0, &body_len, 8);
+    /* `body_len` 是 uint32_t：只拷 4 字节会把高位留成栈垃圾。按 u64 显式展开。 */
+    const uint64_t body_len_u64 = (uint64_t)body_len;
+    memcpy(g_wire + 0, &body_len_u64, 8);
     const uint32_t attrs_len = record;
     memcpy(g_wire + 8, &attrs_len, 4);
     g_wire[12] = storetype; g_wire[13] = ref;
@@ -450,7 +450,11 @@ int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetyp
     memcpy(attrs + 3, langtype, lt);
 #else
     /* [len:u48][storetype][ptr][body][attr_len:u16][tag][len][data] */
-    for (int i = 0; i < 6; ++i) g_wire[i] = (uint8_t)(body_len >> (8 * i));
+    /* `body_len` 是 uint32_t：直接 `>> (8*i)` 在 i>=4 时位移越过类型宽度，
+     * 是未定义行为（实测 i=4 会得到原值，把 len 写成 0x0000000200000002）。
+     * 先提升到 u64 再移。 */
+    const uint64_t body_len_u48 = (uint64_t)body_len;
+    for (int i = 0; i < 6; ++i) g_wire[i] = (uint8_t)(body_len_u48 >> (8 * i));
     g_wire[6] = storetype; g_wire[7] = ref;
     memset(g_wire + 8, 'a', body_len);
     uint8_t *attrs = g_wire + 8 + body_len;
@@ -461,15 +465,17 @@ int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetyp
     memcpy(attrs + 5, langtype, lt);
 #endif
     *body = g_wire + HEAD_LEN;
+    g_wire_len = (uint32_t)(HEAD_LEN + body_len + record);
     return 0;
 }
 
-int kvspaceGetHead(void *h, const char *key, kvspaceHead_t *out) {
-    (void)h; (void)key;
-    if (!out) return 1;
-    memset(out, 0, sizeof *out);
-    out->headlen = HEAD_LEN;
-    out->body_offset = HEAD_LEN;
+/* 返回整条 wire（含 head）：探针按字节判布局，与真前端同一条判据。 */
+int kvspaceGet(void *h, const char *key, int resolve, uint8_t **out,
+               uint32_t *out_len) {
+    (void)h; (void)key; (void)resolve;
+    if (!out || !out_len) return 1;
+    *out = g_wire;
+    *out_len = g_wire_len;
     return 0;
 }
 """
@@ -482,18 +488,13 @@ STUB_FRONTEND = """\
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct { uint16_t headlen; uint8_t ref; uint8_t storetype; int32_t body_len;
-                 int32_t ndim; int32_t dims[8]; char langtype[256];
-                 int32_t langtype_len; int32_t body_offset; uint64_t body_cap; }
-        kvspaceHead_t;
-
 typedef void *(*connect_fn)(const char *);
 typedef void (*close_fn)(void *);
 typedef int (*write_fn)(void *, const char *, uint8_t, uint8_t, uint32_t, uint64_t,
                         const char *, uint8_t **, char *, uint32_t);
-typedef int (*head_fn)(void *, const char *, kvspaceHead_t *);
+typedef int (*get_fn)(void *, const char *, int, uint8_t **, uint32_t *);
 
-typedef struct { void *handle; close_fn close; write_fn write; head_fn head; } forward_t;
+typedef struct { void *handle; close_fn close; write_fn write; get_fn get; } forward_t;
 
 void *kvspaceConnect(const char *dsn) {
     (void)dsn;
@@ -511,8 +512,8 @@ void *kvspaceConnect(const char *dsn) {
     }
     forward->close = (close_fn)dlsym(library, "kvspaceClose");
     forward->write = (write_fn)dlsym(library, "kvspaceWriteNewPlace");
-    forward->head = (head_fn)dlsym(library, "kvspaceGetHead");
-    if (forward->close == NULL || forward->write == NULL || forward->head == NULL) {
+    forward->get = (get_fn)dlsym(library, "kvspaceGet");
+    if (forward->close == NULL || forward->write == NULL || forward->get == NULL) {
         free(forward);
         return NULL;
     }
@@ -541,9 +542,10 @@ int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetyp
                           langtype, body, err, err_cap);
 }
 
-int kvspaceGetHead(void *h, const char *key, kvspaceHead_t *out) {
+int kvspaceGet(void *h, const char *key, int resolve, uint8_t **out,
+               uint32_t *out_len) {
     forward_t *forward = h;
-    return forward->head(forward->handle, key, out);
+    return forward->get(forward->handle, key, resolve, out, out_len);
 }
 
 int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,

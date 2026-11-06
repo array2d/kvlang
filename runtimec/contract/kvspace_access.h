@@ -169,11 +169,29 @@ runtimec_status_t runtimec_kvspace_access_ensure_zero_value(
  * 否则它只能靠「调用失败再分类」来区分「这个类型本来就不该由我建」与「建失败了」，
  * 而那正是把错误当控制流。判据本身仍然只有一份：`ensure_zero_value` 用的宽度表。
  *
- * 表外的类型（数组、散列容器、结构体、元组 map、字符串……）返回 false：它们的值
- * **由源码里的 `·new` 创建**，帧准备不建也不绑。
+ * **定长数组是定宽**：`[N]K` 与 `[d0,d1,…]K`（各维非空十进制）的零值宽度是
+ * 各维乘积 × 基种类宽度，帧准备按它物化。`vthread·pc()` 的 `result1` 是 `[2]int32`，
+ * 槽不物化则第一次写就 `UNBOUND_SLOT`。
+ *
+ * **变长数组不是定宽**：`[]K`、`[?]K`、`[*]K`、`[+]K` 的长度由内容决定，零值长度
+ * 是 0，物化出零长槽反而让第一次真实写必失败——它们仍**由源码里的 `·new` 创建**，
+ * 帧准备不建也不绑。散列容器、结构体、元组 map、字符串同理。
  */
 bool runtimec_kvspace_access_langtype_has_fixed_zero_width(
     runtimec_string_view_t langtype);
+
+/*
+ * 定宽 langtype 的零值字节数：`has_fixed_zero_width` 的那一事实的**数值形态**。
+ *
+ * 存在的理由：调用方有时不只需要「是不是定宽」，还需要「多宽」——测试要断言
+ * `[2]int32` 恰好 8 字节、`[2,3]int32` 恰好 24 字节；将来若帧准备要一次算总量，
+ * 也靠它而不是再写一份解析。
+ *
+ * 与 `has_fixed_zero_width` **同源**：两者都调同一个 `runtimec_kvspace_zero_width`，
+ * 不是两份判据。不是定宽时返回 false 且 `*output_width` 置 0。
+ */
+bool runtimec_kvspace_access_langtype_zero_width(
+    runtimec_string_view_t langtype, uint64_t *output_width);
 /*
  * 一帧的存储 generation。
  *

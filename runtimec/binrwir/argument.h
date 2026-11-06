@@ -40,9 +40,13 @@ extern "C" {
  *   2 = argidx + 引用种类 + 槽号 + payload（指针变量模型）；
  *   3 = 布局同 2，但 LOCAL / FUNCTION 的 slot 是 Program 符号池下标、LITERAL 的
  *       payload 是 Program 字面量池下标；
- *   4 = 符号池条目从「名字」扩展为「名字 + 语言类型」（当前）。
+ *   4 = 符号池条目从「名字」扩展为「名字 + 语言类型」；
+ *   5 = （未记录具体含义，沿用 4 的布局）；
+ *   6 = 参数项第 5 字节从「保留必须为 0」改为 **dereference 标志**（当前）：
+ *       1 = 该操作数是一个指针值，访问前要跟一跳取目标；0 = 直接访问。
+ *       它与引用种类（槽从哪来）**正交**，所以不能塞进 reference_kind。
  */
-#define BINRWIR_BINARY_INTERFACE_GENERATION 5U
+#define BINRWIR_BINARY_INTERFACE_GENERATION 6U
 
 typedef enum binrwir_reference_kind {
     BINRWIR_REFERENCE_INVALID = 0,
@@ -58,7 +62,12 @@ typedef enum binrwir_reference_kind {
 typedef struct binrwir_argument {
     uint32_t argument_index;
     uint8_t reference_kind;
-    uint8_t reserved_8_bits;
+    /*
+     * 该操作数是否要**跟一跳指针**再访问（`*p` 形态）。0/1，其它值非法。
+     * 只有 LOCAL / STATIC / PARAMETER_* 有意义；LITERAL 上的 1 没有可跟的地址，
+     * 由 validate 拒绝。
+     */
+    uint8_t dereference;
     uint16_t slot;
     uint64_t payload;
 } binrwir_argument_t;
@@ -75,8 +84,8 @@ _Static_assert(offsetof(binrwir_argument_t, argument_index) == 0U,
                "binrwir argidx must begin each argument");
 _Static_assert(offsetof(binrwir_argument_t, reference_kind) == 4U,
                "binrwir reference kind must follow argidx");
-_Static_assert(offsetof(binrwir_argument_t, reserved_8_bits) == 5U,
-               "binrwir reserved byte must follow the reference kind");
+_Static_assert(offsetof(binrwir_argument_t, dereference) == 5U,
+               "binrwir dereference flag must follow the reference kind");
 _Static_assert(offsetof(binrwir_argument_t, slot) == 6U,
                "binrwir slot must follow the reserved byte");
 _Static_assert(offsetof(binrwir_argument_t, payload) == 8U,

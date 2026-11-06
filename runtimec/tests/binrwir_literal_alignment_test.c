@@ -57,7 +57,7 @@ static size_t test_make_wire(uint8_t *wire, size_t body_size) {
 
     memset(&head, 0, sizeof(head));
     kvspaceXvalueHeadSetLen(&head, body_size);
-    head.storetype = KVSPACE_XVALUE_ST_SHORT;
+    head.layout = KVSPACE_XVALUE_LAYOUT_LENGTH;
     memcpy(wire, &head, KVSPACE_XVALUE_HEAD_LEN);
     memset(wire + KVSPACE_XVALUE_HEAD_LEN, 0, body_size);
     return KVSPACE_XVALUE_HEAD_LEN + body_size;

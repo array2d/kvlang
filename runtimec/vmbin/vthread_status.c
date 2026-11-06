@@ -117,10 +117,10 @@ runtimec_status_t runtimec_vthread_status_write(
 runtimec_status_t runtimec_vthread_status_read(
     void *kvspace_handle, const char *status_key,
     runtimec_string_view_t *output_text, runtimec_error_t *error) {
-    kvspaceHead_t head;
     uint8_t *wire = NULL;
     uint32_t wire_length = 0U;
     const uint8_t *body = NULL;
+    uint64_t effective_length = 0U;
 
     if (output_text != NULL) {
         *output_text = runtimec_string_view_make(NULL, 0U);
@@ -131,58 +131,58 @@ runtimec_status_t runtimec_vthread_status_read(
             error, RUNTIMEC_STATUS_INVALID, 1,
             "invalid status read request");
     }
-    memset(&head, 0, sizeof(head));
-    if (kvspaceGetHead(kvspace_handle, status_key, &head) != 0) {
-        /* 键不存在是「没有」，不是「坏」——两者修法不同，状态要分开。 */
-        return runtimec_vthread_status_fail(
-            error, RUNTIMEC_STATUS_UNSUPPORTED, 2,
-            "status key is absent");
-    }
-    /*
-     * 形状判据照抄 spec `02-kvspace模型/04-CABI.kv`：storetype SLACK、headlen 恒 8、
-     * 内容 ≤ LV、物理容量 ≥ 下限。常量在本文件头里，**不在这里写新字面量**。
-     */
-    /*
-     * 形状判据照抄 spec `02-kvspace模型/04-CABI.kv`：storetype SLACK、headlen 为
-     * XValue 头长度、内容 ≤ LV。
-     *
-     * **本入口只校验与后端无关的三项；物理容量由 slot view 把关。**
-     *
-     * `kvspaceGetHead` 给的 `body_cap` 是**逻辑长度**（= body_len），不是 box
-     * 物理容量（实测 `"run"` 报 body_cap=3，而 box 实际按 80 分配）。物理容量
-     * 只有 slot view 看得到，而 slot view 是 shm-only——本函数要对所有后端可用，
-     * 所以不在这里重复判，否则非 shm 后端会全线失败。
-     *
-     * **容量不是没人守**：`kvspace-c/src/kvspace.c` 的 slot view 对 status 键检查
-     * `cap < KVSPACE_STATUS_MIN_CAP` 就返回 -1，写路径也按同一常量兜底。
-     * 守在了另一个入口，不是漏了。
-     */
-    if (head.storetype != KVSPACE_STORETYPE_SLACK ||
-        head.headlen != RUNTIMEC_VTHREAD_STATUS_HEAD_LENGTH ||
-        head.body_len < 0 ||
-        (uint32_t)head.body_len > RUNTIMEC_VTHREAD_STATUS_CONTENT_LIMIT) {
-        return runtimec_vthread_status_fail(
-            error, RUNTIMEC_STATUS_INVALID, 3,
-            "status slot does not match the fixed shape");
-    }
     /*
      * `kvspaceGet` 对 `‥status` 这个 volatile key **每次重读后端**（spec 同一节），
      * 不走快照——所以这里拿到的是当前值，不是某次快照的值。
+     *
+     * **头一律自己解**：库已不再提供取头函数（那种「解码结构体」是
+     * 第二份字段真相），布局判据只有 `kvspace/xvalue_head.h` 一份。
      */
     if (kvspaceGet(kvspace_handle, status_key, 0, &wire, &wire_length) != 0) {
         return runtimec_vthread_status_fail(
             error, RUNTIMEC_STATUS_ERROR, 4, "status read failed");
     }
-    if (wire == NULL || wire_length < (uint32_t)head.headlen) {
+    if (wire == NULL || wire_length == 0U) {
+        /* 键不存在是「没有」，不是「坏」——两者修法不同，状态要分开。 */
         return runtimec_vthread_status_fail(
-            error, RUNTIMEC_STATUS_ERROR, 5, "status wire is truncated");
+            error, RUNTIMEC_STATUS_UNSUPPORTED, 2,
+            "status key is absent");
     }
-    body = wire + head.headlen;
-    /*
-     * `len == 0` 且形状合法 → **成功**、空视图。这与「坏槽」必须分开：
-     * 空是「还没写状态」，坏是「槽不符合规范」，调用方的处置完全不同。
-     */
+    {
+        kvspaceXvalueHead head;
+        if (wire_length < KVSPACE_XVALUE_HEAD_LEN) {
+            return runtimec_vthread_status_fail(
+                error, RUNTIMEC_STATUS_ERROR, 5, "status wire is truncated");
+        }
+        memcpy(&head, wire, sizeof(head));
+        /*
+         * 形状判据照抄 spec `02-kvspace模型/04-CABI.kv`：**定长**槽（layout 不是
+         * 容量形态）、头长恒 16、有效长度 ≤ LV。
+         *
+         * 旧实现还比对 `storetype == SLACK`；新头没有这个字段——storage class 是
+         * 后端写侧的概念，不是 wire 上的属性，所以这条判据**被布局判据取代**。
+         *
+         * **本入口只校验与后端无关的项；物理容量由 slot view 把关**（见下方注释）。
+         */
+        if (!kvspaceXvalueHeadPaddingIsZero(&head) ||
+            !kvspaceXvalueHeadLayoutIsValid(&head) ||
+            kvspaceXvalueHeadLayout(&head) != KVSPACE_XVALUE_LAYOUT_LENGTH ||
+            kvspaceXvalueHeadTotalLen(&head) == 0U ||
+            kvspaceXvalueHeadTotalLen(&head) > (uint64_t)wire_length ||
+            kvspaceXvalueHeadEffectiveLen(wire, (uint64_t)wire_length,
+                                          &effective_length) != 0) {
+            return runtimec_vthread_status_fail(
+                error, RUNTIMEC_STATUS_INVALID, 3,
+                "status slot does not match the fixed shape");
+        }
+    }
+    if (effective_length > RUNTIMEC_VTHREAD_STATUS_CONTENT_LIMIT) {
+        return runtimec_vthread_status_fail(
+            error, RUNTIMEC_STATUS_INVALID, 3,
+            "status slot does not match the fixed shape");
+    }
+    body = wire + KVSPACE_XVALUE_HEAD_LEN;
     *output_text = runtimec_string_view_make((const char *)body,
-                                             (size_t)head.body_len);
+                                             (size_t)effective_length);
     return RUNTIMEC_STATUS_SUCCESS;
 }

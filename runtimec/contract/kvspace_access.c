@@ -578,6 +578,15 @@ runtimec_status_t runtimec_kvspace_access_source_revision(
 }
 
 /*
+ * **地址永远指向值自己；跟随指针由显式 `*` 完成。**
+ *
+ * 这是既有裁决「解引用只走显式 `*`」的直接推论：任何「读一个 key 就顺手跟一跳」
+ * 都是隐式解引用。本模块所有 `kvspaceGet` 的 resolve 参数一律为 0，取值/取地址
+ * 都拿到 key 上那一份 wire 本身——指针值的 wire 就是「head ref=PTR + body=目标路径」。
+ * 跟随发生在 `vmbin/value_access` 的 `dereference` 分支，且只在那里。
+ *
+ * 不加一个「会跟随」的解析入口：两个解析器 = 同一语义两个实现（一个编码一个含义）。
+ *
  * 解析一个 key 当前的真地址并登记，供 source_revision 复核是否被搬移。
  * 静态与帧两条解析共用这一段：形状校验、地址来源、零地址检查完全一致，
  * 差别只在调用方对 key 形状与生命周期前提的判定。
@@ -588,7 +597,7 @@ static runtimec_status_t runtimec_kvspace_access_resolve_address(
     runtimec_error_t *error) {
     uint8_t *value = NULL;
     uint32_t value_size = 0U;
-    if (kvspaceGet(adapter->handle, key_text, 1, &value,
+    if (kvspaceGet(adapter->handle, key_text, 0, &value,
                                       &value_size) != 0) {
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_ERROR, 40, "kvspace read failed");
@@ -829,8 +838,13 @@ static const runtimec_kvspace_width_entry_t runtimec_kvspace_width_table[] = {
     {"char/ascii", 1U}, {"char/utf32", 4U},
 };
 
-/* langtype → 零值字节宽度。表中没有即 UNSUPPORTED，不做名称归一化。 */
-static bool runtimec_kvspace_zero_width(runtimec_string_view_t langtype,
+/*
+ * 基种类 → 零值字节宽度。表中没有即不认识，返回 false。
+ *
+ * 只在**没有形状前缀**时被 `runtimec_kvspace_zero_width` 调用，也是数组形状
+ * 求积时的被乘数。
+ */
+static bool runtimec_kvspace_base_width(runtimec_string_view_t langtype,
                                         uint64_t *output_width) {
     const size_t count = sizeof(runtimec_kvspace_width_table) /
                          sizeof(runtimec_kvspace_width_table[0]);
@@ -848,12 +862,176 @@ static bool runtimec_kvspace_zero_width(runtimec_string_view_t langtype,
     return false;
 }
 
+/*
+ * 定长数组的形状前缀 → 元素个数。`[2]` → 2、`[2,3]` → 6。可嵌套，逐层相乘。
+ *
+ * **只认定长维**：每个维度必须是非空十进制数字串。下面这些都**不是**定长，
+ * 一律返回 false（交给调用方的变长路径，不物化）：
+ *
+ *   `[]K`      空维——长度由内容决定
+ *   `[?]K`     问号——同上
+ *   `[*]K`     `*`——同上
+ *   `[+]K`     加号——形式上「至少一维」，宽度仍不可知
+ *   `[n]K`     符号/表达式——不是十进制数字
+ *
+ * 这条判据的形状与 `generate_rwir_catalog.py` 的 `SHAPE_PREFIX_PATTERN` 一致
+ * （`^[[0-9,]+]`），两处都用「非空十进制数字与逗号」的字符集。**两处必须一起看**：
+ * 那边是生成期校验、这里是运行期物化，判据不一致会出现「生成器放行、运行期不物化」
+ * 这种只在执行时才暴露的分歧。
+ */
+static bool runtimec_kvspace_array_element_count(runtimec_string_view_t shape,
+                                                 uint64_t *output_count) {
+    uint64_t total = 1U;
+    size_t cursor = 0U;
+
+    *output_count = 0U;
+    while (cursor < shape.size && shape.data[cursor] == '[') {
+        uint64_t dimension = 0U;
+        bool have_digit = false;
+
+        cursor += 1U;
+        while (cursor < shape.size && shape.data[cursor] != ']') {
+            const char character = shape.data[cursor];
+
+            if (character == ',') {
+                /* 逗号之后必须还有数字：`[2,]` 不是定长形状。 */
+                if (!have_digit) {
+                    return false;
+                }
+                total *= dimension;
+                dimension = 0U;
+                have_digit = false;
+                cursor += 1U;
+                continue;
+            }
+            if (character < '0' || character > '9') {
+                return false; /* `?` / `*` / `+` / 符号表达式：不是定长 */
+            }
+            /* 溢出保护：宽度是字节数，超过 uint64 的十分之一就必然越界。 */
+            if (dimension > (UINT64_MAX - (uint64_t)(character - '0')) / 10U) {
+                return false;
+            }
+            dimension = dimension * 10U + (uint64_t)(character - '0');
+            have_digit = true;
+            cursor += 1U;
+        }
+        if (cursor >= shape.size || !have_digit) {
+            return false; /* 没有闭合的 `]`，或该维为空 */
+        }
+        total *= dimension;
+        cursor += 1U; /* 跳过 ']' */
+    }
+    if (cursor == 0U) {
+        return false; /* 没有形状前缀 —— 调用方应先处理这种情况 */
+    }
+    *output_count = total;
+    return true;
+}
+
+/*
+ * langtype → 零值字节宽度。不认识即 false，不做名称归一化。
+ *
+ * 三种形态（判据有序，**先形状后基种类**）：
+ *
+ *   1. `[N]K` / `[d0,d1,…]K`（各维非空十进制）⇒ 各维乘积 × 基种类宽度；
+ *   2. 无前缀的标量 ⇒ 直接查基表；
+ *   3. 其余（变长维、未知基种类、容器）⇒ false，**不猜**。
+ *
+ * 为什么定长数组必须物化：`vthread·pc()` 的 `result1` 是 `[2]int32`（spec
+ * `05-runtime语义/02-执行模型-续.kv:26-40`），而 `write_body` 要求与当前 body
+ * 等长——槽不物化，第一个写就 `UNBOUND_SLOT`。同理 `detail=16` 那批容器局部
+ * 也卡在这里。
+ *
+ * 为什么变长数组**不**物化：`[]int32` 的零值长度是 0，而写入要求等长——物化出
+ * 一个零长槽反而让第一次真实写必失败。它们走写路径创建，由调用方负责。
+ */
+static bool runtimec_kvspace_zero_width(runtimec_string_view_t langtype,
+                                        uint64_t *output_width) {
+    uint64_t element_count = 0U;
+    size_t cursor = 0U;
+    runtimec_string_view_t base;
+    uint64_t base_width = 0U;
+
+    *output_width = 0U;
+    /*
+     * ── 判据一：指针与扩展不是定宽 ─────────────────────────────────────
+     *
+     * `*T`（指针）与 `@T`（扩展定位）的 body 是**变长文本**（目标 key 路径 / 定位串），
+     * 而且空 body 是合法值（None）——所以它们的零宽是「没有固定宽度」：
+     * 帧准备不物化，首次写由存储层创建。
+     *
+     * 规范 `02-kvspace模型/06-XValueHead线格式.kv`：「指针**不是**定宽（空 body
+     * 即 None），帧准备不物化指针局部，首次写创建」。
+     *
+     * **必须排在形状判据之前**：`*[2]int32` 是指向定长数组的指针（不是定宽），
+     * 而 `[*]int32` 是变长数组（也不是定宽）——两者都拒绝，但理由不同：
+     * 前者因为「指针」、后者因为「变长维」。顺序写反会让 `*[2]int32` 先撞形状规则，
+     * 错误归因成「数组形状不认识」，而真正的原因是指针。
+     */
+    if (langtype.size != 0U &&
+        (langtype.data[0] == '*' || langtype.data[0] == '@')) {
+        return false;
+    }
+    /*
+     * ── 判据二：定长形状 ───────────────────────────────────────────────
+     *
+     * 只认**非空十进制维**：`[2]int32` / `[2,3]int32` / `[2][3]int32` 定宽；
+     * `[]` / `[?]` / `[*]` / `[+]` 的宽度由内容决定，不是定宽。
+     */
+    if (langtype.size != 0U && langtype.data[0] == '[') {
+        /*
+         * 找到形状前缀的结尾：连续的 `[..]` 组。剩下的才是基种类。
+         * 这里只找边界，不解释语义——`runtimec_kvspace_array_element_count`
+         * 负责判合法性。
+         */
+        while (cursor < langtype.size && langtype.data[cursor] == '[') {
+            while (cursor < langtype.size && langtype.data[cursor] != ']') {
+                cursor += 1U;
+            }
+            if (cursor >= langtype.size) {
+                return false; /* 没有闭合 */
+            }
+            cursor += 1U;
+        }
+        {
+            const runtimec_string_view_t shape =
+                runtimec_string_view_make(langtype.data, cursor);
+
+            if (!runtimec_kvspace_array_element_count(shape, &element_count)) {
+                return false;
+            }
+        }
+        base = runtimec_string_view_make(langtype.data + cursor,
+                                         langtype.size - cursor);
+        if (!runtimec_kvspace_base_width(base, &base_width)) {
+            return false;
+        }
+        if (element_count != 0U && base_width > UINT64_MAX / element_count) {
+            return false;
+        }
+        *output_width = element_count * base_width;
+        return true;
+    }
+    return runtimec_kvspace_base_width(langtype, output_width);
+}
+
 bool runtimec_kvspace_access_langtype_has_fixed_zero_width(
     runtimec_string_view_t langtype) {
     uint64_t width = 0U;
 
-    return runtimec_string_view_is_valid(langtype) && langtype.size != 0U &&
-           runtimec_kvspace_zero_width(langtype, &width);
+    return runtimec_kvspace_access_langtype_zero_width(langtype, &width);
+}
+
+bool runtimec_kvspace_access_langtype_zero_width(
+    runtimec_string_view_t langtype, uint64_t *output_width) {
+    if (output_width != NULL) {
+        *output_width = 0U;
+    }
+    if (output_width == NULL || !runtimec_string_view_is_valid(langtype) ||
+        langtype.size == 0U) {
+        return false;
+    }
+    return runtimec_kvspace_zero_width(langtype, output_width);
 }
 
 /*
@@ -1481,28 +1659,31 @@ runtimec_value_body_xvalue_address(
     return body_address - RUNTIMEC_XVALUE_BODY_OFFSET_BYTES;
 }
 
-/* 值头 storetype 只能是这几个档位；其它值说明地址根本不是值头。 */
-static int runtimec_value_header_store_type_is_known(uint8_t store_type) {
-    return store_type == KVSPACE_XVALUE_ST_SHORT ||
-           store_type == KVSPACE_XVALUE_ST_SLACK ||
-           store_type == KVSPACE_XVALUE_ST_LARGE ||
-           store_type == KVSPACE_XVALUE_ST_EXT ||
-           store_type == KVSPACE_XVALUE_ST_VARLEN;
-}
-
 /*
- * storetype 4（定容量变长）的**有效长度**：attr 区里的 tag 2 记录给出 `reallen`。
+ * `layout = 1`（定容量）的**有效长度**：attr 区里的 tag 2 记录给出 `reallen`。
  *
- * `head.bodylen` 在 storetype 4 下是**容量**，把容量当长度用会把容量余量当数据读，
- * 且不报错——所以这里必须单独取 `reallen`。
+ * `head.bodylen` 在 `layout=1` 下是**容量**，把容量当长度用会把容量余量当数据读，
+ * 且不报错——所以必须单独取 `reallen`。
  *
- * 取值规则（三方一致，见 `workspace/622/coding1/storetype4-matrix.md`）：
+ * ── tag 2 的归属是排他的（架构师裁决 2026-11-06）──────────────────────────
+ *
+ * `layout=1` 必须**恰有一条** tag 2；`layout=0` 必须**不带**。后者由本函数的调用方
+ * （`runtimec_value_body_length` / `runtimec_xvalue_body_from_wire`）另判——它们在
+ * `layout=0` 时**根本不调用本函数**，而是直接扫 attr 找 tag 2 并报错。
+ *
+ * 为什么严格：宽容解读等于把「写读双方对格式理解不一致」当作正常数据；这类畸形
+ * 一旦放行，就会变成「看起来能工作」的输入。
+ *
+ * 取值规则：
  *   - 缺 tag 2 / 记录长度非 8 / 重复 tag 2 / `reallen > bodylen` → 不可信，返回 0；
  *   - 尾部不足一条记录的残余字节**忽略**（与 kvspace-durable / kvspace-c 的扫描同语义）；
  *   - 数值从 `KVSPACE_XVALUE_ATTR_TAG_REALLEN` 取，**不写死 2**。
+ *
+ * 返回 false 表示「这个 attr 区在这条 layout 下不合法」——调用方据此具名失败，
+ * 而不是把 0 当长度继续（0 也是合法的空 body，两者必须分开）。
  */
-static uint64_t runtimec_value_varlen_effective_length(
-    const kvspaceXvalueHead *head) {
+static bool runtimec_value_capacity_effective_length(
+    const kvspaceXvalueHead *head, uint64_t *output_length) {
     const uint64_t capacity = kvspaceXvalueHeadLen(head);
     const uint64_t attrs_length = (uint64_t)kvspaceXvalueHeadAttrsLen(head);
     const uint8_t *attrs = (const uint8_t *)(const void *)head +
@@ -1510,16 +1691,18 @@ static uint64_t runtimec_value_varlen_effective_length(
     uint64_t left = attrs_length;
     int seen = 0;
     uint64_t reallen = 0U;
+
+    *output_length = 0U;
     while (left >= 3U) {
         const uint8_t tag = attrs[0];
         const uint16_t record_length =
             (uint16_t)((uint16_t)attrs[1] | ((uint16_t)attrs[2] << 8));
         if ((uint64_t)record_length + 3U > left) {
-            return 0U;
+            return false;
         }
         if (tag == KVSPACE_XVALUE_ATTR_TAG_REALLEN) {
             if (seen != 0 || record_length != 8U) {
-                return 0U;
+                return false;
             }
             uint64_t value = 0U;
             for (size_t i = 0U; i < 8U; ++i) {
@@ -1532,17 +1715,61 @@ static uint64_t runtimec_value_varlen_effective_length(
         left -= (uint64_t)record_length + 3U;
     }
     if (seen == 0 || reallen > capacity) {
-        return 0U;
+        return false;
     }
-    return reallen;
+    *output_length = reallen;
+    return true;
+}
+
+/*
+ * `layout = 0` 时必须**没有** tag 2——有就是畸形（排他判据的另一半）。
+ *
+ * 这条不合并进上面那个函数：两者的判据方向相反（一个要求「恰有一条」、一个要求
+ * 「一条都没有」），合并会让函数体内出现一个按 layout 分岔的 if，而分岔的理由
+ * 是**两条不同的规范条款**，读的人得先分辨当前走的是哪一条。
+ */
+static bool runtimec_value_has_no_reallen_tag(
+    const kvspaceXvalueHead *head) {
+    const uint64_t body_length = kvspaceXvalueHeadLen(head);
+    const uint64_t attrs_length = (uint64_t)kvspaceXvalueHeadAttrsLen(head);
+    const uint8_t *attrs = (const uint8_t *)(const void *)head +
+                           RUNTIMEC_XVALUE_BODY_OFFSET_BYTES + body_length;
+    uint64_t left = attrs_length;
+
+    while (left >= 3U) {
+        const uint8_t tag = attrs[0];
+        const uint16_t record_length =
+            (uint16_t)((uint16_t)attrs[1] | ((uint16_t)attrs[2] << 8));
+
+        if ((uint64_t)record_length + 3U > left) {
+            /* 残余字节忽略——与上面那个函数同语义。 */
+            return true;
+        }
+        if (tag == KVSPACE_XVALUE_ATTR_TAG_REALLEN) {
+            return false;
+        }
+        attrs += (size_t)record_length + 3U;
+        left -= (uint64_t)record_length + 3U;
+    }
+    return true;
 }
 
 /* 从值体地址往前挪头长度得到值头，长度从值头读。不可信一律返回 0。
  *
- * storetype 4 返回的是**有效长度（reallen）**而不是 `bodylen`（容量）：调用方
+ * `layout = 1` 返回的是**有效长度（reallen）**而不是 `bodylen`（容量）：调用方
  * （`vmbin/value_access`）拿它来定读写窗口，容量会把余量当数据。
  * `reallen == 0` 合法（容量已分配、无内容），与「不可信返回 0」在这里同值——
- * 两者的后果都是「读 0 字节」，不需要额外区分。 */
+ * 两者的后果都是「读 0 字节」，不需要额外区分。
+ *
+ * **本函数是全仓唯一读 attr tag 2 的入口**：将来谁要 `reallen`，调它，
+ * 不要另写一遍 attr 扫描（两遍扫描迟早对「重复 tag」「残余字节」这类边角判不同）。
+ *
+ * 三条非法（都返回 0，调用方无法区分——这是本函数的既有边界，因为返回类型是
+ * 「长度」不是「状态」）：
+ *   - `layout` 不是 0/1（保留值）；
+ *   - `padding` 非零；
+ *   - `layout=1` 但 tag 2 不合法（缺、重复、长度非 8、`reallen > 容量`）。
+ */
 uint32_t runtimec_value_body_length(runtimec_value_body_address_t body_address) {
     if (body_address == RUNTIMEC_VALUE_BODY_ADDRESS_NONE ||
         body_address < RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) {
@@ -1550,13 +1777,23 @@ uint32_t runtimec_value_body_length(runtimec_value_body_address_t body_address) 
     }
     const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)(uintptr_t)(
         body_address - RUNTIMEC_XVALUE_BODY_OFFSET_BYTES);
-    if (!runtimec_value_header_store_type_is_known(head->storetype)) {
+    uint64_t body_length = 0U;
+
+    if (!kvspaceXvalueHeadLayoutIsValid(head) ||
+        !kvspaceXvalueHeadPaddingIsZero(head)) {
         return 0U;
     }
-    const uint64_t body_length =
-        head->storetype == KVSPACE_XVALUE_ST_VARLEN
-            ? runtimec_value_varlen_effective_length(head)
-            : kvspaceXvalueHeadLen(head);
+    if (kvspaceXvalueHeadLayout(head) == KVSPACE_XVALUE_LAYOUT_CAPACITY) {
+        if (!runtimec_value_capacity_effective_length(head, &body_length)) {
+            return 0U;
+        }
+    } else {
+        /* `layout = 0`：tag 2 必须不带（排他判据的另一半）。 */
+        if (!runtimec_value_has_no_reallen_tag(head)) {
+            return 0U;
+        }
+        body_length = kvspaceXvalueHeadLen(head);
+    }
     return body_length > UINT32_MAX ? 0U : (uint32_t)body_length;
 }
 
@@ -1575,8 +1812,19 @@ uint32_t runtimec_value_body_length(runtimec_value_body_address_t body_address) 
  * **长度一律来自头，不从调用方传进来的 size 推**：attr 区长度只有头知道；
  * 用 `wire.size` 减出来的永远是「body + attr」。
  *
- * 任何不自洽（头读不出已知 storetype / body 或 attr 超出 wire）都返回空视图
- * （NULL / 0），不返回「有指针无长度」的半状态——**不猜，不截断到看起来合理**。
+ * ── `layout = 1` 时 `bodylen` 是容量，不是长度 ──────────────────────────
+ *
+ * 这一处最容易漏：函数体里「长度一律来自头」那句读起来像已经对了，但
+ * `kvspaceXvalueHeadLen` 在 `layout=1` 下给的是**容量**，直接把容量当 body 返回
+ * 会把容量余量（上一次写的旧字节）当成值的一部分。必须走
+ * `runtimec_value_body_length` 那条路，它才认 tag 2 的 `reallen`。
+ *
+ * 任何不自洽（`layout` 非法 / `padding` 非零 / tag 2 与其 layout 归属不符 /
+ * body 或 attr 超出 wire）都返回空视图（NULL / 0），不返回「有指针无长度」的
+ * 半状态——**不猜，不截断到看起来合理**。
+ *
+ * **不校验 langtype 可解析性**（架构师裁决 2026-11-06）：本函数的职责是「切出
+ * body」，langtype 可解析性归调用方。它连 langtype 都不读。
  */
 runtimec_string_view_t runtimec_xvalue_body_from_wire(
     runtimec_bytes_view_t wire) {
@@ -1586,17 +1834,30 @@ runtimec_string_view_t runtimec_xvalue_body_from_wire(
     }
     kvspaceXvalueHead head;
     memcpy(&head, wire.data, sizeof(head));
-    if (!runtimec_value_header_store_type_is_known(head.storetype)) {
+    if (!kvspaceXvalueHeadLayoutIsValid(&head) ||
+        !kvspaceXvalueHeadPaddingIsZero(&head)) {
         return runtimec_string_view_make(NULL, 0U);
     }
-    const uint64_t body_length = kvspaceXvalueHeadLen(&head);
+    /*
+     * attr 区先按容量定位（layout=1 时 bodylen 就是容量），再用
+     * `runtimec_value_body_length` 求有效长度——两处的「body 从哪里停」必须是
+     * 同一个答案，所以这里调它而不是自己再算一遍。
+     */
+    const uint64_t capacity = kvspaceXvalueHeadLen(&head);
     const uint64_t attrs_length = (uint64_t)kvspaceXvalueHeadAttrsLen(&head);
     const uint64_t available = (uint64_t)wire.size - (uint64_t)offset;
-    if (body_length > available || attrs_length > available - body_length) {
+    if (capacity > available || attrs_length > available - capacity) {
         return runtimec_string_view_make(NULL, 0U);
     }
-    return runtimec_string_view_make((const char *)wire.data + offset,
-                                     (size_t)body_length);
+    {
+        const uint32_t body_length = runtimec_value_body_length(
+            (runtimec_value_body_address_t)(uintptr_t)wire.data + offset);
+        if (body_length > capacity) {
+            return runtimec_string_view_make(NULL, 0U);
+        }
+        return runtimec_string_view_make((const char *)wire.data + offset,
+                                         (size_t)body_length);
+    }
 }
 
 void runtimec_kvspace_value_header_reset(runtimec_kvspace_value_header_t *header) {

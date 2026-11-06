@@ -419,7 +419,7 @@ def audit_addressed_binrwir_model(
             "binrwir_argument", "binrwir_argument_t",
             ("uint32_t argument_index",
              "uint8_t reference_kind",
-             "uint8_t reserved_8_bits",
+             "uint8_t dereference",
              "uint16_t slot",
              "uint64_t payload"),
             "sizeof(binrwir_argument_t) == 16U",
@@ -841,7 +841,7 @@ SELFTEST_ARGUMENT_HEADER = """\
 typedef struct binrwir_argument {
     uint32_t argument_index;
     uint8_t reference_kind;
-    uint8_t reserved_8_bits;
+    uint8_t dereference;
     uint16_t slot;
     uint64_t payload;
 } binrwir_argument_t;

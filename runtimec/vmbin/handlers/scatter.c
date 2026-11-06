@@ -565,7 +565,7 @@ static inline void scatter_append_build(
  * 跨形态是**显式**转换：没有任何算子会隐式跨形态（spec 的铁律）。
  */
 static void scatter_expand_from_compact(
-    const binrwir_execution_frame_t *frame,
+    binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     runtimec_string_view_t source_langtype;
@@ -585,14 +585,27 @@ static void scatter_expand_from_compact(
         source_type.element_size == 0U ||
         vmbin_value_access_locate_body(
             frame, &instruction->read_arguments.data[0], &source,
-            &error) != RUNTIMEC_STATUS_SUCCESS ||
-        !scatter_base_key(frame, &instruction->write_arguments.data[0], base,
-                          sizeof(base), output_exit)) {
+            &error) != RUNTIMEC_STATUS_SUCCESS) {
         if (output_exit->kind != BINRWIR_EXECUTION_EXIT_ERROR) {
             vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                                VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
                                output_exit->logical_program_counter);
         }
+        return;
+    }
+    /*
+     * **目标容器本身必须先存在**：写 `base·[i]` 成员之前，`base` 要有
+     * empty-body 的容器 marker、要有成员索引、还要**进绑定表**。
+     *
+     * 这一步走 `runtimec_container_open_marker`——容器值创建的唯一入口，与
+     * `map·new` 同一份实现。**不在这里自己拼 key**：key 的拼法只有一处。
+     *
+     * 少了它的后果实测过（`04-ndarray/ndarray_numel_scattered`）：成员
+     * `b·[0..2]` 都写进去了，但 `b` 本身不存在、绑定表里也没有它，随后
+     * `compactarray·numel(b)` 读它就是 `UNBOUND_SLOT`。
+     */
+    if (!runtimec_container_open_marker(frame, instruction, base, sizeof(base),
+                                        output_exit)) {
         return;
     }
     if (source_type.base.size + 1U > sizeof(element_langtype)) {
@@ -643,7 +656,7 @@ static void scatter_expand_from_compact(
 
 /* 逻辑函数：一句话——把 compact 数组展开成散列容器。 */
 static inline void scatter_newscatter_build(
-    const binrwir_execution_frame_t *frame,
+    binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     scatter_expand_from_compact(frame, instruction, output_exit);
@@ -661,7 +674,7 @@ static inline void scatter_newscatter_build(
  * 名字带方向：展开走 `scatter_expand_from_compact`，两者成员键构造规则相反。
  */
 static void scatter_pack_to_compact(
-    const binrwir_execution_frame_t *frame,
+    binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     char base[SCATTER_KEY_CAPACITY];
@@ -752,7 +765,7 @@ static void scatter_pack_to_compact(
 
 /* 逻辑函数：一句话——把散列容器压成连续 body。 */
 static inline void scatter_newcompact_build(
-    const binrwir_execution_frame_t *frame,
+    binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     scatter_pack_to_compact(frame, instruction, output_exit);

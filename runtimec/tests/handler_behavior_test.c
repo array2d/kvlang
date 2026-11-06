@@ -129,7 +129,7 @@ static void test_value_initialize(test_value_t *value, size_t body_size) {
 
     memset(value, 0, sizeof(*value));
     memset(&head, 0, sizeof(head));
-    head.storetype = KVSPACE_XVALUE_ST_SHORT;
+    kvspaceXvalueHeadSetLayout(&head, KVSPACE_XVALUE_LAYOUT_LENGTH);
     kvspaceXvalueHeadSetLen(&head, body_size);
     memcpy(value->storage, &head, KVSPACE_XVALUE_HEAD_LEN);
     value->body_size = body_size;
@@ -271,7 +271,7 @@ static runtimec_status_t run_case(const handler_case_t *test_case,
         uint32_t literal_index = 0U;
 
         memset(&head, 0, sizeof(head));
-        head.storetype = KVSPACE_XVALUE_ST_SHORT;
+        kvspaceXvalueHeadSetLayout(&head, KVSPACE_XVALUE_LAYOUT_LENGTH);
         kvspaceXvalueHeadSetLen(&head, test_case->read_sizes[ordinal]);
         memcpy(wire, &head, KVSPACE_XVALUE_HEAD_LEN);
         memcpy(wire + KVSPACE_XVALUE_HEAD_LEN, test_case->reads[ordinal],

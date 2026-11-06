@@ -27,6 +27,7 @@
 #include "binrwir_compiler/jit/executor.h"
 #include "contract/checkpoint.h"
 #include "engine/compilation_repository.h"
+#include "engine/frame_state.h"
 #include "engine/session.h"
 #include "vmbin/frame_slot.h"
 #include "vmbin/interpreter.h"
@@ -854,11 +855,25 @@ runtimec_status_t runtimec_execution_window_execute(
         RUNTIMEC_COMPILATION_REPOSITORY_LOOKUP_INVALID;
     binrwir_compilation_view_t compilation_view;
     binrwir_program_view_t program_view;
+    runtimec_frame_state_table_t *frame_state_table = NULL;
+    runtimec_frame_state_t *frame_state = NULL;
+    runtimec_frame_state_result_t frame_state_result = RUNTIMEC_FRAME_STATE_INVALID;
+    bool frame_state_opened = false;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_frame_t frame;
     binrwir_execution_exit_t execution_exit;
     runtimec_execution_window_diagnostic_t detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_INVALID_REQUEST;
     uint64_t binding_generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
+    /*
+     * 帧的**存储**代次，与 `binding_generation` 分开两个变量。
+     *
+     * 两者来源不同：`binding_generation` 是「绑这些槽那一刻适配器的代次」（由
+     * `bind_parameters` 写出，供 `frame->snapshot_generation` 用）；本变量是
+     * 「这帧目录的存储代次」（`frame_generation`，由 `‥lib` 那枚系统键给出）。
+     * 帧状态表判 REUSED/REBUILT 用的是后者——**判据与比较值必须同源**，
+     * 拿一个去比另一个就是在比两个不同的量。
+     */
+    uint64_t frame_storage_generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
     size_t binding_capacity = 0U;
     uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
     bool lease_held = false;
@@ -913,6 +928,14 @@ runtimec_status_t runtimec_execution_window_execute(
             output_result, error, RUNTIMEC_STATUS_INVALID,
             RUNTIMEC_EXECUTION_WINDOW_DIAG_INVALID_REQUEST,
             "cannot read the kvspace handle from the session");
+    }
+    if (runtimec_session_get_frame_state(session, &frame_state_table) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        frame_state_table == NULL) {
+        return runtimec_execution_window_fail(
+            output_result, error, RUNTIMEC_STATUS_INVALID,
+            RUNTIMEC_EXECUTION_WINDOW_DIAG_INVALID_REQUEST,
+            "session has no frame state table");
     }
 
     /* 1. 权威快照：source revision 是地址与 compilation 的共同世代。 */
@@ -1011,19 +1034,8 @@ runtimec_status_t runtimec_execution_window_execute(
         goto release_lease;
     }
 
-    /* 4. 顶层帧的形参绑定：代数取解析那一刻的真实存储版本，必须非零。 */
-    if (binrwir_frame_bindings_create(&host->allocator,
-                                      binding_capacity == 0U ? 1U
-                                                             : binding_capacity,
-                                      &bindings) != RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_execution_window_fail(output_result, error,
-                                     RUNTIMEC_STATUS_OUT_OF_MEMORY,
-                                     RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY,
-                                     "frame bindings allocation failed");
-        goto release_lease;
-    }
     /*
-     * 建帧先于一切：帧目录必须先存在，形参与 `‥pc` 的父路径才有着落，而
+     * 4. 建帧：帧目录必须先存在，形参与 `‥pc` 的父路径才有着落，而
      * 「这一帧在跑哪个函数」的事实（`‥lib`）也只有这里写。失败即整体失败，
      * 一条指令都不执行。
      */
@@ -1037,31 +1049,86 @@ runtimec_status_t runtimec_execution_window_execute(
             output_result, error, status,
             RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_ENSURE_FAILED,
             "frame could not be established");
-        goto release_bindings;
+        goto release_lease;
     }
-    status = runtimec_execution_window_materialize_locals(
-        host, &snapshot, compilation_view.canonical_program, request, bindings,
-        binding_capacity, &binding_generation, &detail, error);
+    /*
+     * 帧的存储代次先取：它属于**帧**，不属于「恰好第一个被绑上的槽」，而且
+     * 帧状态表要用它判 REUSED / REBUILT——所以必须在 `open` 之前拿到。
+     */
+    status = runtimec_kvspace_access_frame_generation(
+        host, &snapshot,
+        runtimec_key_view_make(request->frame_path.data,
+                               request->frame_path.size),
+        &frame_storage_generation, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         status = runtimec_execution_window_fail(
-            output_result, error, status, detail,
-            "local variables could not be materialized");
-        goto release_bindings;
+            output_result, error, status,
+            RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED,
+            "frame storage generation is unavailable");
+        goto release_lease;
     }
-    status = runtimec_execution_window_bind_parameters(
-        host, &snapshot, compilation_view.canonical_program, request, bindings,
-        &binding_generation, &detail, error);
+    /*
+     * 5. 帧状态：**跨 execute 存活**，所以向 session 要，而不是就地新建。
+     *
+     * 三态决定要不要重绑：
+     *   CREATED / REBUILT —— 新表，绑形参 + 物化局部；
+     *   REUSED            —— 同一张表，**跳过**两者。resume 时驱动给回的实参
+     *                        可能是旧的甚至空的，重绑会把运行时产生的局部覆盖掉，
+     *                        而缺失的局部是 `UNBOUND_SLOT`（`strings.kv` 的 0x4501）。
+     */
+    status = runtimec_frame_state_open(
+        frame_state_table,
+        runtimec_key_view_make(request->frame_path.data,
+                               request->frame_path.size),
+        request->function_path, frame_storage_generation, binding_capacity,
+        &frame_state, &frame_state_result, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_execution_window_fail(output_result, error, status, detail,
-                                     "frame parameter binding failed");
-        goto release_bindings;
+        status = runtimec_execution_window_fail(
+            output_result, error, status,
+            RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED,
+            "frame state could not be opened");
+        goto release_lease;
     }
-    if (binding_generation == BINRWIR_FRAME_BINDING_GENERATION_NONE) {
-        status = runtimec_execution_window_fail(output_result, error,
-                                     RUNTIMEC_STATUS_INVALID,
-                                     RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED,
-                                     "frame binding has no storage generation");
-        goto release_bindings;
+    frame_state_opened = true;
+    bindings = frame_state->bindings;
+    /*
+     * 帧的 `snapshot_generation` **必须**来自携带下来的状态，不是本次现取。
+     *
+     * 绑定表里每条绑定记的是「绑它那一刻的存储代次」；`bindings_get` 拿
+     * `frame->snapshot_generation` 去比。REUSED 时本次没有重绑，现取的代次与
+     * 表里那批可能已经不同（物化过写、地址搬过），一比就全判 `UNBOUND_SLOT`
+     * （`println` 因此报 `0x4501`）。所以这里统一用状态里记下的那一代；重绑分支
+     * 结束后再把它更新成重绑结果。
+     */
+    binding_generation = frame_state->generation;
+    if (frame_state_result != RUNTIMEC_FRAME_STATE_REUSED) {
+        status = runtimec_execution_window_materialize_locals(
+            host, &snapshot, compilation_view.canonical_program, request,
+            bindings, binding_capacity, &binding_generation, &detail, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            status = runtimec_execution_window_fail(
+                output_result, error, status, detail,
+                "local variables could not be materialized");
+            goto release_frame_state;
+        }
+        status = runtimec_execution_window_bind_parameters(
+            host, &snapshot, compilation_view.canonical_program, request,
+            bindings, &binding_generation, &detail, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            status = runtimec_execution_window_fail(
+                output_result, error, status, detail,
+                "frame parameter binding failed");
+            goto release_frame_state;
+        }
+        if (binding_generation == BINRWIR_FRAME_BINDING_GENERATION_NONE) {
+            status = runtimec_execution_window_fail(
+                output_result, error, RUNTIMEC_STATUS_INVALID,
+                RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED,
+                "frame binding has no storage generation");
+            goto release_frame_state;
+        }
+        /* 重绑完成后把结果记回状态：下一次 execute 的 REUSED 比较就比这一代。 */
+        frame_state->generation = binding_generation;
     }
     if (runtimec_execution_window_find_instruction(
             compilation_view.canonical_program,
@@ -1070,7 +1137,7 @@ runtimec_status_t runtimec_execution_window_execute(
         status = runtimec_execution_window_fail(
             output_result, error, RUNTIMEC_STATUS_INVALID, detail,
             "source program counter is not an instruction of this program");
-        goto release_bindings;
+        goto release_frame_state;
     }
     if (binrwir_execution_frame_initialize(
             &frame, compilation_view.canonical_program, NULL, binding_generation,
@@ -1080,7 +1147,7 @@ runtimec_status_t runtimec_execution_window_execute(
                                      RUNTIMEC_STATUS_INVALID,
                                      RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED,
                                      "execution frame initialization failed");
-        goto release_bindings;
+        goto release_frame_state;
     }
     /*
      * 值访问写路径需要 host 才能完成两件事：按 langtype 创建尚不存在的写目标
@@ -1235,9 +1302,40 @@ release_frame:
     if (frame_ready) {
         (void)binrwir_execution_frame_destroy(&frame);
     }
-release_bindings:
-    if (bindings != NULL) {
-        (void)binrwir_frame_bindings_destroy(bindings);
+release_frame_state:
+    /*
+     * 帧状态的去留**只看退出种类**：
+     *
+     *   DONE / ERROR —— 这一帧不会再被 execute，销毁绑定表并从表里移除；
+     *   CALL / HANDOFF / YIELD / WAIT 及其它 —— **保留**。驱动正是靠「对同一
+     *   frame_path 再 execute 一次」来 resume，销毁了就只剩形参，运行时绑的
+     *   局部槽全丢。
+     *
+     * 窗口**不销毁 bindings**：它归帧状态表，窗口只是借用。
+     */
+    if (frame_state_opened) {
+        /*
+         * 判据是「这次 execute 有没有交回可续跑的退出」，不是「kind 是不是
+         * DONE」。`status != SUCCESS` 时**任何 kind 都算终态**：execute 已经把
+         * 失败写进 error，这一帧不会再被续跑；留着它只会让状态表在 session 销毁
+         * 时说一句「残留 > 0」，而那句话正是缺陷的样子。
+         *
+         * 反过来 `status == SUCCESS` 且 kind 是 CALL/HANDOFF/YIELD 时**必须留**：
+         * 驱动正是靠对同一 frame_path 再 execute 一次来 resume。
+         */
+        const bool terminal =
+            status != RUNTIMEC_STATUS_SUCCESS ||
+            output_result->execution_exit.kind == BINRWIR_EXECUTION_EXIT_DONE ||
+            output_result->execution_exit.kind == BINRWIR_EXECUTION_EXIT_ERROR;
+        if (terminal) {
+            runtimec_error_t ignored;
+            runtimec_error_reset(&ignored);
+            (void)runtimec_frame_state_close(
+                frame_state_table,
+                runtimec_key_view_make(request->frame_path.data,
+                                       request->frame_path.size),
+                &ignored);
+        }
     }
 release_lease:
     if (lease_held) {

@@ -140,6 +140,9 @@ typedef struct runner_counts {
     size_t execution_failed;
     /* 编码期失败：layout 过了但成不了 Program。查编码器，不是查执行。 */
     size_t encode_failed;
+    /* 窗口期失败：建帧 / 物化 / 绑定 / 快照 / 仓库 / 编译缓存 —— 还没进解释器。
+     * 与执行期失败的区别不是「谁返回了失败」，而是**失败发生在哪一层**。 */
+    size_t window_failed;
 } runner_counts_t;
 
 /* blocked 记录：文件 + pc + 算子名。分组后就得到能力缺口表。 */
@@ -1170,7 +1173,7 @@ static void collect_cases(const char *root, const char *relative,
             continue;
         }
         /* `known-limitations/` 是**停靠区**，不是语料：里面的用例阻塞于已知的
-         * 能力缺口（如 head.ptr 恒 0 导致指针参数不可编码），跑起来只会贡献
+         * 能力缺口（如指针值的 langtype 缺 `*` 前缀导致形态判不出来），跑起来只会贡献
          * 「一条都不验」的噪声，且会把限制误读成回归。
          *
          * 跳过是**显式列举**目录名，不是按路径猜——名单只有一行，加新停靠区
@@ -1683,6 +1686,7 @@ int main(int argument_count, char **arguments) {
             fprintf(stderr, "FAIL %s: 无法建立 per-case store\n",
                     cases.paths[index]);
             counts.failed += 1U;
+                counts.window_failed += 1U;
             (void)case_store_close(&environment);
             continue;
         }
@@ -1691,6 +1695,7 @@ int main(int argument_count, char **arguments) {
         if (!declare_external_capabilities(&environment)) {
             fprintf(stderr, "FAIL %s: 无法声明外部能力\n", cases.paths[index]);
             counts.failed += 1U;
+                counts.window_failed += 1U;
             (void)case_store_close(&environment);
             continue;
         }
@@ -1715,6 +1720,7 @@ int main(int argument_count, char **arguments) {
                     "或负向\n",
                     cases.paths[index]);
             counts.failed += 1U;
+                counts.incomplete += 1U;
             (void)case_store_close(&environment);
             continue;
         }
@@ -1751,6 +1757,7 @@ int main(int argument_count, char **arguments) {
             fprintf(stderr, "FAIL %s: 缺 `// 期望输出:` 头\n", cases.paths[index]);
             missing_expectation += 1U;
             counts.failed += 1U;
+                counts.incomplete += 1U;
             (void)case_store_close(&environment);
             continue;
         }
@@ -1764,6 +1771,7 @@ int main(int argument_count, char **arguments) {
                     "FAIL %s: 期望输出超过 runner 容量 %u 行\n", cases.paths[index],
                     (unsigned)KVRUN_EXPECTATION_LINE_CAPACITY);
             counts.failed += 1U;
+                counts.incomplete += 1U;
             (void)case_store_close(&environment);
             continue;
         }
@@ -1773,6 +1781,7 @@ int main(int argument_count, char **arguments) {
                     cases.paths[index], expectation.line_overflow_index + 1U,
                     (unsigned)KVRUN_EXPECTATION_LINE_SIZE);
             counts.failed += 1U;
+                counts.incomplete += 1U;
             (void)case_store_close(&environment);
             continue;
         }
@@ -1808,6 +1817,7 @@ int main(int argument_count, char **arguments) {
                 fprintf(stderr, "FAIL %s: 预期 layout 失败，但它通过了\n",
                         cases.paths[index]);
                 counts.failed += 1U;
+                counts.encode_failed += 1U;
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1825,6 +1835,7 @@ int main(int argument_count, char **arguments) {
                         stderr_line,
                         error_text[0] != '\0' ? error_text : "(空)");
                 counts.failed += 1U;
+                counts.encode_failed += 1U;
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1881,6 +1892,7 @@ int main(int argument_count, char **arguments) {
             fprintf(stderr, "FAIL %s: layout failed: %s\n  实际 stderr 首行：%s\n",
                     cases.paths[index], error_text, stderr_line);
             counts.failed += 1U;
+                counts.encode_failed += 1U;
             (void)case_store_close(&environment);
             continue;
         }
@@ -1896,6 +1908,7 @@ int main(int argument_count, char **arguments) {
                 fprintf(stderr, "FAIL %s: cannot get components\n",
                         cases.paths[index]);
                 counts.failed += 1U;
+                counts.window_failed += 1U;
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1931,6 +1944,7 @@ int main(int argument_count, char **arguments) {
                 fprintf(stderr, "FAIL %s: source revision unavailable\n",
                         cases.paths[index]);
                 counts.failed += 1U;
+                counts.window_failed += 1U;
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1997,6 +2011,7 @@ int main(int argument_count, char **arguments) {
                 fprintf(stderr, "FAIL %s: get_view failed\n",
                         cases.paths[index]);
                 counts.failed += 1U;
+                counts.window_failed += 1U;
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -2049,6 +2064,7 @@ int main(int argument_count, char **arguments) {
                 fprintf(stderr, "FAIL %s: vthread identifier truncated\n",
                         cases.paths[index]);
                 counts.failed += 1U;
+                counts.window_failed += 1U;
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -2082,8 +2098,40 @@ int main(int argument_count, char **arguments) {
                         frame_exit.kind, (int)frame_exit.status,
                         frame_exit.detail_code,
                         frame_exit.logical_program_counter);
+                /*
+                 * **按「失败发生在哪一层」分类，不按「哪个 API 返回了失败」。**
+                 *
+                 * 此前这里一律 +execution_failed，于是教程四条在窗口期
+                 * `vmkv_local_types` 处的编码失败被记成「执行期失败」——数字
+                 * 不是错，是**标签在说谎**。窗口诊断码定义见
+                 * `engine/execution_window.c` 的
+                 * `runtimec_execution_window_diagnostic_t`。
+                 */
                 counts.failed += 1U;
-                counts.execution_failed += 1U;
+                switch (frame_exit.detail_code) {
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_ENCODE_FAILED:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_SPECIALIZE_FAILED:
+                    counts.encode_failed += 1U;
+                    break;
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_MISSING_HOST_CAPABILITY:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_SNAPSHOT_FAILED:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_REPOSITORY_FAILED:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_COMPILE_FAILED:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_COMPILATION_INVALID:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_PROGRAM_COUNTER_NOT_FOUND:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_ENSURE_FAILED:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_CHECKPOINT_FAILED:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY:
+                case RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_MATERIALIZE_FAILED:
+                    counts.window_failed += 1U;
+                    break;
+                default:
+                    counts.execution_failed += 1U;
+                    break;
+                }
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -2118,6 +2166,7 @@ int main(int argument_count, char **arguments) {
                         frame_exit.logical_program_counter,
                         stderr_line);
                 counts.failed += 1U;
+                counts.execution_failed += 1U;
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -2165,7 +2214,9 @@ int main(int argument_count, char **arguments) {
                     }
                     break;
                 default:
+                    /* 四态之外的返回值 = harness 自己判不了，不是被测对象失败。 */
                     counts.failed += 1U;
+                    counts.incomplete += 1U;
                     break;
             }
         }
@@ -2194,11 +2245,11 @@ int main(int argument_count, char **arguments) {
     /* fail 的细分按**修复方向**排，不按发生顺序：
      *   未观测到    → 查链路（输出没接上）
      *   执行期失败  → 查链路（带错误码，看 status/detail）
-     *   编码期失败  → 查编码器
+     *   编译期失败  → 查 layout / 编码器
      *   期望不符    → 查实现或期望
      *   用例不完整  → 补用例
      *   其中预期失败 → 负向用例正常工作，不是失败 */
-    printf("  细分：未观测到 %zu、执行期失败 %zu、编码期失败 %zu、"
+    printf("  细分：未观测到 %zu、执行期失败 %zu、编译期失败 %zu、"
            "期望不符 %zu、用例不完整 %zu、其中预期失败 %zu\n",
            counts.unobserved, counts.execution_failed, counts.encode_failed,
            counts.expectation_wrong, counts.incomplete, counts.expected_failed);
@@ -2218,6 +2269,23 @@ int main(int argument_count, char **arguments) {
      *
      * 判据：**任何比值的分母若由计算分子的同一段代码挑选，这个比值就没有信息量。**
      * 现在写成 `executed X / 总数 N`，读的人自己能看到「那 N-X 条不在分子里」。 */
+    /*
+     * **分类完整性自检**：fail 合计必须等于五个分类之和。
+     *
+     * 不等时**必须吼出来**——这正是「总数相等藏不住子项错」的反面：总数不等
+     * 说明有失败路径没被任何标签接住，而它此前是静默的（`counts.failed += 1U`
+     * 散落在十几处，谁忘了加分类都没人知道）。这里不猜它属于哪一类，只报告
+     * 「有多少条没归类」，让写的人去补。
+     */
+    {
+        const size_t classified = counts.encode_failed + counts.window_failed +
+                                  counts.execution_failed +
+                                  counts.expectation_wrong + counts.incomplete;
+        /* **0 也照打**：不打印的话，「没有 GAP 行」与「自检没跑」无法区分。 */
+        printf("CLASSIFICATION GAP: %zu failures are unclassified "
+               "(failed %zu, classified %zu)\n",
+               counts.failed - classified, counts.failed, classified);
+    }
     printf("通过 executed %zu / 总数 %zu 条用例\n", counts.executed, cases.count);
     /* `仅编码通过` = pass 里既不是 executed、也不是预期失败的那部分。
      *
@@ -2226,9 +2294,10 @@ int main(int argument_count, char **arguments) {
      * 只减 expected_failed 会让它等于 executed，那是又一次「算式看着对、口径错了」。
      * 这个数当前恒为 0，因为 blocked 一出现就不进 pass；留着它是为了将来有
      * 「跑起来了但无输出、也不算失败」的形态时不用改汇总。 */
-    printf("  按阶段：编码期失败 %zu、执行期失败 %zu、未观测到 %zu、"
+    printf("  按阶段：编译期失败 %zu、窗口期失败 %zu、执行期失败 %zu、未观测到 %zu、"
            "期望不符 %zu、用例不完整 %zu、仅编码通过 %zu、预期失败 %zu\n",
-           counts.encode_failed, counts.execution_failed, counts.unobserved,
+           counts.encode_failed, counts.window_failed, counts.execution_failed,
+           counts.unobserved,
            counts.expectation_wrong, counts.incomplete,
            counts.passed - counts.expected_failed - counts.executed,
            counts.expected_failed);

@@ -165,9 +165,9 @@ static const declared_gap_t kDeclaredGaps[] = {
     /* 安装签名族：读侧零操作数、写侧有值、`result_rule = IDENTITY`。
      * 特化表里连一行都没有是**必然**（特化是「按操作数类型选行」，它们没有
      * 操作数），不是遗漏。补实现时不能照 `scalar_transcendental` 模板。 */
-    /* `&x` 会被 layout emit 成真指令（dump 实测 `[2,0] kvlang·abs`），
+    /* `&x` 会被 layout emit 成真指令（dump 实测 `[2,0] kvspace/key·abs`），
      * 所以不是「从不执行」；它属指针一等值那次双侧改动。 */
-    {0x01A2U, "kvlang·abs", "指针一等值立项"},
+    {0x01A2U, "kvspace/key·abs", "指针一等值立项"},
 };
 
 /* 该 opid 是否在声明清单里；命中时返回那条实体（自失效检查要看它）。 */

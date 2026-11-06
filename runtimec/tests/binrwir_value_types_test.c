@@ -26,7 +26,7 @@ static binrwir_argument_t argument(uint32_t argument_index,
     binrwir_argument_t result = {
         .argument_index = argument_index,
         .reference_kind = BINRWIR_REFERENCE_STATIC,
-        .reserved_8_bits = 0U,
+        .dereference = 0U,
         .slot = 0U,
         .payload = body_address,
     };
@@ -125,7 +125,7 @@ static void test_instruction_request_rejects_inconsistent_spans(void) {
                     RUNTIMEC_STATUS_INVALID);
 
     bad_argument = argument(0U, UINT64_C(0x1008));
-    bad_argument.reserved_8_bits = 1U;
+    bad_argument.dereference = 2U;  /* 0/1 之外的值才非法 */
     request = simple_request();
     request.write_arguments.data = &bad_argument;
     RUNTIMEC_EXPECT(binrwir_instruction_validate_build_request(&request) ==

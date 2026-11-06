@@ -238,3 +238,52 @@ runtimec_status_t string_text_decode(runtimec_bytes_view_t bytes,
 bool string_text_encoding_is_fixed_width(runtimec_string_view_t langtype) {
     return string_encoding_of(langtype) == STRING_ENCODING_UTF32;
 }
+
+/* 编码 → 它的**裸种类名**（`char/utf8` 这类，不带维度段）。表只有这一份。 */
+static runtimec_string_view_t string_encoding_name(enum string_encoding encoding) {
+    switch (encoding) {
+    case STRING_ENCODING_UTF8:
+        return runtimec_string_view_from_c_string("char/utf8");
+    case STRING_ENCODING_UTF32:
+        return runtimec_string_view_from_c_string("char/utf32");
+    case STRING_ENCODING_ASCII:
+        return runtimec_string_view_from_c_string("char/ascii");
+    case STRING_ENCODING_INVALID:
+        break;
+    }
+    return runtimec_string_view_make(NULL, 0U);
+}
+
+runtimec_status_t string_text_common_encoding(runtimec_string_view_t left,
+                                              runtimec_string_view_t right,
+                                              runtimec_string_view_t *output) {
+    const enum string_encoding left_encoding = string_encoding_of(left);
+    const enum string_encoding right_encoding = string_encoding_of(right);
+
+    *output = runtimec_string_view_make(NULL, 0U);
+    if (left_encoding == STRING_ENCODING_INVALID ||
+        right_encoding == STRING_ENCODING_INVALID) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    if (left_encoding == right_encoding) {
+        *output = string_encoding_name(left_encoding);
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    /*
+     * 不同编码：只有一条能成立——**一侧是 ascii**。它是 utf8 与 utf32 的共同
+     * 子集，另一侧的表示能无歧义地容纳它，所以结果取另一侧。
+     *
+     * utf8 与 utf32 不同且都不是 ascii ⇒ 没有共同编码（它们不是子集关系，
+     * 互相转换是**字符集转换**，必须由源码显式写出）。静默选一个会让同一份程序
+     * 在不同输入上产出不同字节布局。
+     */
+    if (left_encoding == STRING_ENCODING_ASCII) {
+        *output = string_encoding_name(right_encoding);
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    if (right_encoding == STRING_ENCODING_ASCII) {
+        *output = string_encoding_name(left_encoding);
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    return RUNTIMEC_STATUS_INVALID;
+}

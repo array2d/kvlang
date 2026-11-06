@@ -74,11 +74,11 @@ static bool store_text(                       void *handle, const char *key, con
 static bool store_int64(                        void *handle, const char *key, int64_t value) {
     uint8_t wire[KVSPACE_XVALUE_HEAD_LEN + 8U];
     memset(wire, 0, sizeof(wire));
-    /* 16 字节 head：bodylen(u64)@0、attrslen(u32)@8、storetype@12、inline@13、
-     * padding@14-15；无 attr 时 attrslen = 0。按字节偏移拼，不写结构体字段名。 */
+    /* 16 字节 head：bodylen(u64)@0、attrslen(u32)@8、layout@12、padding@13-15；
+     * 无 attr 时 attrslen = 0。按字节偏移拼，不写结构体字段名。
+     * 新格式没有 storetype/ptr：存储形态与引用性都在 langtype（本夹具无类型）。 */
     wire[0] = 8U;                       /* bodylen = 8，小端 */
-    wire[12] = KVSPACE_XVALUE_ST_SHORT;
-    wire[13] = 0U;                      /* 指向形态：0 = 值内联 */
+    wire[12] = KVSPACE_XVALUE_LAYOUT_LENGTH;
     for (size_t index = 0U; index < 8U; index++) {
         wire[KVSPACE_XVALUE_HEAD_LEN + index] =
             (uint8_t)(((uint64_t)value >> (8U * index)) & 0xffU);
@@ -206,9 +206,12 @@ int main(int argument_count, char **arguments) {
         (const kvspaceXvalueHead *)(uintptr_t)address;
     EXPECT(head != NULL);
     if (head != NULL) {
-        EXPECT(head->storetype <= KVSPACE_XVALUE_ST_EXT);
-        /* 第 8 字节（偏移 7）是指向形态：0 = 值内联。按偏移读，不写字段名。 */
-        EXPECT(((const uint8_t *)head)[7] == 0U);
+        /* layout 只能是 0/1；padding 必须为零——这是新头唯一的自洽判据。 */
+        EXPECT(head->layout == KVSPACE_XVALUE_LAYOUT_LENGTH ||
+               head->layout == KVSPACE_XVALUE_LAYOUT_CAPACITY);
+        EXPECT(((const uint8_t *)head)[13] == 0U &&
+               ((const uint8_t *)head)[14] == 0U &&
+               ((const uint8_t *)head)[15] == 0U);
     }
 
     /* 1b. 真实后端上的帧地址解析：走 /vthread 槽，给出基址 + generation。 */

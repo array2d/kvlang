@@ -356,7 +356,7 @@ static runtimec_status_t test_program_build_local_round_trip(
         kvspaceXvalueHead head;
 
         memset(&head, 0, sizeof(head));
-        head.storetype = KVSPACE_XVALUE_ST_SHORT;
+        head.layout = KVSPACE_XVALUE_LAYOUT_LENGTH;
         head.bodylen = sizeof(literal_body);
         head.attrslen = 0U;
         memcpy(literal_wire, &head, KVSPACE_XVALUE_HEAD_LEN);

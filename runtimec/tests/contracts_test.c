@@ -41,14 +41,14 @@ _Static_assert(offsetof(binrwir_argument_t, argument_index) == 0U,
                "BinRWIR argidx offset changed");
 _Static_assert(offsetof(binrwir_argument_t, reference_kind) == 4U,
                "BinRWIR reference kind offset changed");
-_Static_assert(offsetof(binrwir_argument_t, reserved_8_bits) == 5U,
+_Static_assert(offsetof(binrwir_argument_t, dereference) == 5U,
                "BinRWIR reserved byte offset changed");
 _Static_assert(offsetof(binrwir_argument_t, slot) == 6U,
                "BinRWIR slot offset changed");
 _Static_assert(offsetof(binrwir_argument_t, payload) == 8U,
                "BinRWIR payload offset changed");
-_Static_assert(BINRWIR_BINARY_INTERFACE_GENERATION == 5U,
-               "BinRWIR binary interface generation must be 5");
+_Static_assert(BINRWIR_BINARY_INTERFACE_GENERATION == 6U,
+               "BinRWIR binary interface generation must be 6");
 _Static_assert(sizeof(binrwir_alias_rule_t) == 12U,
                "alias rules must remain twelve bytes");
 _Static_assert(sizeof(binrwir_instruction_t) == 2U,
@@ -73,7 +73,7 @@ static void test_plain_data_copy_round_trip(void) {
     const binrwir_argument_t initial_argument = {
         .argument_index = 7U,
         .reference_kind = BINRWIR_REFERENCE_STATIC,
-        .reserved_8_bits = 0U,
+        .dereference = 0U,
         .slot = 0U,
         .payload = UINT64_C(0x1000),
     };
@@ -94,7 +94,7 @@ static void test_reference_argument_failure_shape(void) {
     binrwir_argument_t argument = {
         .argument_index = UINT32_MAX,
         .reference_kind = UINT8_MAX,
-        .reserved_8_bits = UINT8_MAX,
+        .dereference = UINT8_MAX,
         .slot = UINT16_MAX,
         .payload = UINT64_MAX,
     };
@@ -110,7 +110,7 @@ static void test_reference_argument_failure_shape(void) {
         &argument) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(argument.argument_index == 3U);
     RUNTIMEC_EXPECT(argument.reference_kind == BINRWIR_REFERENCE_STATIC);
-    RUNTIMEC_EXPECT(argument.reserved_8_bits == 0U);
+    RUNTIMEC_EXPECT(argument.dereference == 0U);
     RUNTIMEC_EXPECT(argument.slot == 0U);
     RUNTIMEC_EXPECT(argument.payload == BINRWIR_BODY_ADDRESS_NONE);
 
@@ -146,7 +146,7 @@ static void test_reference_argument_failure_shape(void) {
     RUNTIMEC_EXPECT(binrwir_argument_validate(&argument) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
-    argument.reserved_8_bits = 1U;
+    argument.dereference = 2U;  /* 0/1 之外的值才非法 */
     RUNTIMEC_EXPECT(binrwir_argument_validate(&argument) ==
                     RUNTIMEC_STATUS_INVALID);
 }
@@ -214,13 +214,13 @@ static void test_xvalue_body_address(void) {
                     UINT64_MAX);
 }
 
-/* 逆运算：从值体地址读回长度；零地址、下溢、坏 storetype 都返回 0。 */
+/* 逆运算：从值体地址读回长度；零地址、下溢、坏 layout/padding 都返回 0。 */
 static void test_value_body_length(void) {
     uint8_t storage[KVSPACE_XVALUE_HEAD_LEN + 8U];
     memset(storage, 0, sizeof(storage));
     kvspaceXvalueHead head;
     memset(&head, 0, sizeof(head));
-    head.storetype = KVSPACE_XVALUE_ST_SHORT;
+    kvspaceXvalueHeadSetLayout(&head, KVSPACE_XVALUE_LAYOUT_LENGTH);
     kvspaceXvalueHeadSetLen(&head, 8U);
     memcpy(storage, &head, sizeof(head));
     const runtimec_value_body_address_t body =
@@ -234,10 +234,16 @@ static void test_value_body_length(void) {
     RUNTIMEC_EXPECT(runtimec_value_body_length(
                         RUNTIMEC_XVALUE_BODY_OFFSET_BYTES - 1U) == 0U);
 
-    /* storetype 不可信：地址前面不是值头。偏移经 offsetof，不写死。 */
-    storage[offsetof(kvspaceXvalueHead, storetype)] = 0x7fU;
+    /* layout 不可信（保留值）：地址前面不是自洽的值头。偏移经 offsetof，不写死。 */
+    storage[offsetof(kvspaceXvalueHead, layout)] = 0x7fU;
     RUNTIMEC_EXPECT(runtimec_value_body_length(body) == 0U);
-    storage[offsetof(kvspaceXvalueHead, storetype)] = KVSPACE_XVALUE_ST_SLACK;
+    storage[offsetof(kvspaceXvalueHead, layout)] = KVSPACE_XVALUE_LAYOUT_LENGTH;
+    RUNTIMEC_EXPECT(runtimec_value_body_length(body) == 8U);
+
+    /* padding 非零：ABI 校验，读路径必须先过这一关。 */
+    storage[offsetof(kvspaceXvalueHead, padding)] = 1U;
+    RUNTIMEC_EXPECT(runtimec_value_body_length(body) == 0U);
+    storage[offsetof(kvspaceXvalueHead, padding)] = 0U;
     RUNTIMEC_EXPECT(runtimec_value_body_length(body) == 8U);
 
     /* 与 +8 互逆：基址 → 值体 → 长度，长度就是值头声明的 len。 */
@@ -283,13 +289,13 @@ static void test_xvalue_head_sixteen_byte_layout(void) {
     memset(&head, 0, sizeof(head));
     kvspaceXvalueHeadSetLen(&head, 8U);
     kvspaceXvalueHeadSetAttrsLen(&head, 8U);
-    head.storetype = KVSPACE_XVALUE_ST_SLACK;
+    kvspaceXvalueHeadSetLayout(&head, KVSPACE_XVALUE_LAYOUT_CAPACITY);
 
     RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, bodylen) == 0U);
     RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, attrslen) == 8U);
-    RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, storetype) == 12U);
-    /* 指针形态字段偏移 13、padding 偏移 14：只验位置，不引用上游标识符。 */
-    RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, padding) == 14U);
+    RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, layout) == 12U);
+    /* padding 是 3 字节，从 13 起——head 只描述字节布局，没有 storetype/ptk 字段了。 */
+    RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, padding) == 13U);
     RUNTIMEC_EXPECT(sizeof(kvspaceXvalueHead) == 16U);
     RUNTIMEC_EXPECT(KVSPACE_XVALUE_HEAD_LEN == 16U);
     RUNTIMEC_EXPECT(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == KVSPACE_XVALUE_HEAD_LEN);
@@ -304,7 +310,7 @@ static void test_xvalue_head_sixteen_byte_layout(void) {
     for (size_t index = 9U; index < 12U; ++index) {
         RUNTIMEC_EXPECT(bytes[index] == 0U);
     }
-    RUNTIMEC_EXPECT(bytes[12] == KVSPACE_XVALUE_ST_SLACK);
+    RUNTIMEC_EXPECT(bytes[12] == KVSPACE_XVALUE_LAYOUT_CAPACITY);
     RUNTIMEC_EXPECT(bytes[14] == 0U);
     RUNTIMEC_EXPECT(bytes[15] == 0U);
 
@@ -359,8 +365,7 @@ static uint8_t *contracts_make_varlen(uint64_t capacity, int64_t reallen,
     }
     kvspaceXvalueHead head;
     memset(&head, 0, sizeof(head));
-    head.storetype = KVSPACE_XVALUE_ST_VARLEN;
-    head.ptr = KVSPACE_XVALUE_PTR_INLINE;
+    kvspaceXvalueHeadSetLayout(&head, KVSPACE_XVALUE_LAYOUT_CAPACITY);
     kvspaceXvalueHeadSetLen(&head, capacity);
     kvspaceXvalueHeadSetAttrsLen(&head, (uint32_t)attrs_length);
     memcpy(wire, &head, sizeof(head));
@@ -479,7 +484,7 @@ static void contracts_test_non_varlen_uses_body_length(void) {
 
     memset(slack_wire, 0, sizeof(slack_wire));
     memset(&head, 0, sizeof(head));
-    head.storetype = KVSPACE_XVALUE_ST_SLACK;
+    kvspaceXvalueHeadSetLayout(&head, KVSPACE_XVALUE_LAYOUT_LENGTH);
     kvspaceXvalueHeadSetLen(&head, 8U);
     memcpy(slack_wire, &head, sizeof(head));
     RUNTIMEC_EXPECT(runtimec_value_body_length(
@@ -517,6 +522,113 @@ static void contracts_test_varlen_ambiguity_is_known(void) {
 }
 
 /*
+ * `layout=0` 却带 tag 2 —— **非法**（架构师裁决 2026-11-06）。
+ *
+ * 判据与 `kvspace/include/kvspace/xvalue_head.h` 的头注释一致：「tag 2 的归属是
+ * **排他**的：`layout=1` 必须恰有一条、`layout=0` 必须不带」。
+ *
+ * 为什么严格而不是忽略：宽容解读等于把「写读双方对格式理解不一致」当作正常数据；
+ * 这类畸形一旦放行，就会变成「看起来能工作」的输入。
+ *
+ * 这条是**反向对照**：若哪天实现改回「忽略多余 tag 2」，它会从「返回 0」变成
+ * 「返回 bodylen」，断言立刻红。
+ */
+static void contracts_test_length_layout_rejects_reallen_tag(void) {
+    /* 复用 varlen fixture（它建的是 layout=1 + tag 2），把 layout 改回 0。 */
+    uint8_t *wire = contracts_make_varlen(16U, 8, 0, 0, 0U);
+
+    RUNTIMEC_EXPECT(wire != NULL);
+    if (wire == NULL) {
+        return;
+    }
+    /* layout=1 + tag 2：合法，返回 reallen=8。 */
+    RUNTIMEC_EXPECT(runtimec_value_body_length(contracts_varlen_body(wire)) == 8U);
+    /* 同一份字节，只把 layout 改成 0：tag 2 变成不该有的记录 ⇒ 非法。 */
+    wire[offsetof(kvspaceXvalueHead, layout)] = KVSPACE_XVALUE_LAYOUT_LENGTH;
+    RUNTIMEC_EXPECT(runtimec_value_body_length(contracts_varlen_body(wire)) == 0U);
+    free(wire);
+}
+
+/*
+ * `layout >= 2` —— **非法**（保留值）。
+ *
+ * head 头注释：「layout 其余取值保留且必须为零，非零按非法处理」。这里断的是
+ * 「读取方不会拿一个不认识的 layout 猜语义」。
+ */
+static void contracts_test_reserved_layout_is_rejected(void) {
+    uint8_t storage[KVSPACE_XVALUE_HEAD_LEN + 8U];
+
+    memset(storage, 0, sizeof(storage));
+    {
+        kvspaceXvalueHead head;
+
+        memset(&head, 0, sizeof(head));
+        kvspaceXvalueHeadSetLen(&head, 8U);
+        kvspaceXvalueHeadSetLayout(&head, KVSPACE_XVALUE_LAYOUT_LENGTH);
+        memcpy(storage, &head, sizeof(head));
+    }
+    {
+        const runtimec_value_body_address_t body =
+            (runtimec_value_body_address_t)(uintptr_t)storage +
+            RUNTIMEC_XVALUE_BODY_OFFSET_BYTES;
+
+        RUNTIMEC_EXPECT(runtimec_value_body_length(body) == 8U);
+        for (uint8_t reserved = 2U; reserved <= 4U; ++reserved) {
+            storage[offsetof(kvspaceXvalueHead, layout)] = reserved;
+            RUNTIMEC_EXPECT(runtimec_value_body_length(body) == 0U);
+        }
+        /* 空 body 视图同理：`xvalue_body_from_wire` 也必须拒。 */
+        storage[offsetof(kvspaceXvalueHead, layout)] = 3U;
+        {
+            const runtimec_string_view_t body_view =
+                runtimec_xvalue_body_from_wire(
+                    runtimec_bytes_view_make(storage, sizeof(storage)));
+
+            RUNTIMEC_EXPECT(body_view.data == NULL && body_view.size == 0U);
+        }
+    }
+}
+
+/*
+ * `*T` / `@T` 不是定宽（架构师裁决 2026-11-06）。
+ *
+ * 规范 `02-kvspace模型/06-XValueHead线格式.kv`：「指针**不是**定宽（空 body
+ * 即 None），帧准备不物化指针局部，首次写创建」。
+ *
+ * 两条**必须分开验**，因为它们拒绝的理由不同（见 `runtimec_kvspace_zero_width`
+ * 的判据顺序注释）：
+ *   `*[2]int32` —— 指针（形状是定长的，但这个值是指针，body 是变长路径）
+ *   `[*]int32`  —— 变长维（不是指针，但形状不定长）
+ *
+ * 若实现把顺序写反，`*[2]int32` 会先撞形状规则，**仍然返回 false**——
+ * 所以仅看 false 分不出对错。这里额外钉住「基种类剥掉前缀后仍是合法标量」，
+ * 说明拒绝确实发生在指针判据那一支。
+ */
+static void contracts_test_pointer_and_ext_are_variable_width(void) {
+    static const char *const pointer_langtypes[] = {
+        "*int64", "*[2]int32", "*[]int32", "@[]uint8", "@int64",
+    };
+
+    for (size_t ordinal = 0U;
+         ordinal < sizeof(pointer_langtypes) / sizeof(pointer_langtypes[0]);
+         ++ordinal) {
+        uint64_t width = 123U;
+
+        RUNTIMEC_EXPECT(!runtimec_kvspace_access_langtype_zero_width(
+            runtimec_string_view_from_c_string(pointer_langtypes[ordinal]),
+            &width));
+        RUNTIMEC_EXPECT(width == 0U);
+        RUNTIMEC_EXPECT(!runtimec_kvspace_access_langtype_has_fixed_zero_width(
+            runtimec_string_view_from_c_string(pointer_langtypes[ordinal])));
+    }
+    /* 反向对照：去掉前缀后同一个类型**是**定宽——证明拒绝来自前缀判据。 */
+    RUNTIMEC_EXPECT(runtimec_kvspace_access_langtype_has_fixed_zero_width(
+        runtimec_string_view_from_c_string("[2]int32")));
+    RUNTIMEC_EXPECT(runtimec_kvspace_access_langtype_has_fixed_zero_width(
+        runtimec_string_view_from_c_string("int64")));
+}
+
+/*
  * 定宽零值宽度表的**三分类**（`runtimec/contract/kvspace_access.c` 的
  * `runtimec_kvspace_width_table`）。
  *
@@ -541,6 +653,67 @@ static void contracts_test_character_scalars_are_fixed_width(void) {
         runtimec_string_view_from_c_string("char/ascii")));
 }
 
+/*
+ * 定长数组的零值宽度：`[N]K` 与 `[d0,d1,…]K`。
+ *
+ * 判据（架构师 2026-11-06 裁）：定长维 ⇒ 宽度 = 各维乘积 × 基种类宽度；
+ * 变长维（`[]`/`[?]`/`[*]`/`[+]`）⇒ 不是定宽；未知基种类 ⇒ 不是定宽。
+ *
+ * 为什么这条重要：`vthread·pc()` 的 `result1` 是 `[2]int32`（spec
+ * `05-runtime语义/02-执行模型-续.kv:26-40`）。槽不物化，第一个写就 UNBOUND_SLOT。
+ */
+static void contracts_test_fixed_array_zero_width(void) {
+    struct {
+        const char *langtype;
+        uint64_t width;
+    } cases[] = {
+        {"[2]int32", 8U},
+        {"[3]float64", 24U},
+        {"[2,3]int32", 24U},
+        {"[1]int8", 1U},
+        {"[2][3]int32", 24U},   /* 嵌套形状逐层相乘 */
+        {"[2]char/utf32", 8U},  /* 基种类是定宽字符 */
+    };
+    for (size_t ordinal = 0U; ordinal < sizeof(cases) / sizeof(cases[0]);
+         ++ordinal) {
+        uint64_t width = 0U;
+        RUNTIMEC_EXPECT(runtimec_kvspace_access_langtype_zero_width(
+            runtimec_string_view_from_c_string(cases[ordinal].langtype),
+            &width));
+        RUNTIMEC_EXPECT(width == cases[ordinal].width);
+        RUNTIMEC_EXPECT(runtimec_kvspace_access_langtype_has_fixed_zero_width(
+            runtimec_string_view_from_c_string(cases[ordinal].langtype)));
+    }
+}
+
+/*
+ * 反向对照：**变长数组不能被物化**。
+ *
+ * 这不是「暂未实现」——`[]int32` 的零值长度是 0，物化出一个零长槽会让第一次
+ * 真实写必失败（写入要求等长）。所以它们必须走创建路径。
+ */
+static void contracts_test_variable_array_is_not_fixed_width(void) {
+    static const char *const langtypes[] = {
+        "[]int32",   /* 空维 */
+        "[?]int32",  /* 问号 */
+        "[*]int32",  /* 星号 */
+        "[+]int32",  /* 加号 */
+        "[2,]/lib/Node", /* 逗号后空 */
+        "[2]/lib/Node",  /* 已知形状但基种类是容器 */
+        "[]char/utf8",   /* 变长字符 */
+    };
+    for (size_t ordinal = 0U;
+         ordinal < sizeof(langtypes) / sizeof(langtypes[0]); ++ordinal) {
+        uint64_t width = 123U; /* 哨兵：失败时必须被清零 */
+
+        RUNTIMEC_EXPECT(!runtimec_kvspace_access_langtype_zero_width(
+            runtimec_string_view_from_c_string(langtypes[ordinal]), &width));
+        RUNTIMEC_EXPECT(width == 0U);
+        RUNTIMEC_EXPECT(!runtimec_kvspace_access_langtype_has_fixed_zero_width(
+            runtimec_string_view_from_c_string(langtypes[ordinal])));
+    }
+}
+
 static void contracts_test_utf8_character_is_variable_width(void) {
     /* 第 2 类：`char/utf8` 的宽度取决于内容（1–4 字节），不能进定宽表。 */
     RUNTIMEC_EXPECT(!runtimec_kvspace_access_langtype_has_fixed_zero_width(
@@ -548,13 +721,34 @@ static void contracts_test_utf8_character_is_variable_width(void) {
 }
 
 static void contracts_test_character_array_is_not_fixed_width(void) {
-    /* 第 2 类：数组形态字符串按完整串匹配，不是定宽标量。
-     * 这一条是**反向对照**——若哪天把 `[]char/utf32` 也塞进表，
-     * 帧准备就会给它建一个错误的定宽槽。 */
+    /* **变长**字符数组：`[]char/utf32` 的长度由内容决定，不是定宽。
+     * 这一条是反向对照——若哪天把 `[]char/utf32` 也当成定宽，
+     * 帧准备就会给它建一个错误的零长槽。 */
     RUNTIMEC_EXPECT(!runtimec_kvspace_access_langtype_has_fixed_zero_width(
         runtimec_string_view_from_c_string("[]char/utf32")));
-    RUNTIMEC_EXPECT(!runtimec_kvspace_access_langtype_has_fixed_zero_width(
+
+    /*
+     * **判据变更（2026-11-06）**：`[4]char/utf32` 从「不是定宽」改为「是定宽、16 字节」。
+     *
+     * 原判据是「数组一律不是定宽」，理由是数组元素个数可变。但那条理由只对
+     * **变长维**（`[]`/`[?]`/`[*]`/`[+]`）成立——`[4]` 是定长维，元素个数由类型
+     * 本身给出，零值宽度可算。
+     *
+     * 触发这条变更的是 `vthread·pc()`：它的 `result1` 是 `[2]int32`
+     * （spec `05-runtime语义/02-执行模型-续.kv:26-40`），槽不物化则第一个写就
+     * `UNBOUND_SLOT`。要支持它，定长数组必须物化；而既然物化，宽度就得算对。
+     *
+     * 这条改动是**跟上 spec**，不是放宽判据：变长的那一半仍然拒绝（见上）。
+     */
+    RUNTIMEC_EXPECT(runtimec_kvspace_access_langtype_has_fixed_zero_width(
         runtimec_string_view_from_c_string("[4]char/utf32")));
+    {
+        uint64_t width = 0U;
+
+        RUNTIMEC_EXPECT(runtimec_kvspace_access_langtype_zero_width(
+            runtimec_string_view_from_c_string("[4]char/utf32"), &width));
+        RUNTIMEC_EXPECT(width == 16U);
+    }
 }
 
 static void contracts_test_unknown_langtype_is_not_fixed_width(void) {
@@ -588,8 +782,13 @@ int main(void) {
     contracts_test_varlen_trailing_bytes_ignored();
     contracts_test_non_varlen_uses_body_length();
     contracts_test_varlen_ambiguity_is_known();
+    contracts_test_length_layout_rejects_reallen_tag();
+    contracts_test_reserved_layout_is_rejected();
+    contracts_test_pointer_and_ext_are_variable_width();
     contracts_test_character_scalars_are_fixed_width();
     contracts_test_utf8_character_is_variable_width();
+    contracts_test_fixed_array_zero_width();
+    contracts_test_variable_array_is_not_fixed_width();
     contracts_test_character_array_is_not_fixed_width();
     contracts_test_unknown_langtype_is_not_fixed_width();
     return failures == 0 ? 0 : 1;

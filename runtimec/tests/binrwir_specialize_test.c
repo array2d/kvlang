@@ -236,7 +236,7 @@ int main(void) {
 
         memset(&head, 0, sizeof(head));
         kvspaceXvalueHeadSetLen(&head, 8U);
-        head.storetype = KVSPACE_XVALUE_ST_SHORT;
+        head.layout = KVSPACE_XVALUE_LAYOUT_LENGTH;  /* 新头：无 storetype */
         memcpy(wire, &head, KVSPACE_XVALUE_HEAD_LEN);
         memset(wire + KVSPACE_XVALUE_HEAD_LEN, 0, 8U);
 

@@ -52,32 +52,49 @@ typedef struct test_value {
 } test_value_t;
 
 /*
- * `pointer` 非零 → head.ptr = PTR（指针值，body 是目标 key）；
- * 零 → head.ptr = INLINE（普通值／None）。
+ * `pointer` 非零 → langtype 带 `*` 前缀（指针值，body 是目标 key）；
+ * 零 → langtype 无前缀（普通值／None）。
  *
- * **body_size 为零 + pointer 为零 = None**。这是 spec 的判据，本测试不另立规则。
+ * **body_size 为零 + 无前缀 = None**。这是 spec 的判据，本测试不另立规则。
+ *
+ * ── 2026-11-06 ABI 变更 ──────────────────────────────────────────────
+ *
+ * head 的 `storetype` 与 `ptr` 两个字节已删除（`kvspace/include/kvspace/
+ * xvalue_head.h`）。指针性**只在 langtype 首字符**：`*T` 是指针、`@T` 是扩展、
+ * 其它是普通值。⇒ 本测试造值时不再设 head 字段，改为把前缀写进 langtype。
  */
 static void test_value_initialize(test_value_t *value, int pointer,
                                   const char *body, size_t body_size) {
     kvspaceXvalueHead head;
+    /*
+     * 指针的 langtype 必须**带 `*` 前缀**——head 里已经没有那个位了。
+     * `*[]char/utf8` 表示「指向 char 序列的指针」，body 是目标 key 路径。
+     *
+     * 非指针值用 `[]char/utf8`（body 是文本）或空 langtype（None）。
+     * 两者的区别正是本测试要验的东西，所以 langtype 必须真的写进 attr 区。
+     */
+    static const char pointer_langtype[] = "*[]char/utf8";
+    static const char value_langtype[] = "[]char/utf8";
+    const char *langtype = pointer != 0 ? pointer_langtype : value_langtype;
+    const size_t langtype_size = strlen(langtype);
+    const size_t attr_size = 3U + langtype_size;
 
     memset(&head, 0, sizeof(head));
     kvspaceXvalueHeadSetLen(&head, body_size);
-    head.storetype = KVSPACE_XVALUE_ST_SHORT;
-    /*
-     * `head.ptr` 的字段名与取值都由 kvspace ABI 定义，本仓没有命名权。
-     *
-     * `check_names` 禁的是**自造**缩写；上游 ABI 名字的正确处理是把它加进
-     * `check_names.py` 的 `FOREIGN_ABI_IDENTIFIERS` 白名单，**不是**在本仓
-     * 另起一套常量——抄一份上游数值进来，上游变了这里会静默测错东西，
-     * 而且看起来完全正常。
-     */
-    head.ptr = pointer != 0 ? KVSPACE_XVALUE_PTR_PTR
-                            : KVSPACE_XVALUE_PTR_INLINE;
+    kvspaceXvalueHeadSetAttrsLen(&head, (uint32_t)attr_size);
+    kvspaceXvalueHeadSetLayout(&head, KVSPACE_XVALUE_LAYOUT_LENGTH);
     memset(value->storage, 0, sizeof(value->storage));
     memcpy(value->storage, &head, sizeof(head));
     if (body_size != 0U) {
         memcpy(value->storage + KVSPACE_XVALUE_HEAD_LEN, body, body_size);
+    }
+    {
+        uint8_t *attr = value->storage + KVSPACE_XVALUE_HEAD_LEN + body_size;
+
+        attr[0] = KVSPACE_XVALUE_ATTR_TAG_LANGTYPE;
+        attr[1] = (uint8_t)(langtype_size & 0xFFU);
+        attr[2] = (uint8_t)(langtype_size >> 8U);
+        memcpy(attr + 3, langtype, langtype_size);
     }
     value->body_size = body_size;
 }
@@ -172,7 +189,8 @@ static runtimec_status_t run_pointer_equality(
         uint32_t parameter_index = BINRWIR_ARGUMENT_INDEX_NONE;
         status = binrwir_program_builder_add_parameter(
             builder, BINRWIR_PARAMETER_DIRECTION_READ, 1U,
-            runtimec_string_view_from_c_string("int64"), &parameter_index);
+            runtimec_string_view_from_c_string("int64"),
+            &parameter_index);
         if (status == RUNTIMEC_STATUS_SUCCESS) {
             status = binrwir_argument_create(1U,
                                              BINRWIR_REFERENCE_PARAMETER_READ,
@@ -191,7 +209,19 @@ static runtimec_status_t run_pointer_equality(
         }
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        test_value_initialize(&result_storage, 0, "\0", 1U);
+        /* 写槽：1 字节 bool，**不带 langtype attr**（它是 STATIC 写目标，
+         * 类型由签名声明，不需要值里的 langtype）。 */
+        memset(&result_storage, 0, sizeof(result_storage));
+        {
+            kvspaceXvalueHead result_head;
+
+            memset(&result_head, 0, sizeof(result_head));
+            kvspaceXvalueHeadSetLen(&result_head, 1U);
+            kvspaceXvalueHeadSetLayout(&result_head,
+                                       KVSPACE_XVALUE_LAYOUT_LENGTH);
+            memcpy(result_storage.storage, &result_head, sizeof(result_head));
+        }
+        result_storage.body_size = 1U;
         status = binrwir_argument_create(
             3U, BINRWIR_REFERENCE_STATIC, symbol_index,
             (uint64_t)(uintptr_t)test_value_body_address(&result_storage),
@@ -252,6 +282,13 @@ static runtimec_status_t run_pointer_equality(
         *output_result = 0xFFU;
         status = vmbin_execute(program, NULL, &frame, &registry, NULL, NULL,
                                &exit_state);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            fprintf(stderr, "DIAG execute status=%d kind=%u detail=%u errcode=%lld msg=%.*s\n",
+                    (int)status, (unsigned)exit_state.kind,
+                    (unsigned)exit_state.detail_code, (long long)error.code,
+                    (int)error.message.size,
+                    error.message.data ? error.message.data : "");
+        }
         if (status == RUNTIMEC_STATUS_SUCCESS) {
             *output_result =
                 *(const uint8_t *)(const void *)test_value_body_address(
@@ -277,9 +314,10 @@ static void test_same_key(void) {
     test_value_initialize(&left, 1, "/a", 2U);
     test_value_initialize(&right, 1, "/a", 2U);
 
-    EXPECT(run_pointer_equality(&left, &right,
+    {runtimec_status_t s_ = run_pointer_equality(&left, &right,
                                 BINRWIR_OPERATION_IDENTIFIER_POINTER_EQUAL,
-                                &result) == RUNTIMEC_STATUS_SUCCESS);
+                                &result);
+     EXPECT(s_ == RUNTIMEC_STATUS_SUCCESS);}
     EXPECT(result == 1U);
 
     EXPECT(run_pointer_equality(&left, &right,
@@ -357,11 +395,45 @@ static void test_none_versus_none(void) {
     EXPECT(result == 0U);
 }
 
+/*
+ * 反向对照：**同一 body、langtype 不带 `*`** ⇒ 不是指针。
+ *
+ * 判据若只靠 body 长相（"看起来像不像 key"）会在这里答错——两个值的字节完全相同，
+ * 只有一个是指针。真正的判据是 langtype 首字符，这条用例把它钉住。
+ *
+ * 期望的具体差异：`(Ptr "/a", Ptr "/a")` 相等；`(值 "/a", 值 "/a")` 也相等——
+ * 所以「相等」本身分不出来。**能分出的是 `(Ptr, 值)` 这一对**：按 matrix:66
+ * 「指针对非指针 ⇒ INVALID」，而两个非指针值之间是合法的值比较。
+ */
+static void test_same_bytes_different_kind(void) {
+    test_value_t pointer_value;
+    test_value_t plain_value;
+    uint8_t result = 0U;
+
+    test_value_initialize(&pointer_value, 1, "/a", 2U);
+    test_value_initialize(&plain_value, 0, "/a", 2U);
+
+    /* 字节区连 body 都一样——唯一的差别在 langtype attr。 */
+    EXPECT(pointer_value.body_size == plain_value.body_size);
+    EXPECT(memcmp(pointer_value.storage + KVSPACE_XVALUE_HEAD_LEN,
+                  plain_value.storage + KVSPACE_XVALUE_HEAD_LEN, 2U) == 0);
+
+    /*
+     * 指针对非指针：matrix:66 判 INVALID，**不是**「不等」。
+     * 若实现只用 body 比较（忽略 langtype），这里会「成功且相等」——那正是
+     * 「看起来能工作」的错误实现，本断言让它红。
+     */
+    EXPECT(run_pointer_equality(&pointer_value, &plain_value,
+                                BINRWIR_OPERATION_IDENTIFIER_POINTER_EQUAL,
+                                &result) != RUNTIMEC_STATUS_SUCCESS);
+}
+
 int main(void) {
     test_same_key();
     test_different_key();
     test_pointer_versus_none();
     test_none_versus_none();
+    test_same_bytes_different_kind();
     if (failures != 0) {
         fprintf(stderr, "scalar_pointer_equality_test: %d failure(s)\n",
                 failures);

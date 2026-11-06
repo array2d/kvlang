@@ -21,6 +21,7 @@
 #include "contract/allocator.h"
 #include "contract/kvspace_access.h"
 #include "contract/status.h"
+#include "engine/frame_state.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -84,6 +85,16 @@ typedef struct runtimec_session_runtime_components_t {
 runtimec_status_t runtimec_session_get_runtime_components(
     runtimec_session_t *session,
     runtimec_session_runtime_components_t *output_components);
+
+/*
+ * 借出**跨 execute 存活的帧状态表**（`engine/frame_state.h`）。
+ *
+ * 只有窗口用：执行窗口的生命周期是「一次 execute」，帧的生命周期是「建立到
+ * DONE/ERROR」。表挂在 owner graph 的根上，窗口每次进来借、用完还（不销毁）。
+ */
+runtimec_status_t runtimec_session_get_frame_state(
+    runtimec_session_t *session,
+    runtimec_frame_state_table_t **output_frame_state);
 
 /*
  * checkpoint 的单调提交序号：取号即前进，session 销毁前一直递增。route 不在

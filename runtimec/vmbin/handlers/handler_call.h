@@ -106,12 +106,79 @@ typedef enum vmbin_handler_call_diagnostic {
     /* 写参落到只读值（字面量）：没有可写位置，下一步就是空指针写。 */
     VMBIN_HANDLER_CALL_DIAG_LITERAL_IS_READ_ONLY = 0x4A04,
     /* 造 wire 或写存储失败。 */
-    VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED = 0x4A05
+    VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED = 0x4A05,
+    /*
+     * `member_key_text` 的四个诊断在这里的对应码。
+     *
+     * **为什么不透传 `contract/member_key_text` 的 1..5**：那是另一个域。
+     * `detail_code` 是全进程一张段表（`contract/diagnostic_band.h`），把 1..5
+     * 塞进来就是「一个字段两种命名空间」——看到 3 分不出是 contract 的
+     * `UNSUPPORTED_LANGTYPE` 还是执行窗口的 3。转码是这一步的职责。
+     *
+     * **为什么不复用 `LENGTH_MISMATCH`（0x4A03）**：那条的意思是「值体宽度与
+     * 逻辑函数要求的宽度不符」，是**已经拿到值之后**的判定；容量不足是**还没
+     * 写完**。两者修法不同（改数据 vs 给大缓冲），合成一条会把人引错方向。
+     */
+    VMBIN_HANDLER_CALL_DIAG_INSUFFICIENT_CAPACITY = 0x4A06,
+    /*
+     * 该值的 langtype 不能作成员键：标量/字符/字符串之外的一切。
+     *
+     * 「取不到声明 langtype」也报这条——它同样回答「这个操作数能不能作键」，
+     * 报 `LOCATE_FAILED`（0x4A02）是错的：值定位到了，只是没有类型。
+     */
+    VMBIN_HANDLER_CALL_DIAG_UNSUPPORTED_LANGTYPE = 0x4A07,
+    /* 值体宽度与该 langtype 应有的宽度不符（标量定宽、utf32 非 4 的倍数）。 */
+    VMBIN_HANDLER_CALL_DIAG_MALFORMED_BODY = 0x4A08,
+    /* 浮点键是 NaN。±Inf 合法（键文本 `inf`/`-inf`），不报此码。 */
+    VMBIN_HANDLER_CALL_DIAG_NON_FINITE = 0x4A09,
+    /*
+     * 生成的键文本 + 父路径长度超出存储能表达的 key 上界（1023 字节）。
+     *
+     * **不复用 `INSUFFICIENT_CAPACITY`（0x4A06）**：两者含义相反的重试性。
+     * 0x4A06 是「我的缓冲小、给我更大的就能成」；本码是「这个键存储根本装不下」，
+     * 换多大的缓冲都不成——它是**不可重试**的失败。合成一条会让调用方无限重试。
+     *
+     * 上界的两处来源（都实读，见 `handler_call.h` 上方注释）：
+     *   `runtimec/contract/kvspace_access.c` 的 `RUNTIMEC_KVSPACE_KEY_CAPACITY`
+     *   （1024，栈缓冲尺寸）与 `kvspace-c/src/kvspace.c` 的 `>= 1024` 后端拒收。
+     */
+    VMBIN_HANDLER_CALL_DIAG_KEY_TOO_LONG = 0x4A0A
 } vmbin_handler_call_diagnostic_t;
 
 /* 段断言：本模块的码必须落在自己的段内（见 contract/diagnostic_band.h）。 */
 _Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_HANDLER_CALL_DIAG_LITERAL_IS_READ_ONLY, RUNTIMEC_DIAGNOSTIC_BAND_HANDLER_CALL),
                "VMBIN_HANDLER_CALL_DIAG_LITERAL_IS_READ_ONLY must stay inside its diagnostic band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_HANDLER_CALL_DIAG_INSUFFICIENT_CAPACITY, RUNTIMEC_DIAGNOSTIC_BAND_HANDLER_CALL),
+               "VMBIN_HANDLER_CALL_DIAG_INSUFFICIENT_CAPACITY must stay inside its diagnostic band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_HANDLER_CALL_DIAG_NON_FINITE, RUNTIMEC_DIAGNOSTIC_BAND_HANDLER_CALL),
+               "VMBIN_HANDLER_CALL_DIAG_NON_FINITE must stay inside its diagnostic band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_HANDLER_CALL_DIAG_KEY_TOO_LONG, RUNTIMEC_DIAGNOSTIC_BAND_HANDLER_CALL),
+               "VMBIN_HANDLER_CALL_DIAG_KEY_TOO_LONG must stay inside its diagnostic band");
+
+/*
+ * 存储能表达的键文本长度上界（**不含结尾 NUL**）：**1023 字节**。
+ *
+ * ── 这不是「定长缓冲」，是「最大可能长度」的栈空间 ────────────────────
+ *
+ * `0x4501` 治的是**任意猜的数**（曾经的 64 字节 scratch），不是「有据可依的
+ * 上界」。本常量不是猜的，有两个互相印证的外部来源：
+ *
+ *   1. `kvspace-c/src/kvspace.c:2796,3329`——后端的 Get 与 Set 两条路径都对
+ *      `strlen(key) >= 1024` 做**语义拒收**。这是硬上限。
+ *   2. `runtimec/contract/kvspace_access.c:23` 的 `RUNTIMEC_KVSPACE_KEY_CAPACITY`
+ *      = 1024，是拼接完整 key 的**栈缓冲尺寸**，必须容得下任何后端接受的 key。
+ *
+ * 两处独立给出同一个数，所以 1023 是**系统真实限制推出来的**，不是选出来的。
+ * 分配 `1023 + 1` 字节栈空间因此相当于「按最大可能长度开缓冲」，与
+ * 「拍一个 64 字节试试看」是两件事——后者在超限时静默出错，前者不可能超限。
+ *
+ * ── 超限怎么办 ────────────────────────────────────────────────────────
+ *
+ * `member_key_text` 若回报所需长度 > 本上界（理论上不该发生：完整 key 的父路径
+ * 只会更长），报 `KEY_TOO_LONG`，**不截断、不降级**——截断会写到一个看起来像、
+ * 实际不是的键上。
+ */
+#define VMBIN_HANDLER_KEY_TEXT_MAXIMUM UINT32_C(1023)
 
 
 /*

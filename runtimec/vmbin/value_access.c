@@ -1,6 +1,7 @@
 /*
  * 组件：vmbin/value_access 的实现
- * 作用：按 reference_kind 找值体地址（或池内字面量），并直接读写值体字节。
+ * 作用：按参数项的引用种类（reference_kind）找值体地址（或池内字面量），
+ *       并直接读写值体字节；值的**形态**（普通/指针/扩展）另由 langtype 前缀派生。
  * 约束：值头/值体的几何只经合同——基址 → 值体用 runtimec_xvalue_body_address，
  *       值体 → 当前长度用 runtimec_value_body_length；本文件不写任何偏移算术。
  *       实参是字面量时绑定表给的是内联字节，直接借出，不推导任何地址。
@@ -115,7 +116,127 @@ static runtimec_status_t vmbin_value_access_locate_member(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+
+/* 前向声明：解引用要先借用「不带 dereference 的同一参数」的普通解析。 */
+static runtimec_status_t vmbin_value_access_locate_plain(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument,
+    vmbin_value_location_t *output_location, runtimec_error_t *error);
+
+/*
+ * 显式解引用：参数项的 `dereference=1` 表示「这个值是一个指针，跟一跳再访问」。
+ *
+ * 四件事都只在这一层做（handler 里不许重复）：
+ *   1. 先按**不带 dereference 的同一参数**解析出指针值本身；
+ *   2. 形态必须是 `VMBIN_VALUE_ACCESS_FORM_POINTER`（由 langtype 的 `*` 前缀
+ *      派生，不读 head）——不是指针就具名失败，不猜；
+ *   3. 指针值的 body 就是目标 key 文本，拿它**再解析一次**；
+ *   4. 只返回目标位置：绑定表仍记参数项那个槽，**不把 target 写进绑定表**
+ *      （绑定表是「槽 → 值」的一次性事实，每跳都写就把表变成了缓存）。
+ */
+static runtimec_status_t vmbin_value_access_dereference(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, vmbin_value_location_t *output_location,
+    runtimec_error_t *error) {
+    binrwir_argument_t plain = *argument;
+    vmbin_value_location_t pointer_location;
+    runtimec_xvalue_address_t target_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
+    runtimec_value_body_address_t target_body = RUNTIMEC_VALUE_BODY_ADDRESS_NONE;
+    uint8_t form = VMBIN_VALUE_ACCESS_FORM_VALUE;
+    runtimec_status_t status;
+
+    if (argument->reference_kind == BINRWIR_REFERENCE_LITERAL) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "a literal has no address to follow");
+    }
+    plain.dereference = 0U;
+    status = vmbin_value_access_locate_plain(frame, &plain, &pointer_location,
+                                             error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    status = vmbin_value_access_form(frame, &plain, &form, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    if (form != VMBIN_VALUE_ACCESS_FORM_POINTER) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_DEREFERENCE_TARGET_IS_NOT_POINTER,
+            "dereferenced operand does not hold a pointer");
+    }
+    if (pointer_location.read_bytes == NULL || pointer_location.size == 0U ||
+        frame->kvspace_access == NULL) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
+            "pointer value does not carry a resolvable target key");
+    }
+    {
+        const runtimec_key_view_t key = runtimec_key_view_make(
+            (const char *)pointer_location.read_bytes, pointer_location.size);
+
+        if (pointer_location.size >= sizeof("/vthread/") - 1U &&
+            memcmp(pointer_location.read_bytes, "/vthread/",
+                   sizeof("/vthread/") - 1U) == 0) {
+            uint64_t generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
+            status = runtimec_kvspace_access_resolve_frame_xvalue_address(
+                frame->kvspace_access, &frame->snapshot, key, &target_address,
+                &generation, error);
+            if (status == RUNTIMEC_STATUS_SUCCESS &&
+                generation != frame->snapshot_generation) {
+                return vmbin_value_access_fail(
+                    error, RUNTIMEC_STATUS_INVALID,
+                    VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
+                    "dereference target is not in the frame generation");
+            }
+        } else {
+            status = runtimec_kvspace_access_resolve_static_xvalue_address(
+                frame->kvspace_access, &frame->snapshot, key, &target_address,
+                error);
+        }
+    }
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    target_body = runtimec_xvalue_body_address(target_address);
+    if (target_address == RUNTIMEC_XVALUE_ADDRESS_NONE ||
+        target_body == RUNTIMEC_VALUE_BODY_ADDRESS_NONE) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
+            "dereference target has no derivable body");
+    }
+    output_location->read_bytes = (const uint8_t *)(uintptr_t)target_body;
+    output_location->write_bytes = (uint8_t *)(uintptr_t)target_body;
+    output_location->size = runtimec_value_body_length(target_body);
+    output_location->is_whole_wire = false;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 runtimec_status_t vmbin_value_access_locate(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument,
+    vmbin_value_location_t *output_location, runtimec_error_t *error) {
+    if (output_location != NULL) {
+        *output_location = (vmbin_value_location_t){NULL, NULL, 0U, false};
+    }
+    if (frame == NULL || argument == NULL || output_location == NULL) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST, "invalid locate request");
+    }
+    if (argument->dereference != 0U) {
+        return vmbin_value_access_dereference(frame, argument, output_location,
+                                              error);
+    }
+    return vmbin_value_access_locate_plain(frame, argument, output_location,
+                                           error);
+}
+
+static runtimec_status_t vmbin_value_access_locate_plain(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error) {
@@ -519,7 +640,41 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
     uint16_t binding_slot = BINRWIR_FRAME_BINDING_SLOT_NONE;
     runtimec_status_t status;
 
+    /*
+     * **未处理的引用种类不许静默成功**（p1：不容许「以奇怪的方式成功」）。
+     *
+     * 本函数只负责「LOCAL 局部槽的建值 + 绑定」。其余种类各有归属：
+     *   - `PARAMETER_WRITE`：目标是对端（调用方）的 key，由**绑定**给出——本帧
+     *     `frame_path` 拼出来的一定是错 key（`/vthread/1/[2.4]/[0,+1]` 这种）。
+     *     所以这里**只核绑定在不在**：在 ⇒ 合法且无事可做；不在 ⇒ 具名失败，
+     *     那说明调用方那一侧从没绑过它。
+     *   - `STATIC` / `LITERAL` / `FUNCTION`：本函数不碰，具名失败。
+     *
+     * 曾经这一支是 `return RUNTIMEC_STATUS_SUCCESS;`——写形参因此既不建值、
+     * 也不绑定、也不报错，随后 `LOCATE_WRITE` 读它报 `UNBOUND_SLOT`，而失败点
+     * 指向的是「读」而不是「从未创建」。`strings.kv` 的 `replace_at` 就是这条。
+     */
     if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL) {
+        if (argument->reference_kind != BINRWIR_REFERENCE_PARAMETER_WRITE) {
+            return vmbin_value_access_fail(
+                error, RUNTIMEC_STATUS_INVALID,
+                VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE,
+                "this reference kind has no creation path in the local writer");
+        }
+        if (frame->bindings == NULL ||
+            vmbin_frame_slot_of_argument(frame->program, argument,
+                                         &binding_slot) !=
+                RUNTIMEC_STATUS_SUCCESS ||
+            binrwir_frame_bindings_get(frame->bindings, binding_slot,
+                                       frame->snapshot_generation,
+                                       &binding) != RUNTIMEC_STATUS_SUCCESS) {
+            return vmbin_value_access_fail(
+                error, RUNTIMEC_STATUS_INVALID,
+                VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT,
+                "write parameter has no binding; the caller side never bound "
+                "it");
+        }
+        /* 有绑定即合法：写形参的值由调用方那一侧的 key 承载，本函数无事可做。 */
         return RUNTIMEC_STATUS_SUCCESS;
     }
     if (frame->bindings == NULL || frame->kvspace_access == NULL) {
@@ -545,11 +700,18 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
     }
     if (vmbin_frame_slot_of_argument(frame->program, argument, &binding_slot) !=
         RUNTIMEC_STATUS_SUCCESS) {
-        return RUNTIMEC_STATUS_SUCCESS;
+        /* 换算不出绑定槽号 ⇒ 这是**已知会失败的写**，不能当「无事可做」放过去：
+         * 放过去就是「写成功但值没落」，比失败更难查。 */
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE,
+            "local slot index is not in the program pool");
     }
     if (binrwir_frame_bindings_get(frame->bindings, binding_slot,
                                    frame->snapshot_generation,
                                    &binding) == RUNTIMEC_STATUS_SUCCESS) {
+        /* **已有绑定 ⇒ 无事可做**：这是本函数唯一合法的「不创建」出口——
+         * 槽已经存在且可写，`write_body` 随后会照常定位并写入。 */
         return RUNTIMEC_STATUS_SUCCESS;
     }
     status = vmbin_value_access_langtype(frame, argument, &declared, error);
@@ -857,8 +1019,11 @@ runtimec_status_t vmbin_value_access_write_body(
         return vmbin_value_access_create_static_target(frame, argument, value,
                                                        error);
     }
-    status = vmbin_value_access_create_unbound_local(frame, argument, value,
-                                                     error);
+    /* 解引用目标的“未绑定”是错误而不是“待初始化”：它由指针指向，本该已存在。 */
+    status = argument->dereference != 0U
+                 ? RUNTIMEC_STATUS_SUCCESS
+                 : vmbin_value_access_create_unbound_local(frame, argument,
+                                                           value, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -1013,22 +1178,22 @@ runtimec_status_t vmbin_value_access_langtype(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t vmbin_value_access_reference_kind(
+runtimec_status_t vmbin_value_access_form(
     const binrwir_execution_frame_t *frame,
-    const binrwir_argument_t *argument, uint8_t *output_reference,
+    const binrwir_argument_t *argument, uint8_t *output_form,
     runtimec_error_t *error) {
     vmbin_value_location_t location;
     const uint8_t *wire = NULL;
     runtimec_status_t status;
 
-    if (output_reference != NULL) {
-        *output_reference = KVSPACE_REF_INLINE;
+    if (output_form != NULL) {
+        *output_form = VMBIN_VALUE_ACCESS_FORM_VALUE;
     }
-    if (output_reference == NULL) {
+    if (output_form == NULL) {
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_INVALID,
             VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
-            "invalid reference kind request");
+            "invalid value form request");
     }
     status = vmbin_value_access_locate(frame, argument, &location, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -1060,25 +1225,32 @@ runtimec_status_t vmbin_value_access_reference_kind(
             VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
             "argument has no readable XValue head");
     }
-    /* 值头字段只经 kvspace 提供的访问器读，本文件不取裸偏移。 */
+    /*
+     * **形态来自 langtype，不来自 head**：head 现在只有 bodylen/attrslen/layout。
+     * 读 langtype 记录（tag 1）的首字符即可判：`*` 指针、`@` 扩展、其它普通值。
+     * 读不到 langtype ⇒ 普通值（未打类型的 None 也走这支）。
+     */
     {
         const kvspaceXvalueHead *head =
             (const kvspaceXvalueHead *)(const void *)wire;
+        const uint64_t total = kvspaceXvalueHeadTotalLen(head);
 
-        if (!kvspaceXvalueHeadPaddingIsZero(head) ||
-            head->storetype > KVSPACE_XVALUE_ST_EXT) {
+        if (total == 0) {
             return vmbin_value_access_fail(
                 error, RUNTIMEC_STATUS_UNSUPPORTED,
                 VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
                 "value head is not a well-formed XValue");
         }
-        if (head->ptr > KVSPACE_REF_EXT) {
-            return vmbin_value_access_fail(
-                error, RUNTIMEC_STATUS_UNSUPPORTED,
-                VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
-                "value head carries an unknown reference byte");
+        const uint8_t *langtype = NULL;
+        const uint16_t langtype_size = kvspaceXvalueHeadLangtypeBounded(
+            wire, total, &langtype);
+        if (langtype != NULL && langtype_size != 0U) {
+            if (langtype[0] == '*') {
+                *output_form = VMBIN_VALUE_ACCESS_FORM_POINTER;
+            } else if (langtype[0] == '@') {
+                *output_form = VMBIN_VALUE_ACCESS_FORM_EXTENSION;
+            }
         }
-        *output_reference = head->ptr;
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }

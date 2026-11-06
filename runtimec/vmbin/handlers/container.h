@@ -158,6 +158,28 @@ runtimec_status_t runtimec_container_langtype_parse(
 int64_t runtimec_container_shape_numel(runtimec_string_view_t langtype);
 
 /*
+ * **容器值创建的唯一入口**：取写参槽的 key、写一条 empty-body 的 container
+ * marker（并把值绑定到槽）、再给 base 建成员索引（`kvspaceMkindex`）。
+ *
+ * 三步缺一不可（`container.c` 的长注释记了为什么）：
+ *   - 只建 marker 不建索引 ⇒ 成员写不进（memhead 不存在）；
+ *   - 只建索引不建 marker ⇒ base 上没有类型；
+ *   - 建了不绑定 ⇒ 存储里有、绑定表里没有，执行期读它就是 `UNBOUND_SLOT`。
+ *
+ * **导出给与它同形的创建路径**（`scatterarray·newscatter` / `newcompact` 这类
+ * 「跨容器搬运」的 handler）：它们要的正是「目标容器本身先存在」，与 `map·new`
+ * 完全一样。**不许调用方自己拼 key**——key 的拼法只有 `container_target_key`
+ * 一处，再写一份就是第二套规则。
+ *
+ * 成功返回 true，并把 base 的 key 写进 `buffer`（NUL 结尾）；失败返回 false，
+ * `output_exit` 已置好。
+ */
+bool runtimec_container_open_marker(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, char *buffer,
+    size_t capacity, binrwir_execution_exit_t *output_exit);
+
+/*
  * 返回本模块的静态条目数组，并把条目数写入 output_count。
  * output_count 为 NULL 时返回 NULL（调用方错用，不猜）。
  */

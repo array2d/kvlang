@@ -267,7 +267,7 @@ static void test_vmkv_xvalue_address_encoding(void) {
     binrwir_argument_t encoded_argument = {
         .argument_index = UINT32_MAX,
         .reference_kind = BINRWIR_REFERENCE_INVALID,
-        .reserved_8_bits = UINT8_MAX,
+        .dereference = UINT8_MAX,
         .slot = UINT16_MAX,
         .payload = UINT64_MAX,
     };
@@ -314,7 +314,7 @@ static void test_vmkv_xvalue_address_encoding(void) {
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 7U);
     RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
                     BINRWIR_REFERENCE_STATIC);
-    RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.dereference == 0U);
     RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
     /* payload 是推导出的值体地址：**真后端给出的基址** + 头长度，不写死地址。 */
     {
@@ -340,7 +340,7 @@ static void test_vmkv_xvalue_address_encoding(void) {
     RUNTIMEC_EXPECT(encoded_argument.argument_index == 0U);
     RUNTIMEC_EXPECT(encoded_argument.reference_kind ==
                     BINRWIR_REFERENCE_INVALID);
-    RUNTIMEC_EXPECT(encoded_argument.reserved_8_bits == 0U);
+    RUNTIMEC_EXPECT(encoded_argument.dereference == 0U);
     RUNTIMEC_EXPECT(encoded_argument.slot == 0U);
     RUNTIMEC_EXPECT(encoded_argument.payload == BINRWIR_BODY_ADDRESS_NONE);
 
@@ -364,7 +364,7 @@ static void test_vmkv_xvalue_address_encoding(void) {
         encoded_argument = (binrwir_argument_t){
             .argument_index = UINT32_MAX,
             .reference_kind = BINRWIR_REFERENCE_INVALID,
-            .reserved_8_bits = UINT8_MAX,
+            .dereference = UINT8_MAX,
             .slot = UINT16_MAX,
             .payload = UINT64_MAX,
         };

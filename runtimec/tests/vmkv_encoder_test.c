@@ -131,7 +131,7 @@ static uint8_t *make_wire(const uint8_t *body, size_t body_size,
     memset(&head, 0, sizeof(head));
     kvspaceXvalueHeadSetLen(&head, (uint64_t)body_size);
     kvspaceXvalueHeadSetAttrsLen(&head, (uint32_t)attr_size);
-    head.storetype = KVSPACE_XVALUE_ST_SLACK;
+    head.layout = KVSPACE_XVALUE_LAYOUT_LENGTH;
     memcpy(wire, &head, KVSPACE_XVALUE_HEAD_LEN);
     if (body_size != 0U) {
         memcpy(wire + KVSPACE_XVALUE_HEAD_LEN, body, body_size);
@@ -724,19 +724,28 @@ static void test_alias_policy_becomes_signature_rule(void) {
     store_free(&store);
 }
 
-/* 指针参数：langtype 文本推不出指针性，本阶段一律 UNSUPPORTED，不猜。 */
-static void test_pointer_parameter_is_unsupported(void) {
+/*
+ * 指针结果：**写侧掩码只有 POINTER 一位**时信能力行、放行。
+ *
+ * 旧判据是「掩码含 POINTER 就整条 UNSUPPORTED」，于是 `kvspace/key·abs`
+ * （写掩码 0x00040000，且**没有读参**）被挡死，`&x` 进不了 BinRWIR。
+ * 现在只有「该侧是多位并集且操作数是裸指针文本」才拒绝。
+ *
+ * 注：今天 catalog 里**没有任何一行**的 POINTER 位与其它位并集，
+ * 所以「并集拒绝」与「无操作数拒绝」两条分支没有可构造的真实能力行——
+ * 它们是防御分支，这里只钉住可达的那一条（见编码器调用点注释）。
+ */
+static void test_pointer_result_from_single_bit_mask_is_encodable(void) {
     fake_store_t store;
     if (!store_open(&store)) {
         fprintf(stderr, "SKIP: cannot connect kvspace\n");
         return;
     }
-    add_function(&store, "/lib/ptraddr", 1U, 1U);
-    add_parameter(&store, "/lib/ptraddr", -1, "a", "int64");
-    add_parameter(&store, "/lib/ptraddr", 1, "R", "int64");
-    add_opcode(&store, "/lib/ptraddr", 1, 1U, 1U, "kvlang·abs");
-    add_reference(&store, "/lib/ptraddr", 1, -1, "*[0,-1]", "int64");
-    add_reference(&store, "/lib/ptraddr", 1, 1, "*[0,1]", "int64");
+    /* 与真实能力行一致：`kvspace/key·abs` 是 **0 读 1 写**（读掩码为 0）。 */
+    add_function(&store, "/lib/ptraddr", 0U, 1U);
+    add_parameter(&store, "/lib/ptraddr", 1, "R", "*int64");
+    add_opcode(&store, "/lib/ptraddr", 1, 0U, 1U, "kvspace/key·abs");
+    add_reference(&store, "/lib/ptraddr", 1, 1, "*[0,1]", "*int64");
     runtimec_kvspace_access_t *host = NULL;
     runtimec_error_t host_error;
     runtimec_error_reset(&host_error);
@@ -757,8 +766,7 @@ static void test_pointer_parameter_is_unsupported(void) {
     test_canonical_t instruction;
     EXPECT(encode_instruction_at(
         encoder, &request, 0U, function, &instruction,
-                                    &error) == RUNTIMEC_STATUS_UNSUPPORTED);
-    EXPECT(error.code == 25);
+                                    &error) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
     (void)runtimec_kvspace_access_destroy(host, &host_error);
     store_free(&store);
@@ -1655,7 +1663,7 @@ int main(void) {
     test_union_parameter_is_rejected();
     test_concrete_operand_type_wins_over_declaration();
     test_alias_policy_becomes_signature_rule();
-    test_pointer_parameter_is_unsupported();
+    test_pointer_result_from_single_bit_mask_is_encodable();
     test_mixed_signed_unsigned_is_rejected();
     test_not_equal_specialization_selects_dedicated_row();
     test_inline_literal_uses_literal_reference();
