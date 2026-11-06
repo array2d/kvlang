@@ -878,7 +878,7 @@ static bool container_unary_arity(const binrwir_instruction_view_t *instruction,
 
 /*
  * 写目标的 key：**一条规则一个实现**——派生逻辑全在
- * `vmbin_value_access_write_target_key`（LOCAL → 帧槽、STATIC → 绝对路径本身），
+ * `vmbin_value_access_argument_key`（LOCAL → 帧槽、STATIC → 绝对路径本身），
  * 本函数只做 error → exit 的翻译，不自己拼 key。
  *
  * 为什么要翻译而不是丢：helper 分得出「缓冲区不够」与「引用种类不对」两种失败，
@@ -892,7 +892,7 @@ static bool container_target_key(binrwir_execution_frame_t *frame,
     runtimec_error_t error;
 
     runtimec_error_reset(&error);
-    if (vmbin_value_access_write_target_key(
+    if (vmbin_value_access_argument_key(
             frame, &instruction->write_arguments.data[0], buffer, capacity,
             &error) == RUNTIMEC_STATUS_SUCCESS) {
         return true;

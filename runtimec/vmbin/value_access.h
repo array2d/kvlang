@@ -167,6 +167,23 @@ runtimec_status_t vmbin_value_access_locate_body(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error);
+
+/*
+ * **写方向的定位**：与 `_locate_body` 的差别只有一条——目标是 **STATIC 绝对 key
+ * 且当前不存在**时，先按写参声明的 langtype 建零值（复用 `ensure_zero_value`），
+ * 再定位。
+ *
+ * 为什么需要：`VMBIN_HANDLER_LOCATE_WRITE` 先要一个可写位置、算完再写。目标不存在
+ * 时它无从定位 ⇒ `UNBOUND_SLOT`（最小复现 `1 + 2 -> /sum`）。#632 定过「写指令
+ * 创造 key、读指令不创造」，但创建此前只落在整值写那两条路径上。
+ *
+ * **只对 STATIC 生效**：LOCAL 的定宽槽由帧准备物化、变长槽由 copy /
+ * `write_new_value` 创建。**读方向仍用 `_locate_body`，绝不创建**。
+ */
+runtimec_status_t vmbin_value_access_locate_write(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument,
+    vmbin_value_location_t *output_location, runtimec_error_t *error);
 /*
  * **指令不创造 key，创建源在源码里。**
  *

@@ -50,7 +50,7 @@ runtimec_status_t vmbin_frame_target_key(
  * **不创建、不触碰存储**：只回答「这条写指令的 key 是什么」。创建的语义归
  * `vmbin_value_access_write_*` 那几条（#632）。
  */
-runtimec_status_t vmbin_value_access_write_target_key(
+runtimec_status_t vmbin_value_access_argument_key(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument, char *buffer, size_t capacity,
     runtimec_error_t *error) {
@@ -65,6 +65,15 @@ runtimec_status_t vmbin_value_access_write_target_key(
         return vmbin_frame_target_key(frame, argument, buffer, capacity);
     }
     if (argument->reference_kind != BINRWIR_REFERENCE_STATIC) {
+        /* **失败必须带原因**：`runtimec_error_reset` 把 status 置 0（SUCCESS），
+         * 而下游若直接读 `error.status` 就会拿到 0——那是「失败却没有原因」。
+         * 这里显式填，让 `error` 在任何返回路径上都是可读的。 */
+        runtimec_error_set(error, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_ERROR_DOMAIN_CONTRACT, 0,
+                           runtimec_string_view_from_c_string(
+                               "write target is neither a local slot nor a "
+                               "static key"),
+                           RUNTIMEC_PROGRAM_COUNTER_NONE);
         return RUNTIMEC_STATUS_INVALID;
     }
     /* STATIC：符号池里的名字就是**完整 key**（`/tmp/adk` 这类绝对路径）。
@@ -72,6 +81,11 @@ runtimec_status_t vmbin_value_access_write_target_key(
     if (binrwir_program_get_symbol(frame->program, argument->slot, &name,
                                    &langtype) != RUNTIMEC_STATUS_SUCCESS ||
         name.size == 0U) {
+        runtimec_error_set(error, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_ERROR_DOMAIN_CONTRACT, 0,
+                           runtimec_string_view_from_c_string(
+                               "static write target has no symbol name"),
+                           RUNTIMEC_PROGRAM_COUNTER_NONE);
         return RUNTIMEC_STATUS_INVALID;
     }
     if (name.size + 1U > capacity) {

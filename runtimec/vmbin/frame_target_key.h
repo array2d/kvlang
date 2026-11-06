@@ -50,7 +50,7 @@ runtimec_status_t vmbin_frame_target_key(
  *
  * 错误经 `error` 传出（status + 具名诊断），调用方据以翻译成自己的 `exit`。
  */
-runtimec_status_t vmbin_value_access_write_target_key(
+runtimec_status_t vmbin_value_access_argument_key(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument, char *buffer, size_t capacity,
     runtimec_error_t *error);

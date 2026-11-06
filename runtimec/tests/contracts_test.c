@@ -516,6 +516,56 @@ static void contracts_test_varlen_ambiguity_is_known(void) {
     free(over_capacity);
 }
 
+/*
+ * 定宽零值宽度表的**三分类**（`runtimec/contract/kvspace_access.c` 的
+ * `runtimec_kvspace_width_table`）。
+ *
+ * 这张表只回答一件事：**这个 langtype 的零值是几个字节**。它同时承担「帧准备该不该
+ * 物化这个槽」的判据，所以三类必须分清——混成一条路径就是 p1 禁止的
+ * 「一条路径表达三种语义」：
+ *
+ *   1. **定宽的字符标量**：`char/utf32` 是一个码位、恒 4 字节（C 的 `char32_t`）；
+ *      `char/ascii` 是一个字符、恒 1 字节（C 的 `char`）。两者都必须在表里。
+ *   2. **真正的变长**：`char/utf8` 是 1–4 字节的 UTF-8 序列；`[]char/utf32` 这类
+ *      数组形态字符串按完整串匹配。两者都**不在**表里。
+ *   3. 不认识的 langtype 同样不在表里——它与第 2 类共用 `false` 返回值，
+ *      但原因不同（不知道 vs 知道它变长）。
+ *
+ * 测试名直接写清每一格，不叫 `misc`：这些断言是这张表的**规格**，不是抽查。
+ */
+static void contracts_test_character_scalars_are_fixed_width(void) {
+    /* 第 1 类：定宽字符标量。 */
+    RUNTIMEC_EXPECT(runtimec_kvspace_access_langtype_has_fixed_zero_width(
+        runtimec_string_view_from_c_string("char/utf32")));
+    RUNTIMEC_EXPECT(runtimec_kvspace_access_langtype_has_fixed_zero_width(
+        runtimec_string_view_from_c_string("char/ascii")));
+}
+
+static void contracts_test_utf8_character_is_variable_width(void) {
+    /* 第 2 类：`char/utf8` 的宽度取决于内容（1–4 字节），不能进定宽表。 */
+    RUNTIMEC_EXPECT(!runtimec_kvspace_access_langtype_has_fixed_zero_width(
+        runtimec_string_view_from_c_string("char/utf8")));
+}
+
+static void contracts_test_character_array_is_not_fixed_width(void) {
+    /* 第 2 类：数组形态字符串按完整串匹配，不是定宽标量。
+     * 这一条是**反向对照**——若哪天把 `[]char/utf32` 也塞进表，
+     * 帧准备就会给它建一个错误的定宽槽。 */
+    RUNTIMEC_EXPECT(!runtimec_kvspace_access_langtype_has_fixed_zero_width(
+        runtimec_string_view_from_c_string("[]char/utf32")));
+    RUNTIMEC_EXPECT(!runtimec_kvspace_access_langtype_has_fixed_zero_width(
+        runtimec_string_view_from_c_string("[4]char/utf32")));
+}
+
+static void contracts_test_unknown_langtype_is_not_fixed_width(void) {
+    /* 第 3 类：不认识 ⇒ 同样 false，但这是「不知道」，与第 2 类的「知道它变长」
+     * 不同。共用返回值可接受，表的内容必须只由第 1 类构成。 */
+    RUNTIMEC_EXPECT(!runtimec_kvspace_access_langtype_has_fixed_zero_width(
+        runtimec_string_view_from_c_string("not-a-langtype")));
+    RUNTIMEC_EXPECT(!runtimec_kvspace_access_langtype_has_fixed_zero_width(
+        runtimec_string_view_make(NULL, 0U)));
+}
+
 int main(void) {
     kvlang_runtime_t *opaque_runtime = NULL;
 
@@ -538,5 +588,9 @@ int main(void) {
     contracts_test_varlen_trailing_bytes_ignored();
     contracts_test_non_varlen_uses_body_length();
     contracts_test_varlen_ambiguity_is_known();
+    contracts_test_character_scalars_are_fixed_width();
+    contracts_test_utf8_character_is_variable_width();
+    contracts_test_character_array_is_not_fixed_width();
+    contracts_test_unknown_langtype_is_not_fixed_width();
     return failures == 0 ? 0 : 1;
 }

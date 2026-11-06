@@ -510,19 +510,58 @@ runtimec_status_t runtimec_kvspace_access_source_revision(
             error, RUNTIMEC_STATUS_ERROR, 36,
             "function has no readable source revision key");
     }
+    /*
+     * **本函数必须是幂等查询**：同一存储状态下连续调用两次，返回值必须相同。
+     *
+     * 曾经这里扫到第一条失效记录就 `changed = true; break;`，**而不刷新账本**。
+     * 账本只追加（只有 `record_address` 一处写），于是那条失效记录从此每次都被
+     * 重新发现 ⇒ `generation` 每次 +1 ⇒ 「观测到失效的次数」被当成了「存储布局
+     * 的纪元」。后果：runner 在 encode 前取一次、`vmkv_encode` 内部再取一次，
+     * 两次必然差 1 ⇒ 假性 `STALE_SNAPSHOT`。
+     *
+     * 实测（`014_longest_common`，帧准备物化 `char/utf32` 触发一次重定位后）：
+     *   [rev] fn=/lib/test records=32 changed=1 before=1 → after=2   (runner)
+     *   [rev] fn=/lib/test records=32 changed=1 before=2 → after=3   (encode)
+     * 两次都 changed=1、每次都 +1 —— 比较永远不等。
+     *
+     * 修法三条：
+     *   1. 扫到失效记录就**就地刷新**（重新解析成功的写回新地址/尺寸）；
+     *   2. **整批重定位只算一次**纪元推进（`changed` 是个 bool，不按条数累加）；
+     *   3. key 已不存在 ⇒ **从账本移除**（swap 尾部），不让它永久污染后续每次查询。
+     *
+     * 比较本身保留：它仍然告诉调用方「地址账本已过期」，这是有价值的信息；
+     * 修的是「用过一次就该落定」这件事。
+     */
     bool changed = false;
-    for (size_t index = 0U; index < adapter->resolved_address_count; index++) {
+    size_t index = 0U;
+    while (index < adapter->resolved_address_count) {
         runtimec_kvspace_resolved_address_t *record =
             &adapter->resolved_addresses[index];
         uint8_t *value = NULL;
         uint32_t value_size = 0U;
-        if (kvspaceGet(adapter->handle, record->key, 1,
-                                          &value, &value_size) != 0 ||
-            value == NULL || (uint64_t)(uintptr_t)value != record->address ||
-            (uint64_t)value_size != record->observed_size) {
-            changed = true;
-            break;
+        const int read_status =
+            kvspaceGet(adapter->handle, record->key, 1, &value, &value_size);
+        const bool stale =
+            read_status != 0 || value == NULL ||
+            (uint64_t)(uintptr_t)value != record->address ||
+            (uint64_t)value_size != record->observed_size;
+        if (!stale) {
+            index += 1U;
+            continue;
         }
+        changed = true;
+        if (read_status != 0 || value == NULL) {
+            /* key 已不存在：从账本移除（尾元素前移），**不推进 index**——
+             * 让下一个元素落到同一位置被检查。 */
+            adapter->resolved_addresses[index] =
+                adapter->resolved_addresses[adapter->resolved_address_count - 1U];
+            adapter->resolved_address_count -= 1U;
+            continue;
+        }
+        /* 仍在，只是被搬了：就地刷新，下一轮同一个 key 就不会再被判为失效。 */
+        record->address = (uint64_t)(uintptr_t)value;
+        record->observed_size = (uint64_t)value_size;
+        index += 1U;
     }
     if (!adapter->generation_started || changed ||
         adapter->generation == 0U) {
@@ -756,12 +795,38 @@ typedef struct runtimec_kvspace_width_entry {
     uint64_t width;
 } runtimec_kvspace_width_entry_t;
 
+/*
+ * 定宽 langtype → 零值字节宽度。
+ *
+ * **表里的三种东西必须分清**（p1：一条路径不许同时表达三种语义）：
+ *
+ *   1. **定宽的字符类型**——`char/utf32` 是**一个码位、恒 4 字节**
+ *      （等同 C 的 `char32_t`）；`char/ascii` 是**一个字符、恒 1 字节**
+ *      （等同 C 的 `char`）。两者都必须进表：它们是标量，帧准备应当按固定宽度
+ *      物化零值并绑定，与 `int64` 无差别。
+ *
+ *   2. **真正的变长类型**——`char/utf8` 是 1–4 字节的 UTF-8 序列，`[]char/` 前缀的
+ *      数组形态字符串按完整串匹配。它们**不进表**，走变长路径（写路径
+ *      创建、按内容定长）。**不许**把 `char/utf8` 塞进来：它的宽度取决于内容，
+ *      给它编一个固定宽度就是「发明语义」。
+ *
+ *   3. **根本不认识的 langtype**——同样返回 false，但那是「不知道」，与第 2 类
+ *      的「知道它变长」是两件事。调用方（帧准备）对两者的动作恰好相同（不物化），
+ *      所以共用 `false` 返回值是可接受的；**但表的内容必须只由第 1 类构成**。
+ *
+ * 曾经 `char/utf32` 与 `char/ascii` 没进表：于是 `char/utf32` 的局部槽在帧准备
+ * 时不物化，任何「首次写是 `LOCATE_WRITE` 取可写位置」的指令必然
+ * `UNBOUND_SLOT`（`strings` / `ndarray_numel_scattered` / `020_valid_parentheses` /
+ * `008_string_to_int` 四条）。
+ */
 static const runtimec_kvspace_width_entry_t runtimec_kvspace_width_table[] = {
     {"int8", 1U},    {"uint8", 1U},   {"bool", 1U},
     {"int16", 2U},   {"uint16", 2U},  {"int32", 4U},
     {"uint32", 4U},  {"float32", 4U}, {"int64", 8U},
     {"uint64", 8U},  {"float64", 8U}, {"time", 8U},
     {"time/duration", 8U},
+    /* 定宽的字符标量（见上）。`char/utf8` 故意不在此——它变长。 */
+    {"char/ascii", 1U}, {"char/utf32", 4U},
 };
 
 /* langtype → 零值字节宽度。表中没有即 UNSUPPORTED，不做名称归一化。 */

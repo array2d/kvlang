@@ -161,8 +161,12 @@ static inline void vmbin_handler_fail(binrwir_execution_exit_t *output_exit,
         runtimec_status_t vmbin_handler_status_;                                   \
                                                                                    \
         runtimec_error_reset(&vmbin_handler_error_);                               \
+        /* **写方向用 `_locate_write`**：STATIC 绝对 key 尚不存在时先创建
+         * （`1 + 2 -> /sum` 那种形态）；读方向仍用 `_locate_body`，绝不创建
+         * （#632 的反向对照）。LOCAL 槽不由此路径创建——定宽由帧准备物化、
+         * 变长由 copy / `write_new_value` 建。 */                        \
         vmbin_handler_status_ =                                                   \
-            vmbin_value_access_locate_body(                                        \
+            vmbin_value_access_locate_write(                                       \
                 (frame), &(instruction)->write_arguments.data[(ordinal)],          \
                 (location), &vmbin_handler_error_);                                \
         if (vmbin_handler_status_ != RUNTIMEC_STATUS_SUCCESS) {                    \
@@ -245,8 +249,22 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
                            instruction->source_logical_program_counter);
         return RUNTIMEC_STATUS_ERROR;
     }
-    status = vmbin_frame_target_key(frame, &instruction->write_arguments.data[0],
-                                    key_buffer, sizeof(key_buffer));
+    /*
+     * **写目标的 key 派生只在这里调用一次**，并且走共用的 helper——
+     * LOCAL 走 `<frame_path>/<符号名>`、STATIC（绝对路径 `/tmp/adk`）就是符号名本身。
+     *
+     * 曾经这里直接调只接 LOCAL 的 `vmbin_frame_target_key`：`map·new` 到绝对路径时
+     * 建 key 失败、报 `CREATE_FAILED`（0x4A05）。而**上层 `container_open_marker`
+     * 已经把正确的 key 拼出来了**（gdb 实测 `buffer="/tmp/adk"`），本函数却没用它、
+     * 又自己派生了一次——「同一事实两个来源」的教科书形态：
+     * `container_target_key` 与这里各有一份，`0x4308` 与 `0x4A05` 是同一个 bug 的
+     * 两个出口。
+     *
+     * LOCAL 行为**逐字不变**：helper 的 LOCAL 分支直接转调 `vmbin_frame_target_key`。
+     */
+    status = vmbin_value_access_argument_key(
+        frame, &instruction->write_arguments.data[0], key_buffer,
+        sizeof(key_buffer), &error);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         message[0] = '\0';
         if (kvspaceSetValue(frame->kvspace_handle, key_buffer, wire,

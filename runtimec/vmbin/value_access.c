@@ -55,8 +55,19 @@ static runtimec_status_t vmbin_value_access_locate_member(
             VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT,
             "frame carries no kvspace access for a member key");
     }
-    status = vmbin_frame_target_key(frame, argument, key_text,
-                                    sizeof(key_text));
+    /*
+     * **基座的 key 走共用派生**（LOCAL → 帧槽、STATIC → 绝对路径本身）。
+     *
+     * 这里曾经直接调只接 LOCAL 的 `vmbin_frame_target_key`——于是基座是绝对路径
+     * （`062_unique_paths` 的 `/tmp/up` 这类）时成员键建不出来，报
+     * 「member key cannot be built」。**这是「参数 → key 文本」这条规则的第三个
+     * 出口**：前两个（`container_target_key`、`vmbin_handler_write_new_value`）
+     * 被当成两个独立 bug 修掉之后，这一处才现形。
+     *
+     * 成员键 = 该 key + `·<成员名>`，拼接规则在下游，本处不改。
+     */
+    status = vmbin_value_access_argument_key(frame, argument, key_text,
+                                             sizeof(key_text), error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_INVALID,
@@ -721,6 +732,93 @@ static runtimec_status_t vmbin_value_access_create_static_target(
             VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
             message[0] != '\0' ? message
                                 : "static write target could not be written");
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * **写方向的定位：STATIC 绝对 key 尚不存在时先创建，再定位。**
+ *
+ * 为什么不直接调 `locate_body`：它只认**已存在**的值。而 spec 与 #632 定过
+ * 「**写指令创造 key、读指令不创造**」——但创建此前只落在
+ * `write_new_value` / `create_static_target`（都是**整值写**）上。
+ * 算术/比较这类 handler 走的是 `VMBIN_HANDLER_LOCATE_WRITE`：它先要一个**可写
+ * 位置**，算完再写进去。目标不存在时它无从定位，于是 `UNBOUND_SLOT`。
+ *
+ * 最小复现（3 行）：
+ *
+ *     rwfunc test() -> () {
+ *         1 + 2 -> /sum        // 写目标是 STATIC 绝对 key，且不存在
+ *         println(/sum)
+ *     }
+ *
+ * **创建复用 `ensure_zero_value`**，不写第二份创建实现：它按宽度表建定宽零值，
+ * 类型取写参声明；表外类型（数组/容器/无声明）返回失败——那时**具名失败，
+ * 不猜类型**（与 `create_static_target` 同一条纪律）。
+ *
+ * **只对 STATIC 生效**：LOCAL 的定宽槽由帧准备物化、变长槽由 copy /
+ * `write_new_value` 创建，这条路径不碰它们（否则就是第三份创建实现）。
+ * **读方向绝不创建**（#632 的反向对照）。
+ */
+runtimec_status_t vmbin_value_access_locate_write(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, vmbin_value_location_t *output_location,
+    runtimec_error_t *error) {
+    runtimec_status_t status =
+        vmbin_value_access_locate_body(frame, argument, output_location, error);
+
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        if (output_location->write_bytes != NULL) {
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+        /* 字面量不可写：与 `write_body` 的判据同一句，不在这里另立一套。 */
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_LITERAL_IS_READ_ONLY,
+            "a literal is not a writable location");
+    }
+    if (argument->reference_kind != BINRWIR_REFERENCE_STATIC ||
+        frame->program == NULL || frame->kvspace_access == NULL) {
+        return status;
+    }
+    {
+        runtimec_string_view_t key_text;
+        runtimec_string_view_t key_langtype;
+
+        if (binrwir_program_get_symbol(frame->program, argument->slot,
+                                       &key_text, &key_langtype) !=
+                RUNTIMEC_STATUS_SUCCESS ||
+            key_text.size == 0U) {
+            return status;
+        }
+        if (!runtimec_string_view_is_valid(key_langtype) ||
+            key_langtype.size == 0U) {
+            /* **不猜类型**：没有声明就建不出零值，具名失败。 */
+            return vmbin_value_access_fail(
+                error, RUNTIMEC_STATUS_INVALID,
+                VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE,
+                "static write target has no declared langtype; the key cannot "
+                "be created without one");
+        }
+        status = runtimec_kvspace_access_ensure_zero_value(
+            frame->kvspace_access, &frame->snapshot,
+            runtimec_key_view_make(key_text.data, key_text.size), key_langtype,
+            error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+    }
+    /* 建完之后再定位一次：这一次它一定存在。 */
+    status = vmbin_value_access_locate_body(frame, argument, output_location,
+                                            error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    if (output_location->write_bytes == NULL) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_LITERAL_IS_READ_ONLY,
+            "a literal is not a writable location");
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }
