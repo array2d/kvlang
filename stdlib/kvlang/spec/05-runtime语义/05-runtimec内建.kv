@@ -65,8 +65,10 @@ stringkeymap 散列容器；跨形态 TypeError。`compactarray·set` 仅同槽 
 - `time/duration·`：`nanos`、`millis`、`seconds`、`minutes`、`hours`、`as_nanos`、`as_millis`、
   `as_seconds`、`as_minutes`、`as_hours`、`add`、`sub`、`before`、`after`。
 - `random·`：`uint64`、`int63`、`intn`。
-- `kvspace·`：`get`、`set`、`del`、`deltree`、`cp`、`cpdir`、`cplist`、`list`、`listlen`、`listn`、
-  `mkindex`、`extindex`、`rmindexext`、`watch`。
+- `kvspace·`：`get`、`set`、`del`、`deltree`、`cp`、`cpdir`、`cplist`、`listlen`、`listat`、
+  `mkindex`、`extindex`、`rmindexext`、`watch`。完整 rwir 定义（opid、读参、写参、结果类型、
+  失败封闭）见 `runtimec/specification/kvspace-family.md`，以那份表为准；本名单此前写成
+  `list`/`listn`，是两个从未注册过的名字。
 - `kvlang·`：`abs`（取址；`&x ≡ kvlang·abs(x)`）。
 - `vthread·`：`create`、`run`、`call`、`sleep`、`setstatus`（语义见 [[执行模型]] §七）。
 

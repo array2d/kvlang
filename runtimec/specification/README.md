@@ -15,7 +15,8 @@
   管理面（mkindex/clear/watch）、已有算子覆盖面（get/set/cp/del）、后端实现面（view*）
   明确不入选，判据见该文第二章。
 - `rwir_catalog.def`：**能力表**。一行一个语义算子，携带读写 TypeSet 掩码、操作数约束、
-  结果规则、alias policy 与行为决策引用；opid 与 identifier 显式分配。
+  结果规则、alias policy 与行为决策引用。**rwir 的唯一标识是 key 文本本身**；表里的数值
+  id 只服务 BinRWIR 编码，是 runtimec 私有的实现细节，不是 rwir 身份。
 - `rwir_alias_table.def`：**别名表**。316 个注册 surface 名字到能力行的唯一映射，外加
   编译器按操作数静态类型改选的特化行（`concat`/`streq`/`ptreq`/`bool·eq`）。
 - `scalar_operations.def`：已裁决行为到标量 execution family 的派生映射输入。
@@ -24,8 +25,9 @@
 
 1. 在五语言矩阵中记录 C、Python、Rust、Go、V8/TypeScript 行为、kvlang 选择、边界
    fixture 与非法输入规则。
-2. 为**语义算子**分配显式稳定 identifier 与 `opid`。identifier 不得来自数组下标、文件
-   顺序、声明顺序或生成顺序。
+2. 为**语义算子**定一个显式稳定的 rwir key（如 `kvspace·get`）——**这就是 rwir 的唯一
+   标识，不得来自数组下标、文件顺序、声明顺序或生成顺序**。数值编码 id 是 BinRWIR 层
+   的事，属于 runtimec 私有，不进入本步骤。
 3. 在 `rwir_catalog.def` 中写入能力行（读写 TypeSet 掩码、约束、结果规则、alias policy、
    `behavior-decision`），并在 `rwir_alias_table.def` 中写入 surface 名字到能力行的唯一
    映射。类型特化名字（`int64·add`）只作为别名出现，不是独立能力行。

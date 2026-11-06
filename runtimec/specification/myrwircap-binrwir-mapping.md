@@ -39,6 +39,10 @@ RWIR 是 kvspace 中的明文、可恢复存储格式。每条调用至少表达
 | 能力表 | `rwir_catalog.def` | 131 行 | **一个语义算子一行**，操作数类型是 union |
 | 别名表 | `rwir_alias_table.def` | 316 条 | **一个注册 surface 名字一条**，指向能力行 |
 
+**三个「名字」不是一回事**（层次规则，勿混）：rwir 侧唯一标识是 **operator key 文本**
+（如 `kvspace·get`）；`Stable operation identifier` 是 runtimec 代码里引用的 C 符号名；
+`Canonical BinRWIR opid` 是二进制编码 id，**runtimec 私有**，不跨实现、不进 rwir 明文。
+
 能力行至少包含：
 
 | Field | Requirement |
