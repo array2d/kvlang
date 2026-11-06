@@ -424,6 +424,39 @@ static runtimec_status_t runtimec_temp_println_run(
         if (ordinal != 0U && separator[0] != '\0') {
             fputs(separator, stream);
         }
+        /*
+         * **打印一个指针值 = 打印它指向的 key 路径**，不查类型渲染表。
+         *
+         * `println(p)`（p 是 `*int64`）要的是**指针自己的值**，而指针的值就是
+         * 目标路径文本（spec 03-类型系统/03-种类：Ptr 的 body 是目标键）。
+         * 按 langtype 查渲染表必然查不到 `*int64`——那不是缺陷，是问错了表：
+         * 指针不是标量，它没有「数值形态」可言。
+         *
+         * 判据用 `vmbin_value_access_form`（形态由 langtype 的 `*`/`@` 前缀派生），
+         * 与解引用、ptreq 用的是同一条；我**不另判首字符**，那会是第二份规则。
+         *
+         * `argument->dereference != 0` 的不进这支：那种参数要的是跟过一跳之后的
+         * 值，不是指针本身。实测 `println(*p)` 根本走不到这里——layout 先发一条
+         * copy 把 `*p` 落进临时槽，println 拿到的是那个槽（所以 println 上的
+         * dereference 位恒为 0，这是正常形态，不是断裂）。留着这个条件是因为
+         * 「跟一跳后仍打印指针」在别的路径上仍可能成立，那时该走解引用语义。
+         *
+         * 空 body（空引用即 None）输出空串：一行空，不是空指针地址，也不是
+         * 一个编造的 `None` 字面。
+         */
+        {
+            uint8_t form = VMBIN_VALUE_ACCESS_FORM_VALUE;
+
+            if (vmbin_value_access_form(frame, argument, &form, &error) ==
+                    RUNTIMEC_STATUS_SUCCESS &&
+                form == VMBIN_VALUE_ACCESS_FORM_POINTER &&
+                argument->dereference == 0U) {
+                if (location.size != 0U && location.read_bytes != NULL) {
+                    fwrite(location.read_bytes, 1U, location.size, stream);
+                }
+                continue;
+            }
+        }
         switch (runtimec_temp_println_render(langtype, location.read_bytes,
                                              location.size, scratch,
                                              sizeof(scratch), stream)) {

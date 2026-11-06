@@ -850,3 +850,30 @@ runtimec_test_warnings(runtimec_frame_state_test)
 add_test(NAME runtimec.engine.frame_state COMMAND runtimec_frame_state_test)
 set_tests_properties(runtimec.engine.frame_state PROPERTIES
  LABELS "runtimec;scaffold;engine;frame_state")
+
+# `println` 打印**指针值**：输出目标 key 路径，不是它指向的数。
+#
+# 与 kv 语料里 pointer_none.kv 的分工：那条证明「整条语言链路」能跑通，
+# 本用例直接构造 XValue 打在 handler 上，能分别断「指针 → 路径」「标量 → 数」
+# 「空引用 → 空串」三态。只断后两者时，「指针打印成路径」根本没被测过。
+#
+# `RUNTIMEC_TEMP_PRINTLN` 是编译期开关：关闭时 `runtimec_temp_println_entries`
+# 不存在，本目标也不注册——与临时实现的生存期一致，不制造一条恒红的用例。
+if(RUNTIMEC_TEMP_PRINTLN)
+add_executable(runtimec_temp_println_pointer_test temp_println_pointer_test.c)
+target_compile_features(runtimec_temp_println_pointer_test PRIVATE c_std_11)
+target_include_directories(runtimec_temp_println_pointer_test PRIVATE
+ "${CMAKE_CURRENT_SOURCE_DIR}/.."
+ "${RUNTIMEC_INCLUDE_DIRECTORY}"
+ "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_temp_println_pointer_test PRIVATE
+ runtimec_contract runtimec_binrwir runtimec_vmbin
+ "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+set_target_properties(runtimec_temp_println_pointer_test PROPERTIES
+ BUILD_RPATH "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}")
+runtimec_test_warnings(runtimec_temp_println_pointer_test)
+add_test(NAME runtimec.vmbin.temp_println_pointer
+ COMMAND runtimec_temp_println_pointer_test)
+set_tests_properties(runtimec.vmbin.temp_println_pointer PROPERTIES
+ LABELS "runtimec;scaffold;vmbin;temp_println;pointer")
+endif()
