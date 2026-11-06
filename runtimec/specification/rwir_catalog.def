@@ -3,7 +3,9 @@
  * 作用：myrwircap 的唯一 capability manifest —— 一行一个语义算子。
  * 联系：surface 名字到本表行的映射在 rwir_alias_table.def；两表都由
  *       tools/architecture/generate_rwir_catalog.py 生成并校验。
- * 约束：opid 与 identifier 显式分配，不来自数组下标、文件顺序或声明顺序；
+ * 约束：rwir 的唯一标识是 operator key 文本；下面的数值 id 只服务 BinRWIR 编码，
+ *       是 runtimec 私有的实现细节，不是 rwir 身份。id 与 identifier 显式分配，
+ *       不来自数组下标、文件顺序或声明顺序；
  *       读写掩码是 TypeSet 位集，不是占位串，不含 wildcard；未获得矩阵决策的
  *       能力不进入本文件，记录在 rwir_catalog_gaps.md。
  * 掩码位：0 int8，1 int16，2 int32，3 int64，4 uint8，5 uint16，6 uint32，

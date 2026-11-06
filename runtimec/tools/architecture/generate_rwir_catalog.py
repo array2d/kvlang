@@ -6,13 +6,17 @@ operator**, carrying a read/write TypeSet bitmask, an operand constraint, a resu
 an alias policy and the behavior-decision list that governs it.
 
 Level 2 — `specification/rwir_alias_table.def`: surface name -> capability row. The 316
-names registered by `runtime/src/myrwircaps.c` are collapsed by type family and by alias;
+names registered by `specification/myrwircaps.c` are collapsed by type family and by alias;
 the four compiler-selected specializations (`concat`, `streq`, `ptreq`, `bool·eq`) are not
 registered names and are declared separately.
 
-Coverage scope: **only the C runtime's `myrwircaps`**. byteseek is an extension runtime
-whose in-process opcodes are deliberately not represented here (decision #622 D); neither
-are stdlib `def rwir` declarations written by layout.
+Coverage scope: **only the names listed in `specification/myrwircaps.c`**, the in-tree
+self-contained name table. That table replaced `runtime/src/myrwircaps.c` — the dispatch table
+of the previous-generation C runtime, which is frozen and no longer read by this tool. The name
+table answers only "which operator keys this runtime honours"; the single execution dispatch
+table lives elsewhere. byteseek is an extension runtime whose in-process opcodes are
+deliberately not represented here (decision #622 D); neither are stdlib `def rwir` declarations
+written by layout.
 
 The manifest is the single source of capability identity for runtimec. This tool only
 *reads* the registered capability set and the five-language behavior matrix; it never
@@ -37,7 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SPEC = Path("runtimec/specification")
-REGISTRY_SOURCE = Path("runtime/src/myrwircaps.c")
+REGISTRY_SOURCE = Path("runtimec/specification/myrwircaps.c")
 MANIFEST = SPEC / "rwir_catalog.def"
 ALIAS_TABLE = SPEC / "rwir_alias_table.def"
 GAPS = SPEC / "rwir_catalog_gaps.md"
@@ -441,7 +445,12 @@ FAMILY_ROWS = (
               read_langtypes="time/duration,time/duration", write_langtypes="bool"),
     FamilyRow("time/duration", "after", 0x016D, "duration-truncating-scale",
               read_langtypes="time/duration,time/duration", write_langtypes="bool"),
-    # kvspace
+    # kvspace：完整语义见 specification/kvspace-family.md。
+    #   **整族都不声明签名**：第一个读参是 base——可能是容器/struct 值，也可能是一段
+    #   path 文本，类型不可收敛为单一 lane。实测（2026-11-06）：声明成 char/utf8 后，
+    #   `03-control/for`、`04-ndarray/array_slice_hole`、`08-leetcode/{100,104}`、
+    #   `12-struct/10-member-chain` 五条从 blocked 变 fail（layout 内部发起的调用把
+    #   容器/structref 传给 argument0）。decls 表只收无前因的常量类型，本族不属于它。
     FamilyRow("kvspace", "get", 0x0170, "kvspace-get-missing-key"),
     FamilyRow("kvspace", "set", 0x0171, "kvspace-set-write-scope"),
     FamilyRow("kvspace", "del", 0x0172, "kvspace-set-write-scope"),
@@ -583,8 +592,7 @@ def preprocess_registry(root: Path) -> list[str]:
     """Expand the capability table with the C preprocessor so macro families are visible."""
     source = root / REGISTRY_SOURCE
     command = [
-        "gcc", "-E", "-I", str(root / "runtime/include"),
-        "-I", str(root / "runtime/src"), "-I", str(root / "include"), str(source),
+        "gcc", "-E", "-I", str(root / "include"), str(source),
     ]
     completed = subprocess.run(command, text=True, stdout=subprocess.PIPE,
                                stderr=subprocess.DEVNULL)
@@ -889,7 +897,7 @@ def render_signature_table(rows: list[Row]) -> str:
     lines = [
         "// 组件：specification/native_rwir_decls.kv",
         "// 作用：native rwir 的签名声明，供 layout 在**构建期**编进二进制。",
-        "// 联系：真源是 runtime/src/myrwircaps.c 的注册表 + five-language-behavior-matrix.md",
+        "// 联系：真源是 specification/myrwircaps.c 的名字表 + five-language-behavior-matrix.md",
         "//       的裁决；二者生成 rwir_catalog.def 的能力行，再由能力行生成本文件。",
         "//       改签名要改真源，不改任何一份产物。本文件由",
         "//       tools/architecture/generate_rwir_catalog.py 生成并由同一脚本校验。",
@@ -1016,7 +1024,9 @@ def render_catalog(rows: list[Row], aliases: list[tuple[str, str]],
         " * 作用：myrwircap 的唯一 capability manifest —— 一行一个语义算子。",
         " * 联系：surface 名字到本表行的映射在 rwir_alias_table.def；两表都由",
         " *       tools/architecture/generate_rwir_catalog.py 生成并校验。",
-        " * 约束：opid 与 identifier 显式分配，不来自数组下标、文件顺序或声明顺序；",
+        " * 约束：rwir 的唯一标识是 operator key 文本；下面的数值 id 只服务 BinRWIR 编码，",
+        " *       是 runtimec 私有的实现细节，不是 rwir 身份。id 与 identifier 显式分配，",
+        " *       不来自数组下标、文件顺序或声明顺序；",
         " *       读写掩码是 TypeSet 位集，不是占位串，不含 wildcard；未获得矩阵决策的",
         " *       能力不进入本文件，记录在 rwir_catalog_gaps.md。",
         " * 掩码位：0 int8，1 int16，2 int32，3 int64，4 uint8，5 uint16，6 uint32，",
@@ -1437,7 +1447,7 @@ def render_gaps(gaps: list[tuple[str, str]], opcodes: list[str],
     lines = [
         "# rwir_catalog 缺口清单",
         "",
-        "本文件列出 `runtime/src/myrwircaps.c` 中已注册、但无法收敛到一条已裁决",
+        "本文件列出 `specification/myrwircaps.c` 中已注册、但无法收敛到一条已裁决",
         "capability row 的 surface 名字。它们**不**进入 `rwir_alias_table.def`：",
         "补齐决策前不允许进入 canonical BinRWIR。",
         "",
