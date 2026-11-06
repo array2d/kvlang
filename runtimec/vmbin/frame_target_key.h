@@ -20,6 +20,7 @@
 #include <stddef.h>
 
 #include "binrwir/execution_frame.h"
+#include "contract/error.h"
 #include "contract/status.h"
 
 #ifdef __cplusplus
@@ -33,6 +34,26 @@ extern "C" {
 runtimec_status_t vmbin_frame_target_key(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument, char *buffer, size_t capacity);
+
+/*
+ * **写目标的 key 文本**——两种引用种类各走各的派生：
+ *   - `LOCAL`            ⇒ `<frame_path>/<符号名>`（`vmbin_frame_target_key` 那条）；
+ *   - `STATIC`（绝对路径）⇒ 符号名**本身就是完整 key**（`/tmp/adk` 这类），
+ *                          不需要、也不能拼 `frame_path`；
+ *   - 其余（读参引用 / 字面量 / 函数）⇒ INVALID。
+ *
+ * 为什么要有它：容器创建（`map·new` / `struct·new` / `compactarray·new`）的写目标
+ * 可以是绝对路径。曾经 `container_target_key` 直接调只接 LOCAL 的
+ * `vmbin_frame_target_key`，于是写槽是 `static[N]` 时建 key 失败——**而且报成了
+ * `UNPARSEABLE_LANGTYPE`**，判据指向完全错的地方（四例：`062`/`056`/`038`/
+ * `abs_dynamic_key`，全部 pc=1）。
+ *
+ * 错误经 `error` 传出（status + 具名诊断），调用方据以翻译成自己的 `exit`。
+ */
+runtimec_status_t vmbin_value_access_write_target_key(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, char *buffer, size_t capacity,
+    runtimec_error_t *error);
 
 #ifdef __cplusplus
 }

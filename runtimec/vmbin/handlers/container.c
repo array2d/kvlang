@@ -35,6 +35,7 @@
 #include "binrwir/execution_frame.h"
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
+#include "contract/char_codec.h"
 #include "contract/error.h"
 #include "contract/status.h"
 #include "contract/view.h"
@@ -146,6 +147,70 @@ static const char *container_langtype_text(runtimec_string_view_t langtype,
     memcpy(buffer, langtype.data, langtype.size);
     buffer[langtype.size] = '\0';
     return buffer;
+}
+
+/*
+ * **把一个「langtype 文本实参」解成 ASCII 文本。**
+ *
+ * 为什么需要：`compactarray·fill("...")` 与 `compactarray·newreinterpret(x, "...")`
+ * 的第 1/2 个实参都是**字符串字面量**，而 layout 把字符串字面量存成 `char/utf32`
+ * （每字符 4 字节，后跟 3 个 NUL）。`container_langtype_parse` 只认 ASCII 形态的
+ * `[dims]kind`——直接把 UTF-32 的字节喂进去，它读到 `'['` 之后的 `0x00` 就判
+ * 「不是数字」并返回失败。实测症状：
+ *
+ *   fill("[4]int32")              → detail 0x4302（UNPARSEABLE_LANGTYPE）
+ *   newreinterpret(a, "[]uint8")  → detail 0x4304（VALUE_WIDTH_MISMATCH）
+ *
+ * **一条规则一个实现**：编码分派只在这里做，`fill` 与 `newreinterpret` 都调它。
+ * 解码本身走 `contract/char_codec` 的唯一实现，本文件不写第二个解码器。
+ *
+ * 判据是**读参自己声明的 langtype**，不是数据长什么样：
+ *   - `char/utf32`（含 `[N]char/utf32`）⇒ 解码成 UTF-8；
+ *   - `char/utf8` / `char/ascii` ⇒ 已经是 ASCII 形态，原样取用；
+ *   - 其它种类 ⇒ 失败。**不猜**：一个 `int64` 实参不可能是 langtype 文本。
+ *
+ * 输出写进调用方的 `buffer`（NUL 结尾），返回 `buffer`；失败返回 NULL。
+ */
+static const char *container_langtype_text_from_argument(
+    const vmbin_value_location_t *value, runtimec_string_view_t value_langtype,
+    const uint8_t *bytes, size_t size, char *buffer, size_t capacity) {
+    /* 实参的 langtype 带维度前缀（`[8]char/utf32`），与 `container_langtype_parse`
+     * 剥 `[dims]` 的做法一致：**先剥维度段再看基种类**。用「整串等于
+     * `char/utf32`」会漏掉所有带维度的形态，而 layout 写的字面量恒带维度。 */
+    static const char utf32_kind[] = "char/utf32";
+    const char *base = value_langtype.data;
+    size_t base_size = value_langtype.size;
+    if (base != NULL && base_size != 0U && base[0] == '[') {
+        while (base_size != 0U && base[0] != ']') {
+            ++base;
+            --base_size;
+        }
+        if (base_size != 0U) {
+            ++base;
+            --base_size;
+        }
+    }
+    const bool is_utf32 = base_size == sizeof(utf32_kind) - 1U &&
+                          memcmp(base, utf32_kind, sizeof(utf32_kind) - 1U) == 0;
+    (void)value;
+
+    if (size == 0U) {
+        return NULL;
+    }
+    if (is_utf32) {
+        size_t used = 0U;
+        /* 编码器要求 `capacity > 输出长度`，调用方按「文本缓冲留一个位置」分配。 */
+        if (!runtimec_char_utf32_to_utf8(bytes, size, buffer, capacity, &used)) {
+            return NULL;
+        }
+        if (used + 1U > capacity) {
+            return NULL;
+        }
+        buffer[used] = '\0';
+        return buffer;
+    }
+    return container_langtype_text(
+        runtimec_string_view_make((const char *)bytes, size), buffer, capacity);
 }
 
 
@@ -442,14 +507,26 @@ static runtimec_status_t container_replace_langtype(
          * 所以这里取的是 body 文本，不是 `_langtype`。
          */
         vmbin_value_location_t text_location;
+        runtimec_string_view_t argument_type;
 
         status = vmbin_value_access_locate_body(
             frame, &instruction->read_arguments.data[1], &text_location, &error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return container_fail(output_exit, status, counter);
         }
-        replacement = runtimec_string_view_make(
-            (const char *)text_location.read_bytes, text_location.size);
+        /* 与 `fill` 同一条规则：这个实参是 langtype **文本**，按它自己的编码
+         * 解码（layout 把字符串字面量存成 `char/utf32`，每字符后跟三个 NUL）。 */
+        if (vmbin_value_access_langtype(
+                frame, &instruction->read_arguments.data[1], &argument_type,
+                &error) != RUNTIMEC_STATUS_SUCCESS ||
+            container_langtype_text_from_argument(
+                &text_location, argument_type, text_location.read_bytes,
+                text_location.size, langtype_text,
+                sizeof(langtype_text)) == NULL) {
+            return container_fail(output_exit, RUNTIMEC_STATUS_INVALID, counter);
+        }
+        replacement = runtimec_string_view_make(langtype_text,
+                                                strlen(langtype_text));
     } else {
         /* `newreshape` 的新类型由**写槽声明**给出：layout 已把 dims 编进 `[d1,d2]K`。 */
         status = vmbin_value_access_langtype(
@@ -567,7 +644,9 @@ static void container_create_from_fill(
     binrwir_execution_exit_t *output_exit) {
     vmbin_value_location_t langtype_value;
     vmbin_value_location_t filler;
+    runtimec_string_view_t langtype_argument_type;
     runtimec_container_diagnostic_t detail;
+    char langtype_text[CONTAINER_KEY_CAPACITY];
     uint8_t body[CONTAINER_NEW_BODY_CAPACITY];
     int64_t body_size;
     runtimec_error_t error;
@@ -591,9 +670,22 @@ static void container_create_from_fill(
                            output_exit->logical_program_counter);
         return;
     }
+    /* 第 1 个实参是 langtype **文本**：按它自己的编码解码成 ASCII 再解析。
+     * 直接拿 body 字节喂 `container_fill_body` 会把 UTF-32 的 `5b 00 00 00`
+     * 读成「`[` 后面跟一个非数字」，报 UNPARSEABLE_LANGTYPE。 */
+    if (vmbin_value_access_langtype(
+            frame, &instruction->read_arguments.data[0], &langtype_argument_type,
+            &error) != RUNTIMEC_STATUS_SUCCESS ||
+        container_langtype_text_from_argument(
+            &langtype_value, langtype_argument_type, langtype_value.read_bytes,
+            langtype_value.size, langtype_text, sizeof(langtype_text)) == NULL) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                           output_exit->logical_program_counter);
+        return;
+    }
     body_size = container_fill_body(
-        runtimec_string_view_make((const char *)langtype_value.read_bytes,
-                                  langtype_value.size),
+        runtimec_string_view_make(langtype_text, strlen(langtype_text)),
         filler.read_bytes, filler.size,
         instruction->read_arguments.count == 2U ? 1 : 0, body, sizeof(body),
         &detail);
@@ -784,16 +876,40 @@ static bool container_unary_arity(const binrwir_instruction_view_t *instruction,
     return false;
 }
 
+/*
+ * 写目标的 key：**一条规则一个实现**——派生逻辑全在
+ * `vmbin_value_access_write_target_key`（LOCAL → 帧槽、STATIC → 绝对路径本身），
+ * 本函数只做 error → exit 的翻译，不自己拼 key。
+ *
+ * 为什么要翻译而不是丢：helper 分得出「缓冲区不够」与「引用种类不对」两种失败，
+ * 一律折成 `INVALID` 就把那个区分抹掉了——这正是今晚反复消灭的那类「统一出口
+ * 掩盖具体原因」。
+ */
 static bool container_target_key(binrwir_execution_frame_t *frame,
                                  const binrwir_instruction_view_t *instruction,
                                  char *buffer, size_t capacity,
                                  binrwir_execution_exit_t *output_exit) {
-    if (vmbin_frame_target_key(frame, &instruction->write_arguments.data[0],
-                               buffer, capacity) == RUNTIMEC_STATUS_SUCCESS) {
+    runtimec_error_t error;
+
+    runtimec_error_reset(&error);
+    if (vmbin_value_access_write_target_key(
+            frame, &instruction->write_arguments.data[0], buffer, capacity,
+            &error) == RUNTIMEC_STATUS_SUCCESS) {
         return true;
     }
-    vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                       RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+    /*
+     * **建 key 失败 ≠ langtype 解析失败**，用各自具名的码。
+     *
+     * 曾经这里复用 `UNPARSEABLE_LANGTYPE`（0x4302）：`map·new` 的写槽是绝对路径
+     * （`static[N]`）而当时的 helper 只接 LOCAL，于是建 key 失败，报出来却是
+     * 「langtype 解析不出元素宽」——**判据指向完全错的地方**。四个人
+     * （`062`/`056`/`038`/`abs_dynamic_key`，全部 pc=1）都被这个错码误导过。
+     */
+    vmbin_handler_fail(output_exit,
+                       error.status != RUNTIMEC_STATUS_SUCCESS
+                           ? error.status
+                           : RUNTIMEC_STATUS_INVALID,
+                       RUNTIMEC_CONTAINER_DIAG_TARGET_KEY_UNRESOLVED,
                        instruction->source_logical_program_counter);
     return false;
 }

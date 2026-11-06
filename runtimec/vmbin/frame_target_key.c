@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "binrwir/argument.h"
+#include "contract/error.h"
 #include "binrwir/program.h"
 #include "contract/view.h"
 
@@ -39,5 +40,49 @@ runtimec_status_t vmbin_frame_target_key(
     buffer[frame->frame_path.size] = '/';
     memcpy(buffer + frame->frame_path.size + 1U, name.data, name.size);
     buffer[length] = '\0';
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 写目标的 key 文本。LOCAL 走 `<frame_path>/<符号名>`，STATIC 直接是符号名
+ * （绝对路径本身就是完整 key），其余种类 INVALID。
+ *
+ * **不创建、不触碰存储**：只回答「这条写指令的 key 是什么」。创建的语义归
+ * `vmbin_value_access_write_*` 那几条（#632）。
+ */
+runtimec_status_t vmbin_value_access_write_target_key(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, char *buffer, size_t capacity,
+    runtimec_error_t *error) {
+    runtimec_string_view_t name;
+    runtimec_string_view_t langtype;
+
+    if (frame == NULL || frame->program == NULL || argument == NULL ||
+        buffer == NULL || capacity == 0U || error == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    if (argument->reference_kind == BINRWIR_REFERENCE_LOCAL) {
+        return vmbin_frame_target_key(frame, argument, buffer, capacity);
+    }
+    if (argument->reference_kind != BINRWIR_REFERENCE_STATIC) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    /* STATIC：符号池里的名字就是**完整 key**（`/tmp/adk` 这类绝对路径）。
+     * 拼 `frame_path` 是错的——那会得到 `/vthread/.../\/tmp/adk`。 */
+    if (binrwir_program_get_symbol(frame->program, argument->slot, &name,
+                                   &langtype) != RUNTIMEC_STATUS_SUCCESS ||
+        name.size == 0U) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    if (name.size + 1U > capacity) {
+        runtimec_error_set(error, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
+                           RUNTIMEC_ERROR_DOMAIN_CONTRACT, 0,
+                           runtimec_string_view_from_c_string(
+                               "write target key does not fit the buffer"),
+                           RUNTIMEC_PROGRAM_COUNTER_NONE);
+        return RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY;
+    }
+    memcpy(buffer, name.data, name.size);
+    buffer[name.size] = '\0';
     return RUNTIMEC_STATUS_SUCCESS;
 }

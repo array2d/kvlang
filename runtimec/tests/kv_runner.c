@@ -457,6 +457,81 @@ static runtimec_status_t case_store_close(runner_environment_t *environment) {
  * `depth` 是当前帧号（根帧 1），子帧 `depth + 1`。**必须递增**：复用同一帧号会让
  * 子帧覆盖调用方帧——那种错不会立刻崩，而是算错。
  */
+/*
+ * ── 写参槽的**有效 key**（驱动自持的一张表）──────────────────────────
+ *
+ * 背景：`wrap(3) -> y` 的时候，`wrap` 的写参 `*o` 在帧建起来时**已经绑到最终
+ * 接收者** `y` 上（窗口的 bindings 做了这件事）。所以当 `wrap` 再往下调用
+ * `seta(*n) -> *o` 时，子调用要写的那个 key **不是** `/vthread/1/[2]/[0,+1]`
+ * （那只是 wrap 自己的槽），而是 `y` 的 key。写槽 key 就等于写到一个没人读的地方
+ * ——实测 `seta` 写对了、`y` 恒为 0。
+ *
+ * **为什么由驱动记，而不是查窗口**：驱动是这些 key 的**来源**——它自己决定每次
+ * 调用给被调方传哪个 key（`callee_arguments[...].key`）。记下自己做过的决定不是
+ * 「复制窗口的状态」，而是同一事实回到产生它的地方。窗口的 bindings 是它自己的
+ * 派生缓存，且未通过公共 API 暴露。
+ *
+ * 表项是 `(帧路径, 写参序号) → 该写参被绑到的 key`。帧弹出时**按帧路径整段清掉**，
+ * 否则同深度复用目录时会串到上一次调用的 key。
+ */
+#define KVRUN_EFFECTIVE_KEY_CAPACITY 256U
+
+typedef struct runner_effective_key {
+    char frame_path[128];
+    uint16_t parameter_slot;
+    char key[128];
+} runner_effective_key_t;
+
+static runner_effective_key_t g_effective_keys[KVRUN_EFFECTIVE_KEY_CAPACITY];
+static size_t g_effective_key_count;
+
+/* 记一条；同 (帧路径, 槽) 覆盖（递归同帧号不会重入，覆盖即正确）。 */
+static void effective_key_record(const char *frame_path, uint16_t slot,
+                                 const char *key) {
+    for (size_t ordinal = 0U; ordinal < g_effective_key_count; ++ordinal) {
+        if (g_effective_keys[ordinal].parameter_slot == slot &&
+            strcmp(g_effective_keys[ordinal].frame_path, frame_path) == 0) {
+            snprintf(g_effective_keys[ordinal].key,
+                     sizeof(g_effective_keys[ordinal].key), "%s", key);
+            return;
+        }
+    }
+    if (g_effective_key_count >= KVRUN_EFFECTIVE_KEY_CAPACITY) {
+        return;
+    }
+    runner_effective_key_t *entry = &g_effective_keys[g_effective_key_count++];
+    snprintf(entry->frame_path, sizeof(entry->frame_path), "%s", frame_path);
+    entry->parameter_slot = slot;
+    snprintf(entry->key, sizeof(entry->key), "%s", key);
+}
+
+/* 查一条；没有则返回 NULL。 */
+static const char *effective_key_lookup(const char *frame_path,
+                                        uint16_t slot) {
+    for (size_t ordinal = 0U; ordinal < g_effective_key_count; ++ordinal) {
+        if (g_effective_keys[ordinal].parameter_slot == slot &&
+            strcmp(g_effective_keys[ordinal].frame_path, frame_path) == 0) {
+            return g_effective_keys[ordinal].key;
+        }
+    }
+    return NULL;
+}
+
+/* 帧弹出：把该帧的所有记录整段清掉（同一个 frame_path 前缀只属于它）。 */
+static void effective_key_forget_frame(const char *frame_path) {
+    size_t kept = 0U;
+    for (size_t ordinal = 0U; ordinal < g_effective_key_count; ++ordinal) {
+        if (strcmp(g_effective_keys[ordinal].frame_path, frame_path) == 0) {
+            continue;
+        }
+        if (kept != ordinal) {
+            g_effective_keys[kept] = g_effective_keys[ordinal];
+        }
+        kept += 1U;
+    }
+    g_effective_key_count = kept;
+}
+
 static frame_outcome_t execute_frame_until_done(
     runner_environment_t *environment, const char *function_path,
     uint32_t source_pc, int32_t depth, const char *frame_segment,
@@ -705,20 +780,46 @@ static frame_outcome_t execute_frame_until_done(
                 /*
                  * 形参写位置：key 由 helper 拼，本驱动不自己拼。
                  * `slot` 是**该方向内的序号**（argidx），从 0 起。
+                 *
+                 * ── 用**本帧**的 `frame_path`，不是被调方那段 ──────────────
+                 *
+                 * 写参 `*o` 是**调用方签名里的槽**：被调方写它，等于写调用方的
+                 * `/vthread/<vid>/[<本帧段>]/[0,+N]`。用它自己的 `callee` 段去拼
+                 * ——那是被调帧的槽——值就写进了子帧，调用方永远读不到（症状：
+                 * `inner(*n) -> *o` 之后 `*o` 恒为 0，而单层 `inner(3) -> r` 正常，
+                 * 因为那一层调用方就是根帧、恰好同段）。
+                 *
+                 * **LOCAL 实参那一支（上面）已经用同一条判据修过**，注释原文
+                 * 「`depth` 是帧号，`frame_path` 才是地址」。这里用的是同一个
+                 * `frame_path` 局部量——两处取帧路径只有这一个来源。
+                 *
+                 * **契约（对正式驱动同样成立）**：驱动负责把写参槽绑到**调用者
+                 * key**；runtime 只认绑定，不自己推导「写参该落在哪」。
                  */
-                char frame_path[128];
-                const int frame_length = snprintf(
-                    frame_path, sizeof(frame_path), "/vthread/%s/[%s]",
-                    vthread_identifier, frame_segment);
-                if (frame_length < 0 ||
-                    (size_t)frame_length >= sizeof(frame_path)) {
-                    return FRAME_OUTCOME_ERROR;
+                /*
+                 * **先查本帧该写参的有效 key**：本帧自己被调进来时，这个写参
+                 * 已经被绑到某个最终接收者。查不到（根帧、或该层没经由本驱动
+                 * 传递）才用本帧自己的槽 key。
+                 */
+                const char *effective =
+                    effective_key_lookup(frame_path, argument->slot);
+                size_t parameter_key_size = SIZE_MAX;
+                if (effective != NULL) {
+                    const size_t effective_size = strlen(effective);
+                    if (effective_size + 1U <=
+                        sizeof(write_target_keys[callee_argument_count])) {
+                        memcpy(write_target_keys[callee_argument_count],
+                               effective, effective_size + 1U);
+                        parameter_key_size = effective_size;
+                    }
                 }
-                const size_t parameter_key_size = binrwir_frame_parameter_key(
-                    runtimec_string_view_from_c_string(frame_path),
-                    argument->slot, true,
-                    write_target_keys[callee_argument_count],
-                    sizeof(write_target_keys[callee_argument_count]));
+                if (parameter_key_size == SIZE_MAX) {
+                    parameter_key_size = binrwir_frame_parameter_key(
+                        runtimec_string_view_from_c_string(frame_path),
+                        argument->slot, true,
+                        write_target_keys[callee_argument_count],
+                        sizeof(write_target_keys[callee_argument_count]));
+                }
                 if (parameter_key_size == SIZE_MAX) {
                     return FRAME_OUTCOME_ERROR;
                 }
@@ -836,10 +937,48 @@ static frame_outcome_t execute_frame_until_done(
             (size_t)callee_segment_length >= sizeof(callee_frame_segment)) {
             return FRAME_OUTCOME_ERROR;
         }
+        /*
+         * **登记本次调用给出的写参 key**（按被调方帧路径 + 槽号）。
+         *
+         * 被调方自己的 `*o` 写参若是 PARAMETER_WRITE，它要用的是**这里给它的那个
+         * key**，不是它自己帧里的槽 key。反过来不记，就是让它写到一个没人读的地方。
+         */
+        char callee_frame_path[128];
+        const int callee_path_length = snprintf(
+            callee_frame_path, sizeof(callee_frame_path), "/vthread/%s/[%s]",
+            vthread_identifier, callee_frame_segment);
+        if (callee_path_length > 0 &&
+            (size_t)callee_path_length < sizeof(callee_frame_path)) {
+            /* **槽号是写参方向内的序号**（`argument->slot`），不是 `callee_arguments`
+             * 里的位置——后者把读参与写参混在一个数组里，直接用 ordinal 会错位。 */
+            uint16_t write_ordinal = 0U;
+            for (size_t ordinal = 0U; ordinal < callee_argument_count;
+                 ++ordinal) {
+                const runtimec_argument_description_t *description =
+                    &callee_arguments[ordinal];
+                if (description->source != RUNTIMEC_ARGUMENT_SOURCE_WRITE_TARGET) {
+                    continue;
+                }
+                char key_text[128];
+                const size_t key_size = description->key.size;
+                if (key_size == 0U || key_size + 1U > sizeof(key_text)) {
+                    write_ordinal += 1U;
+                    continue;
+                }
+                memcpy(key_text, description->key.data, key_size);
+                key_text[key_size] = '\0';
+                effective_key_record(callee_frame_path, write_ordinal, key_text);
+                write_ordinal += 1U;
+            }
+        }
         const frame_outcome_t callee_outcome = execute_frame_until_done(
             environment, callee_path, KVRUN_CALLEE_ENTRY_SOURCE_PC,
             depth + 1, callee_frame_segment, vthread_identifier,
             callee_arguments, callee_argument_count, NULL, &callee_exit);
+        /* 子帧结束：它那一段的记录全部作废，否则同深度复用目录会串 key。 */
+        if ((size_t)callee_path_length < sizeof(callee_frame_path)) {
+            effective_key_forget_frame(callee_frame_path);
+        }
         if (callee_outcome != FRAME_OUTCOME_DONE) {
             /*
              * 子帧没跑完（ERROR / HANDOFF / INVALID）：**必须把它的 exit 交出去**。

@@ -108,12 +108,24 @@ typedef enum runtimec_container_diagnostic {
      * `[4]int64 → [3,3]int64`：4 ≠ 9，body 长度装不下。与 `VALUE_WIDTH_MISMATCH`
      * 分开——那个是「单个值的宽不对」，这个是「整体元素数变了」。
      */
-    RUNTIMEC_CONTAINER_DIAG_RESHAPE_SIZE_MISMATCH = 0x4305
+    RUNTIMEC_CONTAINER_DIAG_RESHAPE_SIZE_MISMATCH = 0x4305,
+    /*
+     * **写目标的 key 构造不出来**——与「langtype 解析不出元素宽」是两件事。
+     *
+     * 复用一个码会让「看到 0x4302」的人去查类型表，而真相是 key 根本没建成。
+     * 实测（2026-11-06）：`map·new` 的写槽是**绝对路径**（`static[N]`，如
+     * `/tmp/adk`），而 `container_target_key` 当时只接 LOCAL 引用 ⇒ 建 key 失败，
+     * 却报成 `UNPARSEABLE_LANGTYPE`。四例：`062_unique_paths`、`056_merge_intervals`、
+     * `038_count_and_say`、`abs_dynamic_key`，全部 `pc=1`。
+     */
+    RUNTIMEC_CONTAINER_DIAG_TARGET_KEY_UNRESOLVED = 0x4308
 } runtimec_container_diagnostic_t;
 
 /* 段断言：本模块的码必须落在自己的段内（见 contract/diagnostic_band.h）。 */
 _Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(RUNTIMEC_CONTAINER_DIAG_RESHAPE_SIZE_MISMATCH, RUNTIMEC_DIAGNOSTIC_BAND_CONTAINER),
                "RUNTIMEC_CONTAINER_DIAG_RESHAPE_SIZE_MISMATCH must stay inside its diagnostic band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(RUNTIMEC_CONTAINER_DIAG_TARGET_KEY_UNRESOLVED, RUNTIMEC_DIAGNOSTIC_BAND_CONTAINER),
+               "RUNTIMEC_CONTAINER_DIAG_TARGET_KEY_UNRESOLVED must stay inside its diagnostic band");
 
 
 /*

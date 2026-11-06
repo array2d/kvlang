@@ -16,6 +16,7 @@
 #include "contract/diagnostic_band.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "binrwir/execution_frame.h"
