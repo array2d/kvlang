@@ -1,17 +1,20 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/类型系统/已敲定 {
-	r####"# 已敲定
+	r####"# 已敲定（2026-11-06）
 
-- 线格式为固定 8 字节 head `[len:u48 LE][storetype:u8][ptr:u8]`（len 在前、占偏移 0-5），body 偏移恒为 8，容量 2^48。类型（langtype）不在 head——存于 body 之后的值内 attr 区（明文串，含形状段）。
-- storetype 0 为短定长值；1 为变长（len=有效字节数）；2 为大定长张量（body=元素连续）；3 为 @ext（body=UTF-8 定位串）。
-- langtype 是完整语义类型。源码类型标注的 `*`/`@` 前缀在 wire 中分别表示为 ptr 字段（1/2）与 storetype 3，不进入 langtype 串。
-- map/struct 的 base key 存 storetype 0 空 body，成员直接在 `base·member`；函数和 lib 使用 `/` 目录。成员由物理 key 前缀枚举，无 index/extindex 矩阵或 memindex body。
-- rwfunc 目录值为 storetype 0、body 空；`[0,0]` 锚点为 storetype 1、5 字节计数头。def rwir 路由头为 storetype 0、5 字节。调用槽由 layout 判定为 rwir 或 rwfunc，均使用 storetype 1，body 为计数头加目标名。
-- 字符串（`[n]char/utf8` 等）使用 storetype 1；UTF-8 的 len 是字节数，langtype 的形状记录码点数，解码同时校验。
-- 语言层面的 `[]uint8` / `[N]uint8`（`ndim ≥ 1`）是定长张量，使用 storetype 2。
-- kvlang 指针（`ptr` 字段位 =1）body 是目标 KV 路径；@ext（ptr=2、storetype 3）body 是扩展定位串，langtype 为实际目标类型。
-- **attr 区**：值内 attr 区编码为 `attr = [attr_len:u16 LE][records...]`——`attr_len = 2 + Σ records`（空 attr = `[2]`，恒存在）；`record = [tag:u8][len:u16 LE][data]`，tag 1 = langtype（UTF-8 明文串，含形状段，record len 自描述，无 NUL），tag 2+ 预留扩展。`total = 8 + len + attr_len`，自描述；无 pad。
-- langtype 随单 key 一次写（head+body+attr 整体）落下，**天然原子**；无 attr key、无顺写裁决、无孤儿清理。
-- runtime 每次从 kvspace 读取变量和 PC，完成指令后写回；进程内不保留其私有状态副本。
+- 线格式为固定 **16 字节** head `[bodylen:u64 LE][attrslen:u32 LE][layout:u8][padding:3]`，
+  body 偏移恒 16，`padding` 必须为零。类型（langtype）不在 head——存于 body 之后的值内 attr 区。
+- `layout`：0 = bodylen 是有效长度；1 = bodylen 是容量，有效长度在 attr tag 2。其余取值必须为零。
+- **没有 storetype 与 ptr 字段**：存储形态由 langtype 推；指针与扩展分别是 langtype 的 `*` / `@`
+  前缀，**原样写入 wire langtype**，任何一层都不剥。
+- `None` = 空 body + 无 langtype + 非目录 key（目录以 `/` 结尾）；空引用（`*T` + 空 body）是
+  有类型的空，不是 None。
+- map/struct 的 base key 是空 body 的容器头，成员在 `base·member`；函数与 lib 用 `/` 目录。
+  成员由物理 key 前缀枚举，无 index/extindex 矩阵或 memindex body。
+- rwfunc 目录值为空 body；`[0,0]` 锚点与调用槽都是**代码值**（空 langtype，5 字节计数头+名字）。
+  def rwir 路由头同为代码值。
+- 字符串形状段记录码点数、bodylen 记录 UTF-8 字节数，解码时两者都校验。
+- 定长张量用形状段 `[d0,d1,…]T`，body 为连续定宽元素。
+- kvlang 指针 langtype 以 `*` 开头、body 为目标 KV 路径；`@` 本期只保留线格式，运行时不实现。
 "#### -> /lib/kvlang/spec/类型系统/已敲定
 }

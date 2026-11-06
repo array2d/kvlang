@@ -20,13 +20,12 @@ handle close（没有指令边界回收调用）。写返回 body 偏移的二�
 因此外部暂停/恢复/终止（改该键）对运行中的 kvcpu 立即可见。除此之外的 key 都是 snapshot；
 新增外部可改写键必须在此登记为 volatile。
 
-**status 固定档（normative）**：`/vthread/*/‥status` 的**形状固定**——storetype 为
-SLACK（headlen 恒等于 `KVSPACE_XVALUE_HEAD_LEN`，**当前为 16 字节**；不得写死数字，一律以该常量为准）、合法内容长度上限
-LV=16。shm 后端创建该键时按**物理容量下限 80 字节**分配（实际
-`headlen`/`body_cap` 以 slot view 返回为准）。之后任何写入（runtime
+**status 固定档（normative）**：`/vthread/*/‥status` 的**形状固定**——head 恒为
+`KVSPACE_XVALUE_HEAD_LEN`（**当前 16 字节**，不得写死数字）、`layout` 为 0 或 1、
+langtype 为 `[]char/utf8`、合法内容长度上限 LV=16。shm 后端创建该键时按**物理容量下限
+80 字节**分配（实际 `headlen`/`body_cap` 以 slot view 返回为准）。之后任何写入（runtime
 `setstatus`/`SetDone`/`SetError` 或外部 `kvspace set`）都必须原地完成；内容长度 > LV、
-storetype 与规范形状不符或现存槽自身
-不满足规范形状（SLACK/`[n]char/utf8`/content ≤16），必须**硬错返回**，
+head 形状不符、langtype 不是 `[]char/utf8`，或现存槽自身物理容量 <80，必须**硬错返回**，
 不得 realloc、不得截断、不得更换 box。**旧 store 中 headlen 不符或物理容量 <80 的
 status 槽不自动升级**：写入硬错，slot view 返回 `-1`，需重建/重置该 store。合规槽的
 view 的二进制指针在 handle 生命期内稳定；`kvspaceWatch` 仍按后端值轮询，status 变更仍可见。
@@ -54,9 +53,10 @@ int kvspaceSlotView(void *h, const kvspaceRef_t *ref,
 二进制指针为借用：寿命到该 key 被写/删、view 失效或 handle close。两种使用模式：
 
 - **只读 view**：只读 head/body，不写；用于 status 与 operand 的每步读。
-- **owned view（P1 仅 PC）**：key 由本 vthread 独占写，storetype/headlen 固定。
+- **owned view（P1 仅 PC）**：key 由本 vthread 独占写，`layout`/`headlen` 固定。
   允许一次 memcpy 原地替换整个 XValue，但必须按 `view->body_cap` 编码（不得按
-  新值长度收紧）；storetype 与 langtype 的**基类型**必须不变；char 的
+  新值长度收紧）；**head 与 attr 区必须逐字节不变**（langtype 是类型事实，改类型即换值，
+  走整值写）；char 的
   `[<n>]` 长度前缀是派生字段，必须用规范编码随内容更新并与 valuelen 一致
   （不得整串照抄旧 n）。总长超过 `cap` 或后端拒绝时回退 `SetPartByRef`（一次性）。
   owned 键不提供 `kvspaceWatch` 通知保证；P1 的局部操作数不进入 owned，继续走
@@ -121,7 +121,7 @@ box 退役进垃圾环；释放发生在屏障轮（`kvspaceViewSweep` 同步跑
 | `kvspaceGet` | 借用读：`*out` 指向后端常驻空间；`resolve=1` 穿透 link；不存在/空值 → `*out=NULL`、返回 0 |
 | `kvspaceSlotView` | shm-only slot view：返回映射内 `head/body/cap/body_cap`；只读或 owned 直写；不支持后端返回 `-2` |
 | `kvspaceWriteInPlace` | 就地写：key 已存在、kind 不变、body 长度不变；返回原 box body 偏移的二进制指针，违反前置条件即报错，绝不静默重分配 |
-| `kvspaceWriteNewPlace` | 新位置写：按 `(ref, storetype, body_len, body_cap, langtype)` 分配新 box、写好固定 head 与 attr 区 tag 1 langtype 记录，返回 body 偏移的二进制指针。用于新建或 kind/尺寸变化。`body_cap` 是 v0.3.0 起的容量下界（预留冗余，减少后续扩容） |
+| `kvspaceWriteNewPlace` | 新位置写：按 `(ref, body_len, body_cap, langtype)` 分配新 box、写好固定 head 与 attr 区 tag 1 langtype 记录，返回 body 偏移的二进制指针。用于新建或 kind/尺寸变化。`layout` 由 `body_cap > body_len` 推出；`ref` 转成 langtype 的 `*`/`@` 前缀。**`storetype` 形参保留只为 ABI 稳定，不携带信息：实现不得对它分支或校验**（见 `kvspace.h` 注释）。`body_cap` 是容量下界（预留冗余，减少后续扩容） |
 | `kvspaceSetValue` | 整值写：给定完整 xvalue 字节，由后端编码 head 并写入。runtime 侧的写出口走它，而非上面的偏移二进制指针原语 |
 | `kvspaceListLen` | 返回前缀下直接子项计数 |
 | `kvspaceListAt` | 取前缀下第 `idx` 个子项名，写入调用方自备缓冲；配合 `kvspaceListLen` 遍历 |
@@ -133,15 +133,15 @@ box 退役进垃圾环；释放发生在屏障轮（`kvspaceViewSweep` 同步跑
 | `kvspaceClear` | 清空 |
 | `kvspaceWatch` | 一次性等待某 key 变为目标值 |
 
-无句柄的 XValue 构造/读取（前端静态导出，byte-identical）：head 固定 8 字节、无 encode/decode 层——构造
-走 `kvspaceXvalueHeadNewNone`/`NewScalar`/`NewSlack`/`NewTensor`/`NewPtr`/`NewExt`/`NewCode`/`Reserve`
-（`kvspaceXvalueHead` struct 为 `len[6] u48 小端 @0-5`、`storetype @6`、`ptr @7`，body 偏移恒 8），读走
-memcpy `kvspaceXvalueHead` struct + inline `kvspaceXvalueHeadLen`/`SetLen`；langtype 不在 head——落值内
-attr 区（tag 1 记录），随单 key 一次写整体落下。标准标量构造器保留：`kvspaceNewPtr`（存目标完整 langtype +
+无句柄的 XValue 构造/读取（前端静态导出，byte-identical）：head 固定 **16 字节**、无 encode/decode 层——
+构造走 `kvspaceXvalueHeadNewNone`/`NewScalar`/`NewSlack`/`NewTensor`/`NewPtr`/`NewExt`/`NewCode`/`Reserve`
+（`kvspaceXvalueHead` struct 为 `bodylen:u64 @0`、`attrslen:u32 @8`、`layout:u8 @12`、`padding:3 @13-15`，
+body 偏移恒 16），读一律走 `xvalue_head.h` 的 inline 访问器（字段的唯一定义点）；langtype 不在 head——
+落值内 attr 区（tag 1 记录），随单 key 一次写整体落下。标准标量构造器保留：`kvspaceNewPtr`（存目标完整 langtype +
 目标 key）、`kvspaceNewChar` / `kvspaceNewBool` / `kvspaceNewInt64` / `kvspaceNewFloat64`（签名各增
 langtype 参数，写入 attr 区）。
 
-读写各带 `resolve` 参数：`resolve=1` 时透明穿透 ref=1 的 kvlang 指针（link）；`kvspaceListLen`/`kvspaceListAt`
+读写各带 `resolve` 参数：`resolve=1` 时透明穿透 langtype 以 `*` 开头的 kvlang 指针（link）；`kvspaceListLen`/`kvspaceListAt`
 另有 `expand_ext` 参数控制是否展开 extindex 子项。head 线格式与 langtype 编码见 [[键系统与数组访
 问]]。
 
@@ -174,6 +174,7 @@ dispatch 静态导出；后端 `kvspace-c` / `kvspace-durable` 各导出同一�
     kvspaceDel
     kvspaceDelTree
     kvspaceGet
+    kvspaceGetByRef
     kvspaceGetPart
     kvspaceListAt
     kvspaceListLen
@@ -184,17 +185,12 @@ dispatch 静态导出；后端 `kvspace-c` / `kvspace-durable` 各导出同一�
     kvspaceNewFloat64
     kvspaceNewInt64
     kvspaceNewPtr
+    kvspaceResolveRef
     kvspaceRmindexExt
     kvspaceSetPart
-    kvspaceXvalueBodyView
-    kvspaceXvalueHeadNewCode
-    kvspaceXvalueHeadNewExt
-    kvspaceXvalueHeadNewNone
-    kvspaceXvalueHeadNewPtr
-    kvspaceXvalueHeadNewScalar
-    kvspaceXvalueHeadNewSlack
-    kvspaceXvalueHeadNewTensor
-    kvspaceXvalueHeadReserve
+    kvspaceSetPartByRef
+    kvspaceSetValue
+    kvspaceSetValueByRef
     kvspaceViewAck
     kvspaceViewCheck
     kvspaceViewDel
@@ -209,6 +205,15 @@ dispatch 静态导出；后端 `kvspace-c` / `kvspace-durable` 各导出同一�
     kvspaceWatch
     kvspaceWriteInPlace
     kvspaceWriteNewPlace
+    kvspaceXvalueBodyView
+    kvspaceXvalueHeadNewCode
+    kvspaceXvalueHeadNewExt
+    kvspaceXvalueHeadNewNone
+    kvspaceXvalueHeadNewPtr
+    kvspaceXvalueHeadNewScalar
+    kvspaceXvalueHeadNewSlack
+    kvspaceXvalueHeadNewTensor
+    kvspaceXvalueHeadReserve
 ```
 	"#### -> /lib/kvlang/spec/kvspace模型/CABI
 }

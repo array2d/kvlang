@@ -2,20 +2,25 @@
 lib kvlang/spec/类型系统/总体方案 {
 	r####"# 类型系统总体方案：xvalue head 的固定头
 
-> **本卷即现行方案**：#566 已把 head 改为**固定 8 字节头**，类型（langtype）移出 head
-> 到值内 attr 区（body 之后的 tag 1 记录）。本卷各章与其它各卷均据此书写。
+> **本卷即现行方案**（2026-11-06 起）：head 固定 **16 字节**，类型（langtype）移出 head 到值内
+> attr 区（body 之后的 tag 1 记录）。本卷各章与其它各卷均据此书写。
 
-每个 XValue 落入 kvspace 时，head 固定 8 字节、body 紧随其后：
+每个 XValue 落入 kvspace 时，head 固定 16 字节、body 紧随其后：
 
-	head = [len:u48 LE][storetype:u8][ptr:u8]
-	body = head + 8
+	head = [bodylen:u64 LE][attrslen:u32 LE][layout:u8][padding:3]
+	body = head + 16
 
-- **`len`（偏移 0-5）** — body 有效字节数，小端 u48，容量 2^48。
-- **`storetype`（偏移 6）** — 存储形态：0 短定长 / 1 变长 / 2 长定长 / 3 扩展世界。
-- **`ptr`（偏移 7）** — 0=inline、1=ptr、2=@ext。
+- **`bodylen`（偏移 0-7）** — body 字节数；或容量（见 `layout`）。
+- **`attrslen`（偏移 8-11）** — attr 区字节数（无长度前缀，记录自描述）。
+- **`layout`（偏移 12）** — `0` = bodylen 是有效长度；`1` = bodylen 是容量、有效长度在 attr tag 2。
+  其余取值保留且必须为零。
+- **`padding`（偏移 13-15）** — 必须为零；它是 ABI 的一部分，不是可填字段。
+- **没有 `storetype`/`ptr` 字段** — 存储形态由 langtype 推；指针与扩展是 langtype 的 `*` / `@`
+  前缀（原样保留，任何一层都不剥）。
 - **类型不在 head** — langtype 存值内 attr 区（body 后 tag 1 记录，明文 UTF-8 串，含形状段）。
 
-**codec 不解析 langtype**：后端是纯存储层——body 偏移恒为 8，类型事实源在值内 attr 区，
-由 vmkv（明文栈）读取解析。
+**codec 不解析 langtype**：后端是纯存储层——body 偏移恒为 16，类型事实源在值内 attr 区，
+由 vmkv（明文栈）读取解析。字段的唯一定义点是 `kvspace/include/kvspace/xvalue_head.h`，
+读/写一律走其 inline 访问器。
 "#### -> /lib/kvlang/spec/类型系统/总体方案
 }

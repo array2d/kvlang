@@ -2,24 +2,28 @@
 lib kvlang/spec/类型系统/wire布局示例 {
 	r####"# wire 布局示例
 
-通用 head `H=[len:u48 LE][storetype:u8][ptr:u8]`（元组 `H(len, storetype, ptr)`），body 偏移恒为 8。类型存值内 attr 区（tag 1 记录）：
+head `H = [bodylen:u64 LE][attrslen:u32 LE][layout:u8][padding:3]`，body 偏移恒为 16。
+类型存值内 attr 区（tag 1 记录）；`A` 表示该值 attr 区的总字节数（langtype 记录 = `1 + 2 + len`），
+`layout = 0` 时 bodylen 是有效长度，`layout = 1` 时 bodylen 是容量、有效长度在 attr tag 2。
 
 ```
-None              : H(0,0,0)                  lang=""                   body=空
-int64             : H(8,0,0)                  lang="int64"              body=8 字节
-[]char/utf8       : H(字节数,1,0)             lang="[码点数]char/utf8" body=UTF-8
-[3,4]float32      : H(48,2,0)                 lang="[3,4]float32"       body=48 字节
-map               : H(0,0,0)                  lang="[]char/utf8·int64" body=空；成员在 base·key
-struct 实例       : H(0,0,0)                  lang="/lib/Point"         body=空；成员在 base·field
-/lib/pkg·f/       : H(0,0,0)                  lang="rwfunc"            body=空；成员在目录下
-/lib/pkg·f/[0,0]  : H(5,1,0)                  lang="rwfunc"            body=[nr][nw][dynamic]
-/lib/op           : H(0,0,0)                  lang="def rwir"          body=[nr][nw][dynamic]
-rwir 调用槽       : H(len,1,0)                lang="rwir"              body=计数头+目标名
-rwfunc 调用槽     : H(len,1,0)                lang="rwfunc"            body=计数头+目标名
-ptr→int64         : H(len,1,1)                lang="int64"             body=目标 KV 路径
-@ext→T            : H(len,3,2)                lang="T"                 body=UTF-8 定位串
+None              : H(0, 0, 0)          lang=无                    body=空
+int64             : H(8, A, 0)          lang="int64"               body=8 字节
+[]char/utf8       : H(字节数, A, 0)     lang="[码点数]char/utf8"   body=UTF-8
+[3,4]float32      : H(48, A, 0)         lang="[3,4]float32"        body=48 字节
+容量型（预留）    : H(容量, A, 1)       lang 同其类型              body=容量字节；tag 2 = reallen
+map               : H(0, A, 0)          lang="[]char/utf8·int64"   body=空；成员在 base·key
+struct 实例       : H(0, A, 0)          lang="/lib/Point"          body=空；成员在 base·field
+/lib/pkg·f/       : H(0, A, 0)          lang="rwfunc"              body=空；成员在目录下
+/lib/pkg·f/[0,0]  : H(5, A, 0)          lang="rwfunc"              body=[nr][nw][dynamic]
+/lib/op           : H(0, A, 0)          lang="def rwir"            body=[nr][nw][dynamic]
+rwir 调用槽       : H(len, A, 0)        lang="rwir"                body=计数头+目标名
+rwfunc 调用槽     : H(len, A, 0)        lang="rwfunc"              body=计数头+目标名
+空引用            : H(0, A, 0)          lang="*int64"              body=空
+ptr→int64         : H(len, A, 0)        lang="*int64"              body=目标 KV 路径
+@ext→T            : H(len, A, 0)        lang="@T"                  body=UTF-8 定位串
 ```
 
-目录与 map 成员通过实际 key 前缀枚举。
+目录与 map 成员通过实际 key 前缀枚举。属性区细节见 [[XValueHead线格式]]。
 "#### -> /lib/kvlang/spec/类型系统/wire布局示例
 }

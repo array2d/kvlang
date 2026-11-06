@@ -39,8 +39,9 @@ head 固定 **16 字节**，body 偏移恒为 16。类型（langtype）**不在 
 由此：
 
 - **wire langtype 保留 `*`/`@` 前缀**——它们就是这个值的类型，任何一层都不得剥掉；
-- `None` 指针 = langtype `*T` + 空 body；普通空串 = `[]char/*` + 空 body，两者由类型区分；
-- 指针**不是定宽**（空 body 即 None），帧准备不物化指针局部，首次写创建；
+- **空指针** = langtype `*T` + 空 body（它是「指针，目标未写」，**不是** `None` 值）；
+  普通空串 = `[]char/*` + 空 body。两者由类型区分，且都与 `None`（无 langtype）不同；
+- 指针**不是定宽**（空 body 合法），帧准备不物化指针局部，首次写创建；
 - 成员键规则一条：`*T`、`@T` 不能作成员键（必须先显式解引用）。
 
 **本期实现范围**：`*T`（指针）实现；**`@T`（扩展存储）本期不实现**——其存储形态与后端方案
@@ -80,6 +81,18 @@ attr 区编码（normative）：
 - `total = 16 + bodylen + attrslen`（自描述——后端据此读完整值长）。
 - 无 pad：attr 起始 = 16+bodylen；记录紧凑；整体末尾不 pad。
 - 扩展协议：新增 tag 追加记录；旧读者按 attrslen 边界跳未知 tag。
+
+## 空值：`None` 与「空但不是 None」
+
+- **`None` 的唯一判据**：空 body + **无 langtype 记录** + 无其它 attr。
+  旧模型靠 storetype（SHORT 对 SLACK）区分「真 None」与「无类型系统槽的空值」；新模型里
+  这两个字段已删除，区分**只能**落在 langtype 上。
+- **需要「空但不是 None」的槽必须带 langtype**。系统槽 `‥status`、`‥lib` 一类的文本槽写
+  `[]char/utf8`，不得留空 langtype。
+- 推论：**不存在「无类型且有语义的空槽」**。谁需要不被读成 None，谁就必须被类型化——
+  判据不给任何槽开后门。
+- 指针值即便 body 为空也不是 None：`*T` 前缀即引用，空 body 表示目标为空/未写。
+  空串则是 `[]char/*` + 空 body，二者由类型区分。
 
 枚举成员按实际物理 key 前缀进行，不存在 index/extindex 成员矩阵或 memindex 载体。
 

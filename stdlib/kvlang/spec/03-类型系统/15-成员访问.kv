@@ -10,9 +10,9 @@ lib kvlang/spec/类型系统/成员访问 {
 | `base·*k` | 动态键：`*` 令 runtimec2 解引用/求值 `k`，其值作 memitemkey |
 | 动态键的显式算子 | **已删除**（2026-11-06）：按名访问就是普通 key 读写；显式形态待定 |
 
-**kvlang 指针作 key 必须 `*` 开头**：当作为 memitemkey 的操作数是 kvlang 指针（ref=1 Ptr）时，
-**必须**写 `base·*k`，由 runtimec2 沿 Ptr 解引用取被指向值作键；省略 `*` 非法，必须先显式
-解引用。这是**显式** deref、非自动改键（运行期语义见 [[成员访问]]（runtime 卷））。
+**动态键必须显式 `*`**：`base·*k` 是动态成员键；layout 展开为
+`kvspace/key·resolveptr(base, k)` 再按显式 `*` 读写（见 [[动态键]]）。`k` 若本身是指针值
+（langtype 以 `*` 开头），必须先解引用再作键——省略 `*` 非法，没有隐式解引用。
 
 `base` 即 map 的 memheadname（或 struct 实例名）。访问键**逐字即键侧 formatter 的输出**（memitemkey 只
 在路径系统、无 body，见 [[map容器]]）：kvspace 与 kvlangruntime 均不得归一化、改写或自动加壳（详见

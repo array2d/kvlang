@@ -18,7 +18,7 @@ runtime 写扩展，按同一文法写入。签名**不写
    `/lib/<op>` 节点自身（langtype `def rwir`），body 只记 `[nr:u16 LE][nw:u16
    LE][dynamic:u8]`——读参个数 `nr`、写参个数
    `nw`、是否变参 `dynamic`（末位读参 `...`）；**不含任何参数 langtype 串**。
-2. **参数类型承载**（按符号分两路，见 [[storetype_def族与签名行]]）：
+2. **参数类型承载**（按符号分两路，见 [[签名行与def族]]）：
    - `def rwir` → **位置化签名行 `[0,x]`**（`x<0` 读参、`x>0` 写参、`[0,0]` 锚点），每槽 `def langtype`，
      body = 该参数完整 langtype 串（跨 runtime 队列按位置收参，故须有序）。
    - `rwfunc` → **参数定义键 `funcDir.[0,±j]`**（点后缀，与坐标斜杠键 `/[0,±j]` 不同名），每键

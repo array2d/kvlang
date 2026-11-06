@@ -63,19 +63,19 @@ stringkeymap 元素的成员名是坐标段，物理 key 形如 `m·[i]`（一�
 
 ## ref（存储位置维）与扩展句柄
 
-| head 形态 | 语义 | body |
+| langtype 形态 | 语义 | body |
 |-----------|------|------|
-| `ptr` 字段位 0、storetype 2 | 内联 tensor | 数据本体 |
-| `ptr` 字段位 1、storetype 1 | kvspace 内 kvlang 指针 | 目标 key 路径 |
-| storetype 3 | @ext 扩展存储句柄 | 元存外位置描述符 |
+| 无 `*`/`@` 前缀、layout=0 | 内联 tensor | 数据本体 |
+| 以 `*` 开头 | kvspace 内 kvlang 指针 | 目标 key 路径 |
+| 以 `@` 开头 | @ext 扩展存储句柄 | 元存外位置描述符 |
 
-storetype 3 表示值本体在扩展世界（SHM/GPU/文件），head 中 langtype 记录形态（如 `[256,256]uint8`），body
+langtype 以 `@` 开头表示值本体在扩展世界（SHM/GPU/文件），前缀之后记录形态（如 `[256,256]uint8`），body
 记位置描述符。@ext 只表**单个值**存于扩展世界（compact 形态），与目录成员枚举无关。读
 取时由支持 `@` 的 rwir（如 byteseek 的 fs/networld 一族）按定位串兑现（见 [[地址空间]] 扩展存储）。
 
 ## 成员枚举
 
-散 key 数组的 base key 是 storetype 0、空 body 的 map 头；元素落在 `base·[i]` 等物理 key。KVSpace 按此前缀枚举成员，不保存独立索引矩阵。`kvspaceMkindex` 为目录创建 key，目录成员按 `/` 前缀枚举。
+散 key 数组的 base key 是空 body 的 map 头（key 不以 `/` 结尾）；元素落在 `base·[i]` 等物理 key。KVSpace 按此前缀枚举成员，不保存独立索引矩阵。`kvspaceMkindex` 为目录创建 key，目录成员按 `/` 前缀枚举。
 
 "#### -> /lib/kvlang/spec/kvspace模型/数组两种物理形态
 }

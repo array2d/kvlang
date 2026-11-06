@@ -19,7 +19,7 @@ lib kvlang/spec/类型系统/map容器 {
 
 三者**共用的物理规则**（下文「容器物理结构」展开）：
 
-- base key 是 storetype 0、**body 为空**的 XValue，只承载 langtype；
+- base key 是**body 为空**的 XValue（容器头），只承载 langtype；
 - 每个成员是 `base·<成员键>` 的**独立 KV key**，各自一个 XValue；
 - 成员由**物理 key 前缀枚举**，不存任何索引矩阵。
 
@@ -97,7 +97,7 @@ memitemvalue 可递归嵌套（`[]char/utf8·[]char/utf8·int64` 即 `map[string
 
 ## 容器物理结构
 
-groupkv 的 base key 存 storetype 0、body 为空，langtype 为完整 map 类型（例如
+groupkv 的 base key 是空 body 的容器头，langtype 为完整 map 类型（例如
 `[]char/utf8·int64`）或原型路径（`/lib/Point`）。每个成员落在 `base·<成员键>` 的独立
 KV key，保存该成员自己的 XValue。成员通过物理 key 前缀枚举；不存放 `base·` 索引矩阵。
 `/lib/{pkg}·{func}` 中的 `·` 是函数命名字符，函数成员则位于 `/` 目录下。

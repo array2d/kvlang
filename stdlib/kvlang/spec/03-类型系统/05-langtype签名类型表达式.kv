@@ -2,7 +2,7 @@
 lib kvlang/spec/类型系统/langtype签名类型表达式 {
 	r####"# langtype 与 def langtype（定义处的匹配类型）
 
-**langtype** 是 XValue head 的语义类型维（见 [[总体方案]]、[[head字段]]），逐字节是一段**类型表达式
+**langtype** 是 XValue head 的语义类型维（见 [[总体方案]]、[[XValueHead线格式]]），逐字节是一段**类型表达式
 串**——base 种类、可选形状 `[dims]`、mapexpr、原型路径等（文法见 [[文法与合法性]]）。它既供人和工具读
 写，也落入 kvspace 作运行期匹配依据，贯穿 layout（静态校验）与 runtime（值匹配），是类型的唯一真相。
 

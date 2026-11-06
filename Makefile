@@ -130,19 +130,19 @@ check-kvspace-head:
 	  '#include <stdlib.h>' \
 	  'int main(void) {' \
 	  '  uint8_t *o = NULL; uint64_t n = 0;' \
-	  '  if (kvspaceXvalueHeadNewScalar(KVSPACE_XVALUE_ST_SHORT,' \
+	  '  if (kvspaceXvalueHeadNewScalar(' \
 	  '        (const uint8_t *)"\x2a\0\0\0\0\0\0\0", 8, "int64",' \
 	  '        &o, &n) != 0) { puts("ctor failed"); return 1; }' \
 	  '  int bad = 0;' \
 	  '  if (KVSPACE_XVALUE_HEAD_LEN != 16) { puts("HEAD_LEN != 16"); bad = 1; }' \
-	  '  if (n != 16 + 8 + 3 + 5) { printf("total=%llu, want 32\\n", (unsigned long long)n); bad = 1; }' \
+	  '  if (n != 16 + 8 + 1 + 2 + 5) { printf("total=%llu, want 32\\n", (unsigned long long)n); bad = 1; }' \
 	  '  if (o[0] != 8 || o[1] != 0) { puts("bodylen != 8"); bad = 1; }' \
 	  '  if (o[8] != 8 || o[9] != 0 || o[10] != 0 || o[11] != 0) { puts("attrslen != 8"); bad = 1; }' \
-	  '  if (o[12] != 0 || o[13] != 0) { puts("storetype/ptr != 0"); bad = 1; }' \
-	  '  if (o[14] != 0 || o[15] != 0) { puts("padding != 0"); bad = 1; }' \
+	  '  if (o[12] != 0) { puts("layout != 0"); bad = 1; }' \
+	  '  if (o[13] != 0 || o[14] != 0 || o[15] != 0) { puts("padding != 0"); bad = 1; }' \
 	  '  free(o);' \
 	  '  if (bad) return 1;' \
-	  '  puts("head: 16 bytes, bodylen@0 attrslen@8 storetype@12 ptr@13 pad@14 = 0");' \
+	  '  puts("head: 16 bytes, bodylen@0 attrslen@8 layout@12 padding@13..15 = 0");' \
 	  '  return 0;' \
 	  '}' > $$tmp/probe.c; \
 	cc $$tmp/probe.c -o $$tmp/probe -I"$(KVSPACE_SRC)/include" \
