@@ -12,9 +12,9 @@ struct Node {
 }
 
 rwfunc remove(*Node $head, *int64 $val) -> () {
-	*head -> p
+	head -> p
 	while (p != None) {
-		v = p·val
+		v = (*p)·val
 		v == *val -> skip
 
 		if (skip) {
@@ -22,7 +22,7 @@ rwfunc remove(*Node $head, *int64 $val) -> () {
 			println(v)
 		}
 
-		p = p·next
+		p = (*p)·next
 	}
 }
 

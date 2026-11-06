@@ -11,12 +11,12 @@ struct Node {
 rwfunc is_pal(*Node $head) -> () {
 	arr:[int64]·int64 = {}
 	0 -> n
-	*head -> p
+	head -> p
 	while (p != None) {
-		p·val -> v
+		(*p)·val -> v
 		v -> arr·*n
 		n = n + 1
-		p·next -> p
+		(*p)·next -> p
 	}
 	ok = true
 	0 -> l
