@@ -22,12 +22,18 @@ handle close（没有指令边界回收调用）。写返回 body 偏移的二�
 
 **status 固定档（normative）**：`/vthread/*/‥status` 的**形状固定**——head 恒为
 `KVSPACE_XVALUE_HEAD_LEN`（**当前 16 字节**，不得写死数字）、`layout` 为 0 或 1、
-langtype 为 `[]char/utf8`、合法内容长度上限 LV=16。shm 后端创建该键时按**物理容量下限
-80 字节**分配（实际 `headlen`/`body_cap` 以 slot view 返回为准）。之后任何写入（runtime
-`setstatus`/`SetDone`/`SetError` 或外部 `kvspace set`）都必须原地完成；内容长度 > LV、
-head 形状不符、langtype 不是 `[]char/utf8`，或现存槽自身物理容量 <80，必须**硬错返回**，
+langtype 的 base kind 为字符族（`char/X`、`[N]char/X`、`[]char/X`；runtimec 写 `[]char/utf8`）、**有效长度**（`layout=1` 时取 attr tag 2，不是 head 的 bodylen）
+上限 LV=16。shm 后端创建该键时按**物理容量下限 80 字节**分配（实际 `headlen`/`body_cap` 以
+slot view 返回为准）。之后任何写入（runtime `setstatus`/`SetDone`/`SetError` 或外部
+`kvspace set`）都必须原地完成；有效长度 > LV、
+head 形状不符、langtype 不是字符族，或现存槽自身物理容量 <80，必须**硬错返回**（判据中**不得拿 `bodylen` 当内容长度**：容量形态下它就是容量），
 不得 realloc、不得截断、不得更换 box。**旧 store 中 headlen 不符或物理容量 <80 的
-status 槽不自动升级**：写入硬错，slot view 返回 `-1`，需重建/重置该 store。合规槽的
+status 槽不自动升级**：写入硬错，slot view 返回 `-1`，需重建/重置该 store。
+
+**约束归属（normative）**：`‥status` 的「langtype base kind 是 char + 有效长度 ≤16」是
+**wire 级契约，所有后端都必须校验**；「物理容量 ≥80」只对 shm 后端有意义（它靠 slot view
+原地读写）。durable 后端没有物理 box 概念，只校验「`layout = CAPACITY` 时 `bodylen ≥ 80`」，
+不要求必须是容量形态（`‥status` 走 LENGTH 形态写入是合法的）。合规槽的
 view 的二进制指针在 handle 生命期内稳定；`kvspaceWatch` 仍按后端值轮询，status 变更仍可见。
 
 **slot view（shm-only, normative）**：`kvspaceSlotView(handle, ref, key_fallback, view)`

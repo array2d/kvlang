@@ -165,9 +165,17 @@ static const declared_gap_t kDeclaredGaps[] = {
     /* 安装签名族：读侧零操作数、写侧有值、`result_rule = IDENTITY`。
      * 特化表里连一行都没有是**必然**（特化是「按操作数类型选行」，它们没有
      * 操作数），不是遗漏。补实现时不能照 `scalar_transcendental` 模板。 */
-    /* `&x` 会被 layout emit 成真指令（dump 实测 `[2,0] kvspace/key·abs`），
-     * 所以不是「从不执行」；它属指针一等值那次双侧改动。 */
-    {0x01A2U, "kvspace/key·abs", "指针一等值立项"},
+    /*
+     * ── 已从本清单移除：`kvspace/key·abs`（0x01A2）────────────────────
+     *
+     * 曾以「指针一等值立项」挂在这里。2026-11-06 该 handler 随 head ABI 收敛
+     * 一起落地（`host.c` 的 `runtimec_host_key_abs`），本用例随即报出
+     * `STALE-DECLARATION  0x01A2`——正是自失效那条判据在起作用。按机制删掉
+     * 声明，不是把清单放宽：它现在由「缺就红」那条规则覆盖。
+     *
+     * 同批注册、同样**不曾**进过清单的两条（记在这里防重复入册）：
+     *   `kvspace/key·tostr` 0x01A3、`vthread·pc` 0x0185。
+     */
 };
 
 /* 该 opid 是否在声明清单里；命中时返回那条实体（自失效检查要看它）。 */

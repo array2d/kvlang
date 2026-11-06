@@ -37,7 +37,15 @@ static const char runtimec_kvspace_member_library[] = "lib";
 static const char runtimec_kvspace_member_source_revision[] = "ctime";
 
 /* 无 langtype 的系统键 wire（dispatch 侧 kvlangSlackCharToWire 的同形编码）。 */
-#define RUNTIMEC_KVSPACE_SYSTEM_LANGTYPE NULL
+/*
+ * 系统成员的值都是文本：`‥status` / `‥message` / `‥lib`。
+ *
+ * **必须带 langtype**：新 head 没有 storetype，`None` 的唯一判据是「空 body + 无
+ * langtype」。若系统槽不带类型，一个空值就会被读成 `None`，与「空但不是 None」
+ * 无法区分（见 `02-kvspace模型/06-XValueHead线格式.kv`「空值」节）。`‥pc` 早已
+ * 带 `[2]int32`，本常量把其余三个对齐到同一规则。
+ */
+#define RUNTIMEC_KVSPACE_SYSTEM_LANGTYPE "[]char/utf8"
 
 
 static runtimec_status_t runtimec_kvspace_access_fail(
@@ -84,7 +92,13 @@ runtimec_status_t runtimec_kvspace_access_read(
     }
     uint8_t *value = NULL;
     uint32_t value_size = 0U;
-    if (kvspaceGet(adapter->handle, key_text, 1, &value,
+    /*
+     * **resolve = 0**：runtimec 的解引用只走显式 `*`（见 16-ptr.kv），
+     * 读接口拿的是 key 本身的值。resolve=1 会把「`*T` + 空 body」的空引用
+     * 当成指向空路径的指针去跟随，结果读回 0 字节——与「key 不存在」撞在
+     * 一起，编码器因此把合法的 None 操作数判成畸形。
+     */
+    if (kvspaceGet(adapter->handle, key_text, 0, &value,
                                       &value_size) != 0) {
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_ERROR, 3, "kvspace read failed");
@@ -133,7 +147,8 @@ runtimec_status_t runtimec_kvspace_access_read_header(
     }
     uint8_t *value = NULL;
     uint32_t value_size = 0U;
-    if (kvspaceGet(adapter->handle, key_text, 1, &value,
+    /* resolve = 0：理由同 `runtimec_kvspace_access_read`。 */
+    if (kvspaceGet(adapter->handle, key_text, 0, &value,
                                       &value_size) != 0) {
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_ERROR, 8, "kvspace read failed");

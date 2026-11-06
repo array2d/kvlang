@@ -279,8 +279,8 @@ static void test_xvalue_address_from_value_body(void) {
  * 16 字节布局的常驻证据。四条核对逐字段证明 16 是唯一正确值：
  *   1. bodylen  在偏移 0，u64 小端，经 kvspaceXvalueHeadLen 反读回原值；
  *   2. attrslen 在偏移 8，u32 小端；
- *   3. storetype@12、ptr@13 在原位；
- *   4. padding@14-15 全零，且总长 == 16 + bodylen + attrslen。
+ *   3. layout@12 在原位；
+ *   4. padding@13-15 全零，且总长 == 16 + bodylen + attrslen。
  * 将来谁再动 head，这条会先红。
  */
 static void test_xvalue_head_sixteen_byte_layout(void) {
@@ -294,7 +294,7 @@ static void test_xvalue_head_sixteen_byte_layout(void) {
     RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, bodylen) == 0U);
     RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, attrslen) == 8U);
     RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, layout) == 12U);
-    /* padding 是 3 字节，从 13 起——head 只描述字节布局，没有 storetype/ptk 字段了。 */
+    /* padding 是 3 字节，从 13 起——head 只描述字节布局，没有 storetype/ptr 字段。 */
     RUNTIMEC_EXPECT(offsetof(kvspaceXvalueHead, padding) == 13U);
     RUNTIMEC_EXPECT(sizeof(kvspaceXvalueHead) == 16U);
     RUNTIMEC_EXPECT(KVSPACE_XVALUE_HEAD_LEN == 16U);
@@ -329,7 +329,7 @@ static void test_xvalue_head_sixteen_byte_layout(void) {
 }
 
 
-/* ── storetype 4（定容量变长）矩阵 ────────────────────────────────────
+/* ── 容量形态（layout=1）矩阵 ───────────────────────────────────────
  *
  * 三方各实现一份（`kvspace-durable` Rust / `kvspace-c` / `runtimec`），没有共享
  * ABI 符号，一致性只能靠「同一组输入 → 同一组输出」。这张表就是那组输入输出。
@@ -340,7 +340,7 @@ static void test_xvalue_head_sixteen_byte_layout(void) {
  * 因为它是 J-5 之前必须补一条带状态码入口的理由；不写进测试就没人看得见。
  */
 
-/* 造一条 storetype 4 wire：`capacity` 字节体 + 可选 tag 2（reallen）+ 可选的
+/* 造一条容量形态 wire：`capacity` 字节体 + 可选 tag 2（reallen）+ 可选的
  * 重复 / 畸形 / 尾部残余。数值一律从 `KVSPACE_XVALUE_*` 取，不写死 2 或 4。 */
 static uint8_t *contracts_make_varlen(uint64_t capacity, int64_t reallen,
                                       int duplicate, int malformed_length,
@@ -477,7 +477,7 @@ static void contracts_test_varlen_trailing_bytes_ignored(void) {
     free(wire);
 }
 
-/* 8b 非 storetype 4、无 tag 2 → 取 bodylen（与今天行为一致）。 */
+/* 8b 长度形态（layout=0）、无 tag 2 → 取 bodylen。 */
 static void contracts_test_non_varlen_uses_body_length(void) {
     uint8_t slack_wire[KVSPACE_XVALUE_HEAD_LEN + 8U];
     kvspaceXvalueHead head;
@@ -496,7 +496,7 @@ static void contracts_test_non_varlen_uses_body_length(void) {
  * `reallen == 0`（合法空值）与全部畸形组在返回值上**无法区分**——都返回 0。
  *
  * 这条不是重复上面任何一组，它断言的正是「分不出来」这件事本身。写成显式断言，
- * 是因为它是 J-5（`‥status` 成为 storetype 4 的第一个消费者）之前必须先补一条
+ * 是因为它是 J-5（`‥status` 成为容量形态的第一个消费者）之前必须先补一条
  * 带状态码入口的理由。理由只写在头注释里没人看得见，写进测试里才有人会读。
  *
  * 若有一天本函数能区分「空」与「坏」，这条断言会**失败**——那时应当删掉它并

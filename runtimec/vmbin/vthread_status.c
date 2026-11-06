@@ -92,8 +92,8 @@ runtimec_status_t runtimec_vthread_status_write(
     message[0] = '\0';
     /*
      * 用 `kvspaceWriteNewPlace` 而不是 `kvspaceSetValue`：前者能直接指定
-     * ref/storetype/body_cap，正是「固定档」要求的那几项；后者按值自算形状，
-     * 算出来的 headlen 未必是规范要求的 8。
+     * ref 与 body_cap（物理容量下界 80），正是「固定档」要求的那几项；
+     * 后者按值自算容量，算出来的可能小于规范下限。
      */
     if (kvspaceWriteNewPlace(kvspace_handle, status_key, KVSPACE_REF_INLINE,
                              KVSPACE_STORETYPE_SLACK, (uint32_t)status.size,
@@ -156,8 +156,8 @@ runtimec_status_t runtimec_vthread_status_read(
         }
         memcpy(&head, wire, sizeof(head));
         /*
-         * 形状判据照抄 spec `02-kvspace模型/04-CABI.kv`：**定长**槽（layout 不是
-         * 容量形态）、头长恒 16、有效长度 ≤ LV。
+         * 形状判据照抄 spec `02-kvspace模型/04-CABI.kv`：layout 为 0 或 1（状态槽
+         * 走容量形态、物理容量 ≥80）、头长恒 16、有效长度 ≤ LV。
          *
          * 旧实现还比对 `storetype == SLACK`；新头没有这个字段——storage class 是
          * 后端写侧的概念，不是 wire 上的属性，所以这条判据**被布局判据取代**。
@@ -166,7 +166,6 @@ runtimec_status_t runtimec_vthread_status_read(
          */
         if (!kvspaceXvalueHeadPaddingIsZero(&head) ||
             !kvspaceXvalueHeadLayoutIsValid(&head) ||
-            kvspaceXvalueHeadLayout(&head) != KVSPACE_XVALUE_LAYOUT_LENGTH ||
             kvspaceXvalueHeadTotalLen(&head) == 0U ||
             kvspaceXvalueHeadTotalLen(&head) > (uint64_t)wire_length ||
             kvspaceXvalueHeadEffectiveLen(wire, (uint64_t)wire_length,

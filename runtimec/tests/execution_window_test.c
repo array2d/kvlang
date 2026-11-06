@@ -987,7 +987,10 @@ int main(void) {
         EXPECT(test_store_get(&test, "/vthread/2/\xE2\x80\xA5" "status",
                               &status_wire, &status_size));
         if (status_wire != NULL && status_size >= KVSPACE_XVALUE_HEAD_LEN) {
-            EXPECT(status_size - KVSPACE_XVALUE_HEAD_LEN == 7U);
+            uint64_t status_effective = 0U;
+            EXPECT(kvspaceXvalueHeadEffectiveLen(status_wire, status_size,
+                                                    &status_effective) == 0);
+            EXPECT(status_effective == 7U);
             EXPECT(memcmp(status_wire + KVSPACE_XVALUE_HEAD_LEN, "running",
                           7U) == 0);
         }
@@ -997,7 +1000,10 @@ int main(void) {
         EXPECT(test_store_get(&test, TEST_FRAME_PATH "/\xE2\x80\xA5" "lib",
                               &lib_wire, &lib_size));
         if (lib_wire != NULL && lib_size >= KVSPACE_XVALUE_HEAD_LEN) {
-            EXPECT(lib_size - KVSPACE_XVALUE_HEAD_LEN == strlen(TEST_TARGET));
+            uint64_t lib_effective = 0U;
+            EXPECT(kvspaceXvalueHeadEffectiveLen(lib_wire, lib_size,
+                                                 &lib_effective) == 0);
+            EXPECT(lib_effective == strlen(TEST_TARGET));
             EXPECT(memcmp(lib_wire + KVSPACE_XVALUE_HEAD_LEN, TEST_TARGET,
                           strlen(TEST_TARGET)) == 0);
         }
@@ -1039,7 +1045,10 @@ int main(void) {
         EXPECT(test_store_get(&test, "/vthread/2/\xE2\x80\xA5" "status",
                               &status_wire, &status_size));
         if (status_wire != NULL && status_size >= KVSPACE_XVALUE_HEAD_LEN) {
-            EXPECT(status_size - KVSPACE_XVALUE_HEAD_LEN == 4U);
+            uint64_t status_effective = 0U;
+            EXPECT(kvspaceXvalueHeadEffectiveLen(status_wire, status_size,
+                                                    &status_effective) == 0);
+            EXPECT(status_effective == 4U);
             EXPECT(memcmp(status_wire + KVSPACE_XVALUE_HEAD_LEN, "done", 4U) ==
                    0);
         }
@@ -1085,7 +1094,10 @@ int main(void) {
             EXPECT(test_store_get(&test, "/vthread/2/\xE2\x80\xA5" "status",
                                   &status_wire, &status_size));
             if (status_wire != NULL && status_size >= KVSPACE_XVALUE_HEAD_LEN) {
-                EXPECT(status_size - KVSPACE_XVALUE_HEAD_LEN == 4U);
+                uint64_t status_effective = 0U;
+                EXPECT(kvspaceXvalueHeadEffectiveLen(status_wire, status_size,
+                                                        &status_effective) == 0);
+                EXPECT(status_effective == 4U);
                 EXPECT(memcmp(status_wire + KVSPACE_XVALUE_HEAD_LEN, "done",
                               4U) == 0);
             }
@@ -1335,6 +1347,62 @@ int main(void) {
     request.frame_path = runtimec_string_view_make(NULL, 0U);
     EXPECT(runtimec_execution_window_execute(session, &request, &result, &error) ==
            RUNTIMEC_STATUS_INVALID);
+
+    /*
+     * 8. 帧状态表在窗口层的三态（甲 4/6 的落点）。
+     *
+     * 判据全部读 `runtimec_frame_state_count` 与三态结果，**不断言 bindings
+     * 指针相等**：指针相等在跨调用比较里会被分配器复用骗过，而状态判据不会。
+     *
+     * 反向对照（改实现即可复现的形态）：
+     *   - 若窗口在 DONE 后不 close，第 8a 组第二次 execute 会读到 REUSED ⇒ 红；
+     *   - 若窗口把「失败」也当可续跑，第 8c 组 count 会停在 1 ⇒ 红。
+     */
+    if (failures == 0) {
+        runtimec_frame_state_table_t *frame_state = NULL;
+        EXPECT(runtimec_session_get_frame_state(session, &frame_state) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(frame_state != NULL);
+        /* 前面所有用例跑完，DONE 的帧都该已 close（handoff 那两帧除外）。 */
+        const size_t before = runtimec_frame_state_count(frame_state);
+
+        /* 8a. 同帧第二次 execute：第一次 DONE 时已 close ⇒ 第二次必须是新帧。
+         *     「新帧」的可观测判据是它仍能正常执行并再次 DONE（表已干净），
+         *     且跑完后仍然回到 before。 */
+        runtimec_execution_window_request_t repeat_request = request;
+        repeat_request.function_path =
+            runtimec_string_view_from_c_string(TEST_DONE_TARGET);
+        repeat_request.frame_path =
+            runtimec_string_view_from_c_string("/vthread/2/[8]");
+        repeat_request.source_logical_program_counter =
+            TEST_DONE_COPY_SOURCE_COUNTER;
+        /* 不得清空实参：TEST_DONE_TARGET 的程序带一读一写两个参数（test_program_begin），
+           零实参会让帧准备报 `frame parameter binding failed`——那是正确拒绝，
+           不是本用例要测的东西。继续沿用 request 的两条 EXISTING_KEY 实参。 */
+        for (int round = 0; round < 2; round++) {
+            EXPECT(runtimec_execution_window_execute(
+                       session, &repeat_request, &result, &error) ==
+                   RUNTIMEC_STATUS_SUCCESS);
+            EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_DONE);
+            /* 每一轮 DONE 之后都必须回到 before：残留 = 该帧没被 close。 */
+            EXPECT(runtimec_frame_state_count(frame_state) == before);
+        }
+
+        /* 8b. 建帧失败（函数不存在）⇒ 失败即终态，表不许残留。
+         *     这条是「status != SUCCESS 也算终态」的正对照。 */
+        runtimec_execution_window_request_t broken_request = request;
+        broken_request.function_path =
+            runtimec_string_view_from_c_string(TEST_MISSING_TARGET);
+        broken_request.frame_path =
+            runtimec_string_view_from_c_string("/vthread/2/[9]");
+        broken_request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
+        broken_request.arguments = NULL;
+        broken_request.argument_count = 0U;
+        EXPECT(runtimec_execution_window_execute(session, &broken_request,
+                                                 &result, &error) !=
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(runtimec_frame_state_count(frame_state) == before);
+    }
 
     EXPECT(runtimec_session_destroy(session) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(test_store_close(&test) == RUNTIMEC_STATUS_SUCCESS);

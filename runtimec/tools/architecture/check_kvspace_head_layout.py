@@ -60,10 +60,15 @@ import sys
 import tempfile
 
 EXPECTED_BODY = 2
+# 探针必须用「容量 > 长度」的形态：新旧布局在「容量 == 长度」的标量上字节完全相同
+# （旧 storetype=0 / ptr=0 与新 layout=0 / padding=0 同值），只测标量必然假绿。
+PROBE_CAPACITY = 80
 PROBE_LANGTYPE = "int64"
 LANGTYPE_RECORD_BYTES = 3 + len(PROBE_LANGTYPE)  # tag + u16 len + data
+REALLEN_RECORD_BYTES = 11  # tag + u16 len(=8) + u64 value，见 xvalue_head.c REALLEN_RECORD_LEN
 
 RESULT_SIXTEEN = "16-byte"
+RESULT_SIXTEEN_NO_CAPACITY = "16-byte-no-capacity"
 RESULT_EIGHT = "8-byte"
 RESULT_UNKNOWN = "unknown"
 RESULT_SKIPPED = "skipped"
@@ -89,7 +94,7 @@ def probe_library(library_path: str) -> str:
     wire = ctypes.POINTER(ctypes.c_uint8)()
     wire_size = ctypes.c_uint64(0)
     status = new_slack(
-        b"ab", EXPECTED_BODY, EXPECTED_BODY, PROBE_LANGTYPE.encode(),
+        b"ab", EXPECTED_BODY, PROBE_CAPACITY, PROBE_LANGTYPE.encode(),
         ctypes.byref(wire), ctypes.byref(wire_size))
     if status != 0 or wire_size.value == 0:
         print(f"  cannot construct a probe value (status={status})")
@@ -99,17 +104,38 @@ def probe_library(library_path: str) -> str:
     data = bytes(wire[index] for index in range(total))
     print(f"  wire: {total} bytes: {data.hex(' ')}")
 
+    if total < EXPECTED_HEAD_LEN:
+        print(f"  wire too short: {total} bytes")
+        return RESULT_UNKNOWN
     bodylen = int.from_bytes(data[0:8], "little")
     attrslen = int.from_bytes(data[8:12], "little")
-    if (bodylen == EXPECTED_BODY and
-            attrslen == LANGTYPE_RECORD_BYTES and
-            total == 16 + bodylen + attrslen):
-        print(f"  layout: 16-byte head (bodylen={bodylen}, "
-              f"attrslen={attrslen})")
+    reallen = data[16 + bodylen + LANGTYPE_RECORD_BYTES:
+                   16 + bodylen + LANGTYPE_RECORD_BYTES + REALLEN_RECORD_BYTES]
+    if (bodylen == PROBE_CAPACITY and data[12] == 1 and
+            data[13:16] == b"\x00\x00\x00" and
+            attrslen == LANGTYPE_RECORD_BYTES + REALLEN_RECORD_BYTES and
+            len(reallen) == REALLEN_RECORD_BYTES and
+            reallen[0] == 2 and
+            int.from_bytes(reallen[3:11], "little") == EXPECTED_BODY and
+            total == EXPECTED_HEAD_LEN + bodylen + attrslen):
+        print(f"  layout: 16-byte head, capacity form (bodylen={bodylen}, "
+              f"reallen={EXPECTED_BODY}, attrslen={attrslen})")
         return RESULT_SIXTEEN
 
+    # 16 字节头、但 bodylen 报的是长度而不是容量：WriteNewPlace 忽略了 body_cap。
+    # 这不能算 8 字节（总长 >= 16+body），也不能算合格的新布局。
+    if (data[12] == 0 and data[13:16] == b"\x00\x00\x00" and
+            bodylen == EXPECTED_BODY and
+            total == EXPECTED_HEAD_LEN + bodylen + attrslen):
+        print(f"  layout: 16-byte head but body_cap ignored "
+              f"(bodylen={bodylen}, want {PROBE_CAPACITY})")
+        return RESULT_SIXTEEN_NO_CAPACITY
+
     u48_length = int.from_bytes(data[0:6], "little")
-    if u48_length == EXPECTED_BODY:
+    # 旧 8 字节布局：head 8 + body + u16 attr 长度 + tag 记录。
+    if (u48_length == EXPECTED_BODY and
+            total == LEGACY_HEAD_LEN + EXPECTED_BODY + 2 +
+            LANGTYPE_RECORD_BYTES):
         print(f"  layout: 8-byte head (u48 len={u48_length}, "
               f"storetype={data[6]}, pointer={data[7]})")
         return RESULT_EIGHT
@@ -199,7 +225,7 @@ def probe_backend(frontend_path: str, scheme: str, dsn_template: str,
             error_buffer = ctypes.create_string_buffer(256)
             body = ctypes.POINTER(ctypes.c_uint8)()
             status = library.kvspaceWriteNewPlace(
-                handle, b"/probe/value", 0, 1, EXPECTED_BODY, EXPECTED_BODY,
+                handle, b"/probe/value", 0, 1, EXPECTED_BODY, PROBE_CAPACITY,
                 PROBE_LANGTYPE.encode(), ctypes.byref(body), error_buffer, 256)
             if status != 0:
                 return RESULT_UNKNOWN, (
@@ -212,16 +238,32 @@ def probe_backend(frontend_path: str, scheme: str, dsn_template: str,
             if status != 0 or wire_len.value == 0:
                 return RESULT_UNKNOWN, "read failed"
             data = bytes(wire[index] for index in range(int(wire_len.value)))
-            if len(data) < 12:
+            if len(data) < EXPECTED_HEAD_LEN:
                 return RESULT_UNKNOWN, f"wire too short: {len(data)} bytes"
             bodylen = int.from_bytes(data[0:8], "little")
             attrslen = int.from_bytes(data[8:12], "little")
-            if (bodylen == EXPECTED_BODY and
-                    attrslen == LANGTYPE_RECORD_BYTES and
+            reallen = data[16 + bodylen + LANGTYPE_RECORD_BYTES:
+                           16 + bodylen + LANGTYPE_RECORD_BYTES +
+                           REALLEN_RECORD_BYTES]
+            if (bodylen == PROBE_CAPACITY and data[12] == 1 and
+                    data[13:16] == b"\x00\x00\x00" and
+                    attrslen == LANGTYPE_RECORD_BYTES + REALLEN_RECORD_BYTES and
+                    len(reallen) == REALLEN_RECORD_BYTES and
+                    reallen[0] == 2 and
+                    int.from_bytes(reallen[3:11], "little") == EXPECTED_BODY and
                     len(data) == EXPECTED_HEAD_LEN + bodylen + attrslen):
                 return RESULT_SIXTEEN, (
-                    f"bodylen={bodylen} attrslen={attrslen} total={len(data)}")
-            if int.from_bytes(data[0:6], "little") == EXPECTED_BODY:
+                    f"capacity form bodylen={bodylen} reallen={EXPECTED_BODY} "
+                    f"attrslen={attrslen} total={len(data)}")
+            if (data[12] == 0 and data[13:16] == b"\x00\x00\x00" and
+                    bodylen == EXPECTED_BODY and
+                    len(data) == EXPECTED_HEAD_LEN + bodylen + attrslen):
+                return RESULT_SIXTEEN_NO_CAPACITY, (
+                    f"16-byte head but body_cap ignored "
+                    f"(bodylen={bodylen}, want {PROBE_CAPACITY})")
+            if (int.from_bytes(data[0:6], "little") == EXPECTED_BODY and
+                    len(data) == LEGACY_HEAD_LEN + EXPECTED_BODY + 2 +
+                    LANGTYPE_RECORD_BYTES):
                 return RESULT_EIGHT, f"u48 len={EXPECTED_BODY} total={len(data)}"
             return RESULT_UNKNOWN, (
                 f"bodylen={bodylen} attrslen={attrslen} total={len(data)} "
@@ -281,20 +323,35 @@ int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
     }
     const uint64_t record_length = 3U + (uint64_t)strlen(langtype);
 #if HEAD_LEN == 16
-    const uint64_t total = 16U + data_length + record_length;
+    const int capacity_layout = capacity > data_length;
+    const uint64_t body_field = capacity_layout ? capacity : data_length;
+    const uint64_t reallen_length = capacity_layout ? 5U : 0U;
+    const uint64_t total = 16U + body_field + record_length + reallen_length;
     uint8_t *wire = calloc(1, (size_t)total);
     if (wire == NULL) {
         return -1;
     }
-    memcpy(wire + 0, &data_length, 8);
-    const uint32_t attrs_length = (uint32_t)record_length;
+    memcpy(wire + 0, &body_field, 8);
+    const uint32_t attrs_length = (uint32_t)(record_length + reallen_length);
     memcpy(wire + 8, &attrs_length, 4);
-    wire[12] = 1U;
+    wire[12] = capacity_layout ? 1U : 0U;
     wire[13] = 0U;
+    wire[14] = 0U;
+    wire[15] = 0U;
     if (data_length != 0U) {
         memcpy(wire + 16, data, (size_t)data_length);
     }
-    write_record(wire + 16 + data_length, langtype);
+    write_record(wire + 16 + body_field, langtype);
+    if (capacity_layout) {
+        uint8_t *reallen = wire + 16 + body_field + record_length;
+        reallen[0] = 2;
+        reallen[1] = 8;
+        reallen[2] = 0;
+        for (int index = 0; index < 8; ++index) {
+            reallen[3 + index] =
+                (uint8_t)((data_length >> (8 * index)) & 0xFFu);
+        }
+    }
 #else
     const uint64_t total = 8U + data_length + 2U + record_length;
     uint8_t *wire = calloc(1, (size_t)total);
@@ -431,24 +488,38 @@ int kvspaceWatch(void *h, const char *k, uint32_t t, uint8_t **v, uint32_t *n,
 int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetype,
                          uint32_t body_len, uint64_t body_cap, const char *langtype,
                          uint8_t **body, char *err, uint32_t err_cap) {
-    (void)h; (void)key; (void)body_cap; (void)err; (void)err_cap;
+    (void)h; (void)key; (void)storetype; (void)ref; (void)err; (void)err_cap;
     const unsigned lt = (unsigned)strlen(langtype);
     memset(g_wire, 0, sizeof g_wire);
     const unsigned record = 3 + lt;
 #if __HEAD_LEN__ == 16
-    /* [bodylen:u64][attrslen:u32][storetype][ptr][pad:2][body][attrs] */
+    /* [bodylen:u64][attrslen:u32][layout:u8][padding:3][body][attrs]
+       容量形态：bodylen 是容量，有效长度在 attr tag 2。 */
+    const int capacity_layout = body_cap > (uint64_t)body_len;
+    const uint64_t body_field = capacity_layout ? body_cap : (uint64_t)body_len;
+    const unsigned reallen_bytes = capacity_layout ? 11U : 0U;
     /* `body_len` 是 uint32_t：只拷 4 字节会把高位留成栈垃圾。按 u64 显式展开。 */
-    const uint64_t body_len_u64 = (uint64_t)body_len;
+    const uint64_t body_len_u64 = body_field;
     memcpy(g_wire + 0, &body_len_u64, 8);
-    const uint32_t attrs_len = record;
+    const uint32_t attrs_len = (uint32_t)(record + reallen_bytes);
     memcpy(g_wire + 8, &attrs_len, 4);
-    g_wire[12] = storetype; g_wire[13] = ref;
-    memset(g_wire + 16, 'a', body_len);
-    uint8_t *attrs = g_wire + 16 + body_len;
+    g_wire[12] = capacity_layout ? 1U : 0U;
+    g_wire[13] = 0U; g_wire[14] = 0U; g_wire[15] = 0U;
+    memset(g_wire + 16, 'a', (size_t)body_field);
+    uint8_t *attrs = g_wire + 16 + body_field;
     attrs[0] = 1;
     attrs[1] = (uint8_t)(lt & 0xFF); attrs[2] = (uint8_t)(lt >> 8);
     memcpy(attrs + 3, langtype, lt);
+    if (capacity_layout) {
+        uint8_t *reallen = attrs + record;
+        reallen[0] = 2; reallen[1] = 8; reallen[2] = 0;
+        for (int index = 0; index < 8; ++index) {
+            reallen[3 + index] =
+                (uint8_t)(((uint64_t)body_len >> (8 * index)) & 0xFFu);
+        }
+    }
 #else
+    (void)body_cap;
     /* [len:u48][storetype][ptr][body][attr_len:u16][tag][len][data] */
     /* `body_len` 是 uint32_t：直接 `>> (8*i)` 在 i>=4 时位移越过类型宽度，
      * 是未定义行为（实测 i=4 会得到原值，把 len 写成 0x0000000200000002）。
@@ -465,7 +536,11 @@ int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetyp
     memcpy(attrs + 5, langtype, lt);
 #endif
     *body = g_wire + HEAD_LEN;
-    g_wire_len = (uint32_t)(HEAD_LEN + body_len + record);
+#if __HEAD_LEN__ == 16
+    g_wire_len = (uint32_t)(HEAD_LEN + body_field + record + reallen_bytes);
+#else
+    g_wire_len = (uint32_t)(HEAD_LEN + body_len + 2 + record); /* +2: u16 attr 长度前缀 */
+#endif
     return 0;
 }
 
@@ -552,29 +627,44 @@ int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
                               uint64_t capacity, const char *langtype,
                               uint8_t **output_wire,
                               uint64_t *output_wire_length) {
-    (void)capacity;
-    if (output_wire == NULL || output_wire_length == NULL || langtype == NULL) {
+    if (output_wire == NULL || output_wire_length == NULL || langtype == NULL ||
+        capacity < data_length) {
         return -1;
     }
+    const int capacity_layout = capacity > data_length;
+    const uint64_t body_field = capacity_layout ? capacity : data_length;
+    const uint64_t reallen_bytes = capacity_layout ? 11U : 0U;
     const uint64_t record = 3U + (uint64_t)strlen(langtype);
-    const uint64_t total = 16U + data_length + record;
+    const uint64_t total = 16U + body_field + record + reallen_bytes;
     uint8_t *wire = calloc(1, (size_t)total);
     if (wire == NULL) {
         return -1;
     }
-    memcpy(wire + 0, &data_length, 8);
-    const uint32_t attrs_length = (uint32_t)record;
+    memcpy(wire + 0, &body_field, 8);
+    const uint32_t attrs_length = (uint32_t)(record + reallen_bytes);
     memcpy(wire + 8, &attrs_length, 4);
-    wire[12] = 1U;
+    wire[12] = capacity_layout ? 1U : 0U;
     wire[13] = 0U;
+    wire[14] = 0U;
+    wire[15] = 0U;
     if (data_length != 0U) {
         memcpy(wire + 16, data, (size_t)data_length);
     }
-    uint8_t *attrs = wire + 16 + data_length;
+    uint8_t *attrs = wire + 16 + body_field;
     attrs[0] = 1;
     attrs[1] = (uint8_t)(strlen(langtype) & 0xFFu);
     attrs[2] = (uint8_t)((strlen(langtype) >> 8) & 0xFFu);
     memcpy(attrs + 3, langtype, strlen(langtype));
+    if (capacity_layout) {
+        uint8_t *reallen = attrs + record;
+        reallen[0] = 2;
+        reallen[1] = 8;
+        reallen[2] = 0;
+        for (int index = 0; index < 8; ++index) {
+            reallen[3 + index] =
+                (uint8_t)((data_length >> (8 * index)) & 0xFFu);
+        }
+    }
     *output_wire = wire;
     *output_wire_length = total;
     return 0;
@@ -766,7 +856,8 @@ def main(arguments: list[str]) -> int:
         verdict, detail = probe_backend(frontend_path, scheme, dsn_template, library)
         verdicts.append((scheme, verdict, detail, library))
 
-    stale = [entry for entry in verdicts if entry[1] == RESULT_EIGHT]
+    stale = [entry for entry in verdicts
+             if entry[1] in (RESULT_EIGHT, RESULT_SIXTEEN_NO_CAPACITY)]
     unjudged = [entry for entry in verdicts if entry[1] == RESULT_UNKNOWN]
     judged = [entry for entry in verdicts if entry[1] == RESULT_SIXTEEN]
     skipped = [entry for entry in verdicts if entry[1] == RESULT_SKIPPED]

@@ -2,10 +2,10 @@
  * `ptreq` / `ptreq·not`：四种操作数组合的语义。
  *
  * 为什么单独一个目标而不是塞进 `handler_behavior`：那个数据驱动用例走的是
- * **字面量**操作数（`LITERAL` 引用，wire 的 `ptr` 字节恒为 INLINE），而指针
- * 语义取决于 **`ptr` 字节 + body 是否为空**——不构造 `ptr=1` 的 wire 就走不到
- * 那几条分支。用字面量测 ptreq，测的永远是「两个非指针比较」，而那不是这条
- * 算子存在的理由。
+ * **字面量**操作数（`LITERAL` 引用，wire 的 langtype 恒为空 ⇒ 恒为普通值），
+ * 而指针语义取决于 **langtype 的 `*` 前缀 + body 是否为空**——不造真 XValue
+ * 就走不到那几条分支。用字面量测 ptreq，测的永远是「两个非指针比较」，
+ * 而那不是这条算子存在的理由。
  *
  * 判据出处：
  *   matrix:66 pointer-equality —— 按目标 key 比身份；None equals None；
@@ -134,8 +134,8 @@ static runtimec_allocator_t test_malloc_allocator(void) {
 }
 
 /*
- * 跑一次 ptreq：两个操作数是**地址绑定**（不是字面量），所以它们的 head 里的
- * `ptr` 字节能被 `vmbin_value_access_reference_kind` 读到。
+ * 跑一次 ptreq：两个操作数是**地址绑定**（不是字面量），它们的 langtype attr
+ * 才会真的被 `vmbin_value_access_form` 读到——指针性只存在于那里。
  */
 static runtimec_status_t run_pointer_equality(
     const test_value_t *left, const test_value_t *right,
@@ -179,7 +179,8 @@ static runtimec_status_t run_pointer_equality(
 
     /*
      * 两个读参是**形参**（PARAMETER_READ）：绑定表给出真实 XValue 地址，
-     * `reference_kind` 才能从 head 里读到 ptr 字节；用 LITERAL 就永远读到 INLINE。
+     * `vmbin_value_access_form` 才能从 attr 里读到 langtype；用 LITERAL 就永远
+     * 读到空 langtype（恒普通值）。
      *
      * 形参槽号 = 读参序号（0/1），见 `vmbin_frame_slot_of_parameter`。
      * **不用 LOCAL**：LOCAL 的槽号是 `read_count + write_count + symbol_index`，
@@ -398,12 +399,23 @@ static void test_none_versus_none(void) {
 /*
  * 反向对照：**同一 body、langtype 不带 `*`** ⇒ 不是指针。
  *
- * 判据若只靠 body 长相（"看起来像不像 key"）会在这里答错——两个值的字节完全相同，
- * 只有一个是指针。真正的判据是 langtype 首字符，这条用例把它钉住。
+ * 判据若只靠 body 长相（"看起来像不像 key"）会在这里答错——两个值的 body 字节
+ * 完全相同，只有一个是指针。真正的判据是 langtype 首字符，这条用例把它钉住。
  *
- * 期望的具体差异：`(Ptr "/a", Ptr "/a")` 相等；`(值 "/a", 值 "/a")` 也相等——
- * 所以「相等」本身分不出来。**能分出的是 `(Ptr, 值)` 这一对**：按 matrix:66
- * 「指针对非指针 ⇒ INVALID」，而两个非指针值之间是合法的值比较。
+ * ── 为什么必须**成对**写 ────────────────────────────────────────────
+ *
+ * 单写「(Ptr, 值) 必须失败」是没有对照的负向断言：整个值访问层挂掉时它也成立，
+ * 于是门禁绿着而一条 Ptr 都没比较过（本文件先前就是这样，`create_unbound_local`
+ * 把 STATIC 写目标全打红时，这条断言照旧通过）。
+ *
+ * 所以同一函数里先跑**正向对照**，再跑反向：两者 body 逐字节相同，只有 langtype
+ * 不同，**结果必须不同**。一个忽略 langtype、只比 body 的实现会在两行上给出同一
+ * 答案，正/负任一行都会红。
+ *
+ * 三态各一条：
+ *   正向  (Ptr "/a", Ptr "/a") → 成功且相等      ← 机器本身活着
+ *   反向  (值  "/a", 值  "/a") → 失败，不是指针  ← 同 body，去 `*` 即非指针
+ *   交叉  (Ptr "/a", 值  "/a") → 失败，matrix:66 指针对非指针
  */
 static void test_same_bytes_different_kind(void) {
     test_value_t pointer_value;
@@ -418,10 +430,23 @@ static void test_same_bytes_different_kind(void) {
     EXPECT(memcmp(pointer_value.storage + KVSPACE_XVALUE_HEAD_LEN,
                   plain_value.storage + KVSPACE_XVALUE_HEAD_LEN, 2U) == 0);
 
+    /* 正向对照：同样的 body，langtype 带 `*` ⇒ 两个指针，比身份，相等。 */
+    EXPECT(run_pointer_equality(&pointer_value, &pointer_value,
+                                BINRWIR_OPERATION_IDENTIFIER_POINTER_EQUAL,
+                                &result) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(result == 1U);
+
     /*
-     * 指针对非指针：matrix:66 判 INVALID，**不是**「不等」。
-     * 若实现只用 body 比较（忽略 langtype），这里会「成功且相等」——那正是
-     * 「看起来能工作」的错误实现，本断言让它红。
+     * 反向对照：同样的 body，langtype 不带 `*` ⇒ 两个普通值，ptreq 不接受。
+     * **与上面一行共享同一份 body 字节**，所以「相等」与「失败」的差异只可能
+     * 来自 langtype。忽略 langtype 的实现会在这里给出成功且相等。
+     */
+    EXPECT(run_pointer_equality(&plain_value, &plain_value,
+                                BINRWIR_OPERATION_IDENTIFIER_POINTER_EQUAL,
+                                &result) != RUNTIMEC_STATUS_SUCCESS);
+
+    /*
+     * 交叉：matrix:66「指针对非指针 ⇒ INVALID」，**不是**「不等」。
      */
     EXPECT(run_pointer_equality(&pointer_value, &plain_value,
                                 BINRWIR_OPERATION_IDENTIFIER_POINTER_EQUAL,

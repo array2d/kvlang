@@ -71,10 +71,9 @@ add_test(NAME runtimec.host.kvspace_backend
 # 新前端 + 旧后端，每个写操作都在报 `invalid XValue`，看着像 layout 写错。
 # 探针先造一个值看字节，把「库装错版本」在跑用例之前就分离出来。
 #
-# CMake 的 `DEPENDS` 只能表达「先跑」不能表达「失败则跳过」，所以这里：
-# 1. 把它注册成独立用例（可单独 `ctest -R head_layout` 跑）；
-# 2. 给 backend 用例挂 FIXTURES_REQUIRED，让 ctest 保证顺序，
-# 且探针失败时 backend 用例被标成 **Not Run** 而不是「也失败」。
+# **不把功能用例挂在探针的 FIXTURES 上**：探针是**诊断**，它的红说明「某一代后端
+# 还没换」；拿它当 setup，会让本来能跑的用例变成 `Not Run`，把真实结果藏起来。
+# 功能用例自己会因为坏库而红，首行就是证据；探针单独作为一条诊断用例报告。
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 # 探针必须探**本项目实际链接的那一份**（RUNTIMEC_KVSPACE_LIBRARY_PATH），
 # 不能让它用自己猜的默认路径——否则库装错位置时探针探的是另一份，给出「16 字节，
@@ -84,13 +83,11 @@ add_test(NAME runtimec.architecture.head_layout
  "${CMAKE_CURRENT_SOURCE_DIR}/../tools/architecture/check_kvspace_head_layout.py"
  --frontend "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
 set_tests_properties(runtimec.architecture.head_layout PROPERTIES
- LABELS "runtimec;scaffold;architecture"
- FIXTURES_SETUP runtimec_kvspace_head)
+ LABELS "runtimec;scaffold;architecture")
 
 set_tests_properties(runtimec.host.kvspace_backend PROPERTIES
- SKIP_RETURN_CODE 77
  LABELS "runtimec;scaffold;host;backend"
- FIXTURES_REQUIRED runtimec_kvspace_head)
+ SKIP_RETURN_CODE "77")
 
 
 add_executable(runtimec_wire_golden_real xvalue_wire_golden.c)
@@ -838,3 +835,18 @@ add_test(NAME runtimec.key.tostr_handler
 set_tests_properties(runtimec.key.tostr_handler PROPERTIES
  SKIP_RETURN_CODE 77
  LABELS "runtimec;scaffold;vmbin;handler;key")
+
+# engine/frame_state 的表契约：三态、终态销毁、分配失败不破坏既有表。
+# 窗口层「DONE 后归零」「失败也是终态」落在 execution_window_test（那里有真后端）。
+add_executable(runtimec_frame_state_test frame_state_test.c)
+target_compile_features(runtimec_frame_state_test PRIVATE c_std_11)
+target_include_directories(runtimec_frame_state_test PRIVATE
+ "${CMAKE_CURRENT_SOURCE_DIR}/.."
+ "${RUNTIMEC_INCLUDE_DIRECTORY}"
+ "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(runtimec_frame_state_test PRIVATE
+ runtimec_contract runtimec_binrwir runtimec_engine)
+runtimec_test_warnings(runtimec_frame_state_test)
+add_test(NAME runtimec.engine.frame_state COMMAND runtimec_frame_state_test)
+set_tests_properties(runtimec.engine.frame_state PROPERTIES
+ LABELS "runtimec;scaffold;engine;frame_state")

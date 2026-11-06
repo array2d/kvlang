@@ -625,6 +625,29 @@ static runtimec_status_t vmbin_value_access_create_member(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+/*
+ * 写路径上「建值 / 核绑定」这一步只属于**拥有绑定槽**的引用种类：
+ *
+ *   LOCAL           建值并绑定（槽就是本帧的符号池项）；
+ *   PARAMETER_WRITE 核调用方那一侧的绑定在不在。
+ *
+ * `STATIC` / `LITERAL` / `FUNCTION` 没有绑定槽——它们的地址在 `locate` 里现取。
+ * 在这里插一步不会「多一层保险」，只会把一整类合法路径按「未处理的引用种类」
+ * 报成失败：`vmbin.execute` 的 STATIC 写目标（编译期已解析出 body 地址）
+ * 原本就是这样整组变红的。
+ *
+ * 解引用目标同理跳过：它由指针指向，本该已存在；未绑定时失败比替它建一个值
+ * 更诚实（建出来的那个值没有任何人指得回去）。
+ */
+static bool vmbin_value_access_writes_through_binding_slot(
+    const binrwir_argument_t *argument) {
+    if (argument->dereference != 0U) {
+        return false;
+    }
+    return argument->reference_kind == BINRWIR_REFERENCE_LOCAL ||
+           argument->reference_kind == BINRWIR_REFERENCE_PARAMETER_WRITE;
+}
+
 static runtimec_status_t vmbin_value_access_create_unbound_local(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
@@ -643,23 +666,25 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
     /*
      * **未处理的引用种类不许静默成功**（p1：不容许「以奇怪的方式成功」）。
      *
-     * 本函数只负责「LOCAL 局部槽的建值 + 绑定」。其余种类各有归属：
-     *   - `PARAMETER_WRITE`：目标是对端（调用方）的 key，由**绑定**给出——本帧
-     *     `frame_path` 拼出来的一定是错 key（`/vthread/1/[2.4]/[0,+1]` 这种）。
-     *     所以这里**只核绑定在不在**：在 ⇒ 合法且无事可做；不在 ⇒ 具名失败，
-     *     那说明调用方那一侧从没绑过它。
-     *   - `STATIC` / `LITERAL` / `FUNCTION`：本函数不碰，具名失败。
+     * 本函数只负责「LOCAL 局部槽的建值 + 绑定」。`PARAMETER_WRITE` 是唯一另一种
+     * 合法入口：目标是对端（调用方）的 key，由**绑定**给出——本帧 `frame_path`
+     * 拼出来的一定是错 key（`/vthread/1/[2.4]/[0,+1]` 这种）。所以这里**只核
+     * 绑定在不在**：在 ⇒ 合法且无事可做；不在 ⇒ 具名失败，说明调用方那一侧
+     * 从没绑过它。
      *
-     * 曾经这一支是 `return RUNTIMEC_STATUS_SUCCESS;`——写形参因此既不建值、
-     * 也不绑定、也不报错，随后 `LOCATE_WRITE` 读它报 `UNBOUND_SLOT`，而失败点
-     * 指向的是「读」而不是「从未创建」。`strings.kv` 的 `replace_at` 就是这条。
+     * 曾经这一支对一切非 LOCAL 都返回 `SUCCESS`——写形参因此既不建值、也不绑定、
+     * 也不报错，随后 `LOCATE_WRITE` 读它报 `UNBOUND_SLOT`，而失败点指向的是
+     * 「读」而不是「从未创建」。`strings.kv` 的 `replace_at` 就是这条。
+     *
+     * 其余种类不该走到这里（调用点的 `writes_through_binding_slot` 已挡），
+     * 所以这一条是**直接调用**的兜底：漏挡即失败，不猜。
      */
     if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL) {
         if (argument->reference_kind != BINRWIR_REFERENCE_PARAMETER_WRITE) {
             return vmbin_value_access_fail(
                 error, RUNTIMEC_STATUS_INVALID,
                 VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE,
-                "this reference kind has no creation path in the local writer");
+                "this reference kind has no binding slot to create or verify");
         }
         if (frame->bindings == NULL ||
             vmbin_frame_slot_of_argument(frame->program, argument,
@@ -939,6 +964,61 @@ runtimec_status_t vmbin_value_access_locate_write(
             VMBIN_VALUE_ACCESS_DIAG_LITERAL_IS_READ_ONLY,
             "a literal is not a writable location");
     }
+    /*
+     * ── 写即创建：**成员写也创建**（#632）────────────────────────────────
+     *
+     * 「写即创建」是**语言规则**，不是 `copy` 这个算子的特性。曾经只有
+     * `write_body`（copy / 整值写）会创建成员槽，而 handler 的写定位
+     * （`VMBIN_HANDLER_LOCATE_WRITE`）不会——于是同一个写，成不成立取决于
+     * **谁来写**：`copy(7 -> a·[1,2])` 会经 `create_unbound_local` 分派到
+     * `create_member`，而 `cast(7 -> a·[1,2])` 直接报
+     * `member key is not present at execution time`（`0x4A02`）。
+     *
+     * 那是「同一件事两条路径」，正是要消灭的分叉。这里补的**不是新机制**：
+     * 复用 `create_member`（与 `create_unbound_local` 里同一处调用），
+     * 用**零值**建槽——本函数只定位、不知道要写的值，真正的值随后由 handler
+     * 写进返回的位置。
+     *
+     * **读路径一字不动**：`locate_body` 读缺失成员仍必须失败，绝不许顺手创建。
+     * 创建只发生在 `_locate_write` 这一条上，且只对 LOCAL 成员与 STATIC。
+     */
+    if (argument->reference_kind == BINRWIR_REFERENCE_LOCAL &&
+        frame->program != NULL && frame->kvspace_access != NULL) {
+        runtimec_string_view_t member_name;
+        runtimec_string_view_t member_langtype;
+
+        if (binrwir_program_get_symbol(frame->program, argument->slot,
+                                       &member_name, &member_langtype) ==
+                RUNTIMEC_STATUS_SUCCESS &&
+            binrwir_symbol_name_is_member(member_name)) {
+            char key_text[512];
+
+            /* 零值建 key：**与 STATIC 那条同一个入口**（`ensure_zero_value`，
+             * 宽度表在那里唯一）。不用 `create_member`：那个按**写入值**建 wire，
+             * 而本函数只定位、手上没有值，传空值会建出 0 长 body——正是
+             * `0x4A03 LENGTH_MISMATCH` 的来源。 */
+            status = vmbin_value_access_argument_key(
+                frame, argument, key_text, sizeof(key_text), error);
+            if (status != RUNTIMEC_STATUS_SUCCESS) {
+                return status;
+            }
+            if (!runtimec_kvspace_access_langtype_has_fixed_zero_width(
+                    member_langtype)) {
+                /* 非定宽（容器/字符串等）：由源码的 `·new` 创建，这里不抢。
+                 * 原样上报 locate 的失败，不猜。 */
+                return status;
+            }
+            status = runtimec_kvspace_access_ensure_zero_value(
+                frame->kvspace_access, &frame->snapshot,
+                runtimec_key_view_from_c_string(key_text), member_langtype,
+                error);
+            if (status != RUNTIMEC_STATUS_SUCCESS) {
+                return status;
+            }
+            return vmbin_value_access_locate_body(frame, argument,
+                                                  output_location, error);
+        }
+    }
     if (argument->reference_kind != BINRWIR_REFERENCE_STATIC ||
         frame->program == NULL || frame->kvspace_access == NULL) {
         return status;
@@ -1019,11 +1099,10 @@ runtimec_status_t vmbin_value_access_write_body(
         return vmbin_value_access_create_static_target(frame, argument, value,
                                                        error);
     }
-    /* 解引用目标的“未绑定”是错误而不是“待初始化”：它由指针指向，本该已存在。 */
-    status = argument->dereference != 0U
-                 ? RUNTIMEC_STATUS_SUCCESS
-                 : vmbin_value_access_create_unbound_local(frame, argument,
-                                                           value, error);
+    status = vmbin_value_access_writes_through_binding_slot(argument)
+                 ? vmbin_value_access_create_unbound_local(frame, argument,
+                                                           value, error)
+                 : RUNTIMEC_STATUS_SUCCESS;
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -1175,6 +1254,19 @@ runtimec_status_t vmbin_value_access_langtype(
             VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE,
             "declared langtype is empty");
     }
+    /*
+     * **这里不按 `dereference` 剥 `*`。**
+     *
+     * 直觉上该剥：`argument->dereference` 表示「访问前跟一跳」，调用方要的理应
+     * 是跟过之后那个值的类型。实测不成立——`println(*p)` 走到这里时
+     * `argument->dereference` 是 **0**，而声明的 langtype 仍是 `*int64`。
+     * 也就是说这一位在 encoder → program 之间没有传下来（`vmkv_encoder_map_argument`
+     * 里 `has_dereference` 已置 1、`output->dereference` 也写了 1，运行期读到的
+     * 却是 0）。在这里补一条依赖它的判据不会生效，只会让下一个人以为链路是通的。
+     *
+     * 谁需要「跟过之后的类型」，就得先把这一位传对；在那之前，本函数如实返回
+     * **声明的类型**（含 `*`），不猜调用方想问哪一个。
+     */
     return RUNTIMEC_STATUS_SUCCESS;
 }
 

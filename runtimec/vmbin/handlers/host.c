@@ -853,23 +853,160 @@ static runtimec_status_t runtimec_host_write_pointer_wire(
  * `s0` 取 `frame->logical_program_counter`：spec 明写它要的是「当前指令在帧内的
  * 指令轴坐标」，而解释器的游标正是这个。**不用 `‥pc`**——spec 同一节写明
  * 「两者不是同一事实，不得互相推导」（`‥pc` 存的是 source pc）。
+ *
+ * ── 为什么分三段而不是一个大函数 ──────────────────────────────────────
+ *
+ * 「取 vid」「取 stackid」「写两个结果」是三件独立的事：前两件各自有一套严格判据
+ * （vid 全数字、stackid 必须在方括号里），第三件只管形状。合在一起时，任一判据
+ * 都要在一段长函数里读到底才知道它保护的是什么；拆开后每段的失败出口就是它自己
+ * 的判据，**任一分量取不到仍然是具名失败**（`0x4606` KEY_UNRESOLVED / `0x4607`
+ * WRITE_FAILED），没有一处用 0 顶替。
  */
-static runtimec_status_t runtimec_host_vthread_pc(
-    binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    const uint32_t source_program_counter =
-        instruction->source_logical_program_counter;
-    int32_t vthread_identifier = 0;
-    int32_t stack_identifier = 0;
-    bool have_stack = false;
-    size_t ordinal;
-    size_t root_end = 0U;
-    unsigned slash_count = 0U;
-    int32_t position[2];
-    int32_t vid_result;
 
-    *output_exit = (binrwir_execution_exit_t){0};
+#define RUNTIMEC_HOST_VTHREAD_PREFIX "/vthread/"
+
+/*
+ * `/vthread/{vid}/[d]` 里第二个斜杠的位置——vid 段与帧段的分界。
+ *
+ * 单独成函数的原因：vid 段要用它作结束、帧段要用它作起点。各写一遍扫描就是
+ * **第二份同一个规则**，而这个规则的偏差（例如把开头那个斜杠也算进去）会让
+ * 两段各自解出不同的边界，谁都不报错。
+ */
+static runtimec_status_t runtimec_host_vthread_path_root_end(
+    runtimec_key_view_t frame_path, size_t *output_root_end,
+    binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
+    unsigned slash_count = 0U;
+    size_t ordinal;
+
+    for (ordinal = 1U; ordinal < frame_path.size; ++ordinal) {
+        if (frame_path.data[ordinal] != '/') {
+            continue;
+        }
+        slash_count += 1U;
+        if (slash_count == 2U) {
+            *output_root_end = ordinal;
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+    }
+    return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                              RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                              source_program_counter);
+}
+
+/* 取 vid：`/vthread/` 之后到 `root_end` 之前，必须全数字且非空。 */
+static runtimec_status_t runtimec_host_vthread_identifier_from_path(
+    runtimec_key_view_t frame_path, size_t root_end,
+    int32_t *output_identifier, binrwir_execution_exit_t *output_exit,
+    uint32_t source_program_counter) {
+    const size_t prefix = sizeof(RUNTIMEC_HOST_VTHREAD_PREFIX) - 1U;
+    int32_t value = 0;
+    size_t index;
+
+    if (root_end <= prefix) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                  source_program_counter);
+    }
+    for (index = prefix; index < root_end; ++index) {
+        const int digit = frame_path.data[index] - '0';
+
+        /* 上界判据是「乘十不进位到负数」：溢出会解出一个负 vid，那是一个
+         * 看起来像数字、实际指向别的 vthread 的假位置。 */
+        if (digit < 0 || digit > 9 || value > (INT32_MAX - digit) / 10) {
+            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                      RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                      source_program_counter);
+        }
+        value = value * 10 + digit;
+    }
+    *output_identifier = value;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 取 stackid：`root_end` 之后必须有一个 `[`，其后的数字是帧号。
+ *
+ * `[0]` 是合法的根帧号，所以**不能用「值为 0」判断没取到**——判据是「进过
+ * 方括号」，进了就算取到。没进方括号即失败，不给默认帧号。
+ */
+static runtimec_status_t runtimec_host_vthread_stack_from_path(
+    runtimec_key_view_t frame_path, size_t root_end,
+    int32_t *output_stack_identifier, binrwir_execution_exit_t *output_exit,
+    uint32_t source_program_counter) {
+    bool have_stack = false;
+    int32_t value = 0;
+    size_t index;
+
+    for (index = root_end + 1U; index < frame_path.size; ++index) {
+        const char character = frame_path.data[index];
+
+        if (character == '[') {
+            have_stack = true;
+            continue;
+        }
+        if (!have_stack) {
+            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                      RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                      source_program_counter);
+        }
+        if (character == ']') {
+            break;
+        }
+        /* 帧号可以是 `[2.2]` 这种带序号的形态（见 kv_runner 的
+         * `g_frame_serial`）。序号不是 stackid 的一部分，遇到非数字就停。 */
+        if (character < '0' || character > '9') {
+            break;
+        }
+        value = value * 10 + (character - '0');
+    }
+    if (!have_stack) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
+                                  source_program_counter);
+    }
+    *output_stack_identifier = value;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/* 两个结果的写准备：result0 = vid，result1 = `[2]int32 [stackid, s0]`。 */
+static runtimec_status_t runtimec_host_vthread_write_results(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, int32_t vthread_identifier,
+    int32_t stack_identifier, binrwir_execution_exit_t *output_exit,
+    uint32_t source_program_counter) {
+    int32_t identifier = vthread_identifier;
+    /*
+     * 第二结果是 `[2]int32`（8 字节）。**按声明的形状写**：spec 说它是 `[2]int32`，
+     * 而 write_body 要求与当前 body 等长——若槽还没按该形状建（局部未物化），
+     * 这里会失败而不是写入一个错长度的值。
+     */
+    int32_t position[2];
+
+    position[0] = stack_identifier;
+    position[1] = (int32_t)frame->logical_program_counter;
+    if (vmbin_value_access_write_body(
+            frame, &instruction->write_arguments.data[0],
+            runtimec_bytes_view_make((const uint8_t *)(const void *)&identifier,
+                                     sizeof(identifier)),
+            NULL) != RUNTIMEC_STATUS_SUCCESS ||
+        vmbin_value_access_write_body(
+            frame, &instruction->write_arguments.data[1],
+            runtimec_bytes_view_make((const uint8_t *)(const void *)position,
+                                     sizeof(position)),
+            NULL) != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_WRITE_FAILED,
+                                  source_program_counter);
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/* 读两个位置分量：0 读参、2 写参，且帧路径必须存在。 */
+static runtimec_status_t runtimec_host_vthread_pc_precondition(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit,
+    uint32_t source_program_counter) {
     if (instruction->read_arguments.count != 0U ||
         instruction->write_arguments.count != 2U) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
@@ -882,105 +1019,44 @@ static runtimec_status_t runtimec_host_vthread_pc(
                                   RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
                                   source_program_counter);
     }
-    /*
-     * 解析 `/vthread/{vid}/[d]`。两段都有严格判据：
-     *   vid 必须全数字且非空（vid 是**数字**，spec `02-kvspace模型/02-结构域.kv`）；
-     *   stackid 必须方括号包着且全数字。
-     * 任何一条不满足都失败——**不猜**，猜出来的位置比读不到更坏。
-     */
-    for (ordinal = 0U; ordinal < frame->frame_path.size; ++ordinal) {
-        if (frame->frame_path.data[ordinal] == '/' && ordinal != 0U) {
-            slash_count += 1U;
-            if (slash_count == 2U) {
-                root_end = ordinal;
-                break;
-            }
-        }
-    }
-    if (root_end == 0U) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
-                                  source_program_counter);
-    }
-    {
-        /* `/vthread/` 之后到 `root_end` 之前是 vid 文本。 */
-        const size_t prefix = sizeof("/vthread/") - 1U;
-        size_t index;
-
-        if (root_end <= prefix) {
-            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                      RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
-                                      source_program_counter);
-        }
-        for (index = prefix; index < root_end; ++index) {
-            const char character = frame->frame_path.data[index];
-
-            if (character < '0' || character > '9') {
-                return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                          RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
-                                          source_program_counter);
-            }
-            vthread_identifier = vthread_identifier * 10 + (character - '0');
-        }
-        /* 方括号段：从 `root_end + 1` 起。 */
-        for (index = root_end + 1U; index < frame->frame_path.size; ++index) {
-            const char character = frame->frame_path.data[index];
-
-            if (character == '[') {
-                have_stack = true;
-                continue;
-            }
-            if (!have_stack) {
-                return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                          RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
-                                          source_program_counter);
-            }
-            if (character == ']') {
-                break;
-            }
-            if (character < '0' || character > '9') {
-                /* 帧号可以是 `[2.2]` 这种带序号的形态（见 kv_runner 的
-                 * `g_frame_serial`）。序号不是 stackid 的一部分，遇到非数字
-                 * 就停——但**已经拿到的整数部分必须非空**，否则仍是失败。 */
-                break;
-            }
-            stack_identifier = stack_identifier * 10 + (character - '0');
-        }
-        /* `[0]` 是合法的根帧号，所以不能用「值为 0」判断没取到。为此记录
-         * 是否真的进过方括号：进了就算取到，没进就失败。 */
-        if (!have_stack) {
-            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                      RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
-                                      source_program_counter);
-        }
-    }
-    vid_result = vthread_identifier;
-    position[0] = stack_identifier;
-    position[1] = (int32_t)frame->logical_program_counter;
-    if (vmbin_value_access_write_body(
-            frame, &instruction->write_arguments.data[0],
-            runtimec_bytes_view_make((const uint8_t *)(const void *)&vid_result,
-                                     sizeof(vid_result)),
-            NULL) != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  RUNTIMEC_HOST_DIAG_WRITE_FAILED,
-                                  source_program_counter);
-    }
-    /*
-     * 第二结果是 `[2]int32`（8 字节）。**按声明的形状写**：spec 说它是 `[2]int32`，
-     * 而 write_body 要求与当前 body 等长——若槽还没按该形状建（局部未物化），
-     * 这里会失败而不是写入一个错长度的值。
-     */
-    if (vmbin_value_access_write_body(
-            frame, &instruction->write_arguments.data[1],
-            runtimec_bytes_view_make((const uint8_t *)(const void *)position,
-                                     sizeof(position)),
-            NULL) != RUNTIMEC_STATUS_SUCCESS) {
-        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                                  RUNTIMEC_HOST_DIAG_WRITE_FAILED,
-                                  source_program_counter);
-    }
     return RUNTIMEC_STATUS_SUCCESS;
+}
+
+static runtimec_status_t runtimec_host_vthread_pc(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    const uint32_t source_program_counter =
+        instruction->source_logical_program_counter;
+    int32_t vthread_identifier = 0;
+    int32_t stack_identifier = 0;
+    size_t root_end = 0U;
+    runtimec_status_t status;
+
+    *output_exit = (binrwir_execution_exit_t){0};
+    status = runtimec_host_vthread_pc_precondition(frame, instruction,
+                                                   output_exit,
+                                                   source_program_counter);
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = runtimec_host_vthread_path_root_end(
+            frame->frame_path, &root_end, output_exit, source_program_counter);
+    }
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = runtimec_host_vthread_identifier_from_path(
+            frame->frame_path, root_end, &vthread_identifier, output_exit,
+            source_program_counter);
+    }
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = runtimec_host_vthread_stack_from_path(
+            frame->frame_path, root_end, &stack_identifier, output_exit,
+            source_program_counter);
+    }
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = runtimec_host_vthread_write_results(
+            frame, instruction, vthread_identifier, stack_identifier,
+            output_exit, source_program_counter);
+    }
+    return status;
 }
 
 /*

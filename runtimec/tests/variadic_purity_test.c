@@ -1,7 +1,7 @@
 /*
  * 变参 `...` 只落在**一个**位置：签名行锚点的 dynamic 字节。
  *
- * 判据（`stdlib/kvlang/spec/03-类型系统/22-storetype-def族与签名行.kv` 的「铁律」
+ * 判据（`stdlib/kvlang/spec/03-类型系统/22-签名行与def族.kv` 的「铁律」
  * 段落原文）：
  *
  *   rwfunc 的 `...` 是**签名层 arity**，吸收 0..N 个实参，**不是 langtype 的一部分**；
@@ -143,7 +143,7 @@ static bool contains_variadic_marker(const char *text, size_t size) {
 /*
  * 任意 XValue 的 langtype：**在 attr 区**，不在 body。
  *
- *   wire = [bodylen:u64][attrslen:u32][storetype][ptr][pad:2][body][attrs]
+ *   wire = [bodylen:u64][attrslen:u32][layout:u8][padding:3][body][attrs]
  *   attr = [tag:u8][len:u16 LE][data]  × attrslen 个字节，tag 1 = langtype
  *
  * 之前按「body 里带长度前缀的 langtype」解析过，那是错的：`/lib/f/[1,-1]` 的
