@@ -65,12 +65,15 @@ stringkeymap 散列容器；跨形态 TypeError。`compactarray·set` 仅同槽 
 - `time/duration·`：`nanos`、`millis`、`seconds`、`minutes`、`hours`、`as_nanos`、`as_millis`、
   `as_seconds`、`as_minutes`、`as_hours`、`add`、`sub`、`before`、`after`。
 - `random·`：`uint64`、`int63`、`intn`。
-- `kvspace·`：`get`、`set`、`del`、`deltree`、`cp`、`cpdir`、`cplist`、`listlen`、`listat`、
-  `mkindex`、`extindex`、`rmindexext`、`watch`。完整 rwir 定义（opid、读参、写参、结果类型、
-  失败封闭）见 `runtimec/specification/kvspace-family.md`，以那份表为准；本名单此前写成
-  `list`/`listn`，是两个从未注册过的名字。
-- `kvlang·`：`abs`（取址；`&x ≡ kvlang·abs(x)`）。
-- `vthread·`：`create`、`run`、`call`、`sleep`、`setstatus`（语义见 [[执行模型]] §七）。
+- `kvspace·`：`del`、`deltree`、`cp`、`cpdir`、`cplist`、`listlen`、`listat`、`mkindex`、
+  `extindex`、`delextindex`、`watch`（11 个。`get`/`set` 已按「读 key 只读、写 key 只写」
+  删除——写目标只能以写参出现）。完整 rwir 定义（读参、写参、结果类型、失败封闭）见
+  `runtimec/specification/kvspace-family.md`，以那份表为准。
+- `kvspace/key·`：`tostr`（值 → 成员键文本）、`resolveptr`（base + 键值 → 位置 Ptr）、
+  `abs`（取址；`&x ≡ kvspace/key·abs(x)`）。本族负责**计算 key**：三者都只算位置、不读写值，
+  读写由显式 `*` 完成。动态键的两步展开见 [[动态键]]。
+- `vthread·`：`create`、`run`、`call`、`sleep`、`setstatus`、`pc`（语义见 [[执行模型]] §七与
+  `‥pc` 小节）。
 
 锚例：`tutorial/{runtimec,byteseek,byteseek-stdlib}/13-stdlib/`（`kv`、`string`、`xv`、`math`、`time`、`duration` 六族）、
 `tutorial/runtimec/04-ndarray/`（`xv_meta.kv`、`xv_reinterpret.kv`、`xv_shape.kv`）。

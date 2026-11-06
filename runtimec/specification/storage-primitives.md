@@ -1,5 +1,10 @@
 # 存储原语：把 kvspace ABI 提升为 BinRWIR 操作
 
+> **2026-11-06 后的状态**：动态键已由用户拍板走 `kvspace/key·resolveptr` + 显式 `*` 解引用
+> （见 `stdlib/kvlang/spec/05-runtime语义/12-动态键.kv`）。因此本文中 `resolve` / `load` /
+> `store` 三条**不再作为动态键的通路**，相关章节保留作历史记录；`keytext` 已改名
+> `kvspace/key·tostr`，`abs` 归入 `kvspace/key·abs`。`new` / `malloc` 的结论不受影响。
+
 用户裁决（2026-11-06）：
 
 > kvspace 的很多 ABI，我建议你加入 binrwir。如 keyto64 的转换（通过 key 查找 64 位内存地址）、
@@ -10,9 +15,10 @@
 
 ## 一、目的：让「键 → 地址 → 读写」成为可表达的基本操作
 
-现在的 BinRWIR 只有两类键：**符号池里的文本键**（LOCAL/STATIC）与**运行期值参数**
-（`kvspace·get/set` 的实参）。动态键之所以没有位置，是因为「把运行期算出来的文本变成一个
-可访问的位置」这一步没有可表达的算子。
+现在的 BinRWIR 只有两类键：**符号池里的文本键**（LOCAL/STATIC）与**运行期值参数**。
+按名读写一个 key 本身不需要算子（读用该 key 作操作数，写用 `=` / `->` 落到该 key 为写目标；
+`kvspace·get` / `set` 已于 2026-11-06 删除）。动态键之所以没有位置，是因为「把运行期算出来的
+文本变成一个可访问的位置」这一步没有可表达的算子。
 
 照 C 的模型补齐这一步：
 
@@ -23,7 +29,7 @@
 | `*(T*)p = v` | `kvspace·store`：按地址写，类型由写入方携带 |
 | `T x = *(T*)p` | `kvspace·load`：按地址读，类型向目标头取 |
 | `(T){...}` 构造一个值 | `kvspace·new`：构造 XValue（纯 wire） |
-| `snprintf` 出键文本 | `kvspace·keytext`：值 → 成员键文本（逐字铁律的唯一实现） |
+| `snprintf` 出键文本 | `kvspace/key·tostr`：值 → 成员键文本（逐字铁律的唯一实现） |
 
 有了这六条，`base·*k` 不需要解释器里的任何「动态键分支」：
 `kvspace·resolve(键文本)` → `kvspace·store` / `kvspace·load`。
@@ -49,7 +55,7 @@ kvspace 的 ABI 里既有「程序语义需要的存储原语」，也有「宿�
 | `kvspace·load` / `store` | 有了地址就必须有按地址读写；否则 resolve 没有出口 |
 | `kvspace·new` | 运行期要构造「值」（含 Ptr），不能只有源码字面量 |
 | `kvspace·malloc` | 运行期要拿到一个新的可写位置 |
-| `kvspace·keytext` | 逐字铁律的唯一实现点；没有它，动态键的格式化会在各处分裂 |
+| `kvspace/key·tostr` | 逐字铁律的唯一实现点；没有它，动态键的格式化会在各处分裂 |
 
 ### 不入选（明确排除，理由逐条）
 
@@ -60,9 +66,9 @@ kvspace 的 ABI 里既有「程序语义需要的存储原语」，也有「宿�
 | `kvspaceListLen` / `ListAt` 等枚举 | 属于语言的容器遍历语义（已有 `kvspace·listlen`/`listat` 算子），**不新增底层形式**；同一事实只留一处 |
 | `kvspaceView*`（Sweep/Ack/Quiesce/ResolvePrefix/Resolve/Check/Write/Del/Refresh） | 后端**实现细节**（版本化视图/缓存），语言层不得感知 |
 | `kvspaceXvalueBodyView` | 只是 `resolve` 在 shm 后端的**实现手段**，不单独成为算子 |
-| `kvspaceGetHead` | 是 `load` 的内部步骤（读类型），不作为独立语言面；把它暴露出去会让「读头」变成可编程的旁路 |
+| `kvspaceGetHead` / `kvspaceHead_t` | **已删除**（2026-11-06 ABI 删减）：head 只由 `xvalue_head.h` 的 inline 方法解读，解码结构体是第二份真相 |
 | `kvspaceCp` / `CpTree` / `CpList` / `Del` / `DelTree` | 已有 `kvspace·cp`/`cpdir`/`cplist`/`del`/`deltree` 算子覆盖，**不重复包装** |
-| `kvspaceGet` / `SetValue` / `SetPart` / `GetPart` | 已有 `kvspace·get`/`set` 与值访问层覆盖；`load`/`store` 是按地址的同族，不新增按 key 的第三条路 |
+| `kvspaceGet` / `SetValue` / `SetPart` / `GetPart` | **普通 key 读写**覆盖（操作数即 key / `=`、`->` 的写目标）：`kvspace·get`/`set` 已于 2026-11-06 删除；`load`/`store` 是按地址的同族，不新增按 key 的第三条路 |
 
 一句话：**进 BinRWIR 的是「程序要用的存储原语」，不是 kvspace 的全部能力面。** 管理面留在
 宿主（byteseek / 工具链），实现面留在后端。
@@ -80,7 +86,7 @@ kvspace 的 ABI 里既有「程序语义需要的存储原语」，也有「宿�
 | `kvspace·store` | 地址 + 值 → 写入 | `kvspaceSetValueByRef` / `kvspaceSetPartByRef` |
 | `kvspace·new` | 构造 XValue（不落地） | `kvspaceNewInt64` / `kvspaceNewBool` / `kvspaceNewChar` / `kvspaceNewPtr` / `kvspaceNewFloat64` |
 | `kvspace·malloc` | 分配新位置，返回可写地址 | `kvspaceWriteNewPlace`；`kvspaceWriteInPlace` 是同族（已有位置的就地写） |
-| `kvspace·keytext` | 值 → 成员键文本 | 尚无独立 ABI；规则见 spec `05-runtime语义/03-成员访问`「浮点文本」与逐字铁律 |
+| `kvspace/key·tostr` | 值 → 成员键文本 | 尚无独立 ABI；规则见 spec `05-runtime语义/03-成员访问`「浮点文本」与逐字铁律 |
 
 `kvspace·resolve` 与 `kvspace·malloc` 是**新增**；`kvspace·new` 是前端已有的纯 wire 构造器；
 `load`/`store` 是 `kvspaceGetByRef` / `kvspaceSetValueByRef` 的语言面。
@@ -121,7 +127,7 @@ kvspace 的 ABI 里既有「程序语义需要的存储原语」，也有「宿�
 `base·*k` 的完整展开链：
 
 1. **base 键路径**：base 是帧槽 → `<帧路径>/<名字>`；是指针 → 解引用后的目标路径；
-2. **键文本**：`k` 的值经 `kvspace·keytext` 得到（逐字铁律，浮点负零/最短往返等规则同成员键）；
+2. **键文本**：`k` 的值经 `kvspace/key·tostr` 得到（逐字铁律，浮点负零/最短往返等规则同成员键）；
 3. **成员键** = 第 1 步 + `·` + 第 2 步；
 4. `kvspace·resolve` → `load`/`store`。
 
@@ -132,7 +138,7 @@ value_access 里按 `·*` 文本二次解析**。这与 `dynamic-key.md` 的裁�
 ## 七、实施顺序与验收
 
 1. `kvspace·new`（前端的五个构造器）——最小、无状态、跨后端一致，先落地；
-2. `kvspace·keytext`（值 → 键文本）——动态键的另一半；
+2. `kvspace/key·tostr`（值 → 键文本）——动态键的另一半；
 3. `kvspace·resolve` + `kvspace·load` / `kvspace·store`——地址访问打通；
 4. `kvspace·malloc`——分配；需要同时定义「分配出来但未写」的可见性规则（同 `mkindex` 只影响
    空目录可见性）；
@@ -151,4 +157,4 @@ value_access 里按 `·*` 文本二次解析**。这与 `dynamic-key.md` 的裁�
 - `dynamic-key.md`：动态键不新增引用种类；本组原语就是它的地基；
 - #631（struct/map 即 xvaluegroup）：组的身份是路径，地址只是一次解析的结果；
 - #632（绝对 key 类型）：写侧携带类型、读侧向目标头取——`store`/`load` 逐字沿用；
-- #633（键编码）：`kvspace·keytext` 是逐字铁律的唯一实现点，不得旁路。
+- #633（键编码）：`kvspace/key·tostr` 是逐字铁律的唯一实现点，不得旁路。

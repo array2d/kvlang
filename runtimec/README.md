@@ -171,7 +171,7 @@ manifest 回答「这个算子能接受什么」；BinRWIR 回答「这一次调
 不产生标量值的控制行）表示它不走标量 union 通道：参数与结果类型由 `/lib/<op>` 安装
 的 `def rwir` 给出，`ResultRule = Identity` 意为「取安装签名」。这是「manifest 不得
 复制第二张签名表」的直接结果，不是遗漏，也不是 wildcard。`obj`、`map·new`、
-`struct·new`、`kvlang·abs` 是例外，带类别位。
+`struct·new`、`kvspace/key·abs` 是例外，带类别位。
 
 **生成与门禁**：`rwir_catalog.def` 与 `rwir_alias_table.def` 都由
 `tools/architecture/generate_rwir_catalog.py` 生成。手改会被判 out of date：

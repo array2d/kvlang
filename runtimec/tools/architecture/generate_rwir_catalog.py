@@ -143,8 +143,23 @@ FLOAT64 = type_set("float64")
 # **已知缺口（不在本文件解）**：本表是「layout 接受哪些 langtype」的**第二份名单**，
 # 它的存在本身就会漂。正确形态是从 layout 的同一张表派生，或至少有一条测试断言
 # 「本表 ⊆ layout 接受面」。已记入「同一事实两个来源」议题。
-SIGNATURE_LANGTYPES = ("time", "time/duration", "int64", "uint64", "bool",
-                       "char/utf8")
+# 基种类白名单：**形状前缀之外的那部分**。`[N]int32` 剥掉 `[N]` 后查 `int32`。
+#
+# 早先这是一份「完整 langtype」白名单，只有六项，每加一个新算子就要往里塞一条——
+# 下一个新算子还会撞同一堵墙。改成「形状前缀 + 基种类」两段之后，
+# **加类型是加基种类，加形状不用加**。
+BASE_LANGTYPES = (
+    "int8", "int16", "int32", "int64",
+    "uint8", "uint16", "uint32", "uint64",
+    "float32", "float64",
+    "bool",
+    "char/utf8", "char/utf32", "char/ascii",
+    # 名字型：没有 TypeSet 位，但 layout 接受（由各自的 lib 定义）
+    "time", "time/duration",
+)
+
+# 形状前缀：`[N]`（定长）或 `[d0,d1,...]`（多维）。可嵌套，如 `[4][2]int32`。
+SHAPE_PREFIX_PATTERN = re.compile(r"^\[[0-9,]+\]")
 # 类型串直接嵌进声明文本：逗号会切断参数表、竖线与引号会改变语义。这些字符一出现，
 # 生成物就会被 layout 解析成另一件事，而肉眼看着仍然像一条合法声明。
 FORBIDDEN_LANGTYPE_CHARACTERS = (",", "|", '"', "'", " ", "\t", "(", ")")
@@ -451,8 +466,6 @@ FAMILY_ROWS = (
     #   `03-control/for`、`04-ndarray/array_slice_hole`、`08-leetcode/{100,104}`、
     #   `12-struct/10-member-chain` 五条从 blocked 变 fail（layout 内部发起的调用把
     #   容器/structref 传给 argument0）。decls 表只收无前因的常量类型，本族不属于它。
-    FamilyRow("kvspace", "get", 0x0170, "kvspace-get-missing-key"),
-    FamilyRow("kvspace", "set", 0x0171, "kvspace-set-write-scope"),
     FamilyRow("kvspace", "del", 0x0172, "kvspace-set-write-scope"),
     FamilyRow("kvspace", "deltree", 0x0173, "kvspace-set-write-scope"),
     FamilyRow("kvspace", "cp", 0x0174, "kvspace-copy-semantics"),
@@ -462,7 +475,7 @@ FAMILY_ROWS = (
     FamilyRow("kvspace", "listat", 0x0178, "kvspace-list-ordering"),
     FamilyRow("kvspace", "mkindex", 0x0179, "kvspace-index-capacity"),
     FamilyRow("kvspace", "extindex", 0x017A, "kvspace-extension-index"),
-    FamilyRow("kvspace", "rmindexext", 0x017B, "kvspace-extension-index"),
+    FamilyRow("kvspace", "delextindex", 0x017B, "kvspace-extension-index"),
     FamilyRow("kvspace", "watch", 0x017C, "kvspace-watch-blocking"),
     # vthread：签名来自参考实现 `runtime/src/rwir_vthread.c`（**逐函数核对，不是推断**）。
     #   每个 `kvlangBuiltinVthread*` 开头都有一句
@@ -485,6 +498,11 @@ FAMILY_ROWS = (
               read_langtypes="time/duration"),
     FamilyRow("vthread", "setstatus", 0x0184, "vthread-control-opcodes",
               read_langtypes="char/utf8"),
+    # `vthread·pc()`：无读参，**两个结果**（spec `05-runtime语义/02-执行模型-续.kv:26-40`）。
+    #   result0 = int32 vid；result1 = [2]int32 `[stackid, s0]`。
+    # 两个结果按声明序写出，与 `FamilyRow` 的 `write_langtypes` 逗号分隔约定一致。
+    FamilyRow("vthread", "pc", 0x0185, "vthread-pc-pure-read",
+              write_langtypes="int32,[2]int32"),
     # random：签名来自 runtime/src/rwir_random.c 的实现（不是推断）。
     #   uint64()/int63() 无读参；intn(int64) 取模后仍按 uint64 产出。
     FamilyRow("random", "uint64", 0x0190, "random-source-and-range",
@@ -503,7 +521,16 @@ FAMILY_ROWS = (
     # `x`, 3, `y`, 4）。同属构造类：初值不约束。
     FamilyRow("struct", "new", 0x01A1, "struct-new-from-prototype",
               0, STRUCT_REF),
-    FamilyRow("kvlang", "abs", 0x01A2, "address-of-yields-pointer", 0, POINTER),
+    # `kvspace/key·abs`：取址（`&x`）。**不在 `kvspace` 族里**——本族的 base 是
+    # 存储基座（容器值或 path 文本），而取址收的是一段 **key 表达式**，两者不是同一
+    # 个域；放进 `kvspace` 会让「本族 = 11 条存储动作」这条判据失去意义。
+    # 名字里的 `key` 就是这个区分：`kvspace/key·` = 对 key 本身的操作，不是对值的存取。
+    FamilyRow("kvspace/key", "abs", 0x01A2, "address-of-yields-pointer", 0, POINTER),
+    # `kvspace/key·tostr`：值 → 成员键文本（逐字铁律的唯一实现）。**读参是「值」
+    # 不是「key」**——它不碰存储，只把值格式化成路径段文本。读掩码 0 = 不约束
+    # （任何可作为键的值都收，拒绝面由 handler 按 `contract/langtype` 判）。
+    FamilyRow("kvspace/key", "tostr", 0x01A3, "float-member-key-identity",
+              0, CHARACTER_UTF8),
 )
 
 # ---------------------------------------------------------------------------------------
@@ -573,17 +600,23 @@ IDENTIFIER_WORDS = {
     "get": "GET", "del": "DELETE", "deltree": "DELETE_TREE", "cp": "COPY",
     "cpdir": "COPY_DIRECTORY", "cplist": "COPY_LIST", "listlen": "LIST_LENGTH",
     "listat": "LIST_AT", "mkindex": "MAKE_INDEX", "extindex": "EXTENSION_INDEX",
-    "rmindexext": "REMOVE_INDEX_EXTENSION", "watch": "WATCH",
+    "delextindex": "DELETE_EXTENSION_INDEX", "watch": "WATCH",
     "create": "CREATE", "run": "RUN", "call": "CALL", "sleep": "SLEEP",
     "setstatus": "SET_STATUS",
+    # `pc` 不展开成全称：它与 kvspace 里的键名 `‥pc` 逐字对齐（用户裁决 2026-11-02，
+    # 见 `check_names.py` 对 `pc` 的豁免）。展开成 `PROGRAM_COUNTER` 会让
+    # 「算子名 → 键名」多一次翻译，而这份表存在的意义正是让两者一眼对上。
+    "pc": "PC",
     "uint64": "UNSIGNED_64", "int63": "SIGNED_63", "intn": "BELOW",
     "abs": "ADDRESS_OF",
+    "tostr": "TOSTRING",
 }
 
 FAMILY_IDENTIFIER_WORDS = {
     "compactarray": "COMPACT_ARRAY", "scatterarray": "SCATTER_ARRAY",
     "string": "STRING", "xv": "XVALUE", "ndarray": "NDARRAY", "time": "TIME",
-    "time/duration": "DURATION", "kvspace": "KVSPACE", "vthread": "VTHREAD",
+    "time/duration": "DURATION", "kvspace": "KVSPACE", "kvspace/key": "KEY",
+    "vthread": "VTHREAD",
     "random": "RANDOM", "map": "MAP", "struct": "STRUCT", "kvlang": "KVLANG",
 }
 
@@ -843,9 +876,15 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
         if row.operator not in row_by_surface:
             findings.append(f"{row.identifier}: signature row has no surface name")
         for langtype in row.read_langtypes + row.write_langtypes:
-            if langtype not in SIGNATURE_LANGTYPES:
+            # 剥离形状前缀后查基种类。前缀本身不校验数字——`[0]int32` 这种
+            # 零长形状由 layout 判，不在生成期替它做主。
+            base = langtype
+            while SHAPE_PREFIX_PATTERN.match(base):
+                base = SHAPE_PREFIX_PATTERN.sub("", base, count=1)
+            if base not in BASE_LANGTYPES:
                 findings.append(
-                    f"{row.identifier}: {langtype!r} is not a langtype layout accepts")
+                    f"{row.identifier}: {langtype!r} is not a langtype layout accepts "
+                    f"(base kind {base!r} is not in BASE_LANGTYPES)")
             for character in FORBIDDEN_LANGTYPE_CHARACTERS:
                 if character in langtype:
                     findings.append(

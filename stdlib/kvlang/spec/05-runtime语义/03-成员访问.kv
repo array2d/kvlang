@@ -15,7 +15,7 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 | `a[i]` | **数组下标** | compact 数组的元素访问，`i` 为整数 |
 | `base·name` | **容器成员 / 限定名** | `·`（U+00B7，中点）是成员访问符 |
 
-容器成员一律走 `·`（或 `kvspace·get`/`kvspace·set`）；`[]` 只索引 compact 数组。
+容器成员一律走 `·`；`[]` 只索引 compact 数组。
 
 ## 容器值与物理成员键
 
@@ -23,7 +23,7 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 成员 `base·name` 是独立物理 key；kvspace 按 `base·` 前缀枚举成员名，不维护 memindex 矩阵。
 
 - **写成员**：`rec·name = 值` 的写槽是完整成员键 `rec·name`，`=` 为值拷贝。
-- **读成员**：`rec·name -> v` 直接取 key `rec·name`；缺失成员的动态读（`kvspace·get`）返回 `None`。
+- **读成员**：`rec·name -> v` 直接取 key `rec·name`；缺失成员的读返回 `None`。
 
 ## `·` 不对 kvlang 指针隐式解引用
 
@@ -39,8 +39,8 @@ base 的解析只剩一条路：`base·name` 的成员键 = `解析(base)·name`
 （`/n1`），使不同帧的 kvlang 指针都指向同一 key。
 
 base 的形态判定：base **必须**是容器——struct 实例（kindexpr 以 `/` 开头）或 typed map；或
-**路径串**（`[]char/*`，显式形式 `kvspace·get(path, k)` 的 base 就是它，其值即成员键的父
-路径）。compact 数组与标量两者都不是，报 TypeError（`·` 要求容器；compact 数组用 `[]`
+**路径串**（`[]char/*`，其值即成员键的父路径）。compact 数组与标量两者都不是，报 TypeError
+（`·` 要求容器；compact 数组用 `[]`
 索引）；None 是动态读，返回 None。**不得**把非容器、非路径串的 body 字节当路径串拼成员键
 ——那会静默给出脏值或 None。
 
@@ -51,7 +51,7 @@ base 的形态判定：base **必须**是容器——struct 实例（kindexpr �
 ## 动态成员名 `·*`：解引用操作数取 memitemkey
 
 `base·*k` 用 `k` 的**值**作为成员键：`·*` 令 runtimec2 **解引用/求值**操作数 `k`，以其值定位
-`base·<k 值>`（等价显式形式 `kvspace·get(base, k)` / `kvspace·set(base, k, v)`）。裸 `base·k`（无 `*`）用字面
+`base·<k 值>`（显式算子形式已随 `kvspace·get/set` 删除，见 `kvspace-family.md` §四）。裸 `base·k`（无 `*`）用字面
 名 `k`；`base·*k` 才取 `k` 的值。
 
 **kvlang 指针作 memitemkey 必须 `*` 开头**：当作为 key 的操作数是**kvlang 指针**（ref=1 Ptr）时，
@@ -150,7 +150,7 @@ kvlang 指针（`Ptr`，head ref==1，源码前缀 `*`）在 kvspace 中存**目
 数组有两种存储形态：**compact**（`[...]` 字面量，元素连续打包进单个 XValue，head kind = 元素类型）与
 **stringkeymap**（`{...}` 字面量，散 key，每元素落 `base·[i]` 坐标段独立子 key）。下标 `a[i]` /
 `compactarray·at` / `compactarray·set` 用于 **compact** 形态；stringkeymap 形态用 `scatterarray·at` /
-`scatterarray·set` / `for-in` / `kvspace·get` 遍历访问。
+`scatterarray·set` / `for-in` / 普通 key 读遍历访问。
 
 下标的操作数**必须**是 compact 数组**值**本身。Ptr（ref=1）是寻址用的间接层，不是数组：`p[i]`（`p:*[]T`）
 报 TypeError——先显式解引用 `*p` 再下标（`*` 是唯一解引用路径，`[]` 不做隐式解引用，见 [[ptr]]）。

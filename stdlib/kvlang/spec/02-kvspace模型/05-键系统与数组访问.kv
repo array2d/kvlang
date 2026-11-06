@@ -39,6 +39,6 @@ langtype 串**全前缀**书写，最左符号为最外层构造器，无优先�
 维数与各维长度编码进 langtype 串本身；ref（存储位置）已独立为 head 中的 ref u8 字段（见 [[XValueHead
 线格式]]），不再是 langtype 前缀——storetype 物理字段携带对应的 ndim/dims 结构。**源码**类型标注可在最
 前写 `*`/`@` 前缀表示 ref（如 `*int64`、`@[256,256]uint8`），layout 解析时剥离前缀落成 head `ref` 独立
-字节；wire 层 langtype 串不含 `*`/`@` 前缀（见 [[总体方案]]）。
+字节；wire 层 langtype 串保留 `*` 指针前缀、不含 `@`（`@` 归 head 的 ext 字节，见 [[XValueHead线格式]]）。
 	"#### -> /lib/kvlang/spec/kvspace模型/键系统与数组访问
 }

@@ -22,7 +22,7 @@ myrwircaps（rwir 能力
 `string·*`、`compactarray·*`（new/fill/copy/newslice/newreshape/newreinterpret/at/set/numel/dim/shape/
 langtype/bodylen/parselangtype）、`scatterarray·*`（new/newscatter/newcompact/len/at/set/append/slice）、
 `kvspace·*`（get/set/del…）、
-`kvlang·*`（abs 取址）、`struct·new`、`vthread·*`
+`kvspace/key·*`（abs 取址）、`struct·new`、`vthread·*`
 （create/run/call/sleep/setstatus）、`time·*`、`time/duration·*`（包分隔用 `/` 分段、`·` 接方法）、
 `random·*`（uint64/int63/intn）。
 
@@ -37,7 +37,7 @@ langtype/bodylen/parselangtype）、`scatterarray·*`（new/newscatter/newcompac
 (* ÷ : 两侧 int → 整除(C 风格)；任一侧 float → 浮除 *)
 (* s[i] 读返单字符字符串，越界返 ""；s[i]="X" 单字符替换写回新串 *)
 (* 源码 + 作用于 string∧string → 拼接；layout 脱糖为 string·concat，rwir 的 + 只做数值加法 *)
-(* &x ≡ kvlang·abs(x)：一元前缀**绝对地址**运算符，产指向 x 的 Ptr（ref=1，body=绝对路径）；与中缀按位与 a & b 靠位置区分 *)
+(* &x ≡ kvspace/key·abs(x)：一元前缀**绝对地址**运算符，产指向 x 的 Ptr（ref=1，body=绝对路径）；与中缀按位与 a & b 靠位置区分 *)
 ```
 "## -> /lib/kvlang/spec/附录/内建函数
 }

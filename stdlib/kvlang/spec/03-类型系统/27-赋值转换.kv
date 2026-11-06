@@ -18,7 +18,7 @@ lib kvlang/spec/类型系统/赋值转换 {
 - 能解析出声明类型的全局变量。
 
 **非 typed 槽**保持无约束/动态语义，**不**适用本章：无注解的推断变量、空 kindexp（`name:`）、
-union/def langtype、`kvspace·set`/`kv·set` 的动态 key、容器赋值的目标本身
+union/def langtype、`kv·set` 的动态 key、容器赋值的目标本身
 （其元素仍按元素 kind 规则处理）。
 
 ## 不变量
@@ -85,7 +85,7 @@ Ptr/空 kindexp 槽，写入其它 typed 槽才 TypeError。**不得**引入第�
 
 kvlang 指针写（`*p = v`）：目标槽按 `p` 的 kindexpr 视为 typed 槽，适用上述全部规则。
 
-动态 `kvspace·set`/`kv·set` 没有静态目标类型，不适用本章：值按原 kind 写入。
+动态 `kv·set` 没有静态目标类型，不适用本章：值按原 kind 写入。
 
 ## 算子类型标注与动态操作数
 

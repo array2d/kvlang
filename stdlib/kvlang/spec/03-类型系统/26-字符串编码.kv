@@ -5,12 +5,19 @@ lib kvlang/spec/类型系统/字符串编码 {
 char 种类（[[种类与定宽类型]]、[[种类_标量时间容器]]）承载三种编码：utf8、utf32、ascii。
 本章规定这三种编码在 **key/value 存储**、**用户 kv 代码**与 **string 标准库**三个层面的分工。
 
-## 一、存储与交换默认 utf8
+## 一、key 侧 utf8，value 侧 utf32
 
-kvlang 体系内，**key 与 value 中的字符串默认 utf8**。
+**key 侧与 value 侧的默认编码不同**（2026-11-06 用户裁决）：
 
-- key 侧：字符串键（`[]char/utf8·value` 中 key 侧的 `[]char/<enc>`）与路径名，utf8 是默认。
-- value 侧：落到 KV 树的字符串值，未显式标注时以 utf8 承载。
+- **key 侧**：字符串键（`[]char/utf8·value` 中 key 侧的 `[]char/<enc>`）与路径名，**utf8 是默认**；
+- **value 侧**：落到 KV 树的字符串值，**未显式标注时以 utf32 承载**——与 §三「string 包工作面是
+  utf32」一致，源码里的字符串字面量与 string 包函数因此无需逐处显式转码；
+- **key 本身与 ptr 类型的 body 恒 utf8**：kvlang 指针（`*T`）的 body 是目标 **key 路径**，
+  属于寻址面而非代码工作面，**不得用 utf32 承载**。`&x` 产出、`*p` 消费的 body 一律 utf8；
+  成员键文本（`member_key_text` 的输出）同样恒 utf8。
+
+这条是「代码工作形态」优先于「存储紧凑」的选择：value 侧主要是代码在处理（索引、切片、比较），
+定宽 utf32 免去每次转码；需要紧凑持久化时显式标注 `[]char/utf8`。
 
 utf8 是变宽字节序列，**字节取向、空间高效**，适合作为持久/交换形态；utf8 **禁码点索引**（O(1) 索引须
 定宽编码）。
@@ -24,7 +31,7 @@ utf32 是码点序列（4B×N），**定宽、可索引**，供用户 kv 代码�
 
 ```
 // 存储读出的串默认 utf8；要逐码点处理，先显式转 utf32
-kvspace·get(d, "name") -> s8          // s8: []char/utf8
+d·name -> s8                     // s8: []char/utf8（普通 key 读；按名访问不经算子）
 char/utf32(s8) -> s32            // s32: []char/utf32，定宽可索引
 s32[0] -> c                      // O(1) 码点取
 ```

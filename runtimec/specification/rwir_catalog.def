@@ -798,20 +798,6 @@ RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_AFTER, "time/duration·after", 0x
                         RUNTIMEC_RWIR_RESULT_IDENTITY,
                         RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
                         "duration-truncating-scale")  /* install signature -> install signature */
-/* behavior-decision: kvspace-get-missing-key */
-RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_GET, "kvspace·get", 0x0170,
-                        0x00000000, 0x00000000,
-                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
-                        RUNTIMEC_RWIR_RESULT_IDENTITY,
-                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
-                        "kvspace-get-missing-key")  /* install signature -> install signature */
-/* behavior-decision: kvspace-set-write-scope */
-RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_SET, "kvspace·set", 0x0171,
-                        0x00000000, 0x00000000,
-                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
-                        RUNTIMEC_RWIR_RESULT_IDENTITY,
-                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
-                        "kvspace-set-write-scope")  /* install signature -> install signature */
 /* behavior-decision: kvspace-set-write-scope */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_DELETE, "kvspace·del", 0x0172,
                         0x00000000, 0x00000000,
@@ -876,7 +862,7 @@ RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_EXTENSION_INDEX, "kvspace·extinde
                         RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
                         "kvspace-extension-index")  /* install signature -> install signature */
 /* behavior-decision: kvspace-extension-index */
-RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_REMOVE_INDEX_EXTENSION, "kvspace·rmindexext", 0x017B,
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_DELETE_EXTENSION_INDEX, "kvspace·delextindex", 0x017B,
                         0x00000000, 0x00000000,
                         RUNTIMEC_RWIR_CONSTRAINT_NONE,
                         RUNTIMEC_RWIR_RESULT_IDENTITY,
@@ -924,6 +910,13 @@ RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_VTHREAD_SET_STATUS, "vthread·setstatus", 
                         RUNTIMEC_RWIR_RESULT_IDENTITY,
                         RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
                         "vthread-control-opcodes")  /* install signature -> install signature */
+/* behavior-decision: vthread-pc-pure-read */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_VTHREAD_PC, "vthread·pc", 0x0185,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "vthread-pc-pure-read")  /* install signature -> install signature */
 /* behavior-decision: random-source-and-range */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_RANDOM_UNSIGNED_64, "random·uint64", 0x0190,
                         0x00000000, 0x00000000,
@@ -960,11 +953,18 @@ RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRUCT_NEW, "struct·new", 0x01A1,
                         RUNTIMEC_RWIR_ALIAS_DECLARED,
                         "struct-new-from-prototype")  /* install signature -> structref */
 /* behavior-decision: address-of-yields-pointer */
-RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVLANG_ADDRESS_OF, "kvlang·abs", 0x01A2,
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KEY_ADDRESS_OF, "kvspace/key·abs", 0x01A2,
                         0x00000000, 0x00040000,
                         RUNTIMEC_RWIR_CONSTRAINT_NONE,
                         RUNTIMEC_RWIR_RESULT_IDENTITY,
                         RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
                         "address-of-yields-pointer")  /* install signature -> pointer */
+/* behavior-decision: float-member-key-identity */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KEY_TOSTRING, "kvspace/key·tostr", 0x01A3,
+                        0x00000000, 0x00000800,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "float-member-key-identity")  /* install signature -> char/utf8 */
 
-/* next free opid: 0x01A3 */
+/* next free opid: 0x01A4 */

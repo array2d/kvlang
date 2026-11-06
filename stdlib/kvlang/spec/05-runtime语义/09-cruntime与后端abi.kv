@@ -79,7 +79,6 @@ layout 与 runtime 对**数据 store**不做特化：不 dlopen、不双后端�
 kvspaceConnect / Close / Clear
 kvspaceGet                       // 借用读：*out 指向后端常驻/回收空间，调用方不得 free
 kvspaceSetValue                  // 验证并同步写入完整 XValue
-kvspaceGetHead                   // 读 head
 kvspaceListLen / ListAt / Del / DelTree / Cp / CpTree
 kvspaceMkindex / MkindexExt / RmindexExt / Watch
 kvspaceXvalueHeadNewNone / NewScalar / NewSlack / NewTensor / NewPtr / NewExt / NewCode / Reserve

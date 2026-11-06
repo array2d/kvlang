@@ -350,8 +350,6 @@ static const struct {
     {"random·uint64", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"random·int63", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"random·intn", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
-    {"kvspace·get", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
-    {"kvspace·set", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"kvspace·del", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"kvspace·deltree", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"kvspace·cp", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
@@ -361,14 +359,18 @@ static const struct {
     {"kvspace·listat", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"kvspace·mkindex", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"kvspace·extindex", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
-    {"kvspace·rmindexext", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
+    {"kvspace·delextindex", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"kvspace·watch", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
-    {"kvlang·abs", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
+    {"kvspace/key·abs", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
+    {"kvspace/key·tostr", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"vthread·create", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"vthread·run", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"vthread·call", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"vthread·sleep", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"vthread·setstatus", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
+    /* `vthread·pc()`：纯读、无读参、两个结果（spec `05-runtime语义/02-执行模型-续.kv:26-40`）。
+     * 它是**新算子**，旧 runtime 没有实现也不需要——旧表已冻结，本表才是生成器的真源。 */
+    {"vthread·pc", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"debugger", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
 };
 
