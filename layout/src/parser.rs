@@ -77,6 +77,67 @@ struct FlowCtx {
     jumps: Vec<(Expr, Pos)>,
 }
 
+/*
+ * **写槽文本的规范拼写**：把同一个形参的几种写法收敛成一种。
+ *
+ * `*r`、`(*r)`、`((*r))`、`( *r )` 都是「解引用形参 r」，必须是**同一个槽**；
+ * 而 `*(a + 1)` 不是名字，**不许**被归一化——任何「按文本剥括号」的推广都会把
+ * 非名字表达式改坏。所以判据是「剥完括号后恰好是 `*` + 一个标识符、且整串到此
+ * 结束」，不是「长得像括号就剥」。
+ *
+ * 名字的判据与 `lower::slot_is_plain_name` 同源：标识符只含字母/数字/下划线，
+ * 且不以数字开头。这里单独写一份极小判断，是因为本函数在 **parser** 层，够不到
+ * lower 的类型表——但判据本身只有一条：`*` 后必须是一个**名字**。
+ *
+ * 不做归一化时**原样返回**：调用方拿到的永远是「可以当写槽名用」的文本，
+ * 不需要再判一次。
+ */
+fn canonical_write_slot_text(text: &str) -> String {
+    /* 循环剥首尾括号，允许括号内有空白。剥不动就停。 */
+    let mut current = text.trim();
+    loop {
+        if current.len() < 2 || !current.starts_with('(') || !current.ends_with(')') {
+            break;
+        }
+        /* 首尾这对括号必须**配对**（不是 `(a) + (b)` 这种）。逐字符深度计数。 */
+        let inner = current[1..current.len() - 1].trim();
+        let mut depth = 0i32;
+        let mut paired = true;
+        for byte in inner.bytes() {
+            match byte {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth < 0 {
+                        paired = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !paired || depth != 0 || inner.is_empty() {
+            break;
+        }
+        current = inner;
+    }
+    /* 剥完必须是 `*` + 一个标识符，且整串到此结束。 */
+    let Some(name) = current.strip_prefix('*') else {
+        return text.to_string();
+    };
+    let mut characters = name.chars();
+    let Some(first) = characters.next() else {
+        return text.to_string();
+    };
+    let identifier_start = first == '_' || first.is_alphabetic();
+    let identifier_rest = characters.all(|c| c == '_' || c.is_alphanumeric());
+    if identifier_start && identifier_rest {
+        current.to_string()
+    } else {
+        text.to_string()
+    }
+}
+
 impl Parser {
     fn error_at(&mut self, pos: Pos, message: String) {
         self.errors.push(Diagnostic {
@@ -1888,11 +1949,15 @@ impl Parser {
                 self.check_deref_operand(&arg, t.pos);
                 return Some(ast::call(ast::DEREF_OP, vec![arg]));
             }
-            // 一元前缀 & = 取址：&x ≡ kvlang·abs(x)（中缀 & 仍为按位与，走 pratt 中缀路径）。
-            // & 对成员链（`=` 读）→ kvlang·abs(base, segs...)：取成员路径地址，非读值取址。
+            // 一元前缀 & = 取址：&x ≡ kvspace/key·abs(x)（中缀 & 仍为按位与，走 pratt 中缀路径）。
+            // & 对成员链（`=` 读）→ kvspace/key·abs(base, segs...)：取成员路径地址，非读值取址。
+            //
+            // 名字是 `kvspace/key·` 而不是 `kvspace·`：取址操作的是 **key 表达式**本身，
+            // 不是一次存储存取——`kvspace·` 族是「base + 存储动作」，base 可以是容器值
+            // 或 path 文本；取址收的是 key，两者不是同一个域。
             if symbol::lookup(&t.value).word == "bitand" {
                 let arg = self.parse_pratt(UNARY_PREC)?;
-                let op = format!("kvlang{}abs", keytree::MEMBER_SEP);
+                let op = format!("kvspace/key{}abs", keytree::MEMBER_SEP);
                 if arg.op == ast::MEMBER_READ_OP && arg.args.len() >= 2 {
                     return Some(ast::call(&op, arg.args));
                 }
@@ -2875,6 +2940,14 @@ impl Parser {
         // 落成员写槽（`=` 写），不是 `compactarray·set`。后者会把基座当容器整体，
         // 下标被当成「写进容器的值」，于是 `(*r)[0] = "H"` 报「cannot assign int64」。
         let deref_base = arr.starts_with("(*") && arr.ends_with(')');
+        /* **写槽名按语义归一，不按源码文本**：`(*r)` 与 `*r` 是同一个形参的两种
+         * 写法，必须落到同一个槽。曾经 `(*r)` 被逐字塞进 `writes`，于是符号池按
+         * 文本登记出一个**新符号**——它与写形参 `result0` 无关，任何指令都没写过它，
+         * 首次读它就是 `UNBOUND_SLOT`（`strings.kv` 的 `replace_at`）。
+         *
+         * 归一化放在 `dot_coord || arr.starts_with('/')` 那一支**之后**：成员写与
+         * 路径写各有自己的写槽形态，这里不碰。 */
+        let arr_canonical = canonical_write_slot_text(&arr);
         // `p[i] = v`（`p` 是 kvlang 指针）：下标作用在指针基座上，是隐式解引用，
         // 与读侧同一判据——写位置不给例外。
         if !deref_base && self.ptr_params.contains(&arr) {
@@ -2895,7 +2968,11 @@ impl Parser {
             inst.expr = e;
             return;
         }
-        let mut args = vec![ast::leaf(&arr)];
+        /* **读参 base 与写槽名都用归一化文本**（`(*r)` → `*r`）：两者必须是同一个
+         * 槽，否则「算出来的元素写回哪里」与「读的哪里」分裂成两个符号。
+         * 上面 `ptr_params` 那条诊断**仍用原文 `arr`**——它判的是「基座是未显式
+         * 解引用的裸指针名」，归一化与它无关。 */
+        let mut args = vec![ast::leaf(&arr_canonical)];
         for idx in idxs.split(',').map(|x| x.trim()) {
             if !idx.is_empty() {
                 args.push(ast::leaf(idx));
@@ -2903,7 +2980,7 @@ impl Parser {
         }
         args.push(e.unwrap_or(ast::leaf("")));
         inst.expr = Some(ast::call("compactarray·set", args));
-        inst.writes = vec![arr];
+        inst.writes = vec![arr_canonical];
         inst.write_types = Vec::new();
     }
 
@@ -2943,8 +3020,25 @@ impl Parser {
                 .filter(|a| a.quote != 0)
                 .map(|a| a.val.clone())
                 .unwrap_or_default();
-            inst.expr = Some(ast::call("kvspace·cplist", vec![e, ast::leaf(&s)]));
-            inst.writes = Vec::new();
+            /*
+             * **dst 是写参，不是第二个读参。**
+             *
+             * 规范 `04-layout语义/01-指令架构.kv`「写槽必须是位置」明确：写槽可以是
+             * 裸名、绝对路径、**成员写（`base·field` / `base·*key`）**、下标写。
+             * 所以 `s` 即使是一条成员链，放进 `writes` 也是**合法形态**——
+             * `lower.rs` 的 `check_map_inst` 本来就按「writes 里含 `·`」处理。
+             *
+             * 而 handler 的 `runtimec_host_copy_operation` 按
+             * `05-runtime语义/12-动态键.kv` 与 `kvspace-family.md` 定的
+             * 「src 读参 + dst 写参」实现，期望 1 读 1 写。发射两读参会让它收到
+             * 2 读 0 写，直接报 INVALID——那是把「形状不符」当成了「能力缺失」。
+             *
+             * `write_types` 必须与 `writes` **等长且逐位对应**：`struct·new` 的
+             * desugar 里类型就是原型路径。清空一个、留下另一个，就是早先
+             * `_1` 报 non-concrete langtype 的成因。
+             */
+            inst.expr = Some(ast::call("kvspace·cplist", vec![e]));
+            inst.writes = vec![s.clone()];
             inst.write_types = if prototype.is_empty() {
                 Vec::new()
             } else {

@@ -3,8 +3,23 @@
 use super::ffi;
 
 // ── kind 常量 ─────────────────────────────────────────────────────────
-
+/// **无标注字符串字面量的默认编码：`char/utf32`。用户裁决（2026-11-06）。**
+///
+/// spec `03-类型系统/26-字符串编码` §一：**key 侧 utf8，value 侧 utf32**。
+/// 「value 侧：落到 KV 树的字符串值，未显式标注时以 utf32 承载」——与 §三
+/// 「string 包工作面是 utf32」一致，源码里的字符串字面量与 string 包函数因此
+/// 无需逐处显式转码。**这不是待改项，是终态**：别再把这里往 `char/utf8` 改。
+///
+/// 曾经试过改成 `char/utf8`（依据当时 §一 的「默认 utf8」旧措辞）：**14 条回归**
+/// ——`11-string/*`、`08-leetcode/{008,013,014,020,058,125,171}` 等从通过变
+/// `0x4503`（temp_println 段）/`0x4B01`（文本 handler MALFORMED）。原因是 string
+/// 包的 handler 按 utf32 解 body，值改 utf8 后解不动。那次回退是对的，且旧措辞
+/// 已被裁决取代。
+///
+/// 有标注时仍按标注转换：`s:[]char/utf32 = "abc"` 走 `target_char`，与本常量无关
+/// ——本常量只服务「完全没有标注」这一支。
 pub const KIND_CHAR: &str = "char/utf32";
+
 pub const KIND_DEF_STRUCT: &str = "def struct";
 
 // kvlang 自有 kind
@@ -18,10 +33,6 @@ pub const KIND_DEF_LANGTYPE: &str = "def langtype";
 /// 空字节 = None。
 pub fn is_none(data: &[u8]) -> bool {
     data.is_empty()
-}
-
-pub fn head(data: &[u8]) -> ffi::kvspaceHead_t {
-    ffi::from_wire_head(data, "")
 }
 
 /// 解析 langtype 内容 → (dims, base kind)。langtype 无前缀（ref/ptr 归 head.ref）。
@@ -75,8 +86,13 @@ pub fn kind(data: &[u8], lt: &str) -> String {
     parse_langtype(lt).1
 }
 
-pub fn is_ptr(data: &[u8]) -> bool {
-    !data.is_empty() && ffi::xh_is_ptr(data)
+/// 这个值是不是指针。
+///
+/// **判据只有 langtype**：新 head 没有 `ptr` 位（`xvalue_head.h`：存储形态与
+/// 引用性都从 langtype 推出）。所以本函数必须收 langtype——早先只收 `data`
+/// 并读 head 的 offset 13，那个位置现在是 padding，读出来恒 0，判据整个失效。
+pub fn is_ptr(data: &[u8], langtype: &str) -> bool {
+    !data.is_empty() && ffi::langtype_is_pointer(langtype)
 }
 
 pub fn array_len(data: &[u8], lt: &str) -> i32 {
@@ -92,25 +108,21 @@ pub fn array_len(data: &[u8], lt: &str) -> i32 {
 }
 
 /// 从 data 截取 body 字节。
-pub fn body<'a>(data: &'a [u8], h: &ffi::kvspaceHead_t) -> &'a [u8] {
-    let off = h.body_offset as usize;
-    let len = h.body_len as usize;
-    if off + len > data.len() {
-        return &[];
-    }
-    &data[off..off + len]
+///
+/// 几何直接来自 wire 头（`xh_body_slice` 一处定义），不再经过中间 head 结构——
+/// 那条 `kvspaceHead_t` 已按裁决删除（它与 kvspace 的 C ABI 同名，留着就是同词两义）。
+pub fn body<'a>(data: &'a [u8]) -> &'a [u8] {
+    ffi::xh_body_slice(data)
 }
 
 /// 指针目标 key（Ptr 的 body 即目标 key 路径；head 去 * 为目标完整 langtype）。
 pub fn ptr_target(data: &[u8]) -> String {
-    let h = ffi::from_wire_head(data, "");
-    String::from_utf8_lossy(body(data, &h)).into_owned()
+    String::from_utf8_lossy(body(data)).into_owned()
 }
 
 /// char/utf8 的明文表示（body 字节按 UTF-8 解码）。
 pub fn value_string(data: &[u8]) -> String {
-    let h = ffi::from_wire_head(data, "");
-    String::from_utf8_lossy(body(data, &h)).into_owned()
+    String::from_utf8_lossy(body(data)).into_owned()
 }
 
 /// Format an XValue for inspection.
@@ -123,9 +135,8 @@ pub fn display(data: &[u8], lt: &str) -> String {
     if k.is_empty() {
         return "None".to_string();
     }
-    let h = ffi::from_wire_head(data, lt);
-    let b = body(data, &h);
-    if h.r#ref == 1 {
+    let b = body(data);
+    if ffi::langtype_is_pointer(lt) {
         return format!("→{}:{}", String::from_utf8_lossy(b), k);
     }
     format!("{}:{}", k, plain_value(&k, b))
@@ -266,8 +277,7 @@ pub fn def_param_parts(data: &[u8]) -> Option<(String, String)> {
     if data.is_empty() {
         return None;
     }
-    let h = ffi::from_wire_head(data, "");
-    let b = body(data, &h);
+    let b = body(data);
     let nul = b.iter().position(|&x| x == 0)?;
     let name = String::from_utf8_lossy(&b[..nul]).into_owned();
     let ty = String::from_utf8_lossy(&b[nul + 1..]).into_owned();
@@ -308,8 +318,7 @@ pub fn counts(data: &[u8]) -> (i32, i32, bool) {
     if data.is_empty() {
         return (0, 0, false);
     }
-    let h = ffi::from_wire_head(data, "");
-    let b = body(data, &h);
+    let b = body(data);
     if b.len() >= 5 {
         (
             u16::from_le_bytes([b[0], b[1]]) as i32,
@@ -327,8 +336,7 @@ pub fn plain(data: &[u8], lt: &str) -> String {
         return String::new();
     }
     let (_, k) = parse_langtype(lt);
-    let h = ffi::from_wire_head(data, lt);
-    plain_value(&k, body(data, &h))
+    plain_value(&k, body(data))
 }
 
 /// rwir 族槽值的载荷串（opcode / 引用名）：body 去 5 字节计数头后的字节。
@@ -339,8 +347,7 @@ pub fn write_slot_name(data: &[u8]) -> (String, String) {
     if data.is_empty() {
         return (String::new(), String::new());
     }
-    let h = ffi::from_wire_head(data, "");
-    let b = body(data, &h);
+    let b = body(data);
     if b.len() > 5 {
         if let Some(split) = b[5..].iter().position(|&x| x == 0) {
             let name = String::from_utf8_lossy(&b[5..5 + split]).into_owned();
@@ -355,8 +362,7 @@ pub fn rwir_sig(data: &[u8]) -> String {
     if data.is_empty() {
         return String::new();
     }
-    let h = ffi::from_wire_head(data, "");
-    let b = body(data, &h);
+    let b = body(data);
     let text = &b[5.min(b.len())..];
     let end = text.iter().position(|&x| x == 0).unwrap_or(text.len());
     String::from_utf8_lossy(&text[..end]).into_owned()

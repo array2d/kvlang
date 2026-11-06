@@ -129,10 +129,32 @@ fn refuse_with_diagnostics(diags: &[crate::scanner::Diagnostic], stage: &str) ->
 /// Pure kvspace-free validation shared by `vet` and `compile`: parse/container diagnostics,
 /// lowering, write-slot checks, specialization, linearization, jump target resolution, and op arity.
 /// State-dependent checks (such as `/lib/<opcode>` `def rwir` collisions) remain in `compile`.
+/// struct 名 → 声明。带包名的同时登记裸名（`pkg·N` 与 `N` 都能查到）。
+///
+/// **唯一构造点**：`analyze_file` 里有两处要用（早的 `check_container_subscript`
+/// 与晚的 `analyze_func`），各写一遍就成了两份表——而它们的键集合必须逐字相同，
+/// 否则同一个 struct 在两条检查路径上是两个东西。
+fn collect_struct_table(file: &ast::File) -> lower::StructTable {
+    let mut structs: lower::StructTable = HashMap::new();
+    for decl in &file.structs {
+        let qual = if decl.pkg.is_empty() {
+            decl.name.clone()
+        } else {
+            format!("{}{}{}", decl.pkg, keytree::MEMBER_SEP, decl.name)
+        };
+        structs.entry(qual).or_insert_with(|| decl.clone());
+        structs
+            .entry(decl.name.clone())
+            .or_insert_with(|| decl.clone());
+    }
+    structs
+}
+
 fn analyze_file(src: &str) -> Result<CheckedFile, String> {
     let (file, mut diags) = parser::parse_code(src)?;
+    let structs = collect_struct_table(&file);
     for f in subscript_check_funcs(&file) {
-        diags.extend(lower::check_container_subscript(&f));
+        diags.extend(lower::check_container_subscript(&f, &structs));
         diags.extend(lower::check_map_defined(&f));
         diags.extend(lower::check_container_typed(&f));
     }
@@ -159,18 +181,7 @@ fn analyze_file(src: &str) -> Result<CheckedFile, String> {
         };
         sigs.entry(qual).or_insert_with(|| d.sig.clone());
     }
-    let mut structs: lower::StructTable = HashMap::new();
-    for decl in &file.structs {
-        let qual = if decl.pkg.is_empty() {
-            decl.name.clone()
-        } else {
-            format!("{}{}{}", decl.pkg, keytree::MEMBER_SEP, decl.name)
-        };
-        structs.entry(qual).or_insert_with(|| decl.clone());
-        structs
-            .entry(decl.name.clone())
-            .or_insert_with(|| decl.clone());
-    }
+    let structs = collect_struct_table(&file);
     let mut funcs: Vec<AnalyzedFunc> = Vec::new();
     for func in &file.funcs {
         let pkg = if func.pkg.is_empty() {
@@ -227,12 +238,12 @@ fn analyze_func(
     // 形状校验必须在 lower **之前**：`flatten_expr` 会把 `f([1,2,3,4])` 的实参
     // 物化成临时槽，此后容器字面量不复存在，形状再也比不了。
     let mut shape_diags = lower::check_call_shapes(&src, sigs);
-    let mut fn_ = lower::lower_func(&src)?;
-    let type_map = lower::infer_types(&fn_);
+    let mut fn_ = lower::lower_func(&src, structs)?;
+    let type_map = lower::infer_types(&fn_, structs);
     // 合成表：形参行是 Value 形态、写槽行是源级形态；优先级见
     // `lower::declared_langtypes_by_origin` 的注释（形参优先，等价性条件）。
     let declared = lower::declared_langtypes_by_origin(&fn_);
-    let type_sets = lower::infer_type_sets(&fn_);
+    let type_sets = lower::infer_type_sets(&fn_, structs);
     let mut diags = std::mem::take(&mut shape_diags);
     diags.extend(lower::validate_writes(&fn_, &type_map, structs, sigs));
     /* 推断必须在 specialize 之前算一次，且只算一次：specialize 只改 e.op 的字形
@@ -266,7 +277,58 @@ fn analyze_func(
      * 结论。**这必须在 `specialize` 之后**：`specialize` 只看 op/操作数形态与
      * 声明类型，不看槽类型；一旦将来有特化规则需要槽类型，合并点要再前移，
      * 而不是让 `specialize` 自己去补查——那会造出第二个查询面。 */
-    annotate_slot_types(&mut seq, &declared, &type_sets, &mut stable, sigs, structs);
+    /* 形参坐标表：名字 → `*[0,±k]`。`(*p)·v` 摊出的临时槽承接的是**坐标形态**
+     * `[0,-1]`，而各类型表的键是形参名——反查要靠这张表（见 `value_type_of`）。 */
+    let mut slot_coord: HashMap<String, String> = HashMap::new();
+    for (index, parameter) in fn_.sig.params.iter().enumerate() {
+        slot_coord.insert(parameter.name.clone(), format!("*[0,-{}]", index + 1));
+    }
+    for (index, parameter) in fn_.sig.returns.iter().enumerate() {
+        slot_coord.insert(parameter.name.clone(), format!("*[0,{}]", index + 1));
+    }
+    annotate_slot_types(
+        &mut seq, &declared, &type_sets, &mut stable, sigs, structs, &slot_coord,
+    );
+    /* 隐式数值转换必须在 `annotate_slot_types` **之后**：目标 kind 取自
+     * `write_slot_type`，而它读的正是那一趟补出来的写槽类型与并入的 `stable`。
+     * 早一步则临时槽还没定型，只能判「认不出」而整条跳过。 */
+    {
+        let source_langtypes = lower::SourceLangtypes::new(&fn_.sig);
+        let mut declared_source = source_langtypes.merged_under(&declared);
+        for (name, kind) in &stable {
+            if !kind.is_empty() && !kind.contains('|') {
+                declared_source.entry(name.clone()).or_insert_with(|| kind.clone());
+            }
+        }
+        let param_types: Vec<String> = fn_.sig.langtype_list();
+        let mut param_langtype: HashMap<String, String> = HashMap::new();
+        for (index, parameter) in fn_.sig.params.iter().enumerate() {
+            param_langtype.insert(parameter.name.clone(), param_types[index].clone());
+        }
+        for (index, result) in fn_.sig.returns.iter().enumerate() {
+            let offset = fn_.sig.num_reads() as usize + index;
+            param_langtype.insert(result.name.clone(), param_types[offset].clone());
+        }
+        insert_write_casts(
+            &mut seq,
+            |inst, ordinal, slot| {
+                write_slot_type(
+                    inst,
+                    ordinal,
+                    slot,
+                    &param_langtype,
+                    &source_langtypes,
+                    &declared,
+                    &declared_source,
+                    &type_sets,
+                    structs,
+                    &stable,
+                )
+            },
+            &declared,
+            &stable,
+        );
+    }
     // Validate instruction arity before touching kvspace (shared by `vet` and `compile`).
     for inst in &seq {
         let (op, reads) = inst.flat();
@@ -1353,8 +1415,12 @@ fn slot_static_type(
             }
         }
     }
-    let lookup_name = name.strip_prefix('*').unwrap_or(name);
-    let is_deref = lookup_name.len() != name.len();
+    /*
+     * 归一：`p` / `*p` / `(*p)` / `((*p))` 都查同一行表项。
+     * 判据只有一处（`lower::normalize_slot_name`）——早先这里只认裸 `*`。
+     */
+    let (lookup_name_owned, is_deref) = lower::normalize_slot_name(name);
+    let lookup_name = lookup_name_owned.as_str();
     let declared_any = declared.get(lookup_name).filter(|t| !t.is_empty());
     if let Some(t) = declared_any {
         let value = if is_deref {
@@ -1430,6 +1496,7 @@ fn annotate_slot_types(
     stable: &mut HashMap<String, String>,
     sigs: &lower::SigTable,
     structs: &lower::StructTable,
+    coord: &HashMap<String, String>,
 ) {
     /*
      * lowering 产生的临时槽（`_N`）与**隐式局部**（`(*p)·x -> t` 的 `t`）不在
@@ -1477,11 +1544,27 @@ fn annotate_slot_types(
          * 源的类型用**同一个解析器**取（`resolve_slot_type`），不在这里另写一份：
          * 它同时覆盖裸名、`*p` 解引用、`(*p)·seg` 与坐标段。 */
         let ty = if expr.is_leaf() {
+            /*
+             * **叶子拷贝不能用 `to_wire` 剥星。**
+             *
+             * `to_wire` 去掉 `*`/`@` 是对的**当它是形参的传递方式**时——wire 里
+             * 指针性走 head 的 ptr 位，不进 langtype 串（spec 04-layout语义/03）。
+             * 但这里是**值的类型**：`head -> cur` 的 `head` 类型是 `*Node`，那个
+             * 星号是**值的种类**（它就是一个指针值），不是「传参方式」。剥掉它
+             * 等于把指针降级成值——`cur` 于是被记成 `/lib/Node`，与
+             * `(*cur)·next`（得指针形态）打架，vmkv 报两类型冲突。
+             *
+             * 实测：`12-struct/03-linked-list` 的 `[1,1] cur` 曾是 `/lib/Node`
+             * 而 `[3,1] cur` 是指针形态，同一个槽两个类型。
+             *
+             * 与 `expr_slot_type` 的其它分支保持一致：它们返回的是**值的类型**，
+             * 不做 wire 归一。
+             */
             let resolved = lower::resolve_slot_type(&expr.val, declared, structs, declared)
                 .or_else(|| lower::resolve_slot_type(&expr.val, stable, structs, stable));
-            resolved.map(|t| to_wire(&t)).unwrap_or_default()
+            resolved.unwrap_or_default()
         } else {
-            expr_slot_type(expr, declared, sigs, stable, structs).unwrap_or_default()
+            expr_slot_type(expr, declared, sigs, stable, structs, coord).unwrap_or_default()
         };
         let ty = (!ty.is_empty()).then_some(ty);
         if let Some(ty) = ty.filter(|value| !value.is_empty()) {
@@ -1519,11 +1602,12 @@ fn expr_slot_type(
     sigs: &lower::SigTable,
     derived: &HashMap<String, String>,
     structs: &lower::StructTable,
+    coord: &HashMap<String, String>,
 ) -> Option<String> {
     /* D：指针解引用 `*p`；B：成员读 `base·seg…`。
      * 两者都可能以**复合表达式**为基座（`(*p)·x`），所以走同一套递归取型。 */
     if expr.op == ast::DEREF_OP || expr.op == ast::MEMBER_READ_OP {
-        return value_type_of(expr, declared, derived, structs);
+        return value_type_of(expr, declared, derived, structs, coord);
     }
     /* `compactarray·fill` 的**首个形参就是写目标的 langtype**——这是它的**签名**，
      * 不是「第一个字面量」这种语法巧合（spec `array-fill-write-param`：它填的是
@@ -1577,7 +1661,7 @@ fn expr_slot_type(
         let argument_types: Vec<Option<String>> = expr
             .args
             .iter()
-            .map(|argument| value_type_of(argument, declared, derived, structs))
+            .map(|argument| value_type_of(argument, declared, derived, structs, coord))
             .collect();
         let argument_literals: Vec<Option<String>> = expr
             .args
@@ -1610,15 +1694,41 @@ fn value_type_of(
     declared: &HashMap<String, String>,
     derived: &HashMap<String, String>,
     structs: &lower::StructTable,
+    coord: &HashMap<String, String>,
 ) -> Option<String> {
     if expr.op == ast::DEREF_OP {
         let inner = expr.args.first()?;
-        let ty = value_type_of(inner, declared, derived, structs)?;
-        return Some(ty.strip_prefix('*').unwrap_or(&ty).to_string());
+        /*
+         * **`*` 在 `expr.op` 里，不在 `inner.val` 里。**
+         *
+         * `(*p)·v` 摊成的 `DEREF_OP` 指令是 `op="*"`、`args=[p]`——`inner.val`
+         * 就是裸形参名 `p`。早先在这里对 `inner.val` 做 `normalize_slot_name`
+         * 判断「是否解引用」，`"p"` 自然返回 false，于是**不剥层**：临时槽拿到
+         * `*T` 而不是 `T`，下一条 `_1·v` 变成「在指针上取成员」，推成空类型，
+         * 编码器报 `parameter has no langtype at all`（0x4005）。
+         *
+         * 这里的语义是确定的：`DEREF_OP` 就是解引用，**必定剥一层**。
+         * 归一仍要做——`inner.val` 可能是 `(*p)` 这种带括号的写法。
+         *
+         * 判据：`*e` 的值类型 = 被指类型剥一层；`e` 自身（指针变量）保持 `*T`
+         * 不变——后者由其它分支负责，这里只处理前者。
+         */
+        let (name, _) = lower::normalize_slot_name(&inner.val);
+        let ty = value_type_of(
+            &ast::Expr {
+                val: name,
+                ..inner.clone()
+            },
+            declared,
+            derived,
+            structs,
+            coord,
+        )?;
+        return Some(lower::deref_value_type(&ty).to_string());
     }
     if expr.op == ast::MEMBER_READ_OP {
         let base = expr.args.first()?;
-        let base_type = value_type_of(base, declared, derived, structs)?;
+        let base_type = value_type_of(base, declared, derived, structs, coord)?;
         let tail: Vec<&str> = expr.args.iter().skip(1).map(|a| a.val.as_str()).collect();
         let member = tail.join(keytree::MEMBER_SEP);
         return lower::member_chain_type(&base_type, &member, structs)
@@ -1635,6 +1745,22 @@ fn value_type_of(
     }
     if expr.val.is_empty() {
         return None;
+    }
+    /*
+     * **形参坐标反查。** `(*p)·v` 摊成 `*[0,-1] -> _1; _1·v`：`_1` 承接的源是
+     * 坐标形态 `[0,-1]`（`DEREF_OP` 的实参），而 `declared` 的键是形参名 `p`
+     * ——直接查必然落空，`_1` 没有类型，下一条 `_1·v` 推成空，编码器报
+     * `parameter has no langtype at all`。
+     *
+     * `coord` 是 `名字 → *[0,±k]`；反向找到形参名，取声明类型。
+     * 剥层由调用方（`DEREF_OP` 那一支）负责，这里只回答「这个槽是哪个形参」。
+     */
+    if let Some(name) = coord
+        .iter()
+        .find(|(_, coordinate)| coordinate.as_str() == expr.val)
+        .map(|(name, _)| name.clone())
+    {
+        return declared.get(&name).cloned().or_else(|| derived.get(&name).cloned());
     }
     declared
         .get(&expr.val)
@@ -1664,16 +1790,20 @@ fn member_read_type(
     let base = e.args.first()?;
     /* 基座可能是 lowering 临时槽（`(*node)·left` 的 `_8`）：先查声明表，再查
      * 可证明类型表（write_func 已把临时槽的写槽类型并进去）。 */
+    /* 基座可能是 `p`、`*p`、`(*p)`：归一后才能查到同一行表项。
+     * `(*p)·f` 是 spec 16-ptr 规定的**唯一**指针成员访问写法，早先只认裸 `*`，
+     * 它恰好落空——`structs.get(name)` 拿不到类型，整个成员链断掉。 */
+    let (base_name, _) = lower::normalize_slot_name(&base.val);
     let base_type = declared
         .get(&base.val)
-        .or_else(|| declared.get(base.val.trim_start_matches('*')))
+        .or_else(|| declared.get(&base_name))
         .or_else(|| stable.get(&base.val))
-        .or_else(|| stable.get(base.val.trim_start_matches('*')))?;
+        .or_else(|| stable.get(&base_name))?;
     let field = e.args.get(1)?;
-    let name = base_type
-        .trim_start_matches('*')
-        .strip_prefix("/lib/")
-        .unwrap_or(base_type.trim_start_matches('*'));
+    /* 类型串前的星号是**声明形态**（`*T`），查 struct 表要剥掉；与槽名归一是
+     * 两回事——这里处理的是**类型**文本，不是名字。 */
+    let bare_type = base_type.trim_start_matches('*');
+    let name = bare_type.strip_prefix("/lib/").unwrap_or(bare_type);
     structs
         .get(name)?
         .fields
@@ -1735,6 +1865,110 @@ fn narrow_union(ty: String, name: &str, stable: &HashMap<String, String>) -> Str
     }
 }
 
+/*
+ * ── 隐式数值转换插桩（[[赋值转换]]）────────────────────────────────────
+ *
+ * `7 -> x`（`x:int32`）时 layout 直发 `copy`，而字面量是 8 字节 int64、写槽只有
+ * 4 字节，`vmbin_value_access_write_body` 的等宽检查判 `SIZE_MISMATCH`——失败点在
+ * 值访问层，成因在 layout 没插 `cast`。同一个根因在三处现形：
+ *
+ *   成员 `a·[1,2]`、局部 `x:int32`、写形参 `*r` ⇒ `0x4107`（值访问宽度不等）
+ *   容器元素 `arr[1]`                          ⇒ `0x4304`（container handler 宽度不等）
+ *   同一局部先后被写两种 kind                   ⇒ encode `code=41`
+ *
+ * 依据 `03-类型系统/27-赋值转换:16/80/83` 与 `04-layout语义/01:111-113`：转换是
+ * **layout** 的职责。插的是既有 `cast`（`0x1E`），与手写 `int32(7)` 逐字节等价；
+ * 值访问层与 container handler 的字节搬运**一行不动**——转换归类型系统，
+ * 搬字节归执行器，把转换塞进 handler 等于把类型系统复制进执行器。
+ *
+ * 只处理**静态可证**的数值跨 kind。动态值（空 kindexp、推断不定、调用实参）的
+ * kind 运行时才知道，layout 不猜（`:80` 末句归运行时 `TypeError`）：猜错会**静默
+ * 写错值**，比失败更难查。
+ */
+
+/// 写槽已解析类型里那个**标量** kind；不是单个标量就 `None`。
+///
+/// 入参是 `write_slot_type` 的结果（**不在本处重建那份判据**）。带 `*`/`@`、
+/// 带 `[`/`·`/`/`、并集、空一律出局：那些要么不是标量槽，要么类型不唯一。
+fn write_scalar_kind(resolved: &str) -> Option<String> {
+    let ty = resolved.trim();
+    if ty.is_empty()
+        || ty.contains('|')
+        || ty.starts_with('*')
+        || ty.starts_with('@')
+        || ty.starts_with('[')
+        || ty.contains(keytree::MEMBER_SEP)
+        || ty.contains('/')
+    {
+        return None;
+    }
+    builtin::is_num_kind(ty).then(|| ty.to_string())
+}
+
+/// 隐式数值转换：把跨 kind 的标量写补一条 `cast`。
+///
+/// 四条路径在 `seq` 这一层**同形**（一条指令 + 一个写槽），所以只有两个分支：
+///   1. `compactarray·set` —— 目标是第三个读参，换 `args[2]`；
+///   2. 其余 —— 目标就是写槽，换整条 `expr`。
+///
+/// `writes` 与 `write_types` 一律不动：本 pass 只换 RHS 的**求值类型**，不改写位置。
+/// `wrap_cast` 幂等，所以对已含 cast 的表达式再跑一遍不会多插一层。
+fn insert_write_casts(
+    seq: &mut [Instruction],
+    resolve_write_type: impl Fn(&Instruction, usize, &str) -> String,
+    declared: &HashMap<String, String>,
+    stable: &HashMap<String, String>,
+) {
+    for inst in seq.iter_mut() {
+        let Some(expr) = inst.expr.take() else {
+            continue;
+        };
+        /*
+         * **容器元素写不在这里插 cast**（`compactarray·set`）。
+         *
+         * 代价不是「多做一步」，是**做错**：本 pass 跑在 `lower_func` 之后，此时
+         * `compactarray·set` 的第三个实参**已经是 `flatten_expr` 物化出来的叶子
+         * 临时槽**（`_3`）。在叶子上套 `cast(_3)` 只是给表达式换了 op，lower 不会
+         * 再展开它，于是源槽里留下一个 `rwir` 类型、`body_size == 5`、没有文本的
+         * 空参数槽；编码器读到它判 `vmkv rwir: argument value is malformed`。
+         *
+         * 实测：`7 -> arr[1]` 插 cast 后 encode 失败，而**手写** `int32(7) -> arr[1]`
+         * 通过——两者生成的 BinRWIR 逐行相同，差异只在源槽，正是这个空槽。
+         *
+         * 元素宽度只能由 lower **之前**的 `check_element` / 元素 kind 决定；
+         * 到这一层再补，已经错过了能改对的位置。失败封闭：不插，不猜。
+         */
+        if expr.op == "compactarray·set" {
+            inst.expr = Some(expr);
+            continue;
+        }
+        let slot = match inst.writes.as_slice() {
+            [slot] => slot.clone(),
+            _ => {
+                inst.expr = Some(expr);
+                continue;
+            }
+        };
+        let resolved = resolve_write_type(inst, 0, &slot);
+        let Some(target_kind) = write_scalar_kind(&resolved) else {
+            inst.expr = Some(expr);
+            continue;
+        };
+        let source_kind = lower::exact_numeric_kind(&expr, declared, stable);
+        /* 同 kind 是常态，也是快路径：**不许**在这里多插一条指令。 */
+        if source_kind.as_deref() == Some(target_kind.as_str()) {
+            inst.expr = Some(expr);
+            continue;
+        }
+        /* 认不出源 kind（动态值、并集、非数值）：layout 不下结论，交给运行时。 */
+        if source_kind.is_none() {
+            inst.expr = Some(expr);
+            continue;
+        }
+        inst.expr = Some(lower::wrap_cast(&expr, &target_kind));
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 /// 槽文本 → 形参坐标（`*[0,±k]`）。
 ///
@@ -1746,8 +1980,10 @@ fn param_slot<'a>(params: &'a HashMap<String, String>, text: &'a str) -> &'a str
     if let Some(value) = params.get(text) {
         return value.as_str();
     }
-    if let Some(bare) = text.strip_prefix('*') {
-        if let Some(value) = params.get(bare) {
+    /* 归一：`*p` 与 `(*p)` 是同一个形参引用，都要落回形参表那一行。 */
+    let (bare, dereferenced) = lower::normalize_slot_name(text);
+    if dereferenced {
+        if let Some(value) = params.get(&bare) {
             return value.as_str();
         }
     }
@@ -2123,6 +2359,19 @@ fn adapted_literal_slot(
 
 fn typed_slot_value(name: &str, ty: &str, target_char: &str) -> Result<(Vec<u8>, String), String> {
     if !ty.is_empty() && (name.starts_with('/') || !is_literal(name)) {
+        /*
+         * **这里保留 `ty` 的原样，不剥 `*`。**
+         *
+         * 我曾按 spec `04-layout语义/03-函数`「wire langtype 不含 `*`/`@`」把这里
+         * 换成 `to_wire(ty)`，结果**引入 18 条回归**：`vmkv/parameter_type.c` 靠
+         * **首字节是不是 `*`** 判 POINTER 类别，剥掉星号后指针值被判成
+         * STRUCT_REFERENCE，落到能力行掩码外，报
+         * `result type is outside the capability mask`。
+         *
+         * 所以这一步不是「按 spec 归一」能做的：**分类器以文本形态为判据**，
+         * 与 spec 的「指针性走 head ptr 位」是两条尚未对齐的规则。改一边就会
+         * 让另一边失真。对齐方案待定（见 coding2 的 3b 报告），此处保持原状。
+         */
         return Ok((
             kvkind::new_typed_rwir(name, ty)?,
             kvkind::KIND_RWIR.to_string(),
@@ -2369,7 +2618,7 @@ pub fn printstack(kv: &mut Kv, vid: &str) -> String {
             let mut v = kv.get_one(&cur_key);
             if is_arg {
                 for _ in 0..2 {
-                    if !kvkind::is_ptr(&v) {
+                    if !kvkind::is_ptr(&v, &kv.langtype_of(&cur_key)) {
                         break;
                     }
                     cur_key = kvkind::ptr_target(&v);
@@ -2447,15 +2696,19 @@ mod tests {
         .unwrap();
         let dir = kv.get_one("/lib/a/b·f/");
         assert_eq!(kvkind::kind(&dir, &kv.langtype_of("/lib/a/b·f/")), "rwfunc");
-        assert_eq!(kvkind::head(&dir).storetype, 0);
+        /* 新 head 没有 storetype：`layout` 才是字段（0=有效长度 / 1=容量）。 */
+        assert_eq!(ffi::xh_layout(&dir), 0);
         assert_eq!(
             kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]"), &kv.langtype_of("/lib/a/b·f/[0,0]")),
             "rwfunc"
         );
-        assert_eq!(
-            kvkind::head(&kv.get_one("/lib/a/b·f/[0,0]")).storetype,
-            1
-        );
+        /* 原先断言 `storetype == 1`（code 槽的存储形态）。新 head 没有 storetype
+         * 字段，`layout` 只表达「bodylen 是长度还是容量」，与存储形态无关——
+         * 把旧期望值搬过来是错的（实测 layout=0）。这里改断言语义上等价的事实：
+         * 该槽是 rwfunc 的 code 槽，其 body 非空。 */
+        let anchor = kv.get_one("/lib/a/b·f/[0,0]");
+        assert_eq!(ffi::xh_layout(&anchor), 0);
+        assert!(!kvkind::body(&anchor).is_empty());
 
         // 同 lib a 下再 layout 另一嵌套 lib c，验证 b·f 未被整库删除（增量合并）
         compile(
@@ -2575,7 +2828,7 @@ mod tests {
         .unwrap();
         let proto = kv.get_one("/lib/Point");
         assert_eq!(kvkind::kind(&proto, &kv.langtype_of("/lib/Point")), "def struct");
-        assert!(kvkind::body(&proto, &kvkind::head(&proto)).is_empty());
+        assert!(kvkind::body(&proto).is_empty());
         assert_eq!(kvkind::value_string(&kv.get_one("/lib/Point/x")), "int64");
         assert_eq!(
             kvkind::value_string(&kv.get_one("/lib/Point/next")),

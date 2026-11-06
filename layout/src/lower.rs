@@ -19,6 +19,66 @@ pub fn deref_value_type(pointer_type: &str) -> &str {
     pointer_type.strip_prefix('*').unwrap_or(pointer_type)
 }
 
+/// 槽名归一：`p` / `*p` / `(*p)` / `((*p))` 都归到 **`p`**，并告知「是否带解引用」。
+///
+/// 返回 `(名字, 是否解引用)`。非名字表达式（`*(a + 1)`、`a·b`、字面量）**原样返回**，
+/// 解引用标志为 false——任何「按文本剥括号」的推广都会把非名字表达式改坏。
+///
+/// **为什么要有它**：spec 16-ptr 规定指针的成员访问必须写成 `(*p)·f`（显式解引用 +
+/// 括号），而 `*p` 是解引用的另一种写法。六个取类型的地方各写一种判据时，
+/// `code.rs` 的 5 处只认裸 `*`，`(*p)` 一律落空——同一个 `cur` 被推出两种类型，
+/// vmkv 报 `local 'cur' is written with a non-concrete langtype`。
+///
+/// 判据与 `parser::canonical_write_slot_text` **同一条**（剥配对括号 → `*` + 标识符），
+/// 但那个函数保留 `*`（它要的是写槽文本），本函数**返回剥掉星号的名字**
+/// （调用方要的是「查哪一行表」）。两者是同一条规则的两种投影，不是两套规则。
+pub fn normalize_slot_name(text: &str) -> (String, bool) {
+    let original = text;
+    let mut current = text.trim();
+    /* 剥首尾配对括号，允许括号内有空白。剥不动就停。 */
+    loop {
+        if current.len() < 2 || !current.starts_with('(') || !current.ends_with(')') {
+            break;
+        }
+        let inner = current[1..current.len() - 1].trim();
+        let mut depth = 0i32;
+        let mut paired = true;
+        for byte in inner.bytes() {
+            match byte {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth < 0 {
+                        paired = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !paired || depth != 0 || inner.is_empty() {
+            break;
+        }
+        current = inner;
+    }
+    let (name, dereferenced) = match current.strip_prefix('*') {
+        Some(rest) => (rest, true),
+        None => (current, false),
+    };
+    /* 剩余部分必须是**单个标识符**，否则整串不是名字，原样返回。 */
+    let mut characters = name.chars();
+    let identifier_ok = match characters.next() {
+        Some(first) if first == '_' || first.is_alphabetic() => {
+            characters.all(|c| c == '_' || c.is_alphanumeric())
+        }
+        _ => false,
+    };
+    if !identifier_ok {
+        return (original.to_string(), false);
+    }
+    (name.to_string(), dereferenced)
+}
+
 fn is_string_kind(t: &str) -> bool {
     t.contains("char")
 }
@@ -297,8 +357,8 @@ fn check_map_inst(s: &Instruction, defined: &HashSet<String>, diags: &mut Vec<Di
     }
 }
 
-pub fn check_container_subscript(fn_: &Func) -> Vec<Diagnostic> {
-    let tm = infer_types(fn_);
+pub fn check_container_subscript(fn_: &Func, structs: &StructTable) -> Vec<Diagnostic> {
+    let tm = infer_types(fn_, structs);
     let addr: Vec<&str> = fn_
         .sig
         .params
@@ -638,8 +698,8 @@ fn desugar_string_subscript_expr(e: &mut Expr, tm: &HashMap<String, String>) {
     e.op = "string·char".to_string();
 }
 
-pub fn lower_func(fn_: &Func) -> Result<Func, String> {
-    let tm = infer_types(fn_);
+pub fn lower_func(fn_: &Func, structs: &StructTable) -> Result<Func, String> {
+    let tm = infer_types(fn_, structs);
     /* 字符串下标在 lower 之前改判（判据是类型，见 `desugar_string_subscript`）。 */
     let mut fn_ = fn_.clone();
     desugar_string_subscript(&mut fn_.body, &tm);
@@ -1459,33 +1519,33 @@ pub fn declared_langtypes_by_origin(fn_: &Func) -> HashMap<String, String> {
     declared
 }
 
-pub fn infer_types(fn_: &Func) -> HashMap<String, String> {
+pub fn infer_types(fn_: &Func, structs: &StructTable) -> HashMap<String, String> {
     // 种子来自**同一个**源级表（Value 形态），不再各写一遍 `value_type()`：
     // `tm` 只承载**推断**出来的类型，声明类型由表给出。
     let mut tm = value_langtypes(fn_);
-    infer_body(&fn_.body, &mut tm);
+    infer_body(&fn_.body, &mut tm, structs);
     tm
 }
 
-fn infer_body(body: &[Stmt], tm: &mut HashMap<String, String>) {
+fn infer_body(body: &[Stmt], tm: &mut HashMap<String, String>, structs: &StructTable) {
     for st in body {
         match st {
-            Stmt::Instruction(s) => infer_inst(s, tm),
-            Stmt::Scope(s) => infer_body(&s.body, tm),
+            Stmt::Instruction(s) => infer_inst(s, tm, structs),
+            Stmt::Scope(s) => infer_body(&s.body, tm, structs),
             Stmt::If(s) => {
                 if let Some(c) = &s.cond {
-                    infer_inst(c, tm);
+                    infer_inst(c, tm, structs);
                 }
-                infer_body(&s.then_, tm);
-                infer_body(&s.else_, tm);
+                infer_body(&s.then_, tm, structs);
+                infer_body(&s.else_, tm, structs);
             }
             Stmt::While(s) => {
                 if let Some(c) = &s.cond {
-                    infer_inst(c, tm);
+                    infer_inst(c, tm, structs);
                 }
-                infer_body(&s.body, tm);
+                infer_body(&s.body, tm, structs);
             }
-            Stmt::For(s) => infer_body(&s.body, tm),
+            Stmt::For(s) => infer_body(&s.body, tm, structs),
             _ => {}
         }
     }
@@ -1496,6 +1556,7 @@ fn infer_body(body: &[Stmt], tm: &mut HashMap<String, String>) {
 fn per_write_types(
     inst: &Instruction,
     tm: &mut HashMap<String, String>,
+    structs: &StructTable,
 ) -> Vec<Option<String>> {
     let Some(e) = &inst.expr else {
         return Vec::new();
@@ -1509,7 +1570,7 @@ fn per_write_types(
             String::new()
         } else {
             let annotated = inst.write_types.first().map(String::as_str).unwrap_or("");
-            infer_op_type(&opcode, &reads, tm, annotated)
+            infer_op_type(&opcode, &reads, tm, annotated, structs)
         }
     };
     (0..inst.writes.len())
@@ -1526,11 +1587,11 @@ fn per_write_types(
         .collect()
 }
 
-fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
+fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>, structs: &StructTable) {
     if inst.writes.is_empty() {
         return;
     }
-    let types = per_write_types(inst, tm);
+    let types = per_write_types(inst, tm, structs);
     for (w, t) in inst.writes.iter().zip(types) {
         if w.is_empty() || w.starts_with(keytree::MEMBER_SEP) {
             continue;
@@ -1543,13 +1604,25 @@ fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>) {
 
 /// 变量的有限类型集合（union 用）：签名/源码声明的类型 + 每条写的类型并集。
 /// 用于给操作数槽补类型：单元素 → 具体类型；多元素 → `<t1>|<t2>|…`。
-pub fn infer_type_sets(fn_: &Func) -> HashMap<String, Vec<String>> {
+pub fn infer_type_sets(fn_: &Func, structs: &StructTable) -> HashMap<String, Vec<String>> {
     let mut base_sets: HashMap<String, BTreeSet<String>> = HashMap::new();
     let mut base_work: HashMap<String, String> = HashMap::new();
     for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
-        insert_type_set(&mut base_sets, &p.name, &p.ty);
+        /*
+         * **用 `declared_type()` 而不是 `p.ty`。**
+         *
+         * `by_ref` 是**传递方式**且是类型的一部分：`*Node $head` 的 `p.ty` 只是
+         * 裸 `/lib/Node`，`declared_type()` 才带上那个星号前缀。早先这里用 `p.ty`，
+         * 于是 `head -> cur` 的 `slot_type("head")` 拿到剥掉星的值，与
+         * `(*cur)·next`（得指针形态）打架 → 并集 → vmkv 报
+         * `local 'cur' is written with a non-concrete langtype`。
+         *
+         * `value_langtypes` 走的是 `SourceLangtypes::langtype_value`（同 `by_ref`
+         * 语义），两处必须**同一个**形态来源，否则同一个形参在两个表里是两种类型。
+         */
+        insert_type_set(&mut base_sets, &p.name, &p.declared_type());
         if !p.name.is_empty() && !p.ty.is_empty() {
-            base_work.insert(p.name.clone(), p.ty.clone());
+            base_work.insert(p.name.clone(), p.declared_type());
         }
     }
     let mut declared = HashMap::new();
@@ -1575,7 +1648,7 @@ pub fn infer_type_sets(fn_: &Func) -> HashMap<String, Vec<String>> {
     for _ in 0..4 {
         let mut next_sets = base_sets.clone();
         let mut next_unknown: HashSet<String> = HashSet::new();
-        collect_type_sets(&fn_.body, &mut next_sets, &mut next_unknown, &mut work);
+        collect_type_sets(&fn_.body, &mut next_sets, &mut next_unknown, &mut work, structs);
         for (name, set) in &next_sets {
             if !next_unknown.contains(name) || declared.contains_key(name) {
                 let joined = join_type_members(set.clone());
@@ -1629,27 +1702,28 @@ fn collect_type_sets(
     sets: &mut HashMap<String, BTreeSet<String>>,
     unknown: &mut HashSet<String>,
     tm: &mut HashMap<String, String>,
+    structs: &StructTable,
 ) {
     for st in body {
         match st {
             Stmt::Instruction(s) => {
-                record_inst_sets(s, sets, unknown, tm);
+                record_inst_sets(s, sets, unknown, tm, structs);
             }
-            Stmt::Scope(s) => collect_type_sets(&s.body, sets, unknown, tm),
+            Stmt::Scope(s) => collect_type_sets(&s.body, sets, unknown, tm, structs),
             Stmt::If(s) => {
                 if let Some(c) = &s.cond {
-                    record_inst_sets(c, sets, unknown, tm);
+                    record_inst_sets(c, sets, unknown, tm, structs);
                 }
-                collect_type_sets(&s.then_, sets, unknown, tm);
-                collect_type_sets(&s.else_, sets, unknown, tm);
+                collect_type_sets(&s.then_, sets, unknown, tm, structs);
+                collect_type_sets(&s.else_, sets, unknown, tm, structs);
             }
             Stmt::While(s) => {
                 if let Some(c) = &s.cond {
-                    record_inst_sets(c, sets, unknown, tm);
+                    record_inst_sets(c, sets, unknown, tm, structs);
                 }
-                collect_type_sets(&s.body, sets, unknown, tm);
+                collect_type_sets(&s.body, sets, unknown, tm, structs);
             }
-            Stmt::For(s) => collect_type_sets(&s.body, sets, unknown, tm),
+            Stmt::For(s) => collect_type_sets(&s.body, sets, unknown, tm, structs),
             _ => {}
         }
     }
@@ -1660,6 +1734,7 @@ fn record_inst_sets(
     sets: &mut HashMap<String, BTreeSet<String>>,
     unknown: &mut HashSet<String>,
     tm: &mut HashMap<String, String>,
+    structs: &StructTable,
 ) {
     let (op, reads) = s.flat();
     // A read before any write/declaration observes `None` at runtime; mark it unknown so later writes do not back-propagate.
@@ -1677,7 +1752,7 @@ fn record_inst_sets(
     // Member reads, `scatterarray·at`, and `kvspace·get` may yield `None` on missing keys; keep unannotated destination slots nullable.
     let nullable_lookup = (symbol::lookup(&op).word == "assign" && reads.len() > 1)
         || matches!(op.as_str(), "scatterarray·at" | "kvspace·get");
-    let types = per_write_types(s, tm);
+    let types = per_write_types(s, tm, structs);
     for (j, w) in s.writes.iter().enumerate() {
         if w.is_empty() || w.starts_with(keytree::MEMBER_SEP) {
             continue;
@@ -1689,7 +1764,7 @@ fn record_inst_sets(
         }
         match types.get(j).and_then(|t| t.as_ref()) {
             Some(t) if !t.is_empty() => {
-                insert_type_set(sets, w, t);
+                        insert_type_set(sets, w, t);
                 if let Some(set) = sets.get(w) {
                     let joined = join_type_members(set.clone());
                     if !joined.is_empty() {
@@ -1764,6 +1839,56 @@ pub fn is_cast_op(op: &str) -> bool {
     )
 }
 
+/* ── 隐式数值转换插桩（[[赋值转换]]）────────────────────────────────────
+ *
+ * 问题：`7 -> x`（`x:int32`）时 layout 直发 `copy`，字面量是 8 字节 int64、写槽
+ * 只有 4 字节，`vmbin_value_access_write_body` 的等宽检查直接判 `SIZE_MISMATCH`
+ * ——失败点在值访问层，成因在 layout 没插 cast。
+ *
+ * 依据：
+ *   - `03-类型系统/27-赋值转换:16` 把「typed 容器的标量元素」「struct 的标量字段」
+ *     都算 typed 槽；
+ *   - 同章 `:83`「容器元素与 struct 字段写：按元素/字段声明 kind 转换后再编码容器」；
+ *   - `04-layout语义/01-指令架构:111-113`「写槽的声明类型决定赋值的种类转换……
+ *     `=` 与 `->` 的转换规则完全一致」。
+ *
+ * 所以转换在 **layout**，插的是既有 `cast`（与手写 `int32(x)` 逐字节等价）；
+ * 值访问层与 container handler 的字节搬运**一行不动**——转换是类型系统的事，
+ * 搬字节是执行器的事。
+ *
+ * 只处理**静态可证**的数值跨 kind：动态值（空 kindexp、推断不定、调用实参）的
+ * kind 运行时才知道，layout 不猜（`27-赋值转换:80` 末句归运行时 `TypeError`）。
+ * 猜错会静默写错值，比失败更难查。
+ */
+
+/// 一个 RHS 表达式的**精确**数值 kind。`None` = 认不出或不是单个数值 kind。
+///
+/// 判据是「能不能在不看运行时的情况下写出来」：字面量按文本、变量按声明/稳定表、
+/// `cast` 按算子名本身、算术按 promotion。这些都归 `exact_kind`，本函数只加**一道**
+/// 过滤：结果必须是单个数值 kind。并集、容器、指针、`char/*` 全部出局——它们要么
+/// 不是标量，要么类型不唯一，在这里下结论就是把不确定当证据。
+pub fn exact_numeric_kind(
+    e: &Expr,
+    declared: &HashMap<String, String>,
+    stable: &HashMap<String, String>,
+) -> Option<String> {
+    let kind = exact_kind(e, declared, stable)?;
+    builtin::is_num_kind(&kind).then_some(kind)
+}
+
+/// 给一个表达式套 `cast(<kind>)`。**幂等**：已经是该 kind 的 cast 就原样返回。
+///
+/// 幂等是 pass 本身的性质，不是测试里防：本 pass 每个函数只跑一次，但一旦有人把它
+/// 挪进 fixpoint 或叠加到别的 pass 之后，重复套会产出 `cast(int32)` 外面再包一层
+/// `cast(int32)`——行为不变、**指令条数变了**，而指令条数正是 `binrwir_dump` 逐条
+/// 比对的东西。
+pub fn wrap_cast(expr: &Expr, kind: &str) -> Expr {
+    if !expr.is_leaf() && expr.op == kind {
+        return expr.clone();
+    }
+    ast::call(kind, vec![expr.clone()])
+}
+
 /// 算子的结果类型。`annotated` 是写槽上的类型标注（`x:T = …` 的 `T`），容器字面量
 /// **有标注用标注、无标注返空**——容器值的 langtype 只有声明处能给出，替它猜一个
 /// 就是发明语义（见 spec [[map容器]]：空容器必须带 mapexpr 标注）。
@@ -1772,6 +1897,7 @@ fn infer_op_type(
     reads: &[String],
     tm: &mut HashMap<String, String>,
     annotated: &str,
+    structs: &StructTable,
 ) -> String {
     if matches!(opcode, "return" | "goto" | "br" | "call") {
         return String::new();
@@ -1783,14 +1909,35 @@ fn infer_op_type(
         return "bool".to_string();
     }
     if symbol::lookup(opcode).word == "assign" {
+        /*
+         * **成员读在这里是「一个读参里带 `·`」，不是「多个读参」**。
+         *
+         * 实测（探针取自 `12-struct/03-linked-list.kv` 的 `cur·next -> cur`）：
+         *   reads = ["cur·next"]        ← 真实形态
+         *   reads = ["cur", "next"]     ← 早先以为的形态，不存在
+         *
+         * 早先只判 `reads.len() > 1`，于是这条路**永远不进**；`cur·next` 整个字符串
+         * 被当成变量名去查 `tm`，查不到就返回空串，再由 `cur` 的旧类型顶上——
+         * 同一个槽被记成两种类型，vmkv 报
+         * `local 'cur' is written as both '/lib/Node' and pointer form`。
+         */
+        if let Some(first) = reads.first() {
+            if let Some((base, tail)) = first.split_once(keytree::MEMBER_SEP) {
+                let base_type = slot_type(base, tm);
+                return member_chain_type(&base_type, tail, structs).unwrap_or_default();
+            }
+        }
         if reads.len() > 1 {
-            // 成员读 `base·seg…`：reads = [base, seg…]；结果 = 容器 value 类型（逐段下钻）。
+            // 兼容「已在编码期摊成多参」的形态：逐段下钻，规则与 `member_chain_type`
+            // 同源（容器 value → 数组元素 → struct 字段）。
             let mut ty = slot_type(&reads[0], tm);
-            for _ in &reads[1..] {
+            for part in &reads[1..] {
                 if let Some(v) = container_value(&ty) {
                     ty = v;
                 } else if ty.starts_with('[') {
                     ty = container_elem(&ty).unwrap_or_default();
+                } else if let Some(field) = struct_field_type(&ty, part, structs) {
+                    ty = field;
                 } else {
                     return String::new();
                 }
@@ -1917,7 +2064,7 @@ fn infer_op_type(
     if symbol::lookup(opcode).cmp {
         return "bool".to_string();
     }
-    if opcode == "kvlang·abs" {
+    if opcode == "kvspace/key·abs" {
         // `&x` 取址产 Ptr：类型记 `*<目标类型>`（目标类型未知则记裸 `*`）——`*` 前缀即 ref 轴标记，
         // 供 `[]` 下标校验拦下「指针当数组」（见 [[ptr]]）。
         let t = reads.first().map(|r| slot_type(r, tm)).unwrap_or_default();
@@ -2083,10 +2230,24 @@ fn slot_type(name: &str, tm: &HashMap<String, String>) -> String {
     if name.is_empty() {
         return String::new();
     }
-    // `*p` 的值类型：查 `p` 的声明再剥一层（`p` 记作 `*T`，`*p` 是 `T`）。
-    if let Some(inner) = name.strip_prefix('*') {
-        if let Some(t) = tm.get(inner) {
-            return deref_value_type(t).to_string();
+    /*
+     * `*p` / `(*p)` / `((*p))` 是同一个解引用：归一成 `p` 再查，然后剥一层
+     * （`p` 记作 `*T`，`*p` 是 `T`）。
+     *
+     * spec 16-ptr 要求指针的成员访问写 `(*p)·val`，而 `flat()` 把成员读摊成的
+     * 整串是 `"(*cur)·next"`——基座是 `(*cur)`。早先这里只认裸 `*p`，
+     * `(*cur)` 于是落到 `tm.get(name)` 查不到 → 空类型 → 与 `head -> cur` 的
+     * 指针类型打架 → 两元素并集 → vmkv 报两类型冲突。
+     *
+     * 剥括号的判据只在 `normalize_slot_name` 一处：`*(a + 1)` 不是名字，
+     * 任何「按文本剥括号」的推广都会把非名字表达式改坏。
+     */
+    {
+        let (bare, dereferenced) = normalize_slot_name(name);
+        if dereferenced {
+            if let Some(t) = tm.get(&bare) {
+                return deref_value_type(t).to_string();
+            }
         }
     }
     if let Some(t) = tm.get(name) {
@@ -2338,7 +2499,7 @@ fn exact_kind(
         let inner = e.args.first().and_then(|a| exact_kind(a, declared, stable))?;
         return Some(deref_value_type(&inner).to_string());
     }
-    if op == "kvlang·abs" {
+    if op == "kvspace/key·abs" {
         // `&x` 产 kvlang 指针：结果类型 = `*` + 目标类型（与 `infer_op_type` 同一规则）。
         // 旧实现返回 None，于是 `&x -> eh` 的 `eh` 推不出类型，
         // 再传给 `**T` 形参时判成值与指针不符。
@@ -2586,7 +2747,7 @@ fn collect_inst_stability(
             sources.entry(w.clone()).or_default().push(e.clone());
         }
     }
-    if e.op == "kvlang·abs" {
+    if e.op == "kvspace/key·abs" {
         if let Some(a) = e.args.first() {
             if a.is_leaf() {
                 disq.insert(a.val.clone());
@@ -2988,6 +3149,21 @@ fn struct_lookup<'a>(ty: &str, structs: &'a StructTable) -> Option<&'a ast::Stru
     structs.get(n)
 }
 
+/// 成员读里**一段** struct 字段的类型；基座不是 struct 或没有该字段 → None。
+///
+/// 与 `member_chain_type` 的 struct 分支**同一判据**（都用 `struct_lookup` +
+/// `f.ty`）：成员类型的取法只能有一处定义，否则「同一个 `cur·next` 在两条路径上
+/// 得出两种类型」——那正是 `12-struct/*` 报
+/// `local 'cur' is written as both ...` 的成因。
+///
+/// `f.ty` 就是成员声明的完整形态（`next:*Node` 的 `ty` 是 `*Node`，指针性写在
+/// 字段类型里而不是单独的 `by_ref` 字段——`ast::Field` 没有 `by_ref`）。
+fn struct_field_type(ty: &str, part: &str, structs: &StructTable) -> Option<String> {
+    let declaration = struct_lookup(ty, structs)?;
+    let field = declaration.fields.iter().find(|f| f.name == part)?;
+    Some(field.ty.clone())
+}
+
 pub(crate) fn slot_is_plain_name(w: &str) -> bool {
     !w.is_empty()
         && !w.starts_with('/')
@@ -3013,7 +3189,7 @@ fn is_none_lit(e: &Expr) -> bool {
 }
 
 /// compact 数组元素 kind：`[dims]K` / `[]K`（含 `[2][3]K`）。
-fn container_elem(ty: &str) -> Option<String> {
+pub(crate) fn container_elem(ty: &str) -> Option<String> {
     let t = ty.trim_start_matches('*');
     /*
      * **裸 `char/<enc>` 不是容器**，不能取元素。
@@ -3542,7 +3718,12 @@ fn check_container_literal(target: &str, e: &Expr, diags: &mut Vec<Diagnostic>) 
     }
 }
 
-fn expr_result_type(e: &Expr, tm: &HashMap<String, String>, annotated: &str) -> String {
+fn expr_result_type(
+    e: &Expr,
+    tm: &HashMap<String, String>,
+    annotated: &str,
+    structs: &StructTable,
+) -> String {
     if e.is_leaf() {
         return arg_type(e, tm);
     }
@@ -3603,7 +3784,7 @@ fn expr_result_type(e: &Expr, tm: &HashMap<String, String>, annotated: &str) -> 
     if sym.cmp {
         return "bool".to_string();
     }
-    if e.op == "kvlang·abs" {
+    if e.op == "kvspace/key·abs" {
         let t = e.args.first().map(|a| arg_type(a, tm)).unwrap_or_default();
         return format!("*{t}");
     }
@@ -3612,7 +3793,7 @@ fn expr_result_type(e: &Expr, tm: &HashMap<String, String>, annotated: &str) -> 
     }
     let mut tm2 = tm.clone();
     let reads: Vec<String> = e.args.iter().map(|a| a.val.clone()).collect();
-    infer_op_type(&e.op, &reads, &mut tm2, annotated)
+    infer_op_type(&e.op, &reads, &mut tm2, annotated, structs)
 }
 
 fn collect_declared(body: &[Stmt], declared: &mut HashMap<String, String>) {
@@ -3934,7 +4115,7 @@ fn walk_inst(
     }
 
     let annotated = s.write_types.first().map(String::as_str).unwrap_or("");
-    let rhs = expr_result_type(e, tm, annotated);
+    let rhs = expr_result_type(e, tm, annotated, structs);
     for (j, w) in s.writes.iter().enumerate() {
         if w.is_empty() {
             return;
@@ -4107,7 +4288,30 @@ pub fn validate_writes(
 
 #[cfg(test)]
 mod union_match_tests {
-    use super::value_matches;
+    use super::{normalize_slot_name, value_matches};
+
+    #[test]
+    fn slot_name_normalization_covers_both_deref_spellings() {
+        /* `p` / `*p` / `(*p)` / `((*p))` 都必须归到同一个名字 `p`。
+         * spec 16-ptr：指针成员访问写 `(*p)·f`；`*p` 是解引用的另一种写法。
+         * 两者若归一不到一起，同一个槽会被推出两种类型。 */
+        assert_eq!(normalize_slot_name("p"), ("p".to_string(), false));
+        assert_eq!(normalize_slot_name("*p"), ("p".to_string(), true));
+        assert_eq!(normalize_slot_name("(*p)"), ("p".to_string(), true));
+        assert_eq!(normalize_slot_name("((*p))"), ("p".to_string(), true));
+        assert_eq!(normalize_slot_name("( *p )"), ("p".to_string(), true));
+        assert_eq!(normalize_slot_name("*_8"), ("_8".to_string(), true));
+        /* 非名字表达式**原样返回**且不解引用：任何「按文本剥括号」的推广
+         * 都会把它们改坏（`*(a + 1)` 是真的表达式，不是槽名）。 */
+        assert_eq!(
+            normalize_slot_name("*(a + 1)"),
+            ("*(a + 1)".to_string(), false)
+        );
+        assert_eq!(normalize_slot_name("a·b"), ("a·b".to_string(), false));
+        assert_eq!(normalize_slot_name("/lib/x"), ("/lib/x".to_string(), false));
+        assert_eq!(normalize_slot_name("(a) + (b)"), (("(a) + (b)").to_string(), false));
+        assert_eq!(normalize_slot_name(""), ("".to_string(), false));
+    }
 
     #[test]
     fn union_member_matching() {
