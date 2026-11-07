@@ -32,7 +32,7 @@
 #include <stdint.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "vmbin/handlers/scalar.h"
 #include "vmbin/handlers/string_text.h"
@@ -88,7 +88,7 @@
 #define VMBIN_HANDLER_UNARY_TO_CHARACTER(handler_name, function, source_type,   \
                                          to_code_point, encoding)              \
     static runtimec_status_t handler_name(                                     \
-        binrwir_execution_frame_t *frame,                                      \
+        binrwir_binvthread_frame_t *frame,                                      \
         const binrwir_instruction_view_t *instruction,                         \
         binrwir_execution_exit_t *output_exit) {                               \
         RUNTIMEC_SCALAR_READ_SIZED(frame, instruction, source_type, source_,   \
@@ -106,7 +106,7 @@
                                           target_width, target_signed,         \
                                           target_is_float)                     \
     static runtimec_status_t handler_name(                                     \
-        binrwir_execution_frame_t *frame,                                      \
+        binrwir_binvthread_frame_t *frame,                                      \
         const binrwir_instruction_view_t *instruction,                         \
         binrwir_execution_exit_t *output_exit) {                               \
         function(frame, instruction, decoder, target_width, target_signed,     \
@@ -118,7 +118,7 @@
 #define VMBIN_HANDLER_CHARACTER_TO_CHARACTER(handler_name, function, decoder,   \
                                              encoding)                         \
     static runtimec_status_t handler_name(                                     \
-        binrwir_execution_frame_t *frame,                                      \
+        binrwir_binvthread_frame_t *frame,                                      \
         const binrwir_instruction_view_t *instruction,                         \
         binrwir_execution_exit_t *output_exit) {                               \
         function(frame, instruction, decoder, encoding, output_exit);          \
@@ -129,7 +129,7 @@
 #define VMBIN_HANDLER_CHARACTER_EQUAL(handler_name, function, left_decoder,     \
                                       right_decoder, invert)                   \
     static runtimec_status_t handler_name(                                     \
-        binrwir_execution_frame_t *frame,                                      \
+        binrwir_binvthread_frame_t *frame,                                      \
         const binrwir_instruction_view_t *instruction,                         \
         binrwir_execution_exit_t *output_exit) {                               \
         function(frame, instruction, left_decoder, right_decoder, invert,      \
@@ -141,7 +141,7 @@
 #define VMBIN_HANDLER_CHARACTER_CONCAT(handler_name, function, left_decoder,    \
                                        right_decoder)                          \
     static runtimec_status_t handler_name(                                     \
-        binrwir_execution_frame_t *frame,                                      \
+        binrwir_binvthread_frame_t *frame,                                      \
         const binrwir_instruction_view_t *instruction,                         \
         binrwir_execution_exit_t *output_exit) {                               \
         function(frame, instruction, left_decoder, right_decoder,              \
@@ -182,14 +182,14 @@ bool runtimec_scalar_character_code_point(const uint8_t *bytes, size_t size,
  * 非法 Unicode 标量（> U+10FFFF 或代理区）报错。
  */
 void runtimec_scalar_value_to_character(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, uint32_t code_point,
     runtimec_character_encoding_t target_encoding,
     binrwir_execution_exit_t *output_exit);
 
 /* 字符 → 字符（跨编码）：解码成码点后按目标编码重编。 */
 void runtimec_scalar_character_to_value(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     string_text_decode_function_t decode_source,
     runtimec_character_encoding_t target_encoding,
@@ -197,14 +197,14 @@ void runtimec_scalar_character_to_value(
 
 /* 字符 → 数值：码点值写到定宽目标槽；窄化按整数 cast 的同一套判据回绕。 */
 void runtimec_scalar_character_to_number(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     string_text_decode_function_t decode_source, uint32_t target_width,
     bool target_signed, bool target_is_float,
     binrwir_execution_exit_t *output_exit);
 
 /* concat：两段文本 → 一条新的 char/utf8（矩阵：结果恒 utf8）。 */
-void runtimec_scalar_concat(binrwir_execution_frame_t *frame,
+void runtimec_scalar_concat(binrwir_binvthread_frame_t *frame,
                             const binrwir_instruction_view_t *instruction,
                             string_text_decode_function_t decode_left,
                             string_text_decode_function_t decode_right,
@@ -212,7 +212,7 @@ void runtimec_scalar_concat(binrwir_execution_frame_t *frame,
 
 /* streq / streq·not：解码后按码点序列比较，结果 bool；`invert` 是 streq·not。 */
 void runtimec_scalar_character_equal(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     string_text_decode_function_t decode_left,
     string_text_decode_function_t decode_right, bool invert,

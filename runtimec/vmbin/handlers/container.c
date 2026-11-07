@@ -32,7 +32,7 @@
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
 #include "contract/char_codec.h"
@@ -313,7 +313,7 @@ static const char *container_langtype_text_from_argument(
  * 把 langtype 文本换成视图再转调——避免 container 与 string 各留一份。
  */
 static runtimec_status_t container_publish(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, const uint8_t *body,
     size_t body_size, binrwir_execution_exit_t *output_exit) {
     return vmbin_handler_write_new_value(frame, instruction, body, body_size,
@@ -328,7 +328,7 @@ static runtimec_status_t container_publish(
  * 声明不符的输入都不许拼进去。
  */
 static int64_t container_pack_elements(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, size_t element_size,
     uint8_t *body, size_t capacity,
     runtimec_container_diagnostic_t *output_detail) {
@@ -372,7 +372,7 @@ static int64_t container_pack_elements(
  * 覆盖下一个元素，少了会留空洞，而 head 仍自称合法——「自洽但语义错误」。
  */
 static void container_create_from_elements(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     runtimec_string_view_t result_langtype,
     binrwir_execution_exit_t *output_exit) {
@@ -406,7 +406,7 @@ static void container_create_from_elements(
 
 /* 逻辑函数：一句话——从读参造一个新数组并发布。 */
 static inline void container_new_build(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     runtimec_string_view_t result_langtype,
     binrwir_execution_exit_t *output_exit) {
@@ -443,7 +443,7 @@ static int64_t container_slice_bounds(size_t body_size, size_t element_size,
  * 新值的 langtype 由**写槽声明**给出，不从源抄——源的 dims 是旧长度，抄过来就错。
  */
 static void container_create_from_slice(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     vmbin_value_location_t source;
@@ -493,7 +493,7 @@ static void container_create_from_slice(
 
 /* 逻辑函数：一句话——按边界切一段并发布。 */
 static inline void container_newslice_build(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     container_create_from_slice(frame, instruction, output_exit);
@@ -571,7 +571,7 @@ static int64_t container_langtype_total_bytes(runtimec_string_view_t langtype) {
  * 走的都是同一句「body 原样 + 新 langtype 组 wire」。
  */
 static runtimec_status_t container_replace_langtype(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, int langtype_from_value,
     binrwir_execution_exit_t *output_exit) {
     vmbin_value_location_t source;
@@ -730,7 +730,7 @@ static int64_t container_fill_body(runtimec_string_view_t langtype,
  * 这是核心 runtime 唯一的初始化模式（spec：只认 `T·new` + `T·fill`）。
  */
 static void container_create_from_fill(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     vmbin_value_location_t langtype_value;
@@ -794,7 +794,7 @@ static void container_create_from_fill(
 
 /* 逻辑函数：一句话——造一个「N 个相同值」的数组并发布。 */
 static inline void container_fill_build(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     runtimec_string_view_t result_langtype,
     binrwir_execution_exit_t *output_exit) {
@@ -939,7 +939,7 @@ static runtimec_status_t container_finish(runtimec_status_t status,
 
 /* 「读 langtype → 原样写回写参」。两步各自一行，失败合流到同一出口。 */
 static runtimec_status_t container_langtype_transfer(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction) {
     runtimec_string_view_t langtype;
     runtimec_error_t error;
@@ -976,7 +976,7 @@ static bool container_unary_arity(const binrwir_instruction_view_t *instruction,
  * 一律折成 `INVALID` 就把那个区分抹掉了——这正是今晚反复消灭的那类「统一出口
  * 掩盖具体原因」。
  */
-static bool container_target_key(binrwir_execution_frame_t *frame,
+static bool container_target_key(binrwir_binvthread_frame_t *frame,
                                  const binrwir_instruction_view_t *instruction,
                                  char *buffer, size_t capacity,
                                  binrwir_execution_exit_t *output_exit) {
@@ -1006,7 +1006,7 @@ static bool container_target_key(binrwir_execution_frame_t *frame,
 }
 
 static runtimec_status_t container_langtype_handler(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     if (!container_unary_arity(instruction, output_exit)) {
@@ -1241,7 +1241,7 @@ VMBIN_HANDLER_ARRAY_INDEX_WRITE(container_set_handler,
  * 里，且它必须用写槽声明算，不能再从这些参数算一遍（那会是第二份形状事实）。
  */
 static runtimec_status_t container_newreshape_handler(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     if (instruction->read_arguments.count < 1U) {
@@ -1251,7 +1251,7 @@ static runtimec_status_t container_newreshape_handler(
 }
 
 static void container_newreinterpret_build(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     const vmbin_value_location_t *source,
     const runtimec_string_view_t *source_langtype,
@@ -1275,7 +1275,7 @@ VMBIN_HANDLER_CREATE_TWO(container_newreinterpret_handler,
  * 「创建铁律」：compact 与散列无隐式转换）。
  */
 /* 「把 source 的 body 原样写进写参」这一段的唯一实现；失败口径也在这里。 */
-static void container_write_or_fail(binrwir_execution_frame_t *frame,
+static void container_write_or_fail(binrwir_binvthread_frame_t *frame,
                                     const binrwir_instruction_view_t *instruction,
                                     const vmbin_value_location_t *source,
                                     binrwir_execution_exit_t *output_exit,
@@ -1290,7 +1290,7 @@ static void container_write_or_fail(binrwir_execution_frame_t *frame,
     }
 }
 
-static void container_copy_build(binrwir_execution_frame_t *frame,
+static void container_copy_build(binrwir_binvthread_frame_t *frame,
                                  const binrwir_instruction_view_t *instruction,
                                  const vmbin_value_location_t *source,
                                  const runtimec_string_view_t *source_langtype,
@@ -1358,7 +1358,7 @@ static bool container_member_key(const char *slot_key, const char *suffix,
  * 具名 map 的键来自**字符串**字面量；位置型的读参是值本身（int64 等）。
  * 区分只看「字面量的 langtype 是不是字符序列」，不看引用种类——两者都是 LITERAL。
  */
-static bool container_argument_is_name(binrwir_execution_frame_t *frame,
+static bool container_argument_is_name(binrwir_binvthread_frame_t *frame,
                                        const binrwir_argument_t *argument) {
     runtimec_string_view_t declared;
     runtimec_error_t error;
@@ -1381,7 +1381,7 @@ static bool container_argument_is_name(binrwir_execution_frame_t *frame,
 
 /* 把一个值写成 `<slot>‥<suffix>`：body + 它自己的声明 langtype 组 wire。 */
 static runtimec_status_t container_write_member(
-    binrwir_execution_frame_t *frame, const char *slot_key,
+    binrwir_binvthread_frame_t *frame, const char *slot_key,
     const char *suffix, size_t suffix_size,
     const binrwir_argument_t *value_argument, runtimec_error_t *error) {
     vmbin_value_location_t element;
@@ -1446,7 +1446,7 @@ static runtimec_status_t container_write_member(
  * 所以它只有这一处实现。`scatter.c` 的 `scatter_container_create` 是同一判据。
  */
 static bool container_index_container(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, char *buffer,
     size_t capacity, binrwir_execution_exit_t *output_exit) {
     char message[256];
@@ -1503,7 +1503,7 @@ static bool container_index_container(
  *
  * ⇒ **「值」与「成员索引」是容器的两样东西，写值不等于声明容器。**
  */
-bool runtimec_container_open_marker(binrwir_execution_frame_t *frame,
+bool runtimec_container_open_marker(binrwir_binvthread_frame_t *frame,
                                     const binrwir_instruction_view_t *instruction,
                                     char *buffer, size_t capacity,
                                     binrwir_execution_exit_t *output_exit) {
@@ -1523,7 +1523,7 @@ bool runtimec_container_open_marker(binrwir_execution_frame_t *frame,
 }
 
 static void container_write_positional_members(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, const char *slot_key,
     binrwir_execution_exit_t *output_exit) {
     runtimec_error_t error;
@@ -1554,7 +1554,7 @@ static void container_write_positional_members(
 
 /* 变参 create 的完整开场：marker + 位置型成员。map·new 与 struct·new 共用。 */
 static void container_create_variadic(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     char slot_key[VMBIN_HANDLER_KEY_CAPACITY];
@@ -1572,7 +1572,7 @@ static void container_create_variadic(
 
 
 static void container_map_new_build(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     runtimec_string_view_t result_langtype,
     binrwir_execution_exit_t *output_exit) {
@@ -1584,7 +1584,7 @@ static void container_map_new_build(
 VMBIN_HANDLER_CREATE_VARIADIC(container_map_new_handler, container_map_new_build)
 
 /* 把 `/lib/Name` 的 UTF-32 字面量解成 ASCII 路径。非 UTF-32 形态直接复制。 */
-static bool container_literal_path(binrwir_execution_frame_t *frame,
+static bool container_literal_path(binrwir_binvthread_frame_t *frame,
                                    const binrwir_argument_t *argument,
                                    char *buffer, size_t capacity,
                                    size_t *output_size) {
@@ -1687,7 +1687,7 @@ static bool container_literal_path(binrwir_execution_frame_t *frame,
  * 失败，不是成功。
  */
 static bool container_struct_clone(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, const char *slot_key,
     binrwir_execution_exit_t *output_exit) {
     char prototype_path[512];
@@ -1715,7 +1715,7 @@ static bool container_struct_clone(
 
 /* 成对 (字段名, 值)：字段名同样是 UTF-32 字面量，值直接写成员槽。 */
 static bool container_struct_fields(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, const char *slot_key,
     binrwir_execution_exit_t *output_exit) {
     for (size_t ordinal = 1U; ordinal + 1U < instruction->read_arguments.count;
@@ -1743,7 +1743,7 @@ static bool container_struct_fields(
 }
 
 /* struct·new 的全流程：取槽 → 克隆原型 → 写基值 → 成对写字段。 */
-static void container_struct_create(binrwir_execution_frame_t *frame,
+static void container_struct_create(binrwir_binvthread_frame_t *frame,
                                     const binrwir_instruction_view_t *instruction,
                                     binrwir_execution_exit_t *output_exit) {
     char slot_key[VMBIN_HANDLER_KEY_CAPACITY];
@@ -1792,7 +1792,7 @@ static void container_struct_create(binrwir_execution_frame_t *frame,
 }
 
 static void container_struct_new_build(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     runtimec_string_view_t result_langtype,
     binrwir_execution_exit_t *output_exit) {

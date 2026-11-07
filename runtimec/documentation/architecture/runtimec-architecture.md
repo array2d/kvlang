@@ -76,7 +76,7 @@ vmkv 必须返回 `RUNTIMEC_STATUS_UNSUPPORTED`，不得生成零地址、间接
 
 ## Compilation lifecycle
 
-BinRWIR Compiler 的唯一内容输入是 canonical `binrwir_program_t`。它按固定顺序完成：
+BinRWIR Compiler 的唯一内容输入是 canonical `binrwir_binfunc_t`。它按固定顺序完成：
 
 1. 验证 Program、manifest version 和 binary interface generation。
 2. 构建 `binrwir_execution_plan_t`。

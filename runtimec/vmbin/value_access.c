@@ -42,7 +42,7 @@ static runtimec_status_t vmbin_value_access_fail(
  * 下一个人不知道该是哪个 key。
  */
 static runtimec_status_t vmbin_value_access_locate_member(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument,
     runtimec_string_view_t member_name,
     vmbin_value_location_t *output_location, runtimec_error_t *error) {
@@ -291,7 +291,7 @@ static void vmbin_value_access_fill_none_facts(
 }
 
 static runtimec_status_t vmbin_value_access_locate_plain(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error);
 
@@ -307,7 +307,7 @@ static runtimec_status_t vmbin_value_access_locate_plain(
  *      （绑定表是「槽 → 值」的一次性事实，每跳都写就把表变成了缓存）。
  */
 static runtimec_status_t vmbin_value_access_dereference_ex(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, bool missing_target_is_none,
     vmbin_value_location_t *output_location, runtimec_error_t *error) {
     binrwir_argument_t plain = *argument;
@@ -420,7 +420,7 @@ static runtimec_status_t vmbin_value_access_dereference_ex(
 }
 
 runtimec_status_t vmbin_value_access_locate(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error) {
     if (output_location != NULL) {
@@ -453,7 +453,7 @@ runtimec_status_t vmbin_value_access_locate(
 }
 
 static runtimec_status_t vmbin_value_access_locate_plain(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error) {
     runtimec_bytes_view_t literal;
@@ -479,7 +479,7 @@ static runtimec_status_t vmbin_value_access_locate_plain(
             VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST, "invalid locate request");
     }
     if (argument->reference_kind == BINRWIR_REFERENCE_LITERAL) {
-        status = binrwir_program_get_literal(frame->program,
+        status = binrwir_binfunc_get_literal(frame->program,
                                              (uint32_t)argument->payload,
                                              &literal, &langtype);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -514,7 +514,7 @@ static runtimec_status_t vmbin_value_access_locate_plain(
             runtimec_string_view_t key_langtype;
             runtimec_xvalue_address_t resolved = RUNTIMEC_XVALUE_ADDRESS_NONE;
             if (frame->kvspace_access == NULL ||
-                binrwir_program_get_symbol(frame->program, argument->slot,
+                binrwir_binfunc_get_symbol(frame->program, argument->slot,
                                            &key_text, &key_langtype) !=
                     RUNTIMEC_STATUS_SUCCESS ||
                 runtimec_kvspace_access_resolve_static_xvalue_address(
@@ -585,7 +585,7 @@ static runtimec_status_t vmbin_value_access_locate_plain(
         {
             runtimec_string_view_t member_name;
             runtimec_string_view_t member_langtype;
-            if (binrwir_program_get_symbol(frame->program, argument->slot,
+            if (binrwir_binfunc_get_symbol(frame->program, argument->slot,
                                            &member_name, &member_langtype) ==
                     RUNTIMEC_STATUS_SUCCESS &&
                 binrwir_symbol_name_is_member(member_name)) {
@@ -648,7 +648,7 @@ static runtimec_status_t vmbin_value_access_locate_plain(
 }
 
 runtimec_status_t vmbin_value_access_read(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_buffer_t *output,
     runtimec_error_t *error) {
     vmbin_value_location_t location;
@@ -688,7 +688,7 @@ runtimec_status_t vmbin_value_access_read(
  * 那里缺失仍失败、随后由 `write_body` 创建（#632 的写侧）。
  */
 runtimec_status_t vmbin_value_access_locate_body_read(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error) {
     vmbin_value_location_t location;
@@ -750,7 +750,7 @@ runtimec_status_t vmbin_value_access_locate_body_read(
 }
 
 runtimec_status_t vmbin_value_access_locate_body(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error) {
     vmbin_value_location_t location;
@@ -792,7 +792,7 @@ runtimec_status_t vmbin_value_access_locate_body(
 }
 
 runtimec_status_t vmbin_value_access_read_body(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_buffer_t *output,
     runtimec_error_t *error) {
     vmbin_value_location_t location;
@@ -856,7 +856,7 @@ runtimec_status_t vmbin_value_access_read_body(
  * 那是对的（「往一个不存在的容器里写成员」是真错误，不是缺能力）。
  */
 static runtimec_status_t vmbin_value_access_create_member(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
     runtimec_error_t *error) {
     runtimec_string_view_t declared;
@@ -943,7 +943,7 @@ static bool vmbin_value_access_writes_through_binding_slot(
 }
 
 static runtimec_status_t vmbin_value_access_create_unbound_local(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
     runtimec_error_t *error) {
     const binrwir_frame_binding_t *binding = NULL;
@@ -1009,7 +1009,7 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
     {
         runtimec_string_view_t member_name;
         runtimec_string_view_t member_langtype;
-        if (binrwir_program_get_symbol(frame->program, argument->slot,
+        if (binrwir_binfunc_get_symbol(frame->program, argument->slot,
                                        &member_name, &member_langtype) ==
                 RUNTIMEC_STATUS_SUCCESS &&
             binrwir_symbol_name_is_member(member_name)) {
@@ -1125,7 +1125,7 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
  * 检测，不作类型来源——本函数从不从旧头取类型）。
  */
 static runtimec_status_t vmbin_value_access_create_static_target(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
     runtimec_error_t *error) {
     runtimec_string_view_t key_text;
@@ -1149,7 +1149,7 @@ static runtimec_status_t vmbin_value_access_create_static_target(
             "static write target has no kvspace handle; the key cannot be "
             "created or written");
     }
-    status = binrwir_program_get_symbol(frame->program, argument->slot,
+    status = binrwir_binfunc_get_symbol(frame->program, argument->slot,
                                         &key_text, &key_langtype);
     if (status != RUNTIMEC_STATUS_SUCCESS || key_text.size == 0U) {
         return vmbin_value_access_fail(
@@ -1242,7 +1242,7 @@ static runtimec_status_t vmbin_value_access_create_static_target(
  * **读方向绝不创建**（#632 的反向对照）。
  */
 runtimec_status_t vmbin_value_access_locate_write(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, vmbin_value_location_t *output_location,
     runtimec_error_t *error) {
     runtimec_status_t status =
@@ -1281,7 +1281,7 @@ runtimec_status_t vmbin_value_access_locate_write(
         runtimec_string_view_t member_name;
         runtimec_string_view_t member_langtype;
 
-        if (binrwir_program_get_symbol(frame->program, argument->slot,
+        if (binrwir_binfunc_get_symbol(frame->program, argument->slot,
                                        &member_name, &member_langtype) ==
                 RUNTIMEC_STATUS_SUCCESS &&
             binrwir_symbol_name_is_member(member_name)) {
@@ -1321,7 +1321,7 @@ runtimec_status_t vmbin_value_access_locate_write(
         runtimec_string_view_t key_text;
         runtimec_string_view_t key_langtype;
 
-        if (binrwir_program_get_symbol(frame->program, argument->slot,
+        if (binrwir_binfunc_get_symbol(frame->program, argument->slot,
                                        &key_text, &key_langtype) !=
                 RUNTIMEC_STATUS_SUCCESS ||
             key_text.size == 0U) {
@@ -1365,7 +1365,7 @@ runtimec_status_t vmbin_value_access_locate_write(
  * 只被 `write_body` 在「`dereference` 且定位失败」时调用——**读路径永不创建**。
  */
 static runtimec_status_t vmbin_value_access_create_dereference_target(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
     runtimec_error_t *error) {
     binrwir_argument_t plain = *argument;
@@ -1447,7 +1447,7 @@ static runtimec_status_t vmbin_value_access_create_dereference_target(
 }
 
 runtimec_status_t vmbin_value_access_write_body(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
     runtimec_error_t *error) {
     vmbin_value_location_t location;
@@ -1567,7 +1567,7 @@ runtimec_status_t vmbin_value_access_write_body(
 }
 
 runtimec_status_t vmbin_value_access_write(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
     runtimec_error_t *error) {
     vmbin_value_location_t location;
@@ -1602,7 +1602,7 @@ runtimec_status_t vmbin_value_access_write(
 }
 
 runtimec_status_t vmbin_value_access_write_whole_value(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t body,
     runtimec_error_t *error) {
     if (!runtimec_bytes_view_is_valid(body)) {
@@ -1680,7 +1680,7 @@ bool vmbin_value_access_langtype_is_path_string(runtimec_string_view_t langtype)
 }
 
 runtimec_status_t vmbin_value_access_langtype(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument,
     runtimec_string_view_t *output_langtype, runtimec_error_t *error) {
     const runtimec_string_view_t empty = runtimec_string_view_make(NULL, 0U);
@@ -1700,7 +1700,7 @@ runtimec_status_t vmbin_value_access_langtype(
         runtimec_bytes_view_t wire;
         runtimec_string_view_t langtype;
 
-        if (binrwir_program_get_literal(frame->program,
+        if (binrwir_binfunc_get_literal(frame->program,
                                         (uint32_t)argument->payload, &wire,
                                         &langtype) != RUNTIMEC_STATUS_SUCCESS) {
             return vmbin_value_access_fail(
@@ -1716,7 +1716,7 @@ runtimec_status_t vmbin_value_access_langtype(
         runtimec_string_view_t name;
         runtimec_string_view_t langtype;
 
-        if (binrwir_program_get_symbol(frame->program, argument->slot, &name,
+        if (binrwir_binfunc_get_symbol(frame->program, argument->slot, &name,
                                        &langtype) != RUNTIMEC_STATUS_SUCCESS) {
             return vmbin_value_access_fail(
                 error, RUNTIMEC_STATUS_UNSUPPORTED,
@@ -1728,11 +1728,11 @@ runtimec_status_t vmbin_value_access_langtype(
     }
     case BINRWIR_REFERENCE_PARAMETER_READ:
     case BINRWIR_REFERENCE_PARAMETER_WRITE: {
-        binrwir_program_view_t view;
+        binrwir_binfunc_view_t view;
         const runtimec_string_view_t *types = NULL;
         size_t count = 0U;
 
-        if (binrwir_program_get_view(frame->program, &view) !=
+        if (binrwir_binfunc_get_view(frame->program, &view) !=
             RUNTIMEC_STATUS_SUCCESS) {
             return vmbin_value_access_fail(
                 error, RUNTIMEC_STATUS_UNSUPPORTED,
@@ -1795,7 +1795,7 @@ runtimec_status_t vmbin_value_access_langtype(
  * langtype 首字符定形态）完全共用，不复制实现。
  */
 runtimec_status_t vmbin_value_access_form_unfollowed(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, uint8_t *output_form,
     runtimec_error_t *error) {
     binrwir_argument_t plain = *argument;
@@ -1805,7 +1805,7 @@ runtimec_status_t vmbin_value_access_form_unfollowed(
 }
 
 runtimec_status_t vmbin_value_access_form(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, uint8_t *output_form,
     runtimec_error_t *error) {
     vmbin_value_location_t location;
@@ -1882,7 +1882,7 @@ runtimec_status_t vmbin_value_access_form(
 }
 
 runtimec_status_t vmbin_value_access_bind_write_target(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_key_view_t target_key,
     runtimec_error_t *error) {
     uint16_t binding_slot = BINRWIR_FRAME_BINDING_SLOT_NONE;
@@ -1917,7 +1917,7 @@ runtimec_status_t vmbin_value_access_bind_write_target(
     if (argument->reference_kind == BINRWIR_REFERENCE_LOCAL) {
         runtimec_string_view_t member_name;
         runtimec_string_view_t member_langtype;
-        if (binrwir_program_get_symbol(frame->program, argument->slot,
+        if (binrwir_binfunc_get_symbol(frame->program, argument->slot,
                                        &member_name, &member_langtype) ==
                 RUNTIMEC_STATUS_SUCCESS &&
             binrwir_symbol_name_is_member(member_name)) {

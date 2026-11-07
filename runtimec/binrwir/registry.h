@@ -17,10 +17,10 @@
 #include <stdint.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/error.h"
 #include "contract/status.h"
 #include "contract/view.h"
@@ -35,7 +35,7 @@ extern "C" {
  */
 typedef runtimec_status_t
 (*binrwir_registry_handler_t)(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit);
 

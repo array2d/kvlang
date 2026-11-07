@@ -13,7 +13,7 @@
  *   literal[0] 长度 17（16 头 + 1 body），紧排下 literal[1] 的 wire 就是 17，body 33
  *   —— 33 % 8 != 0，正是要防的情形。
  *
- * 反向控制：把 `binrwir_program_copy_bytes` 里的补齐改回 `*bytes_offset += bytes.size`，
+ * 反向控制：把 `binrwir_binfunc_copy_bytes` 里的补齐改回 `*bytes_offset += bytes.size`，
  * 本用例必须红。
  */
 
@@ -23,7 +23,7 @@
 #include <string.h>
 
 #include "binrwir/argument.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/allocator.h"
 #include "contract/status.h"
 #include "kvspace/xvalue_head.h"
@@ -65,9 +65,9 @@ static size_t test_make_wire(uint8_t *wire, size_t body_size) {
 
 int main(void) {
     runtimec_allocator_t allocator = {NULL, test_allocate, test_deallocate};
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = NULL;
     /* 三个字面量：奇数字节在前，逼出紧排错位。 */
     static const size_t body_sizes[3] = {1U, 8U, 3U};
     uint8_t wires[3][KVSPACE_XVALUE_HEAD_LEN + 8U];
@@ -79,14 +79,14 @@ int main(void) {
     identity.program_generation = 1U;
     identity.binrwir_binary_interface_generation =
         BINRWIR_BINARY_INTERFACE_GENERATION;
-    EXPECT(binrwir_program_builder_create(&allocator, &identity, &builder) ==
+    EXPECT(binrwir_binfunc_builder_create(&allocator, &identity, &builder) ==
            RUNTIMEC_STATUS_SUCCESS);
 
     for (size_t ordinal = 0U; ordinal < 3U; ++ordinal) {
         uint32_t index = BINRWIR_LITERAL_INDEX_NONE;
 
         wire_sizes[ordinal] = test_make_wire(wires[ordinal], body_sizes[ordinal]);
-        EXPECT(binrwir_program_builder_add_literal(
+        EXPECT(binrwir_binfunc_builder_add_literal(
                    builder,
                    runtimec_bytes_view_make(wires[ordinal],
                                             wire_sizes[ordinal]),
@@ -119,14 +119,14 @@ int main(void) {
         request.write_arguments.count = 1U;
         {
             uint32_t identifier = BINRWIR_IDENTIFIER_NONE;
-            EXPECT(binrwir_program_builder_add_instruction(
+            EXPECT(binrwir_binfunc_builder_add_instruction(
                        builder, &request, &identifier) ==
                    RUNTIMEC_STATUS_SUCCESS);
         }
     }
-    EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
            RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(binrwir_program_get_literal_count(program, &literal_count) ==
+    EXPECT(binrwir_binfunc_get_literal_count(program, &literal_count) ==
            RUNTIMEC_STATUS_SUCCESS);
     EXPECT(literal_count == 3U);
 
@@ -135,7 +135,7 @@ int main(void) {
         runtimec_string_view_t langtype;
         const uint8_t *body;
 
-        EXPECT(binrwir_program_get_literal(program, index, &wire, &langtype) ==
+        EXPECT(binrwir_binfunc_get_literal(program, index, &wire, &langtype) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(wire.data != NULL);
         EXPECT(wire.size == wire_sizes[index]);
@@ -147,8 +147,8 @@ int main(void) {
         }
     }
 
-    EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(binrwir_program_builder_destroy(builder) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(binrwir_binfunc_builder_destroy(builder) == RUNTIMEC_STATUS_SUCCESS);
 
     if (failures != 0) {
         printf("binrwir_literal_alignment_test: %d failure(s)\n", failures);

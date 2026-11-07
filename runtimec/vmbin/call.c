@@ -74,7 +74,7 @@ typedef struct vmbin_call_actual {
  * - 实参是参数/局部引用：查调用方帧的绑定表取基址。
  */
 static runtimec_status_t vmbin_call_resolve_actual(
-    const binrwir_execution_frame_t *caller,
+    const binrwir_binvthread_frame_t *caller,
     const binrwir_argument_t *actual, vmbin_call_actual_t *output_actual) {
     const binrwir_frame_binding_t *binding = NULL;
     uint16_t binding_slot = BINRWIR_FRAME_BINDING_SLOT_NONE;
@@ -87,7 +87,7 @@ static runtimec_status_t vmbin_call_resolve_actual(
         runtimec_bytes_view_t literal;
         runtimec_string_view_t langtype;
 
-        if (binrwir_program_get_literal(caller->program,
+        if (binrwir_binfunc_get_literal(caller->program,
                                         (uint32_t)actual->payload, &literal,
                                         &langtype) != RUNTIMEC_STATUS_SUCCESS) {
             return RUNTIMEC_STATUS_INVALID;
@@ -110,7 +110,7 @@ static runtimec_status_t vmbin_call_resolve_actual(
         }
         /* 静态实参没有调用方绑定可借键，用符号池里的绝对路径当槽键（借用，
          * 生命周期跟着调用方 Program）。 */
-        if (binrwir_program_get_symbol(caller->program, actual->slot,
+        if (binrwir_binfunc_get_symbol(caller->program, actual->slot,
                                        &key_text, &key_langtype) !=
             RUNTIMEC_STATUS_SUCCESS) {
             return RUNTIMEC_STATUS_INVALID;
@@ -152,9 +152,9 @@ static runtimec_status_t vmbin_call_resolve_actual(
  * output_addresses 给别名判定用，内联实参留 NONE（它没有地址，不参与判定）。
  */
 static runtimec_status_t vmbin_call_bind_direction(
-    const binrwir_execution_frame_t *caller,
+    const binrwir_binvthread_frame_t *caller,
     const binrwir_argument_t *actuals, size_t formal_count,
-    binrwir_parameter_direction_t direction, const binrwir_program_t *callee,
+    binrwir_parameter_direction_t direction, const binrwir_binfunc_t *callee,
     binrwir_frame_bindings_t *bindings,
     runtimec_xvalue_address_t *output_addresses,
     vmbin_call_diagnostic_t *output_detail_code) {
@@ -256,8 +256,8 @@ static runtimec_status_t vmbin_call_check_alias(
 }
 
 runtimec_status_t vmbin_call_control_create(
-    const binrwir_execution_frame_t *caller,
-    const binrwir_program_t *callee,
+    const binrwir_binvthread_frame_t *caller,
+    const binrwir_binfunc_t *callee,
     const vmbin_call_request_t *request,
     const runtimec_allocator_t *allocator,
     vmbin_call_control_t **output_control) {
@@ -273,8 +273,8 @@ runtimec_status_t vmbin_call_control_create(
         request->call_instruction_identifier == BINRWIR_IDENTIFIER_NONE ||
         request->return_logical_program_counter ==
             BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE ||
-        binrwir_program_validate(callee) != RUNTIMEC_STATUS_SUCCESS ||
-        binrwir_program_get_instruction(
+        binrwir_binfunc_validate(callee) != RUNTIMEC_STATUS_SUCCESS ||
+        binrwir_binfunc_get_instruction(
             caller->program, request->call_instruction_identifier,
             &instruction) != RUNTIMEC_STATUS_SUCCESS) {
         return RUNTIMEC_STATUS_INVALID;
@@ -315,12 +315,12 @@ runtimec_status_t vmbin_call_control_destroy(vmbin_call_control_t *control) {
  * 局部槽不在这里绑定：它们属于调用入口（route 持有 host 才能解析），本函数只负责
  * 形参。
  */
-runtimec_status_t vmbin_call_enter(binrwir_execution_frame_t *caller,
-                                   binrwir_execution_frame_t *callee,
+runtimec_status_t vmbin_call_enter(binrwir_binvthread_frame_t *caller,
+                                   binrwir_binvthread_frame_t *callee,
                                    const vmbin_call_control_t *control,
                                    binrwir_execution_exit_t *output_exit) {
     binrwir_instruction_view_t instruction;
-    binrwir_program_view_t callee_view;
+    binrwir_binfunc_view_t callee_view;
     binrwir_signature_view_t signature;
     runtimec_xvalue_address_t *addresses = NULL;
     binrwir_frame_bindings_t *bindings = NULL;
@@ -345,9 +345,9 @@ runtimec_status_t vmbin_call_enter(binrwir_execution_frame_t *caller,
         return vmbin_call_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                                VMBIN_CALL_DIAG_FRAME_NOT_CALLABLE);
     }
-    if (binrwir_program_get_view(callee->program, &callee_view) !=
+    if (binrwir_binfunc_get_view(callee->program, &callee_view) !=
             RUNTIMEC_STATUS_SUCCESS ||
-        binrwir_program_get_instruction(caller->program,
+        binrwir_binfunc_get_instruction(caller->program,
                                         control->call_instruction_identifier,
                                         &instruction) !=
             RUNTIMEC_STATUS_SUCCESS) {
@@ -424,8 +424,8 @@ runtimec_status_t vmbin_call_enter(binrwir_execution_frame_t *caller,
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t vmbin_call_return(binrwir_execution_frame_t *caller,
-                                    binrwir_execution_frame_t *callee,
+runtimec_status_t vmbin_call_return(binrwir_binvthread_frame_t *caller,
+                                    binrwir_binvthread_frame_t *callee,
                                     const vmbin_call_control_t *control,
                                     binrwir_execution_exit_t *output_exit) {
     (void)control;

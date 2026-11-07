@@ -22,8 +22,8 @@
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
-#include "binrwir/program.h"
+#include "binrwir/binvthread_frame.h"
+#include "binrwir/binfunc.h"
 #include "contract/allocator.h"
 #include "contract/status.h"
 #include "binrwir/registry.h"
@@ -41,7 +41,7 @@ static int failures;
     } while (0)
 
 /* 一个不会被调用的 handler：坏表里它的槽位是 NULL。 */
-static runtimec_status_t unused_handler(binrwir_execution_frame_t *frame,
+static runtimec_status_t unused_handler(binrwir_binvthread_frame_t *frame,
                                         const binrwir_instruction_view_t *view,
                                         binrwir_execution_exit_t *exit) {
     (void)frame;

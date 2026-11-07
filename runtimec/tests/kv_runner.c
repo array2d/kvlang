@@ -79,7 +79,7 @@
 #include "binrwir/execution_exit.h"
 #include "binrwir/instruction.h"
 #include "binrwir/frame_bindings.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir_compiler/compiler.h"
 #include "binrwir/specialize.h"
 #include "engine/execution_window.h"
@@ -1397,7 +1397,7 @@ int main(int argument_count, char **arguments) {
                 (void)case_store_close(&environment);
                 continue;
             }
-            binrwir_program_t *program = NULL;
+            binrwir_binfunc_t *program = NULL;
             const runtimec_status_t encoded = vmkv_encode(
                 components.vmkv_encoder, &encode_request, &program,
                 &encode_error);
@@ -1451,11 +1451,11 @@ int main(int argument_count, char **arguments) {
             /* Program 是不透明类型：条数经 get_view，逐条经 get_instruction。
              * 算子名暂缺——operation_identifier 只能回到能力表，而 FOREIGN
              * （0xFFFE）本来就不在表里。下一步从 RWIR 源槽取名字。 */
-            binrwir_program_view_t program_view;
+            binrwir_binfunc_view_t program_view;
             /* CALL 出口的 target_identifier 是**这份** Program 符号池的下标，
              * 解析被调函数名要用同一份。 */
             unsigned foreign = 0U;
-            if (binrwir_program_get_view(program, &program_view) !=
+            if (binrwir_binfunc_get_view(program, &program_view) !=
                 RUNTIMEC_STATUS_SUCCESS) {
                 fprintf(stderr, "FAIL %s: get_view failed\n",
                         cases.paths[index]);
@@ -1469,7 +1469,7 @@ int main(int argument_count, char **arguments) {
             for (size_t ordinal = 0U; ordinal < program_view.instruction_count;
                  ++ordinal) {
                 binrwir_instruction_view_t view;
-                if (binrwir_program_get_instruction(program, (uint32_t)ordinal,
+                if (binrwir_binfunc_get_instruction(program, (uint32_t)ordinal,
                                                     &view) !=
                     RUNTIMEC_STATUS_SUCCESS) {
                     /* 跳过**一条指令**，不关 store —— 这里是内层循环，
@@ -1648,7 +1648,7 @@ int main(int argument_count, char **arguments) {
                         const binrwir_execution_exit_t *exit_information =
                             &frame_exit;
                         unsigned instruction_count = 0U;
-                        if (binrwir_program_get_view(
+                        if (binrwir_binfunc_get_view(
                                 program, &program_view) ==
                             RUNTIMEC_STATUS_SUCCESS) {
                             instruction_count =

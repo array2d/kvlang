@@ -246,7 +246,7 @@ static void binrwir_format_write_definition(
 }
 
 static runtimec_status_t binrwir_format_write_instructions(
-    binrwir_format_writer_t *writer, const binrwir_program_t *program,
+    binrwir_format_writer_t *writer, const binrwir_binfunc_t *program,
     size_t instruction_count,
     binrwir_operation_name_function resolve_operation_name,
     void *resolve_context) {
@@ -255,7 +255,7 @@ static runtimec_status_t binrwir_format_write_instructions(
     for (ordinal = 0U; ordinal < instruction_count; ++ordinal) {
         binrwir_instruction_view_t instruction;
 
-        if (binrwir_program_get_instruction(program, (uint32_t)ordinal,
+        if (binrwir_binfunc_get_instruction(program, (uint32_t)ordinal,
                                             &instruction) !=
             RUNTIMEC_STATUS_SUCCESS) {
             return RUNTIMEC_STATUS_INVALID;
@@ -278,11 +278,11 @@ static runtimec_status_t binrwir_format_write_instructions(
 }
 
 static runtimec_status_t binrwir_format_write_symbols(
-    binrwir_format_writer_t *writer, const binrwir_program_t *program) {
+    binrwir_format_writer_t *writer, const binrwir_binfunc_t *program) {
     size_t symbol_count = 0U;
     size_t ordinal;
 
-    if (binrwir_program_get_symbol_count(program, &symbol_count) !=
+    if (binrwir_binfunc_get_symbol_count(program, &symbol_count) !=
         RUNTIMEC_STATUS_SUCCESS) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -294,7 +294,7 @@ static runtimec_status_t binrwir_format_write_symbols(
         runtimec_string_view_t name = runtimec_string_view_make(NULL, 0U);
         runtimec_string_view_t langtype = runtimec_string_view_make(NULL, 0U);
 
-        if (binrwir_program_get_symbol(program, (uint16_t)ordinal, &name,
+        if (binrwir_binfunc_get_symbol(program, (uint16_t)ordinal, &name,
                                        &langtype) != RUNTIMEC_STATUS_SUCCESS) {
             return RUNTIMEC_STATUS_INVALID;
         }
@@ -310,11 +310,11 @@ static runtimec_status_t binrwir_format_write_symbols(
 }
 
 static runtimec_status_t binrwir_format_write_literals(
-    binrwir_format_writer_t *writer, const binrwir_program_t *program) {
+    binrwir_format_writer_t *writer, const binrwir_binfunc_t *program) {
     size_t literal_count = 0U;
     size_t ordinal;
 
-    if (binrwir_program_get_literal_count(program, &literal_count) !=
+    if (binrwir_binfunc_get_literal_count(program, &literal_count) !=
         RUNTIMEC_STATUS_SUCCESS) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -322,7 +322,7 @@ static runtimec_status_t binrwir_format_write_literals(
         runtimec_bytes_view_t bytes = runtimec_bytes_view_make(NULL, 0U);
         runtimec_string_view_t langtype = runtimec_string_view_make(NULL, 0U);
 
-        if (binrwir_program_get_literal(program, (uint32_t)ordinal, &bytes,
+        if (binrwir_binfunc_get_literal(program, (uint32_t)ordinal, &bytes,
                                         &langtype) !=
             RUNTIMEC_STATUS_SUCCESS) {
             return RUNTIMEC_STATUS_INVALID;
@@ -338,13 +338,13 @@ static runtimec_status_t binrwir_format_write_literals(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_program_format(
-    const binrwir_program_t *program, runtimec_string_view_t function_name,
+runtimec_status_t binrwir_binfunc_format(
+    const binrwir_binfunc_t *program, runtimec_string_view_t function_name,
     binrwir_operation_name_function resolve_operation_name,
     void *resolve_context, binrwir_format_sink_function sink,
     void *sink_context) {
     binrwir_format_writer_t writer;
-    binrwir_program_view_t view;
+    binrwir_binfunc_view_t view;
     runtimec_status_t status;
 
     if (program == NULL || sink == NULL) {
@@ -353,7 +353,7 @@ runtimec_status_t binrwir_program_format(
     if (!runtimec_string_view_is_valid(function_name)) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    if (binrwir_program_get_view(program, &view) != RUNTIMEC_STATUS_SUCCESS) {
+    if (binrwir_binfunc_get_view(program, &view) != RUNTIMEC_STATUS_SUCCESS) {
         return RUNTIMEC_STATUS_INVALID;
     }
     binrwir_format_writer_initialize(&writer, sink, sink_context);

@@ -25,7 +25,7 @@
 #include "contract/view.h"
 #include "engine/session.h"
 #include "binrwir/execution_exit.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -129,7 +129,7 @@ typedef struct runtimec_execution_window_request_t {
     int32_t stack_identifier;
     /*
      * 起始位置，是 **source logical program counter**（layout 的 irseq），不是
-     * 稠密指令标识符：本层用 binrwir_program_find_instruction 换算出执行游标。
+     * 稠密指令标识符：本层用 binrwir_binfunc_find_instruction 换算出执行游标。
      */
     uint32_t source_logical_program_counter;
     /*
@@ -169,7 +169,7 @@ typedef struct runtimec_execution_window_result_t {
      * 递归时每帧的 Program 不同（`/lib/test` 与 `/lib/fib` 各一份），
      * 所以它是**每帧**的事实，不能存在驱动里当全局。
      */
-    const binrwir_program_t *program;
+    const binrwir_binfunc_t *program;
 } runtimec_execution_window_result_t;
 
 runtimec_status_t runtimec_execution_window_execute(

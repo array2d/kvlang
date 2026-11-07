@@ -1,8 +1,8 @@
-#ifndef BINRWIR_EXECUTION_FRAME_H
-#define BINRWIR_EXECUTION_FRAME_H
+#ifndef BINRWIR_BINVTHREAD_FRAME_H
+#define BINRWIR_BINVTHREAD_FRAME_H
 
 /*
- * 组件：binrwir/execution_frame
+ * 组件：binrwir/binvthread_frame
  * 作用：保存 BinRWIR 执行所需的控制状态，并持有本次调用的帧绑定表指针。
  * 联系：engine route 创建 Frame；vmbin 在调用入口写入绑定表，vmbin 与 JIT 消费。
  * 约束：Frame 持有的是可丢弃、可重建的地址绑定（槽 → XValue 基址 + generation），
@@ -17,22 +17,22 @@
 #include "contract/status.h"
 #include "contract/view.h"
 #include "binrwir/frame_bindings.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum binrwir_execution_frame_flags {
-    BINRWIR_EXECUTION_FRAME_FLAG_NONE = 0,
-    BINRWIR_EXECUTION_FRAME_FLAG_INITIALIZED = 1U << 0,
-    BINRWIR_EXECUTION_FRAME_FLAG_OBSERVABLE = 1U << 1,
-    BINRWIR_EXECUTION_FRAME_FLAG_RESUMED = 1U << 2
-} binrwir_execution_frame_flags_t;
+typedef enum binrwir_binvthread_frame_flags {
+    BINRWIR_BINVTHREAD_FRAME_FLAG_NONE = 0,
+    BINRWIR_BINVTHREAD_FRAME_FLAG_INITIALIZED = 1U << 0,
+    BINRWIR_BINVTHREAD_FRAME_FLAG_OBSERVABLE = 1U << 1,
+    BINRWIR_BINVTHREAD_FRAME_FLAG_RESUMED = 1U << 2
+} binrwir_binvthread_frame_flags_t;
 
-typedef struct binrwir_execution_frame {
-    const binrwir_program_t *program;
-    struct binrwir_execution_frame *parent;
+typedef struct binrwir_binvthread_frame {
+    const binrwir_binfunc_t *program;
+    struct binrwir_binvthread_frame *parent;
     /* 本次调用的地址绑定表；由调用入口建立并拥有，Frame 只借用该指针。 */
     binrwir_frame_bindings_t *bindings;
     /*
@@ -63,21 +63,21 @@ typedef struct binrwir_execution_frame {
     uint64_t program_generation;
     uint32_t logical_program_counter;
     uint32_t flags;
-} binrwir_execution_frame_t;
+} binrwir_binvthread_frame_t;
 
-#define BINRWIR_EXECUTION_FRAME_ALIGNMENT \
-    ((uint32_t)_Alignof(binrwir_execution_frame_t))
+#define BINRWIR_BINVTHREAD_FRAME_ALIGNMENT \
+    ((uint32_t)_Alignof(binrwir_binvthread_frame_t))
 
-runtimec_status_t binrwir_execution_frame_initialize(
-    binrwir_execution_frame_t *frame, const binrwir_program_t *program,
-    binrwir_execution_frame_t *parent,
+runtimec_status_t binrwir_binvthread_frame_initialize(
+    binrwir_binvthread_frame_t *frame, const binrwir_binfunc_t *program,
+    binrwir_binvthread_frame_t *parent,
     uint64_t snapshot_generation, uint64_t program_generation,
     uint32_t logical_program_counter);
-runtimec_status_t binrwir_execution_frame_reset(
-    binrwir_execution_frame_t *frame);
+runtimec_status_t binrwir_binvthread_frame_reset(
+    binrwir_binvthread_frame_t *frame);
 /* 只清空借用指针与标志，不销毁绑定表（所有权归调用入口）。 */
-runtimec_status_t binrwir_execution_frame_destroy(
-    binrwir_execution_frame_t *frame);
+runtimec_status_t binrwir_binvthread_frame_destroy(
+    binrwir_binvthread_frame_t *frame);
 
 #ifdef __cplusplus
 }

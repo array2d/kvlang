@@ -209,7 +209,7 @@ runtimec_status_t string_text_encode_utf8(const string_text_t *text,
 }
 
 runtimec_status_t string_text_decode_argument(
-    const binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
+    const binrwir_binvthread_frame_t *frame, const binrwir_argument_t *argument,
     string_text_t *output, runtimec_error_t *error) {
     runtimec_string_view_t langtype;
     vmbin_value_location_t location;

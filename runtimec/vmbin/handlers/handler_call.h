@@ -83,7 +83,7 @@
  * 需要确定长度的调用方（多维下标线性化）看到它必须失败，不能猜一个值。 */
 #define RUNTIMEC_CONTAINER_DIMENSION_UNBOUNDED INT64_C(-1)
 #include "contract/diagnostic_band.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "contract/error.h"
 #include "contract/status.h"
@@ -327,7 +327,7 @@ static inline void vmbin_handler_fail(binrwir_execution_exit_t *output_exit,
  * 走错了路。用一条用例钉住——对一个从未写过的局部变量调 `new` 必须成功。
  */
 static inline runtimec_status_t vmbin_handler_write_new_value(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, const uint8_t *bytes,
     size_t length, binrwir_execution_exit_t *output_exit) {
     char langtype_buffer[VMBIN_HANDLER_LANGTYPE_CAPACITY];
@@ -486,7 +486,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
  */
 #define VMBIN_HANDLER_UNARY_TYPED(handler_name, function, read_type, write_type)   \
     static runtimec_status_t handler_name(                                      \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t read_position_;                                     \
@@ -514,7 +514,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
 #define VMBIN_HANDLER_BINARY_TYPED(handler_name, function, read_type_first,        \
                                    read_type_second, write_type)                   \
     static runtimec_status_t handler_name(                                      \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t first_position_;                                    \
@@ -544,7 +544,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
 #define VMBIN_HANDLER_TERNARY_TYPED(handler_name, function, read_type_first,       \
                                    read_type_second, read_type_third, write_type)  \
     static runtimec_status_t handler_name(                                      \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t first_position_;                                    \
@@ -586,7 +586,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
  */
 #define VMBIN_HANDLER_UNARY_LOCATION(handler_name, function)                       \
     static runtimec_status_t handler_name(                                      \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t read_position_;                                     \
@@ -606,7 +606,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
 
 #define VMBIN_HANDLER_BINARY_LOCATION(handler_name, function)                      \
     static runtimec_status_t handler_name(                                      \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t first_position_;                                    \
@@ -629,7 +629,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
 
 #define VMBIN_HANDLER_TERNARY_LOCATION(handler_name, function)                     \
     static runtimec_status_t handler_name(                                      \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t first_position_;                                    \
@@ -663,7 +663,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
  */
 #define VMBIN_HANDLER_UNARY_ARRAY(handler_name, function, write_type)              \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         vmbin_value_location_t read_position_;                                     \
@@ -709,7 +709,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
  * 至少一个下标、不超过 `VMBIN_HANDLER_MAX_INDEX_COUNT`。
  */
 static inline runtimec_status_t vmbin_handler_prepare_indices(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, size_t index_count,
     int64_t *indices, vmbin_value_location_t *output_array,
     runtimec_string_view_t *output_array_langtype,
@@ -751,7 +751,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
  */
 #define VMBIN_HANDLER_ARRAY_INDEX(handler_name, function, index_type)              \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         vmbin_value_location_t array_position_;                                    \
@@ -787,7 +787,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
  */
 #define VMBIN_HANDLER_ARRAY_INDEX_WRITE(handler_name, function, index_type)        \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         vmbin_value_location_t array_position_;                                    \
@@ -830,7 +830,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
 /* 零读参创建：`new` 无参形态、`scatterarray·new` 等。 */
 #define VMBIN_HANDLER_CREATE_NONE(handler_name, function)                          \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         VMBIN_HANDLER_REQUIRE_ARITY(instruction, 0U, 1U, output_exit);             \
@@ -852,7 +852,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
  */
 #define VMBIN_HANDLER_CREATE_ONE(handler_name, function)                           \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         vmbin_value_location_t read_position_;                                     \
@@ -886,7 +886,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
  */
 #define VMBIN_HANDLER_CREATE_TWO(handler_name, function)                           \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         vmbin_value_location_t first_position_;                                    \
@@ -931,7 +931,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
  */
 #define VMBIN_HANDLER_CREATE_VARIADIC(handler_name, function)                      \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         runtimec_string_view_t result_langtype_;                                   \
@@ -970,7 +970,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
  */
 #define VMBIN_HANDLER_CREATE_TERNARY(handler_name, function)                       \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         VMBIN_HANDLER_REQUIRE_ARITY(instruction, 3U, 1U, output_exit);             \
@@ -1005,7 +1005,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
 #define VMBIN_HANDLER_UNARY_TYPED_EXIT(handler_name, function, read_type,          \
                                        write_type)                                 \
     static runtimec_status_t handler_name(                                         \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t read_position_;                                     \
@@ -1033,7 +1033,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
 #define VMBIN_HANDLER_BINARY_TYPED_EXIT(handler_name, function, read_type_first,   \
                                         read_type_second, write_type)              \
     static runtimec_status_t handler_name(                                         \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t first_position_;                                    \
@@ -1068,7 +1068,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
                                          read_type_second, read_type_third,        \
                                          write_type)                               \
     static runtimec_status_t handler_name(                                         \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t first_position_;                                    \
@@ -1122,14 +1122,14 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
  * 1 读参（容器）+ 标量结果：`scatterarray·len`。
  *
  * 逻辑函数签名：
- *     void f(const binrwir_execution_frame_t *frame,
+ *     void f(const binrwir_binvthread_frame_t *frame,
  *            const binrwir_instruction_view_t *instruction, write_type *out,
  *            binrwir_execution_exit_t *output_exit)
  * 它自己从 read arg 拼容器 key——那是 scatter 的「取参数」，与 body 形态无关。
  */
 #define VMBIN_HANDLER_SCATTER_READ_SCALAR(handler_name, function, write_type)      \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         vmbin_value_location_t write_position_;                                    \
@@ -1153,7 +1153,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
 /* 0 读参 + 写参（新建）：`scatterarray·new` 这类「只建空容器」。 */
 #define VMBIN_HANDLER_SCATTER_CREATE(handler_name, function)                       \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         if (instruction->write_arguments.count != 1U ||                            \
@@ -1175,7 +1175,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
 /* 2 读参（容器 + 下标）+ 写参：`scatterarray·at`。 */
 #define VMBIN_HANDLER_SCATTER_READ_WRITE(handler_name, function)                   \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         vmbin_value_location_t write_position_;                                    \
@@ -1197,7 +1197,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
 /* 写参（容器）+ 若干读参：`scatterarray·set` 这类「往容器里写一个成员」。 */
 #define VMBIN_HANDLER_SCATTER_WRITE_READS(handler_name, function)                  \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         if (instruction->read_arguments.count < 2U ||                              \
@@ -1220,7 +1220,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
 /* 多个读参 + 写参（跨容器搬运）：`scatterarray·slice` / `newscatter` / `newcompact`。 */
 #define VMBIN_HANDLER_SCATTER_CROSS(handler_name, function)                        \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         if (instruction->read_arguments.count < 2U ||                              \
@@ -1243,7 +1243,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
 /* 1 读参（compact）+ 1 写参（新建散列容器）：`scatterarray·newscatter`。 */
 #define VMBIN_HANDLER_SCATTER_EXPAND(handler_name, function)                       \
     static runtimec_status_t handler_name(                                         \
-        binrwir_execution_frame_t *frame,                                          \
+        binrwir_binvthread_frame_t *frame,                                          \
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         if (instruction->read_arguments.count != 1U ||                             \

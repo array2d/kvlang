@@ -18,7 +18,7 @@ use super::ast::{
     self, Expr, Func, FuncSig, Instruction, Param, RwirDecl, ScopeStmt, Stmt, StructDecl,
 };
 use super::ffi::Kv;
-use super::{builtin, ffi, keytree, kvkind, lower, parser};
+use super::{builtin, crash_resume, ffi, keytree, kvkind, lower, parser};
 
 /// 创建基础目录 /lib/ 与 /vthread/（layout 前必须存在）。
 pub fn init_dirs(kv: &mut Kv) -> Result<(), String> {
@@ -85,6 +85,10 @@ pub struct AnalyzedFunc {
     seq: Vec<Instruction>,
     labels: HashMap<String, i32>,
     is_init: bool,
+    /// 该函数的 crash/resume 判定（`layout/src/crash_resume.rs`）。
+    /// **只读产物**：不参与代码生成，只随 layout 结果一起外送，
+    /// 供 dump 与驱动判定「这个函数崩溃后能不能重放」。
+    crash_resume: crash_resume::Resumability,
 }
 
 /// Output of [`analyze_file`]: parsed AST plus analyzed rwfuncs and optional top-level init.
@@ -239,6 +243,9 @@ fn analyze_func(
     // 形状校验必须在 lower **之前**：`flatten_expr` 会把 `f([1,2,3,4])` 的实参
     // 物化成临时槽，此后容器字面量不复存在，形状再也比不了。
     let mut shape_diags = lower::check_call_shapes(&src, sigs);
+    /* `inplace` 的深度校验同样必须在 lower **之前**（见 `check_inplace_parameters`
+     * 的注释：lowering 会把读写拆到两条指令上）。 */
+    lower::check_inplace_parameters(&src, &mut shape_diags);
     let mut fn_ = lower::lower_func(&src, structs)?;
     let type_map = lower::infer_types(&fn_, structs);
     // 合成表：形参行是 Value 形态、写槽行是源级形态；优先级见
@@ -345,6 +352,24 @@ fn analyze_func(
         check_sub_arity(&op, reads.len(), inst.writes.len())
             .map_err(|e| format!("{}: {e}", fn_.sig.name))?;
     }
+    let crash_resume = crash_resume::analyze(&crash_resume::FunctionFlow {
+        name: fn_.sig.name.clone(),
+        nodes: seq
+            .iter()
+            .enumerate()
+            .map(|(index, inst)| {
+                let (operator, reads, writes) = crash_resume_slots(inst);
+                crash_resume::RwirNode {
+                    identifier: index,
+                    inplace: crash_resume::is_inplace_node(&operator, &reads, &writes),
+                    operator,
+                    reads,
+                    writes,
+                }
+            })
+            .collect(),
+        written_globals: Default::default(),
+    });
     Ok(AnalyzedFunc {
         is_init: func.sig.name == "init",
         pkg,
@@ -354,7 +379,25 @@ fn analyze_func(
         stable,
         seq,
         labels,
+        crash_resume,
     })
+}
+
+/// 从一条指令取出 (算子名, 读槽名集, 写槽名集)，供 crash/resume 分析用。
+///
+/// **只取槽名文本**：本分析判的是「读写是否同槽」，不关心类型与 key 形状。
+/// 写槽直接用 `writes`；读槽取表达式里的叶子名（复合表达式取不到名字 ⇒ 空，
+/// 由 `is_inplace_node` 按保守处理）。
+fn crash_resume_slots(inst: &Instruction) -> (String, Vec<String>, Vec<String>) {
+    let (operator, reads) = inst.flat();
+    let mut read_slots: Vec<String> = Vec::new();
+    for read in &reads {
+        let name = read.trim_start_matches('*').to_string();
+        if !name.is_empty() {
+            read_slots.push(name);
+        }
+    }
+    (operator, read_slots, inst.writes.clone())
 }
 
 /// 待做 `[]` 下标校验的函数集合：显式 funcs + init_body/top_level_calls 合成的 init。
@@ -681,6 +724,7 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
         ty: String::new(),
         by_ref: String::new(),
         has_ty: false,
+        inplace: false,
     };
     let mut params: Vec<Param> = (0..nr).map(|_| blank()).collect();
     let mut returns: Vec<Param> = (0..nw).map(|_| blank()).collect();
@@ -694,6 +738,7 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
                 ty: pty,
                 by_ref: String::new(),
                 has_ty: true,
+                inplace: false,
             };
         }
     }
@@ -705,6 +750,7 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
                 ty: rty,
                 by_ref: String::new(),
                 has_ty: true,
+                inplace: false,
             };
         }
     }
@@ -1179,10 +1225,54 @@ pub fn write_func(
         }
         kv.set(&lpairs).map_err(werr)?;
     }
+    /*
+     * `‥crash_resume`：本函数的崩溃恢复判定，随产物一起落盘供 dump 与驱动读。
+     *
+     * **不参与代码生成**：它不改变任何一条指令，只是把静态分析的结论外送。
+     * 写在这里而不是执行期算，因为判据只依赖静态数据流（读参集/写参集/inplace），
+     * 编译期一次算完，执行期零成本。
+     */
+    {
+        let (text, langtype) = crash_resume_record(&a.crash_resume);
+        let key = format!("{func_dir}/{}{}", keytree::RUNTIME_MEMBER_SEP,
+                          keytree::SEG_CRASH_RESUME);
+        kv.set(&[(key, langtype, ffi::new_char_byte(text.as_bytes())?)])
+            .map_err(werr)?;
+    }
     // Commit `‥ctime` last once all instruction and label slots are persisted.
     kv.set(&[(ctime_key, String::new(), ffi::new_int64(ctime)?)])
         .map_err(werr)?;
     Ok(())
+}
+
+/// `Resumability` → (`‥crash_resume` 的 body 文本, langtype)。
+///
+/// 三态**逐字写全**，不用缩写：读 dump 的人要能一眼分清
+/// `ALWAYS` / `CONDITIONALLY` / `NOT`，而不是解一个单字母。
+fn crash_resume_record(resumability: &crash_resume::Resumability) -> (String, String) {
+    match resumability {
+        crash_resume::Resumability::AlwaysResumable => {
+            ("ALWAYS_RESUMABLE".to_string(), "char/utf8".to_string())
+        }
+        crash_resume::Resumability::ConditionallyResumable { replay_from } => {
+            let points: Vec<String> = replay_from
+                .iter()
+                .map(|(inplace, anchor)| format!("{inplace}<-{anchor}"))
+                .collect();
+            (
+                format!("CONDITIONALLY_RESUMABLE:{}", points.join(",")),
+                "char/utf8".to_string(),
+            )
+        }
+        crash_resume::Resumability::NotResumable {
+            instruction,
+            global_key,
+            ..
+        } => (
+            format!("NOT_RESUMABLE:{instruction}:{global_key}"),
+            "char/utf8".to_string(),
+        ),
+    }
 }
 
 /// Store field types under the prototype and defaults under member keys.

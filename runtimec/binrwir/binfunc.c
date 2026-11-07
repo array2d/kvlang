@@ -9,7 +9,7 @@
  *       同一函数体因此总产出同一个 Program。
  */
 
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -20,62 +20,62 @@
 /* 线格式只有一份：None 字面量的判据走公共头的访问器，本文件不写偏移算术。 */
 #include "kvspace/xvalue_head.h"
 
-#define BINRWIR_PROGRAM_INITIAL_CAPACITY 4U
+#define BINRWIR_BINFUNC_INITIAL_CAPACITY 4U
 
 /*
  * instruction 的私有 framing。二进制载荷只有 heads[ordinal] 的 opid 与参数池里的
  * 参数项；source logical program counter 与两个方向的边界留在这里，不进 instruction。
  * 读区起点是 read_argument_offset，写区紧接读区，因此只存一个偏移。
  */
-typedef struct binrwir_program_instruction_record {
+typedef struct binrwir_binfunc_instruction_record {
     uint32_t source_logical_program_counter;
     uint32_t read_argument_offset;
     uint32_t read_argument_count;
     uint32_t write_argument_count;
-} binrwir_program_instruction_record_t;
+} binrwir_binfunc_instruction_record_t;
 
 /* 参数表：argidx 与具体 langtype 是两个平行数组，共用同一个 count 与 capacity。 */
-typedef struct binrwir_program_parameter_arrays {
+typedef struct binrwir_binfunc_parameter_arrays {
     uint32_t *argument_indices;
     runtimec_string_view_t *types;
     size_t count;
     size_t capacity;
-} binrwir_program_parameter_arrays_t;
+} binrwir_binfunc_parameter_arrays_t;
 
 /* 指令表：二进制头与私有 framing 平行，共用同一个 count 与 capacity。 */
-typedef struct binrwir_program_instruction_arrays {
+typedef struct binrwir_binfunc_instruction_arrays {
     binrwir_instruction_t *heads;
-    binrwir_program_instruction_record_t *records;
+    binrwir_binfunc_instruction_record_t *records;
     size_t count;
     size_t capacity;
-} binrwir_program_instruction_arrays_t;
+} binrwir_binfunc_instruction_arrays_t;
 
 /* 字面量池项：已编码的值字节与它的具体 langtype，两者都指向 Program 自持存储。 */
-typedef struct binrwir_program_literal_record {
+typedef struct binrwir_binfunc_literal_record {
     runtimec_bytes_view_t wire_bytes;
     runtimec_string_view_t langtype;
-} binrwir_program_literal_record_t;
+} binrwir_binfunc_literal_record_t;
 
 /*
  * 符号池项：名字 + 语言类型。类型让调用入口在没有第二事实源的前提下知道槽该多大
  * ——局部槽必须先以正确长度存在，而执行器只接受等长写入。
  */
-typedef struct binrwir_program_symbol_record {
+typedef struct binrwir_binfunc_symbol_record {
     runtimec_string_view_t name;
     runtimec_string_view_t langtype;
-} binrwir_program_symbol_record_t;
+} binrwir_binfunc_symbol_record_t;
 
-struct binrwir_program {
+struct binrwir_binfunc {
     runtimec_allocator_t allocator;
-    binrwir_program_identity_t identity;
-    binrwir_program_instruction_arrays_t instructions;
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_instruction_arrays_t instructions;
     binrwir_argument_t *arguments;
     size_t argument_count;
-    binrwir_program_parameter_arrays_t read_parameters;
-    binrwir_program_parameter_arrays_t write_parameters;
-    binrwir_program_symbol_record_t *symbols;
+    binrwir_binfunc_parameter_arrays_t read_parameters;
+    binrwir_binfunc_parameter_arrays_t write_parameters;
+    binrwir_binfunc_symbol_record_t *symbols;
     size_t symbol_count;
-    binrwir_program_literal_record_t *literals;
+    binrwir_binfunc_literal_record_t *literals;
     size_t literal_count;
     binrwir_alias_rule_t *alias_rules;
     size_t alias_rule_count;
@@ -85,20 +85,20 @@ struct binrwir_program {
     size_t pool_bytes_size;
 };
 
-struct binrwir_program_builder {
+struct binrwir_binfunc_builder {
     runtimec_allocator_t allocator;
-    binrwir_program_identity_t identity;
+    binrwir_binfunc_identity_t identity;
     bool finalized;
-    binrwir_program_instruction_arrays_t instructions;
+    binrwir_binfunc_instruction_arrays_t instructions;
     binrwir_argument_t *arguments;
     size_t argument_count;
     size_t argument_capacity;
-    binrwir_program_parameter_arrays_t read_parameters;
-    binrwir_program_parameter_arrays_t write_parameters;
-    binrwir_program_symbol_record_t *symbols;
+    binrwir_binfunc_parameter_arrays_t read_parameters;
+    binrwir_binfunc_parameter_arrays_t write_parameters;
+    binrwir_binfunc_symbol_record_t *symbols;
     size_t symbol_count;
     size_t symbol_capacity;
-    binrwir_program_literal_record_t *literals;
+    binrwir_binfunc_literal_record_t *literals;
     size_t literal_count;
     size_t literal_capacity;
     binrwir_alias_rule_t *alias_rules;
@@ -106,8 +106,8 @@ struct binrwir_program_builder {
     size_t alias_rule_capacity;
 };
 
-static void binrwir_program_identity_invalidate(
-    binrwir_program_identity_t *identity) {
+static void binrwir_binfunc_identity_invalidate(
+    binrwir_binfunc_identity_t *identity) {
     if (identity != NULL) {
         memset(identity, 0, sizeof(*identity));
         identity->schema_version = UINT32_MAX;
@@ -118,8 +118,8 @@ static void binrwir_program_identity_invalidate(
 }
 
 /* identity 是可消费的当且仅当版本字段都是显式值，且二进制接口代次就是当前代次。 */
-static int binrwir_program_identity_is_usable(
-    const binrwir_program_identity_t *identity) {
+static int binrwir_binfunc_identity_is_usable(
+    const binrwir_binfunc_identity_t *identity) {
     return identity->schema_version != UINT32_MAX &&
            identity->rwir_manifest_version != UINT32_MAX &&
            identity->binrwir_binary_interface_generation ==
@@ -128,7 +128,7 @@ static int binrwir_program_identity_is_usable(
 }
 
 /* 规范形状：count 为零时指针必须是 NULL，count 非零时指针必须有值。 */
-static int binrwir_program_array_shape_is_invalid(const void *array,
+static int binrwir_binfunc_array_shape_is_invalid(const void *array,
                                                   size_t count) {
     if (count == 0U) {
         return array != NULL;
@@ -136,10 +136,10 @@ static int binrwir_program_array_shape_is_invalid(const void *array,
     return array == NULL;
 }
 
-static size_t binrwir_program_grown_capacity(size_t capacity,
+static size_t binrwir_binfunc_grown_capacity(size_t capacity,
                                              size_t required_count) {
     size_t grown_capacity =
-        capacity == 0U ? BINRWIR_PROGRAM_INITIAL_CAPACITY : capacity;
+        capacity == 0U ? BINRWIR_BINFUNC_INITIAL_CAPACITY : capacity;
 
     while (grown_capacity < required_count) {
         if (grown_capacity > SIZE_MAX / 2U) {
@@ -151,7 +151,7 @@ static size_t binrwir_program_grown_capacity(size_t capacity,
 }
 
 /* 换一块更大数组并保留前 capacity 个元素；失败返回 NULL 且不动旧数组。 */
-static void *binrwir_program_regrow(const runtimec_allocator_t *allocator,
+static void *binrwir_binfunc_regrow(const runtimec_allocator_t *allocator,
                                     const void *array, size_t capacity,
                                     size_t grown_capacity, size_t element_size,
                                     size_t element_alignment) {
@@ -175,7 +175,7 @@ static void *binrwir_program_regrow(const runtimec_allocator_t *allocator,
 }
 
 /* 精确尺寸分配；count 为零时返回 NULL（调用方把它当「该池为空」）。 */
-static void *binrwir_program_allocate_exact(
+static void *binrwir_binfunc_allocate_exact(
     const runtimec_allocator_t *allocator, size_t count, size_t element_size,
     size_t element_alignment) {
     if (count == 0U || count > SIZE_MAX / element_size) {
@@ -185,7 +185,7 @@ static void *binrwir_program_allocate_exact(
                                        element_alignment);
 }
 
-static void binrwir_program_release_array(const runtimec_allocator_t *allocator,
+static void binrwir_binfunc_release_array(const runtimec_allocator_t *allocator,
                                           void *array, size_t count,
                                           size_t element_size,
                                           size_t element_alignment) {
@@ -198,7 +198,7 @@ static void binrwir_program_release_array(const runtimec_allocator_t *allocator,
 }
 
 /* 名字的字节字典序：先比公共前缀，再短者在前。 */
-static int binrwir_program_symbol_compare(runtimec_string_view_t left,
+static int binrwir_binfunc_symbol_compare(runtimec_string_view_t left,
                                           runtimec_string_view_t right) {
     size_t common = left.size < right.size ? left.size : right.size;
     int order = memcmp(left.data, right.data, common);
@@ -216,8 +216,8 @@ static int binrwir_program_symbol_compare(runtimec_string_view_t left,
 }
 
 /* 把符号池排成规范顺序：n 很小，插入排序让「稳定 + 总序」一眼可读。 */
-static void binrwir_program_symbol_order(
-    const binrwir_program_symbol_record_t *symbols, size_t count,
+static void binrwir_binfunc_symbol_order(
+    const binrwir_binfunc_symbol_record_t *symbols, size_t count,
     size_t *output_order) {
     size_t ordinal;
 
@@ -226,7 +226,7 @@ static void binrwir_program_symbol_order(
 
         output_order[ordinal] = ordinal;
         while (candidate > 0U &&
-               binrwir_program_symbol_compare(
+               binrwir_binfunc_symbol_compare(
                    symbols[output_order[candidate - 1U]].name,
                    symbols[output_order[candidate]].name) > 0) {
             size_t moved = output_order[candidate - 1U];
@@ -238,7 +238,7 @@ static void binrwir_program_symbol_order(
     }
 }
 
-static int binrwir_program_size_add(size_t *total, size_t size) {
+static int binrwir_binfunc_size_add(size_t *total, size_t size) {
     if (*total > SIZE_MAX - size) {
         return 0;
     }
@@ -247,35 +247,35 @@ static int binrwir_program_size_add(size_t *total, size_t size) {
 }
 
 /* 文本池总长：参数类型 + 符号名 + 字面量类型文本，四组共用一个文本块。 */
-static int binrwir_program_text_size(
-    const binrwir_program_parameter_arrays_t *read_parameters,
-    const binrwir_program_parameter_arrays_t *write_parameters,
-    const binrwir_program_symbol_record_t *symbols, size_t symbol_count,
-    const binrwir_program_literal_record_t *literals, size_t literal_count,
+static int binrwir_binfunc_text_size(
+    const binrwir_binfunc_parameter_arrays_t *read_parameters,
+    const binrwir_binfunc_parameter_arrays_t *write_parameters,
+    const binrwir_binfunc_symbol_record_t *symbols, size_t symbol_count,
+    const binrwir_binfunc_literal_record_t *literals, size_t literal_count,
     size_t *output_size) {
     size_t ordinal;
 
     for (ordinal = 0U; ordinal < read_parameters->count; ++ordinal) {
-        if (!binrwir_program_size_add(
+        if (!binrwir_binfunc_size_add(
                 output_size, read_parameters->types[ordinal].size)) {
             return 0;
         }
     }
     for (ordinal = 0U; ordinal < write_parameters->count; ++ordinal) {
-        if (!binrwir_program_size_add(
+        if (!binrwir_binfunc_size_add(
                 output_size, write_parameters->types[ordinal].size)) {
             return 0;
         }
     }
     for (ordinal = 0U; ordinal < symbol_count; ++ordinal) {
-        if (!binrwir_program_size_add(output_size, symbols[ordinal].name.size) ||
-            !binrwir_program_size_add(output_size,
+        if (!binrwir_binfunc_size_add(output_size, symbols[ordinal].name.size) ||
+            !binrwir_binfunc_size_add(output_size,
                                       symbols[ordinal].langtype.size)) {
             return 0;
         }
     }
     for (ordinal = 0U; ordinal < literal_count; ++ordinal) {
-        if (!binrwir_program_size_add(output_size,
+        if (!binrwir_binfunc_size_add(output_size,
                                       literals[ordinal].langtype.size)) {
             return 0;
         }
@@ -294,24 +294,24 @@ static int binrwir_program_text_size(
  * shm 侧没有这个问题：`kvspace-c` 自己强制 `off%8==0 && val%8==0`。只有 Program
  * 的私有字面量池需要这里补。
  */
-#define BINRWIR_PROGRAM_POOL_ALIGNMENT 8U
+#define BINRWIR_BINFUNC_POOL_ALIGNMENT 8U
 
-static size_t binrwir_program_pool_padded_size(size_t size) {
-    return (size + BINRWIR_PROGRAM_POOL_ALIGNMENT - 1U) /
-           BINRWIR_PROGRAM_POOL_ALIGNMENT * BINRWIR_PROGRAM_POOL_ALIGNMENT;
+static size_t binrwir_binfunc_pool_padded_size(size_t size) {
+    return (size + BINRWIR_BINFUNC_POOL_ALIGNMENT - 1U) /
+           BINRWIR_BINFUNC_POOL_ALIGNMENT * BINRWIR_BINFUNC_POOL_ALIGNMENT;
 }
 
-static int binrwir_program_bytes_size(
-    const binrwir_program_literal_record_t *literals, size_t literal_count,
+static int binrwir_binfunc_bytes_size(
+    const binrwir_binfunc_literal_record_t *literals, size_t literal_count,
     size_t *output_size) {
     size_t ordinal;
 
     for (ordinal = 0U; ordinal < literal_count; ++ordinal) {
         /* 累加**补齐后**的长度：池的总大小与逐条起点必须用同一套算术，
          * 否则分配够了下标却越界。 */
-        if (!binrwir_program_size_add(
+        if (!binrwir_binfunc_size_add(
                 output_size,
-                binrwir_program_pool_padded_size(
+                binrwir_binfunc_pool_padded_size(
                     literals[ordinal].wire_bytes.size))) {
             return 0;
         }
@@ -320,8 +320,8 @@ static int binrwir_program_bytes_size(
 }
 
 /* 深拷贝一段文本进 Program 文本池，返回指向副本的视图。 */
-static runtimec_string_view_t binrwir_program_copy_text(
-    binrwir_program_t *program, runtimec_string_view_t text,
+static runtimec_string_view_t binrwir_binfunc_copy_text(
+    binrwir_binfunc_t *program, runtimec_string_view_t text,
     size_t *text_offset) {
     char *copy = program->pool_text + *text_offset;
 
@@ -335,20 +335,20 @@ static runtimec_string_view_t binrwir_program_copy_text(
 /*
  * 深拷贝一段字节进 Program 字节池，返回指向副本的视图。
  *
- * 每条 wire 的起点补到 8 的倍数（理由见 `binrwir_program_bytes_size` 上方）。
+ * 每条 wire 的起点补到 8 的倍数（理由见 `binrwir_binfunc_bytes_size` 上方）。
  * 填充字节写成 0：它们不属于任何视图，但 memset 让「同一份 Program 两次构建
  * 字节相同」这条性质继续成立——否则比较两棵 Program 会因为填充区是栈残留而
  * 假不等。
  */
-static runtimec_bytes_view_t binrwir_program_copy_bytes(
-    binrwir_program_t *program, runtimec_bytes_view_t bytes,
+static runtimec_bytes_view_t binrwir_binfunc_copy_bytes(
+    binrwir_binfunc_t *program, runtimec_bytes_view_t bytes,
     size_t *bytes_offset) {
     uint8_t *copy = program->pool_bytes + *bytes_offset;
 
     if (bytes.size != 0U) {
         memcpy(copy, bytes.data, bytes.size);
     }
-    *bytes_offset += binrwir_program_pool_padded_size(bytes.size);
+    *bytes_offset += binrwir_binfunc_pool_padded_size(bytes.size);
     return runtimec_bytes_view_make(copy, bytes.size);
 }
 
@@ -357,8 +357,8 @@ static runtimec_bytes_view_t binrwir_program_copy_bytes(
  * PARAMETER_READ / PARAMETER_WRITE 的 slot 必须指回签名里同一个 argidx。任何一条
  * 对不上，同一个引用就有了第二处真相。
  */
-static int binrwir_program_argument_is_unbound(
-    const binrwir_program_t *program, const binrwir_argument_t *argument) {
+static int binrwir_binfunc_argument_is_unbound(
+    const binrwir_binfunc_t *program, const binrwir_argument_t *argument) {
     switch (argument->reference_kind) {
     case BINRWIR_REFERENCE_PARAMETER_READ:
         return argument->slot >= program->read_parameters.count ||
@@ -381,8 +381,8 @@ static int binrwir_program_argument_is_unbound(
 }
 
 /* 局部符号必须带具体 langtype：调用入口靠它决定槽的长度，没有类型就建不出槽。 */
-static int binrwir_program_local_symbol_is_untyped(
-    const binrwir_program_t *program, const binrwir_argument_t *argument) {
+static int binrwir_binfunc_local_symbol_is_untyped(
+    const binrwir_binfunc_t *program, const binrwir_argument_t *argument) {
     if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL) {
         return 0;
     }
@@ -444,11 +444,11 @@ static void binrwir_type_from_target_insert(binrwir_type_from_target_set_t *set,
 
 /* 扫一遍指令表，收集「带 STATIC 读参的指令」写过的无类型局部。 */
 static void binrwir_type_from_target_collect(
-    const binrwir_program_t *program, binrwir_type_from_target_set_t *set) {
+    const binrwir_binfunc_t *program, binrwir_type_from_target_set_t *set) {
     for (size_t instruction_ordinal = 0U;
          instruction_ordinal < program->instructions.count;
          ++instruction_ordinal) {
-        const binrwir_program_instruction_record_t *record =
+        const binrwir_binfunc_instruction_record_t *record =
             &program->instructions.records[instruction_ordinal];
         const size_t read_offset = (size_t)record->read_argument_offset;
         const size_t read_count = (size_t)record->read_argument_count;
@@ -489,8 +489,8 @@ static void binrwir_type_from_target_collect(
  *
  * 两条都只针对**无类型局部**；有类型的局部判据一字不动。
  */
-static int binrwir_program_span_is_invalid(
-    const binrwir_program_t *program, const binrwir_argument_t *arguments,
+static int binrwir_binfunc_span_is_invalid(
+    const binrwir_binfunc_t *program, const binrwir_argument_t *arguments,
     size_t count, bool is_write_span, bool instruction_has_static_read,
     const binrwir_type_from_target_set_t *type_from_target) {
     size_t argument_ordinal;
@@ -500,10 +500,10 @@ static int binrwir_program_span_is_invalid(
         bool exempt;
 
         if (binrwir_argument_validate(argument) != RUNTIMEC_STATUS_SUCCESS ||
-            binrwir_program_argument_is_unbound(program, argument)) {
+            binrwir_binfunc_argument_is_unbound(program, argument)) {
             return 1;
         }
-        if (!binrwir_program_local_symbol_is_untyped(program, argument)) {
+        if (!binrwir_binfunc_local_symbol_is_untyped(program, argument)) {
             continue;
         }
         exempt = is_write_span
@@ -517,8 +517,8 @@ static int binrwir_program_span_is_invalid(
     return 0;
 }
 
-static int binrwir_program_instructions_are_invalid(
-    const binrwir_program_t *program) {
+static int binrwir_binfunc_instructions_are_invalid(
+    const binrwir_binfunc_t *program) {
     /*
      * 程序级集合：只在 `symbol_count` 有限时可行；位图分配失败即视为非法
      * （本函数是纯判定，没有 error 通道——分配不了就不放行，失败封闭）。
@@ -543,7 +543,7 @@ static int binrwir_program_instructions_are_invalid(
     for (instruction_ordinal = 0U;
          instruction_ordinal < program->instructions.count;
          ++instruction_ordinal) {
-        const binrwir_program_instruction_record_t *record =
+        const binrwir_binfunc_instruction_record_t *record =
             &program->instructions.records[instruction_ordinal];
         size_t read_offset = (size_t)record->read_argument_offset;
         size_t read_count = (size_t)record->read_argument_count;
@@ -569,10 +569,10 @@ static int binrwir_program_instructions_are_invalid(
             }
         }
         {
-            const int read_bad = binrwir_program_span_is_invalid(
+            const int read_bad = binrwir_binfunc_span_is_invalid(
                 program, program->arguments + read_offset, read_count, false,
                 instruction_has_static_read, &type_from_target);
-            const int write_bad = binrwir_program_span_is_invalid(
+            const int write_bad = binrwir_binfunc_span_is_invalid(
                 program, program->arguments + read_offset + read_count,
                 write_count, true, instruction_has_static_read,
                 &type_from_target);
@@ -593,24 +593,24 @@ static int binrwir_program_instructions_are_invalid(
 
 /* 三个私有池的形状：空池即空指针；符号名非空且严格字典升序（规范顺序）；
  * 字面量必须带字节且类型是具体 langtype。 */
-static int binrwir_program_pools_are_invalid(
-    const binrwir_program_t *program) {
+static int binrwir_binfunc_pools_are_invalid(
+    const binrwir_binfunc_t *program) {
     size_t ordinal;
 
     if (program->symbol_count > (size_t)UINT16_MAX ||
-        binrwir_program_array_shape_is_invalid(program->symbols,
+        binrwir_binfunc_array_shape_is_invalid(program->symbols,
                                                program->symbol_count) ||
-        binrwir_program_array_shape_is_invalid(program->literals,
+        binrwir_binfunc_array_shape_is_invalid(program->literals,
                                                program->literal_count) ||
-        binrwir_program_array_shape_is_invalid(program->pool_text,
+        binrwir_binfunc_array_shape_is_invalid(program->pool_text,
                                                program->pool_text_size) ||
-        binrwir_program_array_shape_is_invalid(program->pool_bytes,
+        binrwir_binfunc_array_shape_is_invalid(program->pool_bytes,
                                                program->pool_bytes_size) ||
         program->literal_count > UINT32_MAX) {
         return 1;
     }
     for (ordinal = 0U; ordinal < program->symbol_count; ++ordinal) {
-        const binrwir_program_symbol_record_t *symbol =
+        const binrwir_binfunc_symbol_record_t *symbol =
             &program->symbols[ordinal];
 
         /* 名字非空；类型要么为空（函数名、静态 key 没有值类型），要么是具体
@@ -622,13 +622,13 @@ static int binrwir_program_pools_are_invalid(
             return 1;
         }
         if (ordinal != 0U &&
-            binrwir_program_symbol_compare(program->symbols[ordinal - 1U].name,
+            binrwir_binfunc_symbol_compare(program->symbols[ordinal - 1U].name,
                                            symbol->name) >= 0) {
             return 1;
         }
     }
     for (ordinal = 0U; ordinal < program->literal_count; ++ordinal) {
-        const binrwir_program_literal_record_t *literal =
+        const binrwir_binfunc_literal_record_t *literal =
             &program->literals[ordinal];
 
         /*
@@ -651,8 +651,8 @@ static int binrwir_program_pools_are_invalid(
     return 0;
 }
 
-static binrwir_signature_view_t binrwir_program_signature_view(
-    const binrwir_program_t *program) {
+static binrwir_signature_view_t binrwir_binfunc_signature_view(
+    const binrwir_binfunc_t *program) {
     binrwir_signature_view_t signature = {
         .read_parameter_argument_indices =
             program->read_parameters.argument_indices,
@@ -669,10 +669,10 @@ static binrwir_signature_view_t binrwir_program_signature_view(
     return signature;
 }
 
-runtimec_status_t binrwir_program_get_identity(
-    const binrwir_program_t *program,
-    binrwir_program_identity_t *output_identity) {
-    binrwir_program_identity_invalidate(output_identity);
+runtimec_status_t binrwir_binfunc_get_identity(
+    const binrwir_binfunc_t *program,
+    binrwir_binfunc_identity_t *output_identity) {
+    binrwir_binfunc_identity_invalidate(output_identity);
     if (program == NULL || output_identity == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -690,17 +690,17 @@ runtimec_status_t binrwir_program_get_identity(
  * 三段交叉。`rwfunc` 形参签名里不可能出现 LITERAL 引用，所以函数签名那一侧
  * 天然不会被放宽——放行的是「None **字面量**」这个事实，不是「空类型」的形状。
  */
-static bool binrwir_program_empty_parameter_type_is_legal(void *context,
+static bool binrwir_binfunc_empty_parameter_type_is_legal(void *context,
                                                           int is_write,
                                                           size_t ordinal) {
-    const binrwir_program_t *program = (const binrwir_program_t *)context;
+    const binrwir_binfunc_t *program = (const binrwir_binfunc_t *)context;
     const uint32_t *indices =
         is_write != 0 ? program->write_parameters.argument_indices
                       : program->read_parameters.argument_indices;
     const size_t count = is_write != 0 ? program->write_parameters.count
                                        : program->read_parameters.count;
     const binrwir_argument_t *argument;
-    const binrwir_program_literal_record_t *literal;
+    const binrwir_binfunc_literal_record_t *literal;
 
     if (indices == NULL || ordinal >= count) {
         return false;
@@ -717,75 +717,75 @@ static bool binrwir_program_empty_parameter_type_is_legal(void *context,
     return binrwir_literal_is_none_value(literal->wire_bytes);
 }
 
-runtimec_status_t binrwir_program_validate(const binrwir_program_t *program) {
+runtimec_status_t binrwir_binfunc_validate(const binrwir_binfunc_t *program) {
     binrwir_signature_view_t signature;
     size_t text_size = 0U;
     size_t bytes_size = 0U;
 
     if (program == NULL || !runtimec_allocator_is_valid(&program->allocator) ||
-        !binrwir_program_identity_is_usable(&program->identity) ||
+        !binrwir_binfunc_identity_is_usable(&program->identity) ||
         program->instructions.count == 0U) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    signature = binrwir_program_signature_view(program);
+    signature = binrwir_binfunc_signature_view(program);
     if (signature.read_parameter_count > UINT32_MAX ||
         signature.write_parameter_count > UINT32_MAX ||
         program->instructions.count > UINT32_MAX ||
         program->argument_count > UINT32_MAX ||
         signature.alias_rule_count > UINT32_MAX ||
-        binrwir_program_array_shape_is_invalid(
+        binrwir_binfunc_array_shape_is_invalid(
             program->instructions.heads, program->instructions.count) ||
-        binrwir_program_array_shape_is_invalid(
+        binrwir_binfunc_array_shape_is_invalid(
             program->instructions.records, program->instructions.count) ||
-        binrwir_program_array_shape_is_invalid(program->arguments,
+        binrwir_binfunc_array_shape_is_invalid(program->arguments,
                                                program->argument_count) ||
-        binrwir_program_array_shape_is_invalid(signature.alias_rules,
+        binrwir_binfunc_array_shape_is_invalid(signature.alias_rules,
                                                signature.alias_rule_count) ||
-        binrwir_program_pools_are_invalid(program) ||
+        binrwir_binfunc_pools_are_invalid(program) ||
         binrwir_signature_validate_permitting_empty_types(
             &signature, (void *)(uintptr_t)program,
-            binrwir_program_empty_parameter_type_is_legal) !=
+            binrwir_binfunc_empty_parameter_type_is_legal) !=
             RUNTIMEC_STATUS_SUCCESS) {
         return RUNTIMEC_STATUS_INVALID;
     }
     /* 文本池恰好装下全部类型串与符号名、字节池恰好装下全部字面量：多一个字节或
      * 少一个字节都是被改坏的 Program。 */
-    if (!binrwir_program_text_size(&program->read_parameters,
+    if (!binrwir_binfunc_text_size(&program->read_parameters,
                                    &program->write_parameters,
                                    program->symbols, program->symbol_count,
                                    program->literals, program->literal_count,
                                    &text_size) ||
-        !binrwir_program_bytes_size(program->literals, program->literal_count,
+        !binrwir_binfunc_bytes_size(program->literals, program->literal_count,
                                     &bytes_size) ||
         text_size != program->pool_text_size ||
         bytes_size != program->pool_bytes_size) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    if (binrwir_program_instructions_are_invalid(program)) {
+    if (binrwir_binfunc_instructions_are_invalid(program)) {
         return RUNTIMEC_STATUS_INVALID;
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_program_get_view(
-    const binrwir_program_t *program, binrwir_program_view_t *output_view) {
+runtimec_status_t binrwir_binfunc_get_view(
+    const binrwir_binfunc_t *program, binrwir_binfunc_view_t *output_view) {
     if (output_view != NULL) {
         memset(output_view, 0, sizeof(*output_view));
-        binrwir_program_identity_invalidate(&output_view->identity);
+        binrwir_binfunc_identity_invalidate(&output_view->identity);
     }
     if (program == NULL || output_view == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
     output_view->identity = program->identity;
-    output_view->signature = binrwir_program_signature_view(program);
+    output_view->signature = binrwir_binfunc_signature_view(program);
     output_view->instruction_count = program->instructions.count;
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_program_get_instruction(
-    const binrwir_program_t *program, uint32_t instruction_identifier,
+runtimec_status_t binrwir_binfunc_get_instruction(
+    const binrwir_binfunc_t *program, uint32_t instruction_identifier,
     binrwir_instruction_view_t *output_instruction) {
-    const binrwir_program_instruction_record_t *record;
+    const binrwir_binfunc_instruction_record_t *record;
     binrwir_argument_span_t read_arguments;
     binrwir_argument_span_t write_arguments;
 
@@ -808,8 +808,8 @@ runtimec_status_t binrwir_program_get_instruction(
         write_arguments, output_instruction);
 }
 
-runtimec_status_t binrwir_program_find_instruction(
-    const binrwir_program_t *program, uint32_t source_logical_program_counter,
+runtimec_status_t binrwir_binfunc_find_instruction(
+    const binrwir_binfunc_t *program, uint32_t source_logical_program_counter,
     uint32_t *output_instruction_identifier) {
     size_t instruction_ordinal;
 
@@ -834,8 +834,8 @@ runtimec_status_t binrwir_program_find_instruction(
     return RUNTIMEC_STATUS_INVALID;
 }
 
-runtimec_status_t binrwir_program_get_symbol_count(
-    const binrwir_program_t *program, size_t *output_symbol_count) {
+runtimec_status_t binrwir_binfunc_get_symbol_count(
+    const binrwir_binfunc_t *program, size_t *output_symbol_count) {
     if (output_symbol_count != NULL) {
         *output_symbol_count = 0U;
     }
@@ -846,8 +846,8 @@ runtimec_status_t binrwir_program_get_symbol_count(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_program_get_symbol(
-    const binrwir_program_t *program, uint16_t symbol_index,
+runtimec_status_t binrwir_binfunc_get_symbol(
+    const binrwir_binfunc_t *program, uint16_t symbol_index,
     runtimec_string_view_t *output_name,
     runtimec_string_view_t *output_langtype) {
     if (output_name != NULL) {
@@ -865,8 +865,8 @@ runtimec_status_t binrwir_program_get_symbol(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_program_get_literal_count(
-    const binrwir_program_t *program, size_t *output_literal_count) {
+runtimec_status_t binrwir_binfunc_get_literal_count(
+    const binrwir_binfunc_t *program, size_t *output_literal_count) {
     if (output_literal_count != NULL) {
         *output_literal_count = 0U;
     }
@@ -877,8 +877,8 @@ runtimec_status_t binrwir_program_get_literal_count(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_program_get_literal(
-    const binrwir_program_t *program, uint32_t literal_index,
+runtimec_status_t binrwir_binfunc_get_literal(
+    const binrwir_binfunc_t *program, uint32_t literal_index,
     runtimec_bytes_view_t *output_wire_bytes,
     runtimec_string_view_t *output_langtype) {
     if (output_wire_bytes != NULL) {
@@ -897,60 +897,60 @@ runtimec_status_t binrwir_program_get_literal(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-static void binrwir_program_release(binrwir_program_t *program) {
+static void binrwir_binfunc_release(binrwir_binfunc_t *program) {
     const runtimec_allocator_t *allocator = &program->allocator;
 
-    binrwir_program_release_array(allocator, program->instructions.heads,
+    binrwir_binfunc_release_array(allocator, program->instructions.heads,
                                   program->instructions.capacity,
                                   sizeof(binrwir_instruction_t),
                                   _Alignof(binrwir_instruction_t));
-    binrwir_program_release_array(
+    binrwir_binfunc_release_array(
         allocator, program->instructions.records,
         program->instructions.capacity,
-        sizeof(binrwir_program_instruction_record_t),
-        _Alignof(binrwir_program_instruction_record_t));
-    binrwir_program_release_array(allocator, program->arguments,
+        sizeof(binrwir_binfunc_instruction_record_t),
+        _Alignof(binrwir_binfunc_instruction_record_t));
+    binrwir_binfunc_release_array(allocator, program->arguments,
                                   program->argument_count,
                                   sizeof(binrwir_argument_t),
                                   _Alignof(binrwir_argument_t));
-    binrwir_program_release_array(allocator,
+    binrwir_binfunc_release_array(allocator,
                                   program->read_parameters.argument_indices,
                                   program->read_parameters.capacity,
                                   sizeof(uint32_t), _Alignof(uint32_t));
-    binrwir_program_release_array(allocator, program->read_parameters.types,
+    binrwir_binfunc_release_array(allocator, program->read_parameters.types,
                                   program->read_parameters.capacity,
                                   sizeof(runtimec_string_view_t),
                                   _Alignof(runtimec_string_view_t));
-    binrwir_program_release_array(allocator,
+    binrwir_binfunc_release_array(allocator,
                                   program->write_parameters.argument_indices,
                                   program->write_parameters.capacity,
                                   sizeof(uint32_t), _Alignof(uint32_t));
-    binrwir_program_release_array(allocator, program->write_parameters.types,
+    binrwir_binfunc_release_array(allocator, program->write_parameters.types,
                                   program->write_parameters.capacity,
                                   sizeof(runtimec_string_view_t),
                                   _Alignof(runtimec_string_view_t));
-    binrwir_program_release_array(allocator, program->symbols,
+    binrwir_binfunc_release_array(allocator, program->symbols,
                                   program->symbol_count,
-                                  sizeof(binrwir_program_symbol_record_t),
-                                  _Alignof(binrwir_program_symbol_record_t));
-    binrwir_program_release_array(allocator, program->literals,
+                                  sizeof(binrwir_binfunc_symbol_record_t),
+                                  _Alignof(binrwir_binfunc_symbol_record_t));
+    binrwir_binfunc_release_array(allocator, program->literals,
                                   program->literal_count,
-                                  sizeof(binrwir_program_literal_record_t),
-                                  _Alignof(binrwir_program_literal_record_t));
-    binrwir_program_release_array(allocator, program->alias_rules,
+                                  sizeof(binrwir_binfunc_literal_record_t),
+                                  _Alignof(binrwir_binfunc_literal_record_t));
+    binrwir_binfunc_release_array(allocator, program->alias_rules,
                                   program->alias_rule_count,
                                   sizeof(binrwir_alias_rule_t),
                                   _Alignof(binrwir_alias_rule_t));
-    binrwir_program_release_array(allocator, program->pool_text,
+    binrwir_binfunc_release_array(allocator, program->pool_text,
                                   program->pool_text_size, sizeof(char),
                                   _Alignof(char));
-    binrwir_program_release_array(allocator, program->pool_bytes,
+    binrwir_binfunc_release_array(allocator, program->pool_bytes,
                                   program->pool_bytes_size, sizeof(uint8_t),
                                   _Alignof(uint64_t));
     memset(program, 0, sizeof(*program));
 }
 
-runtimec_status_t binrwir_program_destroy(binrwir_program_t *program) {
+runtimec_status_t binrwir_binfunc_destroy(binrwir_binfunc_t *program) {
     runtimec_allocator_t allocator;
 
     if (program == NULL ||
@@ -958,25 +958,25 @@ runtimec_status_t binrwir_program_destroy(binrwir_program_t *program) {
         return RUNTIMEC_STATUS_INVALID;
     }
     allocator = program->allocator;
-    binrwir_program_release(program);
+    binrwir_binfunc_release(program);
     (void)runtimec_allocator_deallocate(&allocator, program, sizeof(*program),
-                                        _Alignof(binrwir_program_t));
+                                        _Alignof(binrwir_binfunc_t));
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
 /* 按精确尺寸一次分配 Program 需要的全部数组；空池留 NULL。 */
-static runtimec_status_t binrwir_program_allocate_storage(
-    binrwir_program_t *program, const binrwir_program_builder_t *builder) {
+static runtimec_status_t binrwir_binfunc_allocate_storage(
+    binrwir_binfunc_t *program, const binrwir_binfunc_builder_t *builder) {
     const runtimec_allocator_t *allocator = &program->allocator;
     size_t text_size = 0U;
     size_t bytes_size = 0U;
 
-    if (!binrwir_program_text_size(&builder->read_parameters,
+    if (!binrwir_binfunc_text_size(&builder->read_parameters,
                                    &builder->write_parameters,
                                    builder->symbols, builder->symbol_count,
                                    builder->literals, builder->literal_count,
                                    &text_size) ||
-        !binrwir_program_bytes_size(builder->literals, builder->literal_count,
+        !binrwir_binfunc_bytes_size(builder->literals, builder->literal_count,
                                     &bytes_size)) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
@@ -993,43 +993,43 @@ static runtimec_status_t binrwir_program_allocate_storage(
     program->pool_text_size = text_size;
     program->pool_bytes_size = bytes_size;
     program->instructions.heads = (binrwir_instruction_t *)
-        binrwir_program_allocate_exact(allocator, program->instructions.count,
+        binrwir_binfunc_allocate_exact(allocator, program->instructions.count,
                                        sizeof(binrwir_instruction_t),
                                        _Alignof(binrwir_instruction_t));
     if (program->instructions.count != 0U &&
         program->instructions.heads == NULL) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
-    program->instructions.records = (binrwir_program_instruction_record_t *)
-        binrwir_program_allocate_exact(
+    program->instructions.records = (binrwir_binfunc_instruction_record_t *)
+        binrwir_binfunc_allocate_exact(
             allocator, program->instructions.count,
-            sizeof(binrwir_program_instruction_record_t),
-            _Alignof(binrwir_program_instruction_record_t));
+            sizeof(binrwir_binfunc_instruction_record_t),
+            _Alignof(binrwir_binfunc_instruction_record_t));
     if (program->instructions.count != 0U &&
         program->instructions.records == NULL) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
-    program->arguments = (binrwir_argument_t *)binrwir_program_allocate_exact(
+    program->arguments = (binrwir_argument_t *)binrwir_binfunc_allocate_exact(
         allocator, program->argument_count, sizeof(binrwir_argument_t),
         _Alignof(binrwir_argument_t));
     if (program->argument_count != 0U && program->arguments == NULL) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
     program->read_parameters.argument_indices = (uint32_t *)
-        binrwir_program_allocate_exact(allocator,
+        binrwir_binfunc_allocate_exact(allocator,
                                        program->read_parameters.count,
                                        sizeof(uint32_t), _Alignof(uint32_t));
     program->write_parameters.argument_indices = (uint32_t *)
-        binrwir_program_allocate_exact(allocator,
+        binrwir_binfunc_allocate_exact(allocator,
                                        program->write_parameters.count,
                                        sizeof(uint32_t), _Alignof(uint32_t));
     program->read_parameters.types = (runtimec_string_view_t *)
-        binrwir_program_allocate_exact(allocator,
+        binrwir_binfunc_allocate_exact(allocator,
                                        program->read_parameters.count,
                                        sizeof(runtimec_string_view_t),
                                        _Alignof(runtimec_string_view_t));
     program->write_parameters.types = (runtimec_string_view_t *)
-        binrwir_program_allocate_exact(allocator,
+        binrwir_binfunc_allocate_exact(allocator,
                                        program->write_parameters.count,
                                        sizeof(runtimec_string_view_t),
                                        _Alignof(runtimec_string_view_t));
@@ -1041,34 +1041,34 @@ static runtimec_status_t binrwir_program_allocate_storage(
           program->write_parameters.types == NULL))) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
-    program->symbols = (binrwir_program_symbol_record_t *)
-        binrwir_program_allocate_exact(allocator, program->symbol_count,
-                                       sizeof(binrwir_program_symbol_record_t),
+    program->symbols = (binrwir_binfunc_symbol_record_t *)
+        binrwir_binfunc_allocate_exact(allocator, program->symbol_count,
+                                       sizeof(binrwir_binfunc_symbol_record_t),
                                        _Alignof(
-                                           binrwir_program_symbol_record_t));
+                                           binrwir_binfunc_symbol_record_t));
     if (program->symbol_count != 0U && program->symbols == NULL) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
-    program->literals = (binrwir_program_literal_record_t *)
-        binrwir_program_allocate_exact(allocator, program->literal_count,
-                                       sizeof(binrwir_program_literal_record_t),
+    program->literals = (binrwir_binfunc_literal_record_t *)
+        binrwir_binfunc_allocate_exact(allocator, program->literal_count,
+                                       sizeof(binrwir_binfunc_literal_record_t),
                                        _Alignof(
-                                           binrwir_program_literal_record_t));
+                                           binrwir_binfunc_literal_record_t));
     if (program->literal_count != 0U && program->literals == NULL) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
     program->alias_rules = (binrwir_alias_rule_t *)
-        binrwir_program_allocate_exact(allocator, program->alias_rule_count,
+        binrwir_binfunc_allocate_exact(allocator, program->alias_rule_count,
                                        sizeof(binrwir_alias_rule_t),
                                        _Alignof(binrwir_alias_rule_t));
     if (program->alias_rule_count != 0U && program->alias_rules == NULL) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
-    program->pool_text = (char *)binrwir_program_allocate_exact(
+    program->pool_text = (char *)binrwir_binfunc_allocate_exact(
         allocator, program->pool_text_size, sizeof(char), _Alignof(char));
     /* 分配对齐用 uint64_t：池里每条 wire 自己起点 8 对齐，池基址必须同样对齐，
      * 否则 `wire 起点对齐` 这条性质整体平移失效。 */
-    program->pool_bytes = (uint8_t *)binrwir_program_allocate_exact(
+    program->pool_bytes = (uint8_t *)binrwir_binfunc_allocate_exact(
         allocator, program->pool_bytes_size, sizeof(uint8_t),
         _Alignof(uint64_t));
     if ((program->pool_text_size != 0U && program->pool_text == NULL) ||
@@ -1082,8 +1082,8 @@ static runtimec_status_t binrwir_program_allocate_storage(
  * 三个池的深拷贝与规范化。符号池在这里排成字典序，同时算出「builder 序号 →
  * Program 序号」的重映射，并把参数池里 LOCAL / FUNCTION 的 slot 改写成新下标。
  */
-static void binrwir_program_copy_pools(binrwir_program_t *program,
-                                       const binrwir_program_builder_t *builder,
+static void binrwir_binfunc_copy_pools(binrwir_binfunc_t *program,
+                                       const binrwir_binfunc_builder_t *builder,
                                        size_t *symbol_order,
                                        size_t *symbol_remap) {
     size_t text_offset = 0U;
@@ -1091,30 +1091,30 @@ static void binrwir_program_copy_pools(binrwir_program_t *program,
     size_t ordinal;
 
     for (ordinal = 0U; ordinal < builder->read_parameters.count; ++ordinal) {
-        program->read_parameters.types[ordinal] = binrwir_program_copy_text(
+        program->read_parameters.types[ordinal] = binrwir_binfunc_copy_text(
             program, builder->read_parameters.types[ordinal], &text_offset);
     }
     for (ordinal = 0U; ordinal < builder->write_parameters.count; ++ordinal) {
-        program->write_parameters.types[ordinal] = binrwir_program_copy_text(
+        program->write_parameters.types[ordinal] = binrwir_binfunc_copy_text(
             program, builder->write_parameters.types[ordinal], &text_offset);
     }
-    binrwir_program_symbol_order(builder->symbols, builder->symbol_count,
+    binrwir_binfunc_symbol_order(builder->symbols, builder->symbol_count,
                                  symbol_order);
     for (ordinal = 0U; ordinal < builder->symbol_count; ++ordinal) {
         size_t source_index = symbol_order[ordinal];
 
-        program->symbols[ordinal].name = binrwir_program_copy_text(
+        program->symbols[ordinal].name = binrwir_binfunc_copy_text(
             program, builder->symbols[source_index].name, &text_offset);
-        program->symbols[ordinal].langtype = binrwir_program_copy_text(
+        program->symbols[ordinal].langtype = binrwir_binfunc_copy_text(
             program, builder->symbols[source_index].langtype, &text_offset);
         symbol_remap[source_index] = ordinal;
     }
     for (ordinal = 0U; ordinal < builder->literal_count; ++ordinal) {
-        program->literals[ordinal].langtype = binrwir_program_copy_text(
+        program->literals[ordinal].langtype = binrwir_binfunc_copy_text(
             program, builder->literals[ordinal].langtype, &text_offset);
     }
     for (ordinal = 0U; ordinal < builder->literal_count; ++ordinal) {
-        program->literals[ordinal].wire_bytes = binrwir_program_copy_bytes(
+        program->literals[ordinal].wire_bytes = binrwir_binfunc_copy_bytes(
             program, builder->literals[ordinal].wire_bytes, &bytes_offset);
     }
     for (ordinal = 0U; ordinal < program->argument_count; ++ordinal) {
@@ -1131,28 +1131,28 @@ static void binrwir_program_copy_pools(binrwir_program_t *program,
     }
 }
 
-static int binrwir_program_builder_is_writable(
-    const binrwir_program_builder_t *builder) {
+static int binrwir_binfunc_builder_is_writable(
+    const binrwir_binfunc_builder_t *builder) {
     return builder != NULL && !builder->finalized &&
            runtimec_allocator_is_valid(&builder->allocator);
 }
 
 /* 参数表扩容：argidx 与类型两个平行数组一起长，容量只有一个。 */
-static int binrwir_program_builder_reserve_parameters(
-    binrwir_program_builder_t *builder,
-    binrwir_program_parameter_arrays_t *arrays, size_t required_count) {
+static int binrwir_binfunc_builder_reserve_parameters(
+    binrwir_binfunc_builder_t *builder,
+    binrwir_binfunc_parameter_arrays_t *arrays, size_t required_count) {
     size_t grown_capacity;
     void *grown;
 
     if (arrays->capacity >= required_count) {
         return 1;
     }
-    grown_capacity = binrwir_program_grown_capacity(arrays->capacity,
+    grown_capacity = binrwir_binfunc_grown_capacity(arrays->capacity,
                                                     required_count);
     if (grown_capacity == 0U) {
         return 0;
     }
-    grown = binrwir_program_regrow(&builder->allocator,
+    grown = binrwir_binfunc_regrow(&builder->allocator,
                                    arrays->argument_indices, arrays->capacity,
                                    grown_capacity, sizeof(uint32_t),
                                    _Alignof(uint32_t));
@@ -1160,7 +1160,7 @@ static int binrwir_program_builder_reserve_parameters(
         return 0;
     }
     arrays->argument_indices = (uint32_t *)grown;
-    grown = binrwir_program_regrow(&builder->allocator, arrays->types,
+    grown = binrwir_binfunc_regrow(&builder->allocator, arrays->types,
                                    arrays->capacity, grown_capacity,
                                    sizeof(runtimec_string_view_t),
                                    _Alignof(runtimec_string_view_t));
@@ -1172,20 +1172,20 @@ static int binrwir_program_builder_reserve_parameters(
     return 1;
 }
 
-static int binrwir_program_builder_reserve_instructions(
-    binrwir_program_builder_t *builder, size_t required_count) {
+static int binrwir_binfunc_builder_reserve_instructions(
+    binrwir_binfunc_builder_t *builder, size_t required_count) {
     size_t grown_capacity;
     void *grown;
 
     if (builder->instructions.capacity >= required_count) {
         return 1;
     }
-    grown_capacity = binrwir_program_grown_capacity(
+    grown_capacity = binrwir_binfunc_grown_capacity(
         builder->instructions.capacity, required_count);
     if (grown_capacity == 0U) {
         return 0;
     }
-    grown = binrwir_program_regrow(
+    grown = binrwir_binfunc_regrow(
         &builder->allocator, builder->instructions.heads,
         builder->instructions.capacity, grown_capacity,
         sizeof(binrwir_instruction_t), _Alignof(binrwir_instruction_t));
@@ -1193,34 +1193,34 @@ static int binrwir_program_builder_reserve_instructions(
         return 0;
     }
     builder->instructions.heads = (binrwir_instruction_t *)grown;
-    grown = binrwir_program_regrow(
+    grown = binrwir_binfunc_regrow(
         &builder->allocator, builder->instructions.records,
         builder->instructions.capacity, grown_capacity,
-        sizeof(binrwir_program_instruction_record_t),
-        _Alignof(binrwir_program_instruction_record_t));
+        sizeof(binrwir_binfunc_instruction_record_t),
+        _Alignof(binrwir_binfunc_instruction_record_t));
     if (grown == NULL) {
         return 0;
     }
     builder->instructions.records =
-        (binrwir_program_instruction_record_t *)grown;
+        (binrwir_binfunc_instruction_record_t *)grown;
     builder->instructions.capacity = grown_capacity;
     return 1;
 }
 
-static int binrwir_program_builder_reserve_arguments(
-    binrwir_program_builder_t *builder, size_t required_count) {
+static int binrwir_binfunc_builder_reserve_arguments(
+    binrwir_binfunc_builder_t *builder, size_t required_count) {
     size_t grown_capacity;
     void *grown;
 
     if (builder->argument_capacity >= required_count) {
         return 1;
     }
-    grown_capacity = binrwir_program_grown_capacity(builder->argument_capacity,
+    grown_capacity = binrwir_binfunc_grown_capacity(builder->argument_capacity,
                                                     required_count);
     if (grown_capacity == 0U) {
         return 0;
     }
-    grown = binrwir_program_regrow(
+    grown = binrwir_binfunc_regrow(
         &builder->allocator, builder->arguments, builder->argument_capacity,
         grown_capacity, sizeof(binrwir_argument_t),
         _Alignof(binrwir_argument_t));
@@ -1232,20 +1232,20 @@ static int binrwir_program_builder_reserve_arguments(
     return 1;
 }
 
-static int binrwir_program_builder_reserve_alias_rules(
-    binrwir_program_builder_t *builder, size_t required_count) {
+static int binrwir_binfunc_builder_reserve_alias_rules(
+    binrwir_binfunc_builder_t *builder, size_t required_count) {
     size_t grown_capacity;
     void *grown;
 
     if (builder->alias_rule_capacity >= required_count) {
         return 1;
     }
-    grown_capacity = binrwir_program_grown_capacity(
+    grown_capacity = binrwir_binfunc_grown_capacity(
         builder->alias_rule_capacity, required_count);
     if (grown_capacity == 0U) {
         return 0;
     }
-    grown = binrwir_program_regrow(
+    grown = binrwir_binfunc_regrow(
         &builder->allocator, builder->alias_rules,
         builder->alias_rule_capacity, grown_capacity,
         sizeof(binrwir_alias_rule_t), _Alignof(binrwir_alias_rule_t));
@@ -1257,72 +1257,72 @@ static int binrwir_program_builder_reserve_alias_rules(
     return 1;
 }
 
-static int binrwir_program_builder_reserve_symbols(
-    binrwir_program_builder_t *builder, size_t required_count) {
+static int binrwir_binfunc_builder_reserve_symbols(
+    binrwir_binfunc_builder_t *builder, size_t required_count) {
     size_t grown_capacity;
     void *grown;
 
     if (builder->symbol_capacity >= required_count) {
         return 1;
     }
-    grown_capacity = binrwir_program_grown_capacity(builder->symbol_capacity,
+    grown_capacity = binrwir_binfunc_grown_capacity(builder->symbol_capacity,
                                                     required_count);
     if (grown_capacity == 0U) {
         return 0;
     }
-    grown = binrwir_program_regrow(
+    grown = binrwir_binfunc_regrow(
         &builder->allocator, builder->symbols, builder->symbol_capacity,
-        grown_capacity, sizeof(binrwir_program_symbol_record_t),
-        _Alignof(binrwir_program_symbol_record_t));
+        grown_capacity, sizeof(binrwir_binfunc_symbol_record_t),
+        _Alignof(binrwir_binfunc_symbol_record_t));
     if (grown == NULL) {
         return 0;
     }
-    builder->symbols = (binrwir_program_symbol_record_t *)grown;
+    builder->symbols = (binrwir_binfunc_symbol_record_t *)grown;
     builder->symbol_capacity = grown_capacity;
     return 1;
 }
 
-static int binrwir_program_builder_reserve_literals(
-    binrwir_program_builder_t *builder, size_t required_count) {
+static int binrwir_binfunc_builder_reserve_literals(
+    binrwir_binfunc_builder_t *builder, size_t required_count) {
     size_t grown_capacity;
     void *grown;
 
     if (builder->literal_capacity >= required_count) {
         return 1;
     }
-    grown_capacity = binrwir_program_grown_capacity(builder->literal_capacity,
+    grown_capacity = binrwir_binfunc_grown_capacity(builder->literal_capacity,
                                                     required_count);
     if (grown_capacity == 0U) {
         return 0;
     }
-    grown = binrwir_program_regrow(
+    grown = binrwir_binfunc_regrow(
         &builder->allocator, builder->literals, builder->literal_capacity,
-        grown_capacity, sizeof(binrwir_program_literal_record_t),
-        _Alignof(binrwir_program_literal_record_t));
+        grown_capacity, sizeof(binrwir_binfunc_literal_record_t),
+        _Alignof(binrwir_binfunc_literal_record_t));
     if (grown == NULL) {
         return 0;
     }
-    builder->literals = (binrwir_program_literal_record_t *)grown;
+    builder->literals = (binrwir_binfunc_literal_record_t *)grown;
     builder->literal_capacity = grown_capacity;
     return 1;
 }
 
-runtimec_status_t binrwir_program_builder_create(
+runtimec_status_t binrwir_binfunc_builder_create(
     const runtimec_allocator_t *allocator,
-    const binrwir_program_identity_t *identity,
-    binrwir_program_builder_t **output_builder) {
-    binrwir_program_builder_t *builder;
+    const binrwir_binfunc_identity_t *identity,
+    binrwir_binfunc_builder_t **output_builder) {
+    binrwir_binfunc_builder_t *builder;
 
     if (output_builder != NULL) {
         *output_builder = NULL;
     }
     if (output_builder == NULL || identity == NULL ||
         !runtimec_allocator_is_valid(allocator) ||
-        !binrwir_program_identity_is_usable(identity)) {
+        !binrwir_binfunc_identity_is_usable(identity)) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    builder = (binrwir_program_builder_t *)runtimec_allocator_allocate(
-        allocator, sizeof(*builder), _Alignof(binrwir_program_builder_t));
+    builder = (binrwir_binfunc_builder_t *)runtimec_allocator_allocate(
+        allocator, sizeof(*builder), _Alignof(binrwir_binfunc_builder_t));
     if (builder == NULL) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
@@ -1334,8 +1334,8 @@ runtimec_status_t binrwir_program_builder_create(
 }
 
 /* 回到空的可写状态并保留已分配容量；也是定稿之后唯一的复用入口。 */
-runtimec_status_t binrwir_program_builder_reset(
-    binrwir_program_builder_t *builder) {
+runtimec_status_t binrwir_binfunc_builder_reset(
+    binrwir_binfunc_builder_t *builder) {
     if (builder == NULL ||
         !runtimec_allocator_is_valid(&builder->allocator)) {
         return RUNTIMEC_STATUS_INVALID;
@@ -1351,8 +1351,8 @@ runtimec_status_t binrwir_program_builder_reset(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_program_builder_destroy(
-    binrwir_program_builder_t *builder) {
+runtimec_status_t binrwir_binfunc_builder_destroy(
+    binrwir_binfunc_builder_t *builder) {
     runtimec_allocator_t allocator;
 
     if (builder == NULL ||
@@ -1360,63 +1360,63 @@ runtimec_status_t binrwir_program_builder_destroy(
         return RUNTIMEC_STATUS_INVALID;
     }
     allocator = builder->allocator;
-    binrwir_program_release_array(
+    binrwir_binfunc_release_array(
         &allocator, builder->instructions.heads,
         builder->instructions.capacity, sizeof(binrwir_instruction_t),
         _Alignof(binrwir_instruction_t));
-    binrwir_program_release_array(
+    binrwir_binfunc_release_array(
         &allocator, builder->instructions.records,
         builder->instructions.capacity,
-        sizeof(binrwir_program_instruction_record_t),
-        _Alignof(binrwir_program_instruction_record_t));
-    binrwir_program_release_array(&allocator, builder->arguments,
+        sizeof(binrwir_binfunc_instruction_record_t),
+        _Alignof(binrwir_binfunc_instruction_record_t));
+    binrwir_binfunc_release_array(&allocator, builder->arguments,
                                   builder->argument_capacity,
                                   sizeof(binrwir_argument_t),
                                   _Alignof(binrwir_argument_t));
-    binrwir_program_release_array(
+    binrwir_binfunc_release_array(
         &allocator, builder->read_parameters.argument_indices,
         builder->read_parameters.capacity, sizeof(uint32_t),
         _Alignof(uint32_t));
-    binrwir_program_release_array(
+    binrwir_binfunc_release_array(
         &allocator, builder->read_parameters.types,
         builder->read_parameters.capacity, sizeof(runtimec_string_view_t),
         _Alignof(runtimec_string_view_t));
-    binrwir_program_release_array(
+    binrwir_binfunc_release_array(
         &allocator, builder->write_parameters.argument_indices,
         builder->write_parameters.capacity, sizeof(uint32_t),
         _Alignof(uint32_t));
-    binrwir_program_release_array(
+    binrwir_binfunc_release_array(
         &allocator, builder->write_parameters.types,
         builder->write_parameters.capacity, sizeof(runtimec_string_view_t),
         _Alignof(runtimec_string_view_t));
-    binrwir_program_release_array(&allocator, builder->symbols,
+    binrwir_binfunc_release_array(&allocator, builder->symbols,
                                   builder->symbol_capacity,
-                                  sizeof(binrwir_program_symbol_record_t),
-                                  _Alignof(binrwir_program_symbol_record_t));
-    binrwir_program_release_array(&allocator, builder->literals,
+                                  sizeof(binrwir_binfunc_symbol_record_t),
+                                  _Alignof(binrwir_binfunc_symbol_record_t));
+    binrwir_binfunc_release_array(&allocator, builder->literals,
                                   builder->literal_capacity,
-                                  sizeof(binrwir_program_literal_record_t),
-                                  _Alignof(binrwir_program_literal_record_t));
-    binrwir_program_release_array(&allocator, builder->alias_rules,
+                                  sizeof(binrwir_binfunc_literal_record_t),
+                                  _Alignof(binrwir_binfunc_literal_record_t));
+    binrwir_binfunc_release_array(&allocator, builder->alias_rules,
                                   builder->alias_rule_capacity,
                                   sizeof(binrwir_alias_rule_t),
                                   _Alignof(binrwir_alias_rule_t));
     (void)runtimec_allocator_deallocate(&allocator, builder,
                                         sizeof(*builder),
-                                        _Alignof(binrwir_program_builder_t));
+                                        _Alignof(binrwir_binfunc_builder_t));
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_program_builder_add_parameter(
-    binrwir_program_builder_t *builder, binrwir_parameter_direction_t direction,
+runtimec_status_t binrwir_binfunc_builder_add_parameter(
+    binrwir_binfunc_builder_t *builder, binrwir_parameter_direction_t direction,
     uint32_t argument_index, runtimec_string_view_t parameter_type,
     uint32_t *output_parameter_index) {
-    binrwir_program_parameter_arrays_t *arrays = NULL;
+    binrwir_binfunc_parameter_arrays_t *arrays = NULL;
 
     if (output_parameter_index != NULL) {
         *output_parameter_index = BINRWIR_ARGUMENT_INDEX_NONE;
     }
-    if (!binrwir_program_builder_is_writable(builder) ||
+    if (!binrwir_binfunc_builder_is_writable(builder) ||
         argument_index == BINRWIR_ARGUMENT_INDEX_NONE ||
         output_parameter_index == NULL ||
         binrwir_signature_validate_parameter_type(parameter_type) !=
@@ -1434,7 +1434,7 @@ runtimec_status_t binrwir_program_builder_add_parameter(
     if (arrays->count >= UINT32_MAX) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
-    if (!binrwir_program_builder_reserve_parameters(builder, arrays,
+    if (!binrwir_binfunc_builder_reserve_parameters(builder, arrays,
                                                     arrays->count + 1U)) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
@@ -1445,13 +1445,13 @@ runtimec_status_t binrwir_program_builder_add_parameter(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_program_builder_add_alias_rule(
-    binrwir_program_builder_t *builder, const binrwir_alias_rule_t *rule,
+runtimec_status_t binrwir_binfunc_builder_add_alias_rule(
+    binrwir_binfunc_builder_t *builder, const binrwir_alias_rule_t *rule,
     uint32_t *output_alias_rule_identifier) {
     if (output_alias_rule_identifier != NULL) {
         *output_alias_rule_identifier = BINRWIR_IDENTIFIER_NONE;
     }
-    if (!binrwir_program_builder_is_writable(builder) || rule == NULL ||
+    if (!binrwir_binfunc_builder_is_writable(builder) || rule == NULL ||
         output_alias_rule_identifier == NULL ||
         binrwir_signature_validate_alias_rule(rule) !=
             RUNTIMEC_STATUS_SUCCESS) {
@@ -1460,7 +1460,7 @@ runtimec_status_t binrwir_program_builder_add_alias_rule(
     if (builder->alias_rule_count >= UINT32_MAX) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
-    if (!binrwir_program_builder_reserve_alias_rules(
+    if (!binrwir_binfunc_builder_reserve_alias_rules(
             builder, builder->alias_rule_count + 1U)) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
@@ -1470,15 +1470,15 @@ runtimec_status_t binrwir_program_builder_add_alias_rule(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_program_builder_add_symbol(
-    binrwir_program_builder_t *builder, runtimec_string_view_t name,
+runtimec_status_t binrwir_binfunc_builder_add_symbol(
+    binrwir_binfunc_builder_t *builder, runtimec_string_view_t name,
     runtimec_string_view_t langtype, uint16_t *output_symbol_index) {
     size_t ordinal;
 
     if (output_symbol_index != NULL) {
         *output_symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
     }
-    if (!binrwir_program_builder_is_writable(builder) ||
+    if (!binrwir_binfunc_builder_is_writable(builder) ||
         output_symbol_index == NULL || name.size == 0U || name.data == NULL ||
         !runtimec_string_view_is_valid(langtype) ||
         (langtype.size != 0U &&
@@ -1504,7 +1504,7 @@ runtimec_status_t binrwir_program_builder_add_symbol(
     if (builder->symbol_count >= (size_t)UINT16_MAX) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
-    if (!binrwir_program_builder_reserve_symbols(builder,
+    if (!binrwir_binfunc_builder_reserve_symbols(builder,
                                                  builder->symbol_count + 1U)) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
@@ -1537,8 +1537,8 @@ bool binrwir_literal_is_none_value(runtimec_bytes_view_t wire_bytes) {
            runtimec_xvalue_body_from_wire(wire_bytes).size == 0U;
 }
 
-runtimec_status_t binrwir_program_builder_add_literal(
-    binrwir_program_builder_t *builder, runtimec_bytes_view_t wire_bytes,
+runtimec_status_t binrwir_binfunc_builder_add_literal(
+    binrwir_binfunc_builder_t *builder, runtimec_bytes_view_t wire_bytes,
     runtimec_string_view_t langtype, uint32_t *output_literal_index) {
     if (output_literal_index != NULL) {
         *output_literal_index = BINRWIR_LITERAL_INDEX_NONE;
@@ -1554,7 +1554,7 @@ runtimec_status_t binrwir_program_builder_add_literal(
      * 字面量**都进池，而这条检查是登记处唯一拦「无类型操作数」的地方。
      * 非 None 的 wire（`bodylen != 0` 或带 attr）配空 langtype 仍然拒绝。
      */
-    if (!binrwir_program_builder_is_writable(builder) ||
+    if (!binrwir_binfunc_builder_is_writable(builder) ||
         output_literal_index == NULL || wire_bytes.size == 0U ||
         wire_bytes.data == NULL) {
         return RUNTIMEC_STATUS_INVALID;
@@ -1570,7 +1570,7 @@ runtimec_status_t binrwir_program_builder_add_literal(
     if (builder->literal_count >= UINT32_MAX) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
-    if (!binrwir_program_builder_reserve_literals(
+    if (!binrwir_binfunc_builder_reserve_literals(
             builder, builder->literal_count + 1U)) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
@@ -1581,19 +1581,19 @@ runtimec_status_t binrwir_program_builder_add_literal(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_program_builder_add_instruction(
-    binrwir_program_builder_t *builder,
+runtimec_status_t binrwir_binfunc_builder_add_instruction(
+    binrwir_binfunc_builder_t *builder,
     const binrwir_instruction_build_request_t *request,
     uint32_t *output_instruction_identifier) {
     size_t read_count;
     size_t write_count;
     size_t span_count;
-    binrwir_program_instruction_record_t *record;
+    binrwir_binfunc_instruction_record_t *record;
 
     if (output_instruction_identifier != NULL) {
         *output_instruction_identifier = BINRWIR_IDENTIFIER_NONE;
     }
-    if (!binrwir_program_builder_is_writable(builder) || request == NULL ||
+    if (!binrwir_binfunc_builder_is_writable(builder) || request == NULL ||
         output_instruction_identifier == NULL ||
         binrwir_instruction_validate_build_request(request) !=
             RUNTIMEC_STATUS_SUCCESS) {
@@ -1607,9 +1607,9 @@ runtimec_status_t binrwir_program_builder_add_instruction(
         builder->argument_count > UINT32_MAX - span_count) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
-    if (!binrwir_program_builder_reserve_instructions(
+    if (!binrwir_binfunc_builder_reserve_instructions(
             builder, builder->instructions.count + 1U) ||
-        !binrwir_program_builder_reserve_arguments(
+        !binrwir_binfunc_builder_reserve_arguments(
             builder, builder->argument_count + span_count)) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
@@ -1637,9 +1637,9 @@ runtimec_status_t binrwir_program_builder_add_instruction(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t binrwir_program_builder_finalize(
-    binrwir_program_builder_t *builder, binrwir_program_t **output_program) {
-    binrwir_program_t *program;
+runtimec_status_t binrwir_binfunc_builder_finalize(
+    binrwir_binfunc_builder_t *builder, binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_t *program;
     size_t *symbol_order = NULL;
     size_t *symbol_remap = NULL;
     runtimec_status_t status;
@@ -1647,21 +1647,21 @@ runtimec_status_t binrwir_program_builder_finalize(
     if (output_program != NULL) {
         *output_program = NULL;
     }
-    if (!binrwir_program_builder_is_writable(builder) ||
+    if (!binrwir_binfunc_builder_is_writable(builder) ||
         output_program == NULL || builder->instructions.count == 0U) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    program = (binrwir_program_t *)runtimec_allocator_allocate(
-        &builder->allocator, sizeof(*program), _Alignof(binrwir_program_t));
+    program = (binrwir_binfunc_t *)runtimec_allocator_allocate(
+        &builder->allocator, sizeof(*program), _Alignof(binrwir_binfunc_t));
     if (program == NULL) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
     memset(program, 0, sizeof(*program));
     program->allocator = builder->allocator;
     program->identity = builder->identity;
-    status = binrwir_program_allocate_storage(program, builder);
+    status = binrwir_binfunc_allocate_storage(program, builder);
     if (status == RUNTIMEC_STATUS_SUCCESS && builder->symbol_count != 0U) {
-        symbol_order = (size_t *)binrwir_program_allocate_exact(
+        symbol_order = (size_t *)binrwir_binfunc_allocate_exact(
             &builder->allocator, builder->symbol_count * 2U, sizeof(size_t),
             _Alignof(size_t));
         if (symbol_order == NULL) {
@@ -1674,7 +1674,7 @@ runtimec_status_t binrwir_program_builder_finalize(
         memcpy(program->instructions.heads, builder->instructions.heads,
                sizeof(binrwir_instruction_t) * builder->instructions.count);
         memcpy(program->instructions.records, builder->instructions.records,
-               sizeof(binrwir_program_instruction_record_t) *
+               sizeof(binrwir_binfunc_instruction_record_t) *
                    builder->instructions.count);
         if (program->argument_count != 0U) {
             memcpy(program->arguments, builder->arguments,
@@ -1694,9 +1694,9 @@ runtimec_status_t binrwir_program_builder_finalize(
             memcpy(program->alias_rules, builder->alias_rules,
                    sizeof(binrwir_alias_rule_t) * program->alias_rule_count);
         }
-        binrwir_program_copy_pools(program, builder, symbol_order,
+        binrwir_binfunc_copy_pools(program, builder, symbol_order,
                                    symbol_remap);
-        status = binrwir_program_validate(program);
+        status = binrwir_binfunc_validate(program);
     }
     if (symbol_order != NULL) {
         (void)runtimec_allocator_deallocate(
@@ -1704,10 +1704,10 @@ runtimec_status_t binrwir_program_builder_finalize(
             sizeof(size_t) * builder->symbol_count * 2U, _Alignof(size_t));
     }
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        binrwir_program_release(program);
+        binrwir_binfunc_release(program);
         (void)runtimec_allocator_deallocate(
             &builder->allocator, program, sizeof(*program),
-            _Alignof(binrwir_program_t));
+            _Alignof(binrwir_binfunc_t));
         return status;
     }
     builder->finalized = true;

@@ -67,10 +67,10 @@
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir/signature.h"
 #include "contract/error.h"
 #include "contract/status.h"
@@ -146,7 +146,7 @@ static runtimec_status_t scalar_type_of_langtype(
  * 符号池给出空类型并以 UNSUPPORTED 拒绝；本批 8 条不涉及它。
  */
 static runtimec_status_t scalar_type_of_argument(
-    binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
+    binrwir_binvthread_frame_t *frame, const binrwir_argument_t *argument,
     scalar_type_t *output_type, runtimec_error_t *error) {
     runtimec_string_view_t langtype = runtimec_string_view_make(NULL, 0U);
     runtimec_status_t status;
@@ -307,7 +307,7 @@ static runtimec_status_t scalar_fail(runtimec_error_t *error, int64_t code,
 
 /* 读一个参数项到栈缓冲；返回字节数与类型。 */
 static runtimec_status_t scalar_read_operand(
-    binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
+    binrwir_binvthread_frame_t *frame, const binrwir_argument_t *argument,
     uint8_t *bytes, scalar_type_t *output_type, runtimec_error_t *error) {
     runtimec_bytes_buffer_t buffer = {bytes, 0U, SCALAR_BODY_CAPACITY};
     runtimec_status_t status =
@@ -358,7 +358,7 @@ typedef enum scalar_unary_operation {
  * 这里只按「有符号 / 无符号」分叉，不按 langtype 分叉——宽度由 scalar_store 处理。
  */
 static runtimec_status_t scalar_unary_integer(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     scalar_unary_operation_t operation, runtimec_error_t *error) {
     uint8_t operand_bytes[SCALAR_BODY_CAPACITY];
@@ -428,7 +428,7 @@ static runtimec_status_t scalar_unary_integer(
  * 输入不是标量数值时由 scalar_read_operand 拒绝。
  */
 static runtimec_status_t scalar_transcendental(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     scalar_unary_operation_t operation, runtimec_error_t *error) {
     uint8_t operand_bytes[SCALAR_BODY_CAPACITY];
@@ -476,7 +476,7 @@ static runtimec_status_t scalar_transcendental(
 
 #define SCALAR_INTEGER_UNARY_HANDLER(name, operation)                         \
     static runtimec_status_t name(                                            \
-        binrwir_execution_frame_t *frame,                                     \
+        binrwir_binvthread_frame_t *frame,                                     \
         const binrwir_instruction_view_t *instruction,                        \
         binrwir_execution_exit_t *output_exit) {                              \
         runtimec_error_t error;                                               \
@@ -491,14 +491,14 @@ static runtimec_status_t scalar_transcendental(
  * 两个操作数先按值转 double 再算；`uint64` 走无符号值本身，不经 int64（matrix:26）。
  *
  * **为什么这里要有基础条目**：本条**不是**生产入口。生产走
- * `execution_window → binrwir_program_specialize`，只要特化表里有对应行，
+ * `execution_window → binrwir_binfunc_specialize`，只要特化表里有对应行，
  * 基础 opid 就被无条件改写成 `0x8xxx`，执行的是 `scalar_generated_power_*`。
  *
  * 补它的理由是**测试矩阵完整**：`handler_behavior` 按基础 opid 组织标量语义，
  * 标量族 37 个算子只有 `pow` 缺条目。缺这一条会让「矩阵全覆盖」变成假话，
  * 而不是让生产少一个能力。
  */
-static runtimec_status_t scalar_power(binrwir_execution_frame_t *frame,
+static runtimec_status_t scalar_power(binrwir_binvthread_frame_t *frame,
                                       const binrwir_instruction_view_t *instruction,
                                       runtimec_error_t *error) {
     uint8_t left_bytes[SCALAR_BODY_CAPACITY];
@@ -545,7 +545,7 @@ static runtimec_status_t scalar_power(binrwir_execution_frame_t *frame,
 
 #define SCALAR_TRANSCENDENTAL_HANDLER(name, operation)                        \
     static runtimec_status_t name(                                            \
-        binrwir_execution_frame_t *frame,                                     \
+        binrwir_binvthread_frame_t *frame,                                     \
         const binrwir_instruction_view_t *instruction,                        \
         binrwir_execution_exit_t *output_exit) {                              \
         runtimec_error_t error;                                               \
@@ -566,7 +566,7 @@ SCALAR_TRANSCENDENTAL_HANDLER(scalar_handle_log, SCALAR_UNARY_LOG)
  * 结果与操作数顺序无关（按 C 与 Rust）。整数路径先比整数，不比浮点。
  */
 static runtimec_status_t scalar_min_max(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, int want_maximum,
     runtimec_error_t *error) {
     uint8_t left_bytes[SCALAR_BODY_CAPACITY];
@@ -650,7 +650,7 @@ static runtimec_status_t scalar_min_max(
 
 #define SCALAR_MIN_MAX_HANDLER(name, want_maximum)                            \
     static runtimec_status_t name(                                            \
-        binrwir_execution_frame_t *frame,                                     \
+        binrwir_binvthread_frame_t *frame,                                     \
         const binrwir_instruction_view_t *instruction,                        \
         binrwir_execution_exit_t *output_exit) {                              \
         runtimec_error_t error;                                               \
@@ -687,7 +687,7 @@ static int scalar_boundary_is_truthy(const uint8_t *bytes,
 }
 
 static runtimec_status_t scalar_logical(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, int is_and, int is_not,
     runtimec_error_t *error) {
     uint8_t bytes[SCALAR_BODY_CAPACITY];
@@ -728,7 +728,7 @@ static runtimec_status_t scalar_logical(
 
 #define SCALAR_LOGICAL_HANDLER(name, is_and, is_not)                          \
     static runtimec_status_t name(                                            \
-        binrwir_execution_frame_t *frame,                                     \
+        binrwir_binvthread_frame_t *frame,                                     \
         const binrwir_instruction_view_t *instruction,                        \
         binrwir_execution_exit_t *output_exit) {                              \
         runtimec_error_t error;                                               \
@@ -788,7 +788,7 @@ static int64_t scalar_saturate_to_width(int64_t value, scalar_type_t target) {
 }
 
 static runtimec_status_t scalar_cast(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, runtimec_error_t *error) {
     uint8_t source_bytes[SCALAR_BODY_CAPACITY];
     uint8_t result_bytes[SCALAR_BODY_CAPACITY];
@@ -927,7 +927,7 @@ static runtimec_status_t scalar_cast(
  */
 #define SCALAR_FORWARDING_HANDLER(name, implementation)                       \
     static runtimec_status_t name(                                            \
-        binrwir_execution_frame_t *frame,                                     \
+        binrwir_binvthread_frame_t *frame,                                     \
         const binrwir_instruction_view_t *instruction,                        \
         binrwir_execution_exit_t *output_exit) {                              \
         runtimec_error_t error;                                               \
@@ -939,7 +939,7 @@ static runtimec_status_t scalar_cast(
 /* 带一个额外常量参数的同类转发（`scalar_pointer_equality` 的 invert 位）。 */
 #define SCALAR_FORWARDING_HANDLER_WITH_ARGUMENT(name, implementation, argument) \
     static runtimec_status_t name(                                            \
-        binrwir_execution_frame_t *frame,                                     \
+        binrwir_binvthread_frame_t *frame,                                     \
         const binrwir_instruction_view_t *instruction,                        \
         binrwir_execution_exit_t *output_exit) {                              \
         runtimec_error_t error;                                               \
@@ -957,7 +957,7 @@ SCALAR_FORWARDING_HANDLER(scalar_handle_pow, scalar_power)
  * catalog 掩码只给 int64 / uint64，其余一律 INVALID。
  */
 static runtimec_status_t scalar_shift(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, int shift_left,
     runtimec_error_t *error) {
     uint8_t value_bytes[SCALAR_BODY_CAPACITY];
@@ -1024,7 +1024,7 @@ static runtimec_status_t scalar_shift(
 
 #define SCALAR_SHIFT_HANDLER(name, shift_left)                                \
     static runtimec_status_t name(                                            \
-        binrwir_execution_frame_t *frame,                                     \
+        binrwir_binvthread_frame_t *frame,                                     \
         const binrwir_instruction_view_t *instruction,                        \
         binrwir_execution_exit_t *output_exit) {                              \
         runtimec_error_t error;                                               \
@@ -1081,7 +1081,7 @@ static bool scalar_char_to_utf8(runtimec_string_view_t langtype,
 
 /* 读一个字符操作数并解码成 UTF-8。 */
 static runtimec_status_t scalar_char_operand(
-    binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
+    binrwir_binvthread_frame_t *frame, const binrwir_argument_t *argument,
     char *text, size_t capacity, size_t *output_size, runtimec_error_t *error) {
     uint8_t bytes[SCALAR_CHAR_TEXT_CAPACITY];
     runtimec_bytes_buffer_t buffer = {bytes, 0U, sizeof(bytes)};
@@ -1107,7 +1107,7 @@ static runtimec_status_t scalar_char_operand(
 
 /* concat：两段 UTF-8 依次写出，结果恒 char/utf8（matrix:64）。 */
 static runtimec_status_t scalar_concat(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, runtimec_error_t *error) {
     char left[SCALAR_CHAR_TEXT_CAPACITY];
     char right[SCALAR_CHAR_TEXT_CAPACITY];
@@ -1149,7 +1149,7 @@ static runtimec_status_t scalar_concat(
 
 /* streq：比较解码后的码点序列，种类可以不同（matrix:65）。 */
 static runtimec_status_t scalar_streq(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, int invert,
     runtimec_error_t *error) {
     char left[SCALAR_CHAR_TEXT_CAPACITY];
@@ -1190,7 +1190,7 @@ static runtimec_status_t scalar_streq(
 
 #define SCALAR_CHAR_HANDLER(name, call)                                       \
     static runtimec_status_t name(                                            \
-        binrwir_execution_frame_t *frame,                                     \
+        binrwir_binvthread_frame_t *frame,                                     \
         const binrwir_instruction_view_t *instruction,                        \
         binrwir_execution_exit_t *output_exit) {                              \
         runtimec_error_t error;                                               \
@@ -1240,7 +1240,7 @@ typedef enum scalar_comparison {
 } scalar_comparison_t;
 
 static runtimec_status_t scalar_compare(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     scalar_comparison_t comparison, int invert, runtimec_error_t *error) {
     uint8_t left_bytes[SCALAR_BODY_CAPACITY];
@@ -1403,7 +1403,7 @@ static runtimec_status_t scalar_compare(
  * 一律 INVALID（matrix 的 boolean-equality，不是「按真值比较」）。
  */
 static runtimec_status_t scalar_boolean_equality(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, int invert,
     runtimec_error_t *error) {
     uint8_t left_bytes[SCALAR_BODY_CAPACITY];
@@ -1452,7 +1452,7 @@ static runtimec_status_t scalar_boolean_equality(
 
 #define SCALAR_COMPARISON_HANDLER(name, comparison, invert)                   \
     static runtimec_status_t name(                                            \
-        binrwir_execution_frame_t *frame,                                     \
+        binrwir_binvthread_frame_t *frame,                                     \
         const binrwir_instruction_view_t *instruction,                        \
         binrwir_execution_exit_t *output_exit) {                              \
         runtimec_error_t error;                                               \
@@ -1464,7 +1464,7 @@ static runtimec_status_t scalar_boolean_equality(
 
 #define SCALAR_BOOLEAN_HANDLER(name, invert)                                  \
     static runtimec_status_t name(                                            \
-        binrwir_execution_frame_t *frame,                                     \
+        binrwir_binvthread_frame_t *frame,                                     \
         const binrwir_instruction_view_t *instruction,                        \
         binrwir_execution_exit_t *output_exit) {                              \
         runtimec_error_t error;                                               \
@@ -1508,7 +1508,7 @@ SCALAR_BOOLEAN_HANDLER(scalar_handle_bool_neq, 1)
  * UNSUPPORTED 并点名原因，不发明一种表示。
  */
 static runtimec_status_t scalar_pointer_equality(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, int invert,
     runtimec_error_t *error) {
     uint8_t left_bytes[SCALAR_CHAR_TEXT_CAPACITY];
@@ -1624,7 +1624,7 @@ SCALAR_FORWARDING_HANDLER_WITH_ARGUMENT(scalar_handle_ptreq_not,
                                         scalar_pointer_equality, 1)
 
 static runtimec_status_t scalar_handle_debugger(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     static const char paused[] = "paused";
@@ -1699,7 +1699,7 @@ static runtimec_status_t scalar_handle_debugger(
  * 「有没有 langtype」由 `_langtype` 取——取不到就是无记录。两条同时成立即 None。
  */
 static runtimec_status_t scalar_nonexistence(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, int invert,
     runtimec_error_t *error) {
     const binrwir_argument_t *operand;

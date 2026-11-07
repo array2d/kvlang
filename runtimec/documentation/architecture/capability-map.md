@@ -17,7 +17,7 @@
 | Hot instruction identity | `binrwir/instruction.*` | 每条 instruction 只保留稳定 `opid` |
 | Addressed arguments | `binrwir/argument.*` | 每个参数只保留 `argidx + uint64 argaddr`，完整且不截断 |
 | Signature and alias policy | `binrwir/signature.*` | `(opid, argidx)` 声明类型、方向与权限；相同 `argaddr` 证明实际 alias |
-| Shared execution frame and exit | `binrwir/execution_frame.*`, `binrwir/execution_exit.h` | vmbin 与内部 JIT executor 使用同一结构合同 |
+| Shared execution frame and exit | `binrwir/binvthread_frame.*`, `binrwir/execution_exit.h` | vmbin 与内部 JIT executor 使用同一结构合同 |
 | Execution plan representation | `binrwir/execution_plan.*` | 不含 body cache 或通用寄存器分配的可删除派生物 |
 | Plan generation and target decision | `binrwir_compiler/` | 编译阶段一次决定 JIT 或 VMBIN |
 | Unified compilation | `binrwir_compiler/` | 同时持有 Program、plan、target 与可选机器码 |

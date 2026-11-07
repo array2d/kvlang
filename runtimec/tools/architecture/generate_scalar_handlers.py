@@ -918,7 +918,7 @@ def _emit_character_thunk(row: Row, call: str) -> str:
     """
     name = handler_name(row)
     return (f"static runtimec_status_t {name}(\n"
-            f"    binrwir_execution_frame_t *frame,\n"
+            f"    binrwir_binvthread_frame_t *frame,\n"
             f"    const binrwir_instruction_view_t *instruction,\n"
             f"    binrwir_execution_exit_t *output_exit) {{\n"
             f"    {call}\n"

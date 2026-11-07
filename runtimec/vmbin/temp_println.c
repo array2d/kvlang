@@ -29,9 +29,9 @@
 #include "contract/float_format.h"
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/status.h"
 #include "vmbin/value_access.h"
 
@@ -65,7 +65,7 @@ static runtimec_status_t runtimec_temp_println_fail(
  * 入口，本文件不再留私有副本。取不到就是空视图，调用方据此失败封闭。
  */
 static runtimec_string_view_t runtimec_temp_println_langtype(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument) {
     runtimec_string_view_t langtype = runtimec_string_view_make(NULL, 0U);
     runtimec_error_t error;
@@ -381,7 +381,7 @@ static runtimec_temp_println_render_result_t runtimec_temp_println_render(
 }
 
 static runtimec_status_t runtimec_temp_println_run(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, const char *separator,
     int use_stderr, int trailing_newline,
     binrwir_execution_exit_t *output_exit) {
@@ -482,7 +482,7 @@ static runtimec_status_t runtimec_temp_println_run(
 }
 
 static runtimec_status_t runtimec_temp_println_handler(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_temp_println_run(frame, instruction, " ", 0, 1,
@@ -490,7 +490,7 @@ static runtimec_status_t runtimec_temp_println_handler(
 }
 
 static runtimec_status_t runtimec_temp_print_handler(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_temp_println_run(frame, instruction, "", 0, 0,
@@ -498,7 +498,7 @@ static runtimec_status_t runtimec_temp_print_handler(
 }
 
 static runtimec_status_t runtimec_temp_cerr_handler(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_temp_println_run(frame, instruction, " ", 1, 1,

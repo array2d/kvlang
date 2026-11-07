@@ -21,7 +21,7 @@
 
 #include <stdbool.h>
 
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/status.h"
 #include "contract/view.h"
 
@@ -54,8 +54,8 @@ typedef runtimec_string_view_t (*binrwir_format_sink_function)(
  * function_name 可为空（Program 不存函数名，存名等于给同一事实造第二处真相）；
  * resolve_operation_name 可为 NULL，此时算子一律打印 `opid=0x…`，不猜名字。
  */
-runtimec_status_t binrwir_program_format(
-    const binrwir_program_t *program, runtimec_string_view_t function_name,
+runtimec_status_t binrwir_binfunc_format(
+    const binrwir_binfunc_t *program, runtimec_string_view_t function_name,
     binrwir_operation_name_function resolve_operation_name,
     void *resolve_context, binrwir_format_sink_function sink,
     void *sink_context);

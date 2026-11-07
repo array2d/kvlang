@@ -33,10 +33,10 @@
 #include <unistd.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/frame_bindings.h"
 #include "binrwir/instruction.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir/registry.h"
 #include "kvspace/xvalue_head.h"
 #include "vmbin/temp_println.h"
@@ -128,10 +128,10 @@ static void test_deallocate(void *context, void *allocation, size_t size,
 static void run_println(const test_value_t *value, char *output,
                         size_t output_capacity) {
     runtimec_allocator_t allocator = {NULL, test_allocate, test_deallocate};
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_instruction_build_request_t request;
     binrwir_argument_t read_argument;
@@ -158,7 +158,7 @@ static void run_println(const test_value_t *value, char *output,
     identity.binrwir_binary_interface_generation =
         BINRWIR_BINARY_INTERFACE_GENERATION;
     identity.canonical_encoding_revision = 1U;
-    if (binrwir_program_builder_create(&allocator, &identity, &builder) !=
+    if (binrwir_binfunc_builder_create(&allocator, &identity, &builder) !=
         RUNTIMEC_STATUS_SUCCESS) {
         EXPECT(0);
         return;
@@ -168,7 +168,7 @@ static void run_println(const test_value_t *value, char *output,
      * `vmbin_value_access_form` 才能从 attr 里读到 langtype。用 LITERAL
      * 就永远读到空 langtype（恒普通值），指针分支走不到。
      */
-    EXPECT(binrwir_program_builder_add_parameter(
+    EXPECT(binrwir_binfunc_builder_add_parameter(
                builder, BINRWIR_PARAMETER_DIRECTION_READ, 1U,
                runtimec_string_view_from_c_string("int64"),
                &parameter_index) == RUNTIMEC_STATUS_SUCCESS);
@@ -178,7 +178,7 @@ static void run_println(const test_value_t *value, char *output,
      * 两个写参是 echo 出来的槽：`println` 的签名是 `(…)->()`，但程序 builder
      * 要求写参非空（算术结果槽），这里给两个不会被读的占位槽。
      */
-    EXPECT(binrwir_program_builder_add_symbol(
+    EXPECT(binrwir_binfunc_builder_add_symbol(
                builder, runtimec_string_view_from_c_string("/t/one"),
                runtimec_string_view_from_c_string("int64"),
                &symbol_index) == RUNTIMEC_STATUS_SUCCESS);
@@ -196,18 +196,18 @@ static void run_println(const test_value_t *value, char *output,
     request.read_arguments.count = 1U;
     request.write_arguments.data = write_arguments;
     request.write_arguments.count = 2U;
-    EXPECT(binrwir_program_builder_add_instruction(builder, &request,
+    EXPECT(binrwir_binfunc_builder_add_instruction(builder, &request,
                                                    &instruction_identifier) ==
            RUNTIMEC_STATUS_SUCCESS);
-    if (binrwir_program_builder_finalize(builder, &program) !=
+    if (binrwir_binfunc_builder_finalize(builder, &program) !=
         RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         EXPECT(0);
         return;
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
 
-    EXPECT(binrwir_execution_frame_initialize(&frame, program, NULL, 1U, 1U,
+    EXPECT(binrwir_binvthread_frame_initialize(&frame, program, NULL, 1U, 1U,
                                               0U) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(binrwir_frame_bindings_create(&allocator, 2U, &bindings) ==
            RUNTIMEC_STATUS_SUCCESS);
@@ -229,7 +229,7 @@ static void run_println(const test_value_t *value, char *output,
         }
     }
 
-    EXPECT(binrwir_program_get_instruction(program, instruction_identifier,
+    EXPECT(binrwir_binfunc_get_instruction(program, instruction_identifier,
                                            &view) ==
            RUNTIMEC_STATUS_SUCCESS);
 
@@ -264,8 +264,8 @@ static void run_println(const test_value_t *value, char *output,
     (void)remove(output_path);
 
     (void)binrwir_frame_bindings_destroy(bindings);
-    (void)binrwir_execution_frame_destroy(&frame);
-    (void)binrwir_program_destroy(program);
+    (void)binrwir_binvthread_frame_destroy(&frame);
+    (void)binrwir_binfunc_destroy(program);
 }
 
 int main(void) {

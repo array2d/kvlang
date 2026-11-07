@@ -24,7 +24,7 @@
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
 #include "contract/error.h"
@@ -188,14 +188,14 @@ static runtimec_string_view_t langtype_strip_declaration_prefix(
 
 /* 写一个写参；长度必须与既有值体一致，由 value_access 裁定。 */
 static runtimec_status_t langtype_write(
-    binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
+    binrwir_binvthread_frame_t *frame, const binrwir_argument_t *argument,
     const void *bytes, size_t size, runtimec_error_t *error) {
     return vmbin_value_access_write_body(
         frame, argument, runtimec_bytes_view_make(bytes, size), error);
 }
 
 static runtimec_status_t langtype_execute(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, runtimec_error_t *error) {
     runtimec_string_view_t langtype = runtimec_string_view_make(NULL, 0U);
     langtype_parsed_t parsed;
@@ -241,7 +241,7 @@ static runtimec_status_t langtype_execute(
 }
 
 static runtimec_status_t runtimec_langtype_parse(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     runtimec_error_t error;

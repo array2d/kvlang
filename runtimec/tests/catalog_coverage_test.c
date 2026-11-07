@@ -15,7 +15,7 @@
  * ── 为什么不再要求「基础 opid 必须注册」────────────────────────────
  *
  * `engine/execution_window.c:572` 在**生产路径上无条件调用**
- * `binrwir_program_specialize`（编码之后、编译之前）。所以能特化的算子，
+ * `binrwir_binfunc_specialize`（编码之后、编译之前）。所以能特化的算子，
  * 基础 opid **到不了 `binrwir_registry_find`**——它先被改写成 `0x8xxx`。
  *
  * 旧判据（「基础 opid 必须注册」）因此断言了一个**不产生行为的属性**：
@@ -348,7 +348,7 @@ int main(int argument_count, char **arguments) {
         /*
          * 判据（修订版）：**基础已注册** 或 **至少一条特化已注册**。
          *
-         * 后者的依据是生产路径无条件调用 `binrwir_program_specialize`
+         * 后者的依据是生产路径无条件调用 `binrwir_binfunc_specialize`
          * （`execution_window.c:572`）——基础 opid 到不了 `registry_find`。
          * 只看基础会把 `pow` 这类「100 条特化全注册、基础没注册」的算子
          * 误报成缺失。

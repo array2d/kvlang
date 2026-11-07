@@ -27,11 +27,11 @@ static runtimec_status_t binrwir_compiler_optimization_fail(
 
 runtimec_status_t binrwir_compiler_build_execution_plan(
     const runtimec_allocator_t *allocator,
-    const binrwir_program_t *canonical_program, uint64_t plan_generation,
+    const binrwir_binfunc_t *canonical_program, uint64_t plan_generation,
     uint32_t compiler_revision,
     binrwir_execution_plan_t **output_execution_plan,
     runtimec_error_t *error) {
-    binrwir_program_view_t program_view;
+    binrwir_binfunc_view_t program_view;
     binrwir_source_program_counter_mapping_t *source_mappings = NULL;
     binrwir_execution_plan_t *plan = NULL;
     size_t instruction_count;
@@ -47,7 +47,7 @@ runtimec_status_t binrwir_compiler_build_execution_plan(
             error, RUNTIMEC_STATUS_INVALID, 1,
             "invalid execution plan request");
     }
-    if (binrwir_program_get_view(canonical_program, &program_view) !=
+    if (binrwir_binfunc_get_view(canonical_program, &program_view) !=
         RUNTIMEC_STATUS_SUCCESS) {
         return binrwir_compiler_optimization_fail(
             error, RUNTIMEC_STATUS_INVALID, 2, "canonical program is not usable");
@@ -72,7 +72,7 @@ runtimec_status_t binrwir_compiler_build_execution_plan(
              ++mapping_ordinal) {
             binrwir_instruction_view_t instruction;
 
-            if (binrwir_program_get_instruction(canonical_program,
+            if (binrwir_binfunc_get_instruction(canonical_program,
                                                 (uint32_t)mapping_ordinal,
                                                 &instruction) !=
                 RUNTIMEC_STATUS_SUCCESS) {

@@ -63,7 +63,7 @@ runtimec_status_t binrwir_jit_safepoint_commit_completed_state(
     uint32_t completed_logical_program_counter,
     uint32_t next_logical_program_counter,
     void *execution_state,
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     runtimec_error_t *error) {
     (void)next_logical_program_counter;
     (void)error;
@@ -80,7 +80,7 @@ runtimec_status_t binrwir_jit_safepoint_discard_incomplete_state(
     binrwir_jit_safepoint_boundary_t boundary,
     uint32_t current_logical_program_counter,
     void *execution_state,
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     runtimec_error_t *error) {
     (void)error;
     if (plan == NULL || !binrwir_jit_safepoint_is_discard_boundary(boundary) ||

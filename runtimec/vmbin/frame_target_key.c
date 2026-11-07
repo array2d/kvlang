@@ -10,11 +10,11 @@
 
 #include "binrwir/argument.h"
 #include "contract/error.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/view.h"
 
 runtimec_status_t vmbin_frame_target_key(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, char *buffer, size_t capacity) {
     runtimec_string_view_t name;
     runtimec_string_view_t langtype;
@@ -27,7 +27,7 @@ runtimec_status_t vmbin_frame_target_key(
     if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL ||
         !runtimec_key_view_is_valid(frame->frame_path) ||
         frame->frame_path.size == 0U ||
-        binrwir_program_get_symbol(frame->program, argument->slot, &name,
+        binrwir_binfunc_get_symbol(frame->program, argument->slot, &name,
                                    &langtype) != RUNTIMEC_STATUS_SUCCESS ||
         name.size == 0U) {
         return RUNTIMEC_STATUS_INVALID;
@@ -51,7 +51,7 @@ runtimec_status_t vmbin_frame_target_key(
  * `vmbin_value_access_write_*` 那几条（#632）。
  */
 runtimec_status_t vmbin_value_access_argument_key(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, char *buffer, size_t capacity,
     runtimec_error_t *error) {
     runtimec_string_view_t name;
@@ -78,7 +78,7 @@ runtimec_status_t vmbin_value_access_argument_key(
     }
     /* STATIC：符号池里的名字就是**完整 key**（`/tmp/adk` 这类绝对路径）。
      * 拼 `frame_path` 是错的——那会得到 `/vthread/.../\/tmp/adk`。 */
-    if (binrwir_program_get_symbol(frame->program, argument->slot, &name,
+    if (binrwir_binfunc_get_symbol(frame->program, argument->slot, &name,
                                    &langtype) != RUNTIMEC_STATUS_SUCCESS ||
         name.size == 0U) {
         runtimec_error_set(error, RUNTIMEC_STATUS_INVALID,

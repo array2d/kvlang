@@ -15,13 +15,13 @@
  * 游标：frame->logical_program_counter 是 Program 内的**指令标识符**（稠密序号）；
  * 结构化退出里的 logical_program_counter / resume_logical_program_counter 是
  * **source logical program counter**（layout 的 irseq，可持久化）。两者之间用
- * binrwir_program_find_instruction 映射。
+ * binrwir_binfunc_find_instruction 映射。
  */
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/execution_plan.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir/registry.h"
 #include "contract/diagnostic_band.h"
 #include "contract/status.h"
@@ -92,9 +92,9 @@ _Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_INTERPRETER_DIAG_CONTRADICTORY_
  * handler 借用。它不在本层被解引用，也不是包装类型——本层不认识存储，只做透传。
  */
 runtimec_status_t
-vmbin_execute(const binrwir_program_t *program,
+vmbin_execute(const binrwir_binfunc_t *program,
               const binrwir_execution_plan_t *execution_plan,
-              binrwir_execution_frame_t *frame,
+              binrwir_binvthread_frame_t *frame,
               const binrwir_registry_t *builtin_registry,
               void *kvspace_handle,
               vmbin_profile_t *profile,

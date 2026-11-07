@@ -15,7 +15,7 @@
 #include <stdint.h>
 
 #include "binrwir/execution_plan.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/allocator.h"
 #include "contract/status.h"
 
@@ -25,7 +25,7 @@ extern "C" {
 
 runtimec_status_t binrwir_compiler_build_execution_plan(
     const runtimec_allocator_t *allocator,
-    const binrwir_program_t *canonical_program,
+    const binrwir_binfunc_t *canonical_program,
     uint64_t plan_generation,
     uint32_t compiler_revision,
     binrwir_execution_plan_t **output_execution_plan,

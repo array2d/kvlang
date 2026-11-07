@@ -149,7 +149,7 @@ const vmkv_rwir_capability_t *vmkv_rwir_manifest_capability(
  *
  * 存在的理由：BinRWIR 要能打印成文本以检查编译结果，打印时按 opid 显示算子名。
  * 名字解析放在这一层，是因为 `binrwir` 不得依赖 `vmkv`（否则编码层与指令层成环），
- * 由调用方把本函数作为回调传给 `binrwir_program_format`。
+ * 由调用方把本函数作为回调传给 `binrwir_binfunc_format`。
  *
  * 数据只来自 `rwir_catalog.def` 展开的那张能力表——**不建第二张 opid 表**。
  * `FOREIGN`（0xFFFE）与保留区不是算子，不在表里，返回 false，由调用方自行

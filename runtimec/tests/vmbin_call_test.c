@@ -10,9 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/frame_bindings.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/status.h"
 #include "kvspace/xvalue_head.h"
 #include "binrwir/registry.h"
@@ -167,11 +167,11 @@ typedef struct test_program_source {
 
 static runtimec_status_t test_program_build(
     const runtimec_allocator_t *allocator, const test_program_source_t *source,
-    binrwir_program_t **output_program) {
+    binrwir_binfunc_t **output_program) {
     /* 同 `vmbin_execute_test`：字面量 wire 的落地缓冲要活到 finalize。 */
     static uint8_t literal_wires[8][KVSPACE_XVALUE_HEAD_LEN + TEST_VALUE_CAPACITY];
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
     uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
     uint32_t identifier = BINRWIR_IDENTIFIER_NONE;
     size_t ordinal;
@@ -185,7 +185,7 @@ static runtimec_status_t test_program_build(
     identity.binrwir_binary_interface_generation =
         BINRWIR_BINARY_INTERFACE_GENERATION;
     identity.canonical_encoding_revision = 1U;
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -194,7 +194,7 @@ static runtimec_status_t test_program_build(
          ++ordinal) {
         uint32_t parameter_index = BINRWIR_ARGUMENT_INDEX_NONE;
 
-        status = binrwir_program_builder_add_parameter(
+        status = binrwir_binfunc_builder_add_parameter(
             builder, source->parameters[ordinal].direction,
             source->parameters[ordinal].argument_index,
             runtimec_string_view_from_c_string(
@@ -213,7 +213,7 @@ static runtimec_status_t test_program_build(
         rule.write_parameter_index =
             source->alias_rules[ordinal].write_parameter_index;
         rule.policy = (uint8_t)source->alias_rules[ordinal].policy;
-        status = binrwir_program_builder_add_alias_rule(builder, &rule,
+        status = binrwir_binfunc_builder_add_alias_rule(builder, &rule,
                                                         &rule_identifier);
     }
     for (ordinal = 0U; status == RUNTIMEC_STATUS_SUCCESS &&
@@ -225,7 +225,7 @@ static runtimec_status_t test_program_build(
                       source->symbol_types[ordinal])
                 : runtimec_string_view_make(NULL, 0U);
 
-        status = binrwir_program_builder_add_symbol(
+        status = binrwir_binfunc_builder_add_symbol(
             builder,
             runtimec_string_view_from_c_string(source->symbols[ordinal]),
             symbol_type, &symbol_index);
@@ -254,7 +254,7 @@ static runtimec_status_t test_program_build(
             memcpy(literal_wire + KVSPACE_XVALUE_HEAD_LEN,
                    source->literal_bytes[ordinal],
                    source->literal_sizes[ordinal]);
-            status = binrwir_program_builder_add_literal(
+            status = binrwir_binfunc_builder_add_literal(
                 builder,
                 runtimec_bytes_view_make(
                     literal_wire,
@@ -278,13 +278,13 @@ static runtimec_status_t test_program_build(
         request.read_arguments.count = instruction->read_count;
         request.write_arguments.data = instruction->writes;
         request.write_arguments.count = instruction->write_count;
-        status = binrwir_program_builder_add_instruction(builder, &request,
+        status = binrwir_binfunc_builder_add_instruction(builder, &request,
                                                          &identifier);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
@@ -294,9 +294,9 @@ static void test_int64_bytes(int64_t value, uint8_t output[8]) {
 
 /* 建 Frame 并给一张容量足够的绑定表。 */
 static runtimec_status_t test_frame_create(
-    binrwir_execution_frame_t *frame, const binrwir_program_t *program,
+    binrwir_binvthread_frame_t *frame, const binrwir_binfunc_t *program,
     const runtimec_allocator_t *allocator) {
-    runtimec_status_t status = binrwir_execution_frame_initialize(
+    runtimec_status_t status = binrwir_binvthread_frame_initialize(
         frame, program, NULL, 1U, 2U, 0U);
     binrwir_frame_bindings_t *bindings = NULL;
 
@@ -311,14 +311,14 @@ static runtimec_status_t test_frame_create(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-static runtimec_status_t test_frame_release(binrwir_execution_frame_t *frame) {
+static runtimec_status_t test_frame_release(binrwir_binvthread_frame_t *frame) {
     runtimec_status_t status = RUNTIMEC_STATUS_SUCCESS;
 
     if (frame->bindings != NULL) {
         status = binrwir_frame_bindings_destroy(frame->bindings);
         frame->bindings = NULL;
     }
-    (void)binrwir_execution_frame_destroy(frame);
+    (void)binrwir_binvthread_frame_destroy(frame);
     return status;
 }
 
@@ -326,7 +326,7 @@ static runtimec_status_t test_frame_release(binrwir_execution_frame_t *frame) {
  * 调用方签名：1 读参、1 写参。绑定槽号按 frame_slot 的划分：读参 0、写参 0+1=1。
  */
 static runtimec_status_t test_bind_caller(
-    binrwir_execution_frame_t *caller, const test_value_t *read_value,
+    binrwir_binvthread_frame_t *caller, const test_value_t *read_value,
     const test_value_t *write_value) {
     /* 文字面量/静态实参的用例不需要调用方读参绑定，传 NULL 跳过。 */
     if (read_value == NULL) {
@@ -386,10 +386,10 @@ static void test_enter_binds_and_return_releases(void) {
     runtimec_allocator_t allocator = test_allocator(&counters);
     test_value_t read_value;
     test_value_t write_value;
-    binrwir_program_t *caller_program = NULL;
-    binrwir_program_t *callee_program = NULL;
-    binrwir_execution_frame_t caller;
-    binrwir_execution_frame_t callee;
+    binrwir_binfunc_t *caller_program = NULL;
+    binrwir_binfunc_t *callee_program = NULL;
+    binrwir_binvthread_frame_t caller;
+    binrwir_binvthread_frame_t callee;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
     vmbin_call_control_t *control = NULL;
@@ -460,7 +460,7 @@ static void test_enter_binds_and_return_releases(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(test_bind_caller(&caller, &read_value, &write_value) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_initialize(&callee, callee_program,
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_initialize(&callee, callee_program,
                                                        NULL, 1U, 2U, 0U) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
@@ -486,22 +486,22 @@ static void test_enter_binds_and_return_releases(void) {
     RUNTIMEC_EXPECT(vmbin_call_control_destroy(control) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&callee) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&callee) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(test_frame_release(&caller) == RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(caller_program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(caller_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(callee_program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(callee_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
 
 /* 进入的公共前半段：调用方帧、被调程序、call 指令。 */
 typedef struct call_fixture {
-    binrwir_program_t *caller_program;
-    binrwir_program_t *callee_program;
-    binrwir_execution_frame_t caller;
-    binrwir_execution_frame_t callee;
+    binrwir_binfunc_t *caller_program;
+    binrwir_binfunc_t *callee_program;
+    binrwir_binvthread_frame_t caller;
+    binrwir_binvthread_frame_t callee;
     vmbin_call_control_t *control;
 } call_fixture_t;
 
@@ -527,7 +527,7 @@ static runtimec_status_t call_fixture_build(
         status = test_bind_caller(&fixture->caller, read_value, write_value);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_execution_frame_initialize(
+        status = binrwir_binvthread_frame_initialize(
             &fixture->callee, fixture->callee_program, NULL, 1U, 2U, 0U);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
@@ -544,13 +544,13 @@ static void call_fixture_release(const runtimec_allocator_t *allocator,
     if (fixture->control != NULL) {
         (void)vmbin_call_control_destroy(fixture->control);
     }
-    (void)binrwir_execution_frame_destroy(&fixture->callee);
+    (void)binrwir_binvthread_frame_destroy(&fixture->callee);
     (void)test_frame_release(&fixture->caller);
     if (fixture->caller_program != NULL) {
-        (void)binrwir_program_destroy(fixture->caller_program);
+        (void)binrwir_binfunc_destroy(fixture->caller_program);
     }
     if (fixture->callee_program != NULL) {
-        (void)binrwir_program_destroy(fixture->callee_program);
+        (void)binrwir_binfunc_destroy(fixture->callee_program);
     }
 }
 
@@ -756,11 +756,11 @@ static void test_nested_calls_keep_outer_addresses(void) {
     test_program_source_t caller_source;
     test_program_source_t middle_source;
     test_program_source_t inner_source;
-    binrwir_program_t *middle_program = NULL;
-    binrwir_program_t *inner_program = NULL;
+    binrwir_binfunc_t *middle_program = NULL;
+    binrwir_binfunc_t *inner_program = NULL;
     call_fixture_t fixture;
-    binrwir_execution_frame_t middle_frame;
-    binrwir_execution_frame_t inner_frame;
+    binrwir_binvthread_frame_t middle_frame;
+    binrwir_binvthread_frame_t inner_frame;
     vmbin_call_control_t *middle_control = NULL;
     vmbin_call_control_t *inner_control = NULL;
     vmbin_call_request_t middle_request = {0U, 2U};
@@ -840,7 +840,7 @@ static void test_nested_calls_keep_outer_addresses(void) {
     middle_frame = fixture.callee;
 
     /* 第二层：middle → inner，实参是 middle 自己的形参。 */
-    RUNTIMEC_EXPECT(binrwir_execution_frame_initialize(
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_initialize(
                         &inner_frame, inner_program, NULL, 1U, 2U, 0U) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_call_control_create(&middle_frame, inner_program,
@@ -864,12 +864,12 @@ static void test_nested_calls_keep_outer_addresses(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_call_control_destroy(inner_control) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&inner_frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&inner_frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(vmbin_call_return(&fixture.caller, &middle_frame,
                                       fixture.control, &exit_state) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(inner_program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(inner_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     call_fixture_release(&allocator, &fixture);
     (void)middle_program;
@@ -1103,7 +1103,7 @@ static void test_return_restores_frame_for_reuse(void) {
 static void test_slot_capacity_includes_symbols(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     size_t capacity = 0U;
     test_parameter_t parameters[2];
     test_instruction_t instruction;
@@ -1140,7 +1140,7 @@ static void test_slot_capacity_includes_symbols(void) {
     RUNTIMEC_EXPECT(vmbin_frame_slot_capacity(program, &capacity) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(capacity == 4U);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }

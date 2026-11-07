@@ -51,7 +51,14 @@ fn fresh_kv() -> (TempStore, Kv) {
     // 便于清理时按前缀批量删。
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let dsn = format!("fs:///tmp/kvlanglayout_i116_{}_{seq}", std::process::id());
+    /* 临时目录**放仓库内**，不放 `/tmp`：后者是 tmpfs、跨会话共享，
+     * 别的会话的残留目录会让本仓测试红绿颠倒（实测过一次 8 红 / 清目录后全绿）。
+     * `workspace/` 已 gitignore，且 `/home` 跨 pod 持久。 */
+    let dsn = format!(
+        "fs://{}/../workspace/tmp/layout-tests/i116_{}_{seq}",
+        env!("CARGO_MANIFEST_DIR"),
+        std::process::id()
+    );
     let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
 
     let mut kv = Kv::conn(&dsn);
@@ -458,7 +465,7 @@ fn abs_if_is_numbered_jumps() {
 #[test]
 fn while_back_edge_is_goto_int64() {
     let (_store, mut kv) = compile_fn(
-        "rwfunc sum_to(*int64 $n) -> (*int64 $acc) {\n    0 -> *acc\n    1 -> i\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n",
+        "rwfunc sum_to(*int64 $n) -> (*int64 $acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "sum_to");
     let p = plane(&mut kv, "sum_to");
@@ -528,7 +535,7 @@ fn break_is_goto_exit() {
 #[test]
 fn continue_is_goto_cond() {
     let (_store, mut kv) = compile_fn(
-        "rwfunc f() -> (*int64 $acc) {\n    0 -> *acc\n    1 -> i\n    while (i <= 5) {\n        if (i == 3) {\n            i = i + 1\n            continue\n        }\n        *acc = *acc + i\n        i = i + 1\n    }\n}\n",
+        "rwfunc f() -> (*int64 $acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= 5) {\n        if (i == 3) {\n            i = i + 1\n            continue\n        }\n        *acc = *acc + i\n        i = i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");
@@ -560,7 +567,7 @@ fn continue_is_goto_cond() {
 fn for_is_br_goto_single_plane() {
     let (_store, mut kv) = compile_fn(
         // Declare container before member writes (`lower::check_map_defined`).
-        "rwfunc f() -> () {\n    data:[int64]·int64 = {}\n    data·0 = 0\n    data·1 = 1\n    for (x in data) {\n        x -> _\n    }\n}\n",
+        "rwfunc f() -> () {\n    data:'[int64]'int64 = {}\n    data·0 = 0\n    data·1 = 1\n    for (x in data) {\n        x -> _\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");
@@ -587,7 +594,7 @@ fn for_is_br_goto_single_plane() {
 #[test]
 fn nested_if_while_single_plane() {
     let (_store, mut kv) = compile_fn(
-        "rwfunc f() -> (*int64 $acc) {\n    0 -> *acc\n    1 -> i\n    while (i <= 3) {\n        if (i == 2) {\n            *acc = *acc + i\n        } else {\n            *acc = *acc + 1\n        }\n        i = i + 1\n    }\n}\n",
+        "rwfunc f() -> (*int64 $acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= 3) {\n        if (i == 2) {\n            *acc = *acc + i\n        } else {\n            *acc = *acc + 1\n        }\n        i = i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");

@@ -3,7 +3,7 @@
 #include "binrwir_compiler/jit/verifier.h"
 
 runtimec_status_t binrwir_jit_verify_program(
-    const binrwir_program_t *program,
+    const binrwir_binfunc_t *program,
     const binrwir_jit_target_t *target,
     binrwir_jit_verified_program_t *output_verified_program,
     binrwir_jit_refusal_t *refusal,

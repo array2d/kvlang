@@ -21,9 +21,9 @@
 
 #include "binrwir/argument.h"
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/frame_bindings.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir/registry.h"
 #include "contract/allocator.h"
 #include "contract/error.h"
@@ -64,10 +64,10 @@ static runtimec_string_view_t test_view(const char *text) {
 
 /* 一条 COPY：读局部符号 0、写局部符号 1；两者都不在绑定表里。 */
 static runtimec_status_t test_build_program(const runtimec_allocator_t *allocator,
-                                            binrwir_program_t **output_program,
+                                            binrwir_binfunc_t **output_program,
                                             binrwir_argument_t *output_read_argument) {
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
     binrwir_argument_t write_argument;
     binrwir_instruction_build_request_t request;
     uint32_t identifier = BINRWIR_IDENTIFIER_NONE;
@@ -79,17 +79,17 @@ static runtimec_status_t test_build_program(const runtimec_allocator_t *allocato
     identity.program_generation = 1U;
     identity.binrwir_binary_interface_generation =
         BINRWIR_BINARY_INTERFACE_GENERATION;
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
-    status = binrwir_program_builder_add_symbol(builder, test_view("alpha"),
+    status = binrwir_binfunc_builder_add_symbol(builder, test_view("alpha"),
                                                 test_view("int64"), &symbol_index);
     if (status == RUNTIMEC_STATUS_SUCCESS && symbol_index != 0U) {
         status = RUNTIMEC_STATUS_INVALID;
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_add_symbol(
+        status = binrwir_binfunc_builder_add_symbol(
             builder, test_view("beta"), test_view("int64"), &symbol_index);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS && symbol_index != 1U) {
@@ -111,13 +111,13 @@ static runtimec_status_t test_build_program(const runtimec_allocator_t *allocato
         request.read_arguments.count = 1U;
         request.write_arguments.data = &write_argument;
         request.write_arguments.count = 1U;
-        status = binrwir_program_builder_add_instruction(builder, &request,
+        status = binrwir_binfunc_builder_add_instruction(builder, &request,
                                                          &identifier);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
@@ -127,9 +127,9 @@ int main(void) {
         .allocate = test_allocate,
         .deallocate = test_deallocate,
     };
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     binrwir_frame_bindings_t *created_bindings = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binvthread_frame_t frame;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
     binrwir_argument_t read_argument;
@@ -144,7 +144,7 @@ int main(void) {
     }
 
     /* ① 下层直调：error.code 是值访问自己的 UNBOUND_SLOT。 */
-    EXPECT(binrwir_execution_frame_initialize(&frame, program, NULL, 1U, 1U,
+    EXPECT(binrwir_binvthread_frame_initialize(&frame, program, NULL, 1U, 1U,
                                               0U) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(binrwir_frame_bindings_create(&allocator, 4U, &created_bindings) ==
            RUNTIMEC_STATUS_SUCCESS);
@@ -168,8 +168,8 @@ int main(void) {
 
     EXPECT(binrwir_frame_bindings_destroy(created_bindings) ==
            RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(binrwir_execution_frame_destroy(&frame) == RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(binrwir_binvthread_frame_destroy(&frame) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
 
     if (failures != 0) {
         printf("FAILURES %d\n", failures);

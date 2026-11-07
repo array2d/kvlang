@@ -589,7 +589,7 @@ impl Parser {
         }
         if self.peek().kind == Kind::LParen {
             self.advance();
-            decl.sig.params = self.parse_param_list(Kind::RParen);
+            decl.sig.params = self.parse_param_list_side(Kind::RParen, true);
             self.expect(Kind::RParen);
         }
         if self.peek().kind == Kind::Arrow {
@@ -597,7 +597,7 @@ impl Parser {
             self.skip_newlines();
             if self.peek().kind == Kind::LParen {
                 self.advance();
-                decl.sig.returns = self.parse_param_list(Kind::RParen);
+                decl.sig.returns = self.parse_param_list_side(Kind::RParen, false);
                 self.expect(Kind::RParen);
             }
         }
@@ -699,7 +699,7 @@ impl Parser {
         }
         if self.peek().kind == Kind::LParen {
             self.advance();
-            sig.params = self.parse_param_list(Kind::RParen);
+            sig.params = self.parse_param_list_side(Kind::RParen, true);
             self.expect(Kind::RParen);
         }
         if self.peek().kind == Kind::Arrow {
@@ -707,10 +707,10 @@ impl Parser {
             self.skip_newlines();
             if self.peek().kind == Kind::LParen {
                 self.advance();
-                sig.returns = self.parse_param_list(Kind::RParen);
+                sig.returns = self.parse_param_list_side(Kind::RParen, false);
                 self.expect(Kind::RParen);
             } else {
-                sig.returns = self.parse_param_list(Kind::LBrace);
+                sig.returns = self.parse_param_list_side(Kind::LBrace, false);
             }
         }
         sig
@@ -817,6 +817,11 @@ impl Parser {
     /// 解析后剥掉——函数体内的引用写裸名（指针参数写 `*name`）。
     /// 旧写法 `name: type` 不再接受。
     fn parse_param_list(&mut self, stop: Kind) -> Vec<Param> {
+        self.parse_param_list_side(stop, false)
+    }
+
+    /// `is_read_side` = 本次解析的是读参列表（`(` 那一侧）还是写参列表（`-> (` 那一侧）。
+    fn parse_param_list_side(&mut self, stop: Kind, is_read_side: bool) -> Vec<Param> {
         let mut params = Vec::new();
         while self.peek().kind != stop && self.peek().kind != Kind::EOF {
             self.skip_newlines();
@@ -856,6 +861,7 @@ impl Parser {
                     ty,
                     by_ref: String::new(),
                     has_ty: true,
+                    inplace: false,
                 });
                 continue;
             }
@@ -902,11 +908,39 @@ impl Parser {
                     src_name: String::new(),
                 });
             }
+            /*
+             * 写参修饰符 `inplace`（spec [[函数写槽与布局]]）：该参数在**同一指令内
+             * 既读又写**。写法是 `*T $name inplace`——跟在名字之后，与现有
+             * 「类型在前、`$name` 在后」的风格一致。
+             *
+             * **只认写参**：读参上出现它是错误（语义不成立——读参不得作写槽）。
+             * `is_read_side` 由调用方按列表位置传入。
+             */
+            let mut inplace = false;
+            if self.peek().kind == Kind::Ident && self.peek().value == "inplace" {
+                let at = self.advance();
+                if is_read_side {
+                    self.errors.push(Diagnostic {
+                        pos: at.pos,
+                        warn: false,
+                        info: false,
+                        message: format!(
+                            "`inplace` 只能修饰 rwfunc 的写参；读参 `{name}` 不得标记"
+                        ),
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                } else {
+                    inplace = true;
+                }
+            }
             params.push(Param {
                 name,
                 ty: ty_value,
                 by_ref,
                 has_ty: true,
+                inplace,
             });
         }
         params

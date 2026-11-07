@@ -181,7 +181,7 @@ int64_t runtimec_container_shape_numel(runtimec_string_view_t langtype);
  * `output_exit` 已置好。
  */
 bool runtimec_container_open_marker(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, char *buffer,
     size_t capacity, binrwir_execution_exit_t *output_exit);
 

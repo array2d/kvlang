@@ -8,7 +8,7 @@
 #include <string.h>
 
 #include "binrwir/operation_identifiers.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/view.h"
 #include <kvspace/xvalue_head.h>
 
@@ -96,8 +96,8 @@ static runtimec_allocator_t test_allocator(
     return allocator;
 }
 
-static binrwir_program_identity_t fixture_identity(void) {
-    binrwir_program_identity_t identity = {
+static binrwir_binfunc_identity_t fixture_identity(void) {
+    binrwir_binfunc_identity_t identity = {
         .snapshot_generation = 1U,
         .program_generation = 2U,
         .schema_version = 1U,
@@ -112,7 +112,7 @@ static binrwir_program_identity_t fixture_identity(void) {
 
 /* 两读参（int64、[]char/utf8）、一写参（float64），外加一条 (0,0)=MAY_ALIAS。 */
 static runtimec_status_t fixture_register_signature(
-    binrwir_program_builder_t *builder) {
+    binrwir_binfunc_builder_t *builder) {
     binrwir_alias_rule_t rule = {
         .read_parameter_index = 0U,
         .write_parameter_index = 0U,
@@ -126,7 +126,7 @@ static runtimec_status_t fixture_register_signature(
     runtimec_status_t status;
 
     /* 指令里那条 STATIC 引用的 key 文本；slot 就是它的池下标。 */
-    status = binrwir_program_builder_add_symbol(builder, type_view("/t/static"),
+    status = binrwir_binfunc_builder_add_symbol(builder, type_view("/t/static"),
                                                 type_view("int64"),
                                                 &symbol_index);
     if (status == RUNTIMEC_STATUS_SUCCESS && symbol_index != 0U) {
@@ -135,14 +135,14 @@ static runtimec_status_t fixture_register_signature(
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
-    status = binrwir_program_builder_add_parameter(
+    status = binrwir_binfunc_builder_add_parameter(
         builder, BINRWIR_PARAMETER_DIRECTION_READ, TEST_READ_ARGUMENT_INDEX,
         type_view("int64"), &parameter_index);
     if (status == RUNTIMEC_STATUS_SUCCESS && parameter_index != 0U) {
         status = RUNTIMEC_STATUS_INVALID;
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_add_parameter(
+        status = binrwir_binfunc_builder_add_parameter(
             builder, BINRWIR_PARAMETER_DIRECTION_READ,
             TEST_SECOND_READ_ARGUMENT_INDEX,
             type_view("[]char/utf8"), &parameter_index);
@@ -151,7 +151,7 @@ static runtimec_status_t fixture_register_signature(
         status = RUNTIMEC_STATUS_INVALID;
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_add_parameter(
+        status = binrwir_binfunc_builder_add_parameter(
             builder, BINRWIR_PARAMETER_DIRECTION_WRITE,
             TEST_WRITE_ARGUMENT_INDEX, type_view("float64"),
             &parameter_index);
@@ -160,7 +160,7 @@ static runtimec_status_t fixture_register_signature(
         status = RUNTIMEC_STATUS_INVALID;
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_add_alias_rule(builder, &rule,
+        status = binrwir_binfunc_builder_add_alias_rule(builder, &rule,
                                                         &rule_identifier);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS && rule_identifier != 0U) {
@@ -171,18 +171,18 @@ static runtimec_status_t fixture_register_signature(
 
 static runtimec_status_t fixture_builder_create(
     const runtimec_allocator_t *allocator,
-    binrwir_program_builder_t **output_builder) {
-    binrwir_program_identity_t identity = fixture_identity();
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_builder_t **output_builder) {
+    binrwir_binfunc_identity_t identity = fixture_identity();
+    binrwir_binfunc_builder_t *builder = NULL;
     runtimec_status_t status;
 
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
     status = fixture_register_signature(builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         return status;
     }
     *output_builder = builder;
@@ -191,7 +191,7 @@ static runtimec_status_t fixture_builder_create(
 
 /* 一条指令：opid 0x42、source pc 5，读两个参数（参数引用 + 静态 key），写一个。 */
 static runtimec_status_t fixture_add_instruction(
-    binrwir_program_builder_t *builder) {
+    binrwir_binfunc_builder_t *builder) {
     binrwir_argument_t read_arguments[2];
     binrwir_argument_t write_arguments[1];
     binrwir_instruction_build_request_t request;
@@ -222,7 +222,7 @@ static runtimec_status_t fixture_add_instruction(
     request.read_arguments.count = 2U;
     request.write_arguments.data = write_arguments;
     request.write_arguments.count = 1U;
-    if (binrwir_program_builder_add_instruction(builder, &request,
+    if (binrwir_binfunc_builder_add_instruction(builder, &request,
                                                 &instruction_identifier) !=
         RUNTIMEC_STATUS_SUCCESS) {
         return RUNTIMEC_STATUS_INVALID;
@@ -235,9 +235,9 @@ static runtimec_status_t fixture_add_instruction(
 
 static runtimec_status_t fixture_program_build(
     const runtimec_allocator_t *allocator,
-    binrwir_program_builder_t **output_builder,
-    binrwir_program_t **output_program) {
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_builder_t **output_builder,
+    binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_builder_t *builder = NULL;
     runtimec_status_t status;
 
     status = fixture_builder_create(allocator, &builder);
@@ -247,9 +247,9 @@ static runtimec_status_t fixture_program_build(
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
-    status = binrwir_program_builder_finalize(builder, output_program);
+    status = binrwir_binfunc_builder_finalize(builder, output_program);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         return status;
     }
     *output_builder = builder;
@@ -259,24 +259,24 @@ static runtimec_status_t fixture_program_build(
 static void test_builder_creation_shape(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_identity_t identity = fixture_identity();
-    binrwir_program_identity_t invalid_identity = fixture_identity();
-    binrwir_program_builder_t *builder =
-        (binrwir_program_builder_t *)(uintptr_t)1U;
+    binrwir_binfunc_identity_t identity = fixture_identity();
+    binrwir_binfunc_identity_t invalid_identity = fixture_identity();
+    binrwir_binfunc_builder_t *builder =
+        (binrwir_binfunc_builder_t *)(uintptr_t)1U;
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(NULL, &identity, &builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(NULL, &identity, &builder) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(builder == NULL);
 
-    builder = (binrwir_program_builder_t *)(uintptr_t)1U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, NULL,
+    builder = (binrwir_binfunc_builder_t *)(uintptr_t)1U;
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, NULL,
                                                    &builder) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(builder == NULL);
 
     /* identity 的版本字段取 UINT32_MAX 就是「无效」的唯一表示。 */
     invalid_identity.schema_version = UINT32_MAX;
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(
                         &allocator, &invalid_identity, &builder) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(builder == NULL);
@@ -285,18 +285,18 @@ static void test_builder_creation_shape(void) {
     invalid_identity = fixture_identity();
     invalid_identity.binrwir_binary_interface_generation =
         BINRWIR_BINARY_INTERFACE_GENERATION + 1U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(
                         &allocator, &invalid_identity, &builder) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(builder == NULL);
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, &identity,
                                                    &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(builder != NULL);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(NULL) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(NULL) ==
                     RUNTIMEC_STATUS_INVALID);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -304,27 +304,27 @@ static void test_builder_creation_shape(void) {
 static void test_builder_rejects_invalid_parameter(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_builder_t *builder = NULL;
     uint32_t parameter_index = 0U;
 
     RUNTIMEC_EXPECT(fixture_builder_create(&allocator, &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     parameter_index = 0U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_parameter(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_parameter(
                         builder, BINRWIR_PARAMETER_DIRECTION_READ, 11U,
                         type_view("int64|float64"),
                         &parameter_index) == RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(parameter_index == BINRWIR_ARGUMENT_INDEX_NONE);
 
     parameter_index = 0U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_parameter(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_parameter(
                         builder, BINRWIR_PARAMETER_DIRECTION_READ, 11U,
                         runtimec_string_view_make(NULL, 0U),
                         &parameter_index) == RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(parameter_index == BINRWIR_ARGUMENT_INDEX_NONE);
 
     parameter_index = 0U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_parameter(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_parameter(
                         builder, BINRWIR_PARAMETER_DIRECTION_READ,
                         BINRWIR_ARGUMENT_INDEX_NONE,
                         type_view("int64"),
@@ -332,13 +332,13 @@ static void test_builder_rejects_invalid_parameter(void) {
     RUNTIMEC_EXPECT(parameter_index == BINRWIR_ARGUMENT_INDEX_NONE);
 
     parameter_index = 0U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_parameter(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_parameter(
                         builder, BINRWIR_PARAMETER_DIRECTION_INVALID, 11U,
                         type_view("int64"),
                         &parameter_index) == RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(parameter_index == BINRWIR_ARGUMENT_INDEX_NONE);
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -346,7 +346,7 @@ static void test_builder_rejects_invalid_parameter(void) {
 static void test_builder_rejects_invalid_alias_rule(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_builder_t *builder = NULL;
     binrwir_alias_rule_t rule = {
         .read_parameter_index = 0U,
         .write_parameter_index = 0U,
@@ -359,7 +359,7 @@ static void test_builder_rejects_invalid_alias_rule(void) {
     RUNTIMEC_EXPECT(fixture_builder_create(&allocator, &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     rule.policy = BINRWIR_ALIAS_POLICY_INVALID;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_alias_rule(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_alias_rule(
                         builder, &rule, &rule_identifier) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(rule_identifier == BINRWIR_IDENTIFIER_NONE);
@@ -367,15 +367,15 @@ static void test_builder_rejects_invalid_alias_rule(void) {
     rule.policy = BINRWIR_ALIAS_MAY_ALIAS;
     rule.reserved_16_bits = 1U;
     rule_identifier = 0U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_alias_rule(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_alias_rule(
                         builder, &rule, &rule_identifier) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(rule_identifier == BINRWIR_IDENTIFIER_NONE);
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_alias_rule(builder, NULL,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_alias_rule(builder, NULL,
                                                            &rule_identifier) ==
                     RUNTIMEC_STATUS_INVALID);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -383,15 +383,15 @@ static void test_builder_rejects_invalid_alias_rule(void) {
 static void test_finalize_rejects_empty_builder(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = (binrwir_program_t *)(uintptr_t)1U;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = (binrwir_binfunc_t *)(uintptr_t)1U;
 
     RUNTIMEC_EXPECT(fixture_builder_create(&allocator, &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(program == NULL);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -399,10 +399,10 @@ static void test_finalize_rejects_empty_builder(void) {
 static void test_program_round_trip(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = NULL;
-    binrwir_program_identity_t identity;
-    binrwir_program_view_t view;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_view_t view;
     binrwir_instruction_view_t instruction_view;
     binrwir_alias_policy_t policy = BINRWIR_ALIAS_POLICY_INVALID;
     runtimec_string_view_t int64_literal = type_view("int64");
@@ -414,11 +414,11 @@ static void test_program_round_trip(void) {
     RUNTIMEC_EXPECT(fixture_program_build(&allocator, &builder, &program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(program != NULL);
-    RUNTIMEC_EXPECT(binrwir_program_validate(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_validate(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
     memset(&identity, 0xff, sizeof(identity));
-    RUNTIMEC_EXPECT(binrwir_program_get_identity(program, &identity) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_identity(program, &identity) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(identity.snapshot_generation == 1U);
     RUNTIMEC_EXPECT(identity.program_generation == 2U);
@@ -427,7 +427,7 @@ static void test_program_round_trip(void) {
                     BINRWIR_BINARY_INTERFACE_GENERATION);
 
     memset(&view, 0xff, sizeof(view));
-    RUNTIMEC_EXPECT(binrwir_program_get_view(program, &view) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_view(program, &view) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(view.instruction_count == 1U);
     RUNTIMEC_EXPECT(view.signature.read_parameter_count == 2U);
@@ -443,7 +443,7 @@ static void test_program_round_trip(void) {
     /* 类型文本是深拷贝：指针不指向测试里的字面量，销毁 builder 后仍然可读。 */
     RUNTIMEC_EXPECT(view.signature.read_parameter_types[0].data !=
                     int64_literal.data);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     {
         runtimec_string_view_t type = view.signature.read_parameter_types[0];
@@ -464,7 +464,7 @@ static void test_program_round_trip(void) {
     RUNTIMEC_EXPECT(policy == BINRWIR_ALIAS_MAY_ALIAS);
 
     memset(&instruction_view, 0xff, sizeof(instruction_view));
-    RUNTIMEC_EXPECT(binrwir_program_get_instruction(program, 0U,
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_instruction(program, 0U,
                                                     &instruction_view) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(instruction_view.instruction->operation_identifier ==
@@ -484,17 +484,17 @@ static void test_program_round_trip(void) {
                     TEST_WRITE_ARGUMENT_INDEX);
 
     /* 标识符是稠密序号：越界与 NONE 都不是合法指令。 */
-    RUNTIMEC_EXPECT(binrwir_program_get_instruction(program, 1U,
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_instruction(program, 1U,
                                                     &instruction_view) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(instruction_view.instruction == NULL);
-    RUNTIMEC_EXPECT(binrwir_program_get_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_instruction(
                         program, BINRWIR_IDENTIFIER_NONE,
                         &instruction_view) == RUNTIMEC_STATUS_INVALID);
-    RUNTIMEC_EXPECT(binrwir_program_get_instruction(program, 0U, NULL) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_instruction(program, 0U, NULL) ==
                     RUNTIMEC_STATUS_INVALID);
 
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -502,8 +502,8 @@ static void test_program_round_trip(void) {
 static void test_finalize_rejects_unbound_parameter(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = (binrwir_program_t *)(uintptr_t)1U;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = (binrwir_binfunc_t *)(uintptr_t)1U;
     binrwir_argument_t read_argument;
     binrwir_instruction_build_request_t request;
     uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
@@ -522,13 +522,13 @@ static void test_finalize_rejects_unbound_parameter(void) {
                         TEST_READ_ARGUMENT_INDEX,
                         BINRWIR_REFERENCE_PARAMETER_READ, 5U, 0U,
                         &read_argument) == RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                         builder, &request, &instruction_identifier) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(program == NULL);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
     /* slot 与 argidx 各说一套：同一个参数就有了第二处真相。 */
@@ -538,28 +538,28 @@ static void test_finalize_rejects_unbound_parameter(void) {
                         TEST_SECOND_READ_ARGUMENT_INDEX,
                         BINRWIR_REFERENCE_PARAMETER_READ, 0U, 0U,
                         &read_argument) == RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                         builder, &request, &instruction_identifier) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(program == NULL);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
     /* 同一方向内重复登记 argidx：签名只有一份 argidx，重复即非法。 */
     RUNTIMEC_EXPECT(fixture_builder_create(&allocator, &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_parameter(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_parameter(
                         builder, BINRWIR_PARAMETER_DIRECTION_READ,
                         TEST_READ_ARGUMENT_INDEX, type_view("int64"),
                         &parameter_index) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(fixture_add_instruction(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(program == NULL);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -567,29 +567,29 @@ static void test_finalize_rejects_unbound_parameter(void) {
 static void test_builder_is_one_shot(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = NULL;
-    binrwir_program_t *second_program = (binrwir_program_t *)(uintptr_t)1U;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binfunc_t *second_program = (binrwir_binfunc_t *)(uintptr_t)1U;
     uint32_t parameter_index = 0U;
 
     RUNTIMEC_EXPECT(fixture_program_build(&allocator, &builder, &program) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
     /* 定稿后一切写入都被拒绝，第二次 finalize 也不给第二个 Program。 */
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_parameter(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_parameter(
                         builder, BINRWIR_PARAMETER_DIRECTION_READ, 21U,
                         type_view("int64"),
                         &parameter_index) == RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(parameter_index == BINRWIR_ARGUMENT_INDEX_NONE);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder,
                                                      &second_program) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(second_program == NULL);
 
     /* reset 回到空的可写状态：空 builder 不能定稿，重新登记后可以。 */
-    RUNTIMEC_EXPECT(binrwir_program_builder_reset(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_reset(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder,
                                                      &second_program) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(second_program == NULL);
@@ -597,20 +597,20 @@ static void test_builder_is_one_shot(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(fixture_add_instruction(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder,
                                                      &second_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(second_program != NULL);
-    RUNTIMEC_EXPECT(binrwir_program_validate(second_program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_validate(second_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
-    RUNTIMEC_EXPECT(binrwir_program_validate(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_validate(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(second_program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(second_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -619,8 +619,8 @@ static void test_builder_is_one_shot(void) {
 static void test_builder_reports_out_of_memory(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = NULL;
     size_t successful_allocations;
 
     for (successful_allocations = 0U;
@@ -632,19 +632,19 @@ static void test_builder_reports_out_of_memory(void) {
                         RUNTIMEC_STATUS_SUCCESS);
         counters.fail_allocations = true;
         counters.remaining_successful_allocations = successful_allocations;
-        RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+        RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                         RUNTIMEC_STATUS_OUT_OF_MEMORY);
         RUNTIMEC_EXPECT(program == NULL);
         counters.fail_allocations = false;
 
         /* 失败不改 builder：同样的内容再定稿一次就成功。 */
-        RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+        RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                         RUNTIMEC_STATUS_SUCCESS);
         RUNTIMEC_EXPECT(program != NULL);
-        RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+        RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                         RUNTIMEC_STATUS_SUCCESS);
         program = NULL;
-        RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+        RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                         RUNTIMEC_STATUS_SUCCESS);
         RUNTIMEC_EXPECT(counters.live_allocations == 0U);
     }
@@ -654,7 +654,7 @@ static void test_builder_reports_out_of_memory(void) {
 static void test_pool_finalize_reports_out_of_memory(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_identity_t identity = fixture_identity();
+    binrwir_binfunc_identity_t identity = fixture_identity();
     unsigned char encoded[4] = {0x01U, 0x02U, 0x03U, 0x04U};
     size_t successful_allocations;
     runtimec_status_t status;
@@ -662,22 +662,22 @@ static void test_pool_finalize_reports_out_of_memory(void) {
     for (successful_allocations = 0U;
          successful_allocations < TEST_POOL_FINALIZE_ALLOCATION_COUNT;
          ++successful_allocations) {
-        binrwir_program_builder_t *builder = NULL;
-        binrwir_program_t *program = NULL;
+        binrwir_binfunc_builder_t *builder = NULL;
+        binrwir_binfunc_t *program = NULL;
         binrwir_argument_t local_argument;
         binrwir_instruction_build_request_t request;
         uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
         uint32_t literal_index = BINRWIR_LITERAL_INDEX_NONE;
         uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
 
-        RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+        RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, &identity,
                                                        &builder) ==
                         RUNTIMEC_STATUS_SUCCESS);
-        RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(
+        RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(
                             builder, type_view("alpha"), type_view("int64"),
                             &symbol_index) ==
                         RUNTIMEC_STATUS_SUCCESS);
-        RUNTIMEC_EXPECT(binrwir_program_builder_add_literal(
+        RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_literal(
                             builder,
                             runtimec_bytes_view_make(encoded, sizeof(encoded)),
                             type_view("int64"), &literal_index) ==
@@ -691,23 +691,23 @@ static void test_pool_finalize_reports_out_of_memory(void) {
         request.operation_identifier = TEST_OPERATION_IDENTIFIER;
         request.read_arguments.data = &local_argument;
         request.read_arguments.count = 1U;
-        RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+        RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                             builder, &request, &instruction_identifier) ==
                         RUNTIMEC_STATUS_SUCCESS);
 
         counters.fail_allocations = true;
         counters.remaining_successful_allocations = successful_allocations;
-        status = binrwir_program_builder_finalize(builder, &program);
+        status = binrwir_binfunc_builder_finalize(builder, &program);
         RUNTIMEC_EXPECT(status == RUNTIMEC_STATUS_OUT_OF_MEMORY);
         RUNTIMEC_EXPECT(program == NULL);
         counters.fail_allocations = false;
 
-        RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+        RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                         RUNTIMEC_STATUS_SUCCESS);
         RUNTIMEC_EXPECT(program != NULL);
-        RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+        RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                         RUNTIMEC_STATUS_SUCCESS);
-        RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+        RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                         RUNTIMEC_STATUS_SUCCESS);
         RUNTIMEC_EXPECT(counters.live_allocations == 0U);
     }
@@ -717,19 +717,19 @@ static void test_pool_finalize_reports_out_of_memory(void) {
 static void test_registration_reports_out_of_memory(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = (binrwir_program_t *)(uintptr_t)1U;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = (binrwir_binfunc_t *)(uintptr_t)1U;
     uint32_t parameter_index = 0U;
     uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
     binrwir_argument_t read_argument;
     binrwir_instruction_build_request_t request;
-    binrwir_program_identity_t identity = fixture_identity();
+    binrwir_binfunc_identity_t identity = fixture_identity();
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, &identity,
                                                    &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     counters.fail_allocations = true;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_parameter(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_parameter(
                         builder, BINRWIR_PARAMETER_DIRECTION_READ, 31U,
                         type_view("int64"),
                         &parameter_index) == RUNTIMEC_STATUS_OUT_OF_MEMORY);
@@ -744,15 +744,15 @@ static void test_registration_reports_out_of_memory(void) {
     request.operation_identifier = TEST_OPERATION_IDENTIFIER;
     request.read_arguments.data = &read_argument;
     request.read_arguments.count = 1U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                         builder, &request, &instruction_identifier) ==
                     RUNTIMEC_STATUS_OUT_OF_MEMORY);
     RUNTIMEC_EXPECT(instruction_identifier == BINRWIR_IDENTIFIER_NONE);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(program == NULL);
     counters.fail_allocations = false;
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -763,10 +763,10 @@ static void test_registration_reports_out_of_memory(void) {
  */
 static runtimec_status_t build_symbol_program(
     const runtimec_allocator_t *allocator, const char *const *insertion_names,
-    binrwir_program_t **output_program) {
+    binrwir_binfunc_t **output_program) {
     static const char *const argument_names[3] = {"alpha", "beta", "sum"};
-    binrwir_program_identity_t identity = fixture_identity();
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_identity_t identity = fixture_identity();
+    binrwir_binfunc_builder_t *builder = NULL;
     binrwir_argument_t arguments[3];
     binrwir_instruction_build_request_t request;
     uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
@@ -775,12 +775,12 @@ static runtimec_status_t build_symbol_program(
     size_t argument_ordinal;
     runtimec_status_t status;
 
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
     for (ordinal = 0U; ordinal < 3U; ++ordinal) {
-        status = binrwir_program_builder_add_symbol(
+        status = binrwir_binfunc_builder_add_symbol(
             builder, type_view(insertion_names[ordinal]), type_view("int64"),
             &symbol_index);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -790,7 +790,7 @@ static runtimec_status_t build_symbol_program(
     for (argument_ordinal = 0U;
          status == RUNTIMEC_STATUS_SUCCESS && argument_ordinal < 3U;
          ++argument_ordinal) {
-        status = binrwir_program_builder_add_symbol(
+        status = binrwir_binfunc_builder_add_symbol(
             builder, type_view(argument_names[argument_ordinal]),
             type_view("int64"), &symbol_index);
         if (status == RUNTIMEC_STATUS_SUCCESS) {
@@ -805,13 +805,13 @@ static runtimec_status_t build_symbol_program(
         request.operation_identifier = TEST_OPERATION_IDENTIFIER;
         request.read_arguments.data = arguments;
         request.read_arguments.count = 3U;
-        status = binrwir_program_builder_add_instruction(
+        status = binrwir_binfunc_builder_add_instruction(
             builder, &request, &instruction_identifier);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
@@ -821,8 +821,8 @@ static void test_symbol_pool_is_canonical(void) {
     const char *const forward_names[3] = {"sum", "alpha", "beta"};
     const char *const reverse_names[3] = {"beta", "alpha", "sum"};
     const char *const expected_names[3] = {"alpha", "beta", "sum"};
-    binrwir_program_t *forward_program = NULL;
-    binrwir_program_t *reverse_program = NULL;
+    binrwir_binfunc_t *forward_program = NULL;
+    binrwir_binfunc_t *reverse_program = NULL;
     binrwir_instruction_view_t forward_view;
     binrwir_instruction_view_t reverse_view;
     runtimec_string_view_t name;
@@ -835,23 +835,23 @@ static void test_symbol_pool_is_canonical(void) {
     RUNTIMEC_EXPECT(build_symbol_program(&allocator, reverse_names,
                                          &reverse_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_validate(forward_program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_validate(forward_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_validate(reverse_program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_validate(reverse_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     if (forward_program == NULL || reverse_program == NULL) {
         if (forward_program != NULL) {
-            (void)binrwir_program_destroy(forward_program);
+            (void)binrwir_binfunc_destroy(forward_program);
         }
         if (reverse_program != NULL) {
-            (void)binrwir_program_destroy(reverse_program);
+            (void)binrwir_binfunc_destroy(reverse_program);
         }
         return;
     }
 
     for (ordinal = 0U; ordinal < 3U; ++ordinal) {
         name = runtimec_string_view_make(NULL, 0U);
-        RUNTIMEC_EXPECT(binrwir_program_get_symbol(forward_program,
+        RUNTIMEC_EXPECT(binrwir_binfunc_get_symbol(forward_program,
                                                    (uint16_t)ordinal, &name,
                                                    &symbol_type) ==
                         RUNTIMEC_STATUS_SUCCESS);
@@ -862,10 +862,10 @@ static void test_symbol_pool_is_canonical(void) {
 
     /* 登记期下标与 Program 下标不同：两个 builder 的插入顺序相反，但参数槽都指向
        同一个规范位置，所以指令视图逐项相同。 */
-    RUNTIMEC_EXPECT(binrwir_program_get_instruction(forward_program, 0U,
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_instruction(forward_program, 0U,
                                                     &forward_view) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_get_instruction(reverse_program, 0U,
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_instruction(reverse_program, 0U,
                                                     &reverse_view) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(forward_view.read_arguments.count == 3U);
@@ -885,9 +885,9 @@ static void test_symbol_pool_is_canonical(void) {
     RUNTIMEC_EXPECT(forward_view.read_arguments.data[0].slot == 0U);
     RUNTIMEC_EXPECT(forward_view.read_arguments.data[2].slot == 2U);
 
-    RUNTIMEC_EXPECT(binrwir_program_destroy(forward_program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(forward_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(reverse_program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(reverse_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -895,32 +895,32 @@ static void test_symbol_pool_is_canonical(void) {
 static void test_symbol_pool_rejects_invalid_content(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_identity_t identity = fixture_identity();
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = (binrwir_program_t *)(uintptr_t)1U;
+    binrwir_binfunc_identity_t identity = fixture_identity();
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = (binrwir_binfunc_t *)(uintptr_t)1U;
     binrwir_argument_t local_argument;
     binrwir_instruction_build_request_t request;
     uint16_t symbol_index = 0U;
     uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, &identity,
                                                    &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     symbol_index = 0U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(
                         builder, runtimec_string_view_make(NULL, 0U),
                         type_view("int64"), &symbol_index) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(symbol_index == BINRWIR_SYMBOL_INDEX_NONE);
 
     /* 同名重复登记是幂等的，返回同一个下标。 */
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(builder,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(builder,
                                                        type_view("alpha"),
                                                        type_view("int64"),
                                                        &symbol_index) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(symbol_index == 0U);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(builder,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(builder,
                                                        type_view("alpha"),
                                                        type_view("int64"),
                                                        &symbol_index) ==
@@ -936,13 +936,13 @@ static void test_symbol_pool_rejects_invalid_content(void) {
     request.operation_identifier = TEST_OPERATION_IDENTIFIER;
     request.read_arguments.data = &local_argument;
     request.read_arguments.count = 1U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                         builder, &request, &instruction_identifier) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(program == NULL);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -950,9 +950,9 @@ static void test_symbol_pool_rejects_invalid_content(void) {
 static void test_literal_pool_round_trip(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_identity_t identity = fixture_identity();
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_identity_t identity = fixture_identity();
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = NULL;
     binrwir_instruction_view_t instruction_view;
     binrwir_argument_t literal_argument;
     binrwir_instruction_build_request_t request;
@@ -965,10 +965,10 @@ static void test_literal_pool_round_trip(void) {
     uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
 
     source_bytes = runtimec_bytes_view_make(encoded, sizeof(encoded));
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, &identity,
                                                    &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_literal(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_literal(
                         builder, source_bytes, type_view("int64"),
                         &literal_index) == RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(literal_index == 0U);
@@ -980,14 +980,14 @@ static void test_literal_pool_round_trip(void) {
     request.operation_identifier = TEST_OPERATION_IDENTIFIER;
     request.read_arguments.data = &literal_argument;
     request.read_arguments.count = 1U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                         builder, &request, &instruction_identifier) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_validate(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_validate(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     if (program == NULL) {
         return;
@@ -997,7 +997,7 @@ static void test_literal_pool_round_trip(void) {
     memset(encoded, 0xff, sizeof(encoded));
     wire_bytes = runtimec_bytes_view_make(NULL, 0U);
     langtype = runtimec_string_view_make(NULL, 0U);
-    RUNTIMEC_EXPECT(binrwir_program_get_literal(program, 0U, &wire_bytes,
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_literal(program, 0U, &wire_bytes,
                                                 &langtype) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(wire_bytes.size == 8U);
@@ -1007,7 +1007,7 @@ static void test_literal_pool_round_trip(void) {
     RUNTIMEC_EXPECT(langtype.size == 5U);
     RUNTIMEC_EXPECT(memcmp(langtype.data, "int64", langtype.size) == 0);
 
-    RUNTIMEC_EXPECT(binrwir_program_get_instruction(program, 0U,
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_instruction(program, 0U,
                                                     &instruction_view) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(instruction_view.read_arguments.data[0].reference_kind ==
@@ -1016,29 +1016,29 @@ static void test_literal_pool_round_trip(void) {
     {
         size_t literal_count = 0U;
 
-        RUNTIMEC_EXPECT(binrwir_program_get_literal_count(program,
+        RUNTIMEC_EXPECT(binrwir_binfunc_get_literal_count(program,
                                                           &literal_count) ==
                         RUNTIMEC_STATUS_SUCCESS);
         RUNTIMEC_EXPECT(literal_count == 1U);
         literal_count = 1U;
-        RUNTIMEC_EXPECT(binrwir_program_get_literal_count(NULL,
+        RUNTIMEC_EXPECT(binrwir_binfunc_get_literal_count(NULL,
                                                           &literal_count) ==
                         RUNTIMEC_STATUS_INVALID);
         RUNTIMEC_EXPECT(literal_count == 0U);
-        RUNTIMEC_EXPECT(binrwir_program_get_literal_count(program, NULL) ==
+        RUNTIMEC_EXPECT(binrwir_binfunc_get_literal_count(program, NULL) ==
                         RUNTIMEC_STATUS_INVALID);
     }
 
     /* 越界与空输入：失败封闭，输出回到无效值。 */
     wire_bytes = runtimec_bytes_view_make(encoded, sizeof(encoded));
     langtype = type_view("int64");
-    RUNTIMEC_EXPECT(binrwir_program_get_literal(program, 1U, &wire_bytes,
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_literal(program, 1U, &wire_bytes,
                                                 &langtype) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(wire_bytes.data == NULL);
     RUNTIMEC_EXPECT(langtype.data == NULL);
 
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -1046,25 +1046,25 @@ static void test_literal_pool_round_trip(void) {
 static void test_literal_pool_rejects_invalid_content(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_identity_t identity = fixture_identity();
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = (binrwir_program_t *)(uintptr_t)1U;
+    binrwir_binfunc_identity_t identity = fixture_identity();
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = (binrwir_binfunc_t *)(uintptr_t)1U;
     binrwir_argument_t literal_argument;
     binrwir_instruction_build_request_t request;
     unsigned char encoded[4] = {0x01U, 0x02U, 0x03U, 0x04U};
     uint32_t literal_index = 0U;
     uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, &identity,
                                                    &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     literal_index = 0U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_literal(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_literal(
                         builder, runtimec_bytes_view_make(NULL, 0U),
                         type_view("int64"), &literal_index) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(literal_index == BINRWIR_LITERAL_INDEX_NONE);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_literal(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_literal(
                         builder, runtimec_bytes_view_make(encoded,
                                                           sizeof(encoded)),
                         type_view("int64|float64"), &literal_index) ==
@@ -1080,13 +1080,13 @@ static void test_literal_pool_rejects_invalid_content(void) {
     request.operation_identifier = TEST_OPERATION_IDENTIFIER;
     request.read_arguments.data = &literal_argument;
     request.read_arguments.count = 1U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                         builder, &request, &instruction_identifier) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(program == NULL);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -1095,9 +1095,9 @@ static void test_literal_pool_rejects_invalid_content(void) {
 static void test_function_reference_round_trip(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_identity_t identity = fixture_identity();
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_identity_t identity = fixture_identity();
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = NULL;
     binrwir_instruction_view_t instruction_view;
     binrwir_argument_t function_argument;
     binrwir_instruction_build_request_t request;
@@ -1112,10 +1112,10 @@ static void test_function_reference_round_trip(void) {
     RUNTIMEC_EXPECT(function_argument.reference_kind ==
                     BINRWIR_REFERENCE_INVALID);
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, &identity,
                                                    &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(
                         builder, type_view("string.concat"),
                         runtimec_string_view_make(NULL, 0U), &symbol_index) ==
                     RUNTIMEC_STATUS_SUCCESS);
@@ -1128,39 +1128,39 @@ static void test_function_reference_round_trip(void) {
     request.operation_identifier = TEST_OPERATION_IDENTIFIER;
     request.read_arguments.data = &function_argument;
     request.read_arguments.count = 1U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                         builder, &request, &instruction_identifier) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_validate(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_validate(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     if (program == NULL) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         return;
     }
 
     name = runtimec_string_view_make(NULL, 0U);
-    RUNTIMEC_EXPECT(binrwir_program_get_symbol(program, 0U, &name,
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_symbol(program, 0U, &name,
                                                &symbol_type) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(name.size == strlen("string.concat"));
     RUNTIMEC_EXPECT(memcmp(name.data, "string.concat", name.size) == 0);
-    RUNTIMEC_EXPECT(binrwir_program_get_symbol(program, 1U, &name,
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_symbol(program, 1U, &name,
                                                &symbol_type) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(name.data == NULL);
 
-    RUNTIMEC_EXPECT(binrwir_program_get_instruction(program, 0U,
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_instruction(program, 0U,
                                                     &instruction_view) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(instruction_view.read_arguments.data[0].reference_kind ==
                     BINRWIR_REFERENCE_FUNCTION);
     RUNTIMEC_EXPECT(instruction_view.read_arguments.data[0].slot == 0U);
 
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -1169,15 +1169,15 @@ static void test_function_reference_round_trip(void) {
 static void test_symbol_type_conflict_is_rejected(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_identity_t identity = fixture_identity();
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_identity_t identity = fixture_identity();
+    binrwir_binfunc_builder_t *builder = NULL;
     uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
     uint16_t same_symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, &identity,
                                                    &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(builder,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(builder,
                                                        type_view("/t/local"),
                                                        type_view("int64"),
                                                        &symbol_index) ==
@@ -1185,7 +1185,7 @@ static void test_symbol_type_conflict_is_rejected(void) {
     RUNTIMEC_EXPECT(symbol_index == 0U);
 
     /* 同类型重复登记仍然幂等。 */
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(builder,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(builder,
                                                        type_view("/t/local"),
                                                        type_view("int64"),
                                                        &same_symbol_index) ==
@@ -1194,14 +1194,14 @@ static void test_symbol_type_conflict_is_rejected(void) {
 
     /* 不同类型：冲突，当场拒绝且不产生新符号。 */
     same_symbol_index = 0U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(builder,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(builder,
                                                        type_view("/t/local"),
                                                        type_view("float64"),
                                                        &same_symbol_index) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(same_symbol_index == BINRWIR_SYMBOL_INDEX_NONE);
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -1210,9 +1210,9 @@ static void test_symbol_type_conflict_is_rejected(void) {
 static void test_local_symbol_requires_type(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_identity_t identity = fixture_identity();
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = (binrwir_program_t *)(uintptr_t)1U;
+    binrwir_binfunc_identity_t identity = fixture_identity();
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = (binrwir_binfunc_t *)(uintptr_t)1U;
     binrwir_argument_t local_argument;
     binrwir_instruction_build_request_t request;
     runtimec_string_view_t symbol_type;
@@ -1220,10 +1220,10 @@ static void test_local_symbol_requires_type(void) {
     uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
 
     /* 不写类型就登记符号：允许（函数名、静态 key 没有值类型）。 */
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, &identity,
                                                    &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(
                         builder, type_view("/t/local"),
                         runtimec_string_view_make(NULL, 0U), &symbol_index) ==
                     RUNTIMEC_STATUS_SUCCESS);
@@ -1236,33 +1236,33 @@ static void test_local_symbol_requires_type(void) {
     request.operation_identifier = TEST_OPERATION_IDENTIFIER;
     request.read_arguments.data = &local_argument;
     request.read_arguments.count = 1U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                         builder, &request, &instruction_identifier) ==
                     RUNTIMEC_STATUS_SUCCESS);
     /* 被 LOCAL 引用却没有类型：定稿失败。 */
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(program == NULL);
 
     /* 同一形状，符号带上类型：定稿成功，且读取器把类型一起给出。 */
-    RUNTIMEC_EXPECT(binrwir_program_builder_reset(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_reset(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(builder,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(builder,
                                                        type_view("/t/local"),
                                                        type_view("int64"),
                                                        &symbol_index) ==
                     RUNTIMEC_STATUS_SUCCESS);
     request.read_arguments.data = &local_argument;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                         builder, &request, &instruction_identifier) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     symbol_type = runtimec_string_view_make(NULL, 0U);
     {
         runtimec_string_view_t symbol_name = runtimec_string_view_make(NULL, 0U);
 
-        RUNTIMEC_EXPECT(binrwir_program_get_symbol(program, symbol_index,
+        RUNTIMEC_EXPECT(binrwir_binfunc_get_symbol(program, symbol_index,
                                                    &symbol_name,
                                                    &symbol_type) ==
                         RUNTIMEC_STATUS_SUCCESS);
@@ -1270,9 +1270,9 @@ static void test_local_symbol_requires_type(void) {
         RUNTIMEC_EXPECT(memcmp(symbol_type.data, "int64", symbol_type.size) ==
                         0);
     }
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -1284,18 +1284,18 @@ static void test_local_symbol_requires_type(void) {
 static void test_static_symbol_slot_must_be_in_pool(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_identity_t identity = fixture_identity();
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = (binrwir_program_t *)(uintptr_t)1U;
+    binrwir_binfunc_identity_t identity = fixture_identity();
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = (binrwir_binfunc_t *)(uintptr_t)1U;
     binrwir_argument_t static_argument;
     binrwir_instruction_build_request_t request;
     uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
     uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, &identity,
                                                    &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(builder,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(builder,
                                                        type_view("/t/only"),
                                                        runtimec_string_view_make(
                                                            NULL, 0U),
@@ -1313,10 +1313,10 @@ static void test_static_symbol_slot_must_be_in_pool(void) {
     request.operation_identifier = TEST_OPERATION_IDENTIFIER;
     request.read_arguments.data = &static_argument;
     request.read_arguments.count = 1U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                         builder, &request, &instruction_identifier) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(program == NULL);
 
@@ -1326,53 +1326,53 @@ static void test_static_symbol_slot_must_be_in_pool(void) {
                                             &static_argument) ==
                     RUNTIMEC_STATUS_SUCCESS);
     request.read_arguments.data = &static_argument;
-    RUNTIMEC_EXPECT(binrwir_program_builder_reset(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_reset(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(builder,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(builder,
                                                        type_view("/t/only"),
                                                        runtimec_string_view_make(
                                                            NULL, 0U),
                                                        &symbol_index) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                         builder, &request, &instruction_identifier) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(program != NULL);
-    RUNTIMEC_EXPECT(binrwir_program_validate(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_validate(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
 
 static void test_program_query_failure_shape(void) {
-    binrwir_program_identity_t identity;
-    binrwir_program_view_t view;
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_view_t view;
     binrwir_instruction_view_t instruction_view;
 
     memset(&identity, 0xff, sizeof(identity));
-    RUNTIMEC_EXPECT(binrwir_program_get_identity(NULL, &identity) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_identity(NULL, &identity) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(identity.schema_version == UINT32_MAX);
     RUNTIMEC_EXPECT(identity.binrwir_binary_interface_generation == UINT32_MAX);
 
     memset(&view, 0xff, sizeof(view));
-    RUNTIMEC_EXPECT(binrwir_program_get_view(NULL, &view) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_view(NULL, &view) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(view.instruction_count == 0U);
     RUNTIMEC_EXPECT(view.signature.read_parameter_types == NULL);
 
     memset(&instruction_view, 0xff, sizeof(instruction_view));
-    RUNTIMEC_EXPECT(binrwir_program_get_instruction(NULL, 0U,
+    RUNTIMEC_EXPECT(binrwir_binfunc_get_instruction(NULL, 0U,
                                                     &instruction_view) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(instruction_view.instruction == NULL);
-    RUNTIMEC_EXPECT(binrwir_program_validate(NULL) == RUNTIMEC_STATUS_INVALID);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(NULL) == RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(binrwir_binfunc_validate(NULL) == RUNTIMEC_STATUS_INVALID);
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(NULL) == RUNTIMEC_STATUS_INVALID);
 }
 
 /*
@@ -1384,8 +1384,8 @@ static void test_program_query_failure_shape(void) {
 static void test_literal_empty_langtype_only_for_none(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_identity_t identity = fixture_identity();
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_identity_t identity = fixture_identity();
+    binrwir_binfunc_builder_t *builder = NULL;
     uint32_t literal_index = 0U;
     /* None 值：16 字节 head、bodylen 0、attrslen 0。 */
     uint8_t none_wire[KVSPACE_XVALUE_HEAD_LEN] = {0};
@@ -1393,31 +1393,31 @@ static void test_literal_empty_langtype_only_for_none(void) {
     uint8_t typed_body_wire[KVSPACE_XVALUE_HEAD_LEN + 8U] = {0};
 
     typed_body_wire[0] = 8U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, &identity,
                                                    &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     /* ① None 值 + 空 langtype ⇒ 必须成功。 */
     literal_index = BINRWIR_LITERAL_INDEX_NONE;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_literal(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_literal(
                         builder,
                         runtimec_bytes_view_make(none_wire, sizeof(none_wire)),
                         runtimec_string_view_make(NULL, 0U),
                         &literal_index) == RUNTIMEC_STATUS_SUCCESS);
     /* ② 非 None（bodylen 8）+ 空 langtype ⇒ 必须失败。 */
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_literal(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_literal(
                         builder,
                         runtimec_bytes_view_make(typed_body_wire,
                                                  sizeof(typed_body_wire)),
                         runtimec_string_view_make(NULL, 0U),
                         &literal_index) == RUNTIMEC_STATUS_INVALID);
     /* ③ 同一 wire 给了类型 ⇒ 成功（证明 ② 拒的是「缺类型」，不是「wire 形状」）。 */
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_literal(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_literal(
                         builder,
                         runtimec_bytes_view_make(typed_body_wire,
                                                  sizeof(typed_body_wire)),
                         runtimec_string_view_from_c_string("int64"),
                         &literal_index) == RUNTIMEC_STATUS_SUCCESS);
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
 }
 
 /*
@@ -1426,15 +1426,15 @@ static void test_literal_empty_langtype_only_for_none(void) {
  * 指向「空类型槽」的 LOCAL 参数不是 None，`nonnull` 对它没有意义。
  *
  * 这条钉在 Program 层：构造一个 LOCAL 引用、其符号 langtype 为空，参数类型也
- * 空，看 `binrwir_program_validate` 是否拒。本用例只用构造器与 finalize，
+ * 空，看 `binrwir_binfunc_validate` 是否拒。本用例只用构造器与 finalize，
  * 不依赖 vmbin。
  */
 static void test_empty_parameter_type_requires_none_literal(void) {
     test_allocator_context_t counters = {0U, false, 0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_identity_t identity = fixture_identity();
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_identity_t identity = fixture_identity();
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = NULL;
     binrwir_argument_t read_argument;
     binrwir_argument_t write_argument;
     binrwir_instruction_build_request_t request;
@@ -1443,16 +1443,16 @@ static void test_empty_parameter_type_requires_none_literal(void) {
     uint32_t write_literal = 0U;
     uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(&allocator, &identity,
                                                    &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     /* 局部符号 **langtype 为空**（就是「空类型槽」）。 */
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(
                         builder,
                         runtimec_string_view_from_c_string("/t/empty"),
                         runtimec_string_view_make(NULL, 0U),
                         &local_symbol) == RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_symbol(
                         builder,
                         runtimec_string_view_from_c_string("/t/result"),
                         runtimec_string_view_from_c_string("bool"),
@@ -1463,7 +1463,7 @@ static void test_empty_parameter_type_requires_none_literal(void) {
 
         bool_wire[0] = 1U;
         bool_wire[KVSPACE_XVALUE_HEAD_LEN] = 1U;
-        RUNTIMEC_EXPECT(binrwir_program_builder_add_literal(
+        RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_literal(
                             builder,
                             runtimec_bytes_view_make(bool_wire,
                                                      sizeof(bool_wire)),
@@ -1484,13 +1484,13 @@ static void test_empty_parameter_type_requires_none_literal(void) {
     request.read_arguments.count = 1U;
     request.write_arguments.data = &write_argument;
     request.write_arguments.count = 1U;
-    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_add_instruction(
                         builder, &request, &instruction_identifier) ==
                     RUNTIMEC_STATUS_SUCCESS);
     /* 参数类型空 + LOCAL 引用 ⇒ finalize 必须拒（空类型只对 None 字面量放行）。 */
-    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                     RUNTIMEC_STATUS_INVALID);
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
 }
 
 int main(void) {
@@ -1516,7 +1516,7 @@ int main(void) {
     test_static_symbol_slot_must_be_in_pool();
     test_program_query_failure_shape();
     if (failures != 0) {
-        fprintf(stderr, "binrwir_program_test: %d failure(s)\n", failures);
+        fprintf(stderr, "binrwir_binfunc_test: %d failure(s)\n", failures);
         return 1;
     }
     return 0;

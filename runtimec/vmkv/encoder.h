@@ -5,7 +5,7 @@
  * 组件：vmkv/encoder
  * 作用：读取并验证明文 RWIR，将 operation name 和 typed named parameters
  *       映射为 opid/argidx，再把静态参数 key 解引用为非零 64 位 argaddr，
- *       最终等价编码为 canonical、不可变的 binrwir_program_t。
+ *       最终等价编码为 canonical、不可变的 binrwir_binfunc_t。
  * 联系：engine route 在 compilation repository 未命中时调用；源只经
  *       vmkv/source 与主机服务读取；结果交给 BinRWIR Compiler。
  * 约束：vmkv 只有 RWIR 到 canonical BinRWIR 这一条正常方向。每个静态 key
@@ -16,7 +16,7 @@
  */
 
 #include "binrwir/argument.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/allocator.h"
 #include "contract/snapshot.h"
 #include "contract/status.h"
@@ -111,7 +111,7 @@ runtimec_status_t vmkv_encoder_get_canonical_encoding_revision(
  */
 runtimec_status_t vmkv_encode_static_argument(
     const vmkv_encode_request_t *request,
-    binrwir_program_builder_t *builder,
+    binrwir_binfunc_builder_t *builder,
     const vmkv_rwir_argument_view_t *source_argument,
     uint32_t argument_index,
     binrwir_argument_t *output_argument,
@@ -133,7 +133,7 @@ runtimec_status_t vmkv_encode_static_argument(
 runtimec_status_t vmkv_encode_instruction(
     vmkv_encoder_t *encoder,
     const vmkv_encode_request_t *request,
-    binrwir_program_builder_t *builder,
+    binrwir_binfunc_builder_t *builder,
     const vmkv_local_types_t *local_types,
     vmkv_encode_function_t *function,
     const vmkv_rwir_instruction_view_t *source_instruction,
@@ -148,7 +148,7 @@ runtimec_status_t vmkv_encode_instruction(
 runtimec_status_t vmkv_encode(
     vmkv_encoder_t *encoder,
     const vmkv_encode_request_t *request,
-    binrwir_program_t **output_program,
+    binrwir_binfunc_t **output_program,
     runtimec_error_t *error);
 
 #ifdef __cplusplus

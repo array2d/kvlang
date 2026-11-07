@@ -41,11 +41,11 @@
 
 #include "binrwir/argument.h"
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/frame_bindings.h"
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir/registry.h"
 #include "contract/allocator.h"
 #include "contract/status.h"
@@ -118,10 +118,10 @@ static runtimec_status_t key_tostr_run(void *handle,
                                        const key_tostr_request_t *test_request,
                                        binrwir_execution_exit_t *output_exit) {
     const runtimec_allocator_t allocator = test_allocator();
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_registry_t registry;
     runtimec_kvspace_access_t *access = NULL;
@@ -147,11 +147,11 @@ static runtimec_status_t key_tostr_run(void *handle,
     identity.binrwir_binary_interface_generation =
         BINRWIR_BINARY_INTERFACE_GENERATION;
     identity.canonical_encoding_revision = 1U;
-    status = binrwir_program_builder_create(&allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(&allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
-    status = binrwir_program_builder_add_symbol(
+    status = binrwir_binfunc_builder_add_symbol(
         builder, runtimec_string_view_from_c_string(KEY_TOSTR_TARGET),
         runtimec_string_view_from_c_string("char/utf8"), &symbol_index);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -159,7 +159,7 @@ static runtimec_status_t key_tostr_run(void *handle,
     }
     if (test_request->read_kind == BINRWIR_REFERENCE_STATIC) {
         /* 「取不到声明 langtype」那条：STATIC 读参只有 key 文本。 */
-        status = binrwir_program_builder_add_symbol(
+        status = binrwir_binfunc_builder_add_symbol(
             builder, runtimec_string_view_from_c_string("/t/untyped"),
             runtimec_string_view_make(NULL, 0U), &read_symbol_index);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -190,7 +190,7 @@ static runtimec_status_t key_tostr_run(void *handle,
         memcpy(g_literal_wire, wire, (size_t)wire_size);
         free(wire);
         wire = NULL;
-        status = binrwir_program_builder_add_literal(
+        status = binrwir_binfunc_builder_add_literal(
             builder,
             runtimec_bytes_view_make(g_literal_wire, (size_t)wire_size),
             runtimec_string_view_from_c_string(test_request->read_langtype),
@@ -221,16 +221,16 @@ static runtimec_status_t key_tostr_run(void *handle,
     instruction_request.read_arguments.count = test_request->read_count;
     instruction_request.write_arguments.data = writes;
     instruction_request.write_arguments.count = test_request->write_count;
-    status = binrwir_program_builder_add_instruction(
+    status = binrwir_binfunc_builder_add_instruction(
         builder, &instruction_request, &instruction_identifier);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         goto done;
     }
-    status = binrwir_program_builder_finalize(builder, &program);
+    status = binrwir_binfunc_builder_finalize(builder, &program);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         goto done;
     }
-    status = binrwir_execution_frame_initialize(&frame, program, NULL, 1U, 2U,
+    status = binrwir_binvthread_frame_initialize(&frame, program, NULL, 1U, 2U,
                                                 0U);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         goto done;
@@ -290,11 +290,11 @@ done:
     if (bindings != NULL) {
         (void)binrwir_frame_bindings_destroy(bindings);
     }
-    (void)binrwir_execution_frame_destroy(&frame);
+    (void)binrwir_binvthread_frame_destroy(&frame);
     if (program != NULL) {
-        (void)binrwir_program_destroy(program);
+        (void)binrwir_binfunc_destroy(program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 

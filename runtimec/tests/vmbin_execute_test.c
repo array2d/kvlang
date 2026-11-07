@@ -11,9 +11,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/frame_bindings.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "kvspace/xvalue_head.h"
 #include "binrwir/registry.h"
 #include "vmbin/core_operations.h"
@@ -164,15 +164,15 @@ typedef struct test_program_source {
 
 static runtimec_status_t test_program_build(
     const runtimec_allocator_t *allocator, const test_program_source_t *source,
-    binrwir_program_t **output_program) {
+    binrwir_binfunc_t **output_program) {
     /*
      * 字面量 wire 的落地缓冲。必须活到 `finalize`——`add_literal` 借用这段
      * 字节直到那时，用函数内的自动变量会在循环下一轮就被覆盖。
      * 上限取 source 的容量（8 条）。
      */
     static uint8_t literal_wires[8][KVSPACE_XVALUE_HEAD_LEN + TEST_VALUE_CAPACITY];
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
     uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
     uint32_t literal_index = 0U;
     uint32_t identifier = BINRWIR_IDENTIFIER_NONE;
@@ -187,7 +187,7 @@ static runtimec_status_t test_program_build(
     identity.binrwir_binary_interface_generation =
         BINRWIR_BINARY_INTERFACE_GENERATION;
     identity.canonical_encoding_revision = 1U;
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -196,7 +196,7 @@ static runtimec_status_t test_program_build(
          ++ordinal) {
         uint32_t parameter_index = BINRWIR_ARGUMENT_INDEX_NONE;
 
-        status = binrwir_program_builder_add_parameter(
+        status = binrwir_binfunc_builder_add_parameter(
             builder, source->parameters[ordinal].direction,
             source->parameters[ordinal].argument_index,
             runtimec_string_view_from_c_string(
@@ -212,7 +212,7 @@ static runtimec_status_t test_program_build(
                       source->symbol_types[ordinal])
                 : runtimec_string_view_make(NULL, 0U);
 
-        status = binrwir_program_builder_add_symbol(
+        status = binrwir_binfunc_builder_add_symbol(
             builder,
             runtimec_string_view_from_c_string(source->symbols[ordinal]),
             symbol_type, &symbol_index);
@@ -242,7 +242,7 @@ static runtimec_status_t test_program_build(
         memcpy(literal_wire, &head, KVSPACE_XVALUE_HEAD_LEN);
         memcpy(literal_wire + KVSPACE_XVALUE_HEAD_LEN,
                source->literal_bytes[ordinal], source->literal_sizes[ordinal]);
-        status = binrwir_program_builder_add_literal(
+        status = binrwir_binfunc_builder_add_literal(
             builder,
             runtimec_bytes_view_make(
                 literal_wire,
@@ -264,13 +264,13 @@ static runtimec_status_t test_program_build(
         request.read_arguments.count = instruction->read_count;
         request.write_arguments.data = instruction->writes;
         request.write_arguments.count = instruction->write_count;
-        status = binrwir_program_builder_add_instruction(builder, &request,
+        status = binrwir_binfunc_builder_add_instruction(builder, &request,
                                                          &identifier);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
@@ -279,10 +279,10 @@ static void test_int64_bytes(int64_t value, uint8_t output[8]) {
 }
 
 static runtimec_status_t test_frame_initialize(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     binrwir_frame_bindings_t **output_bindings,
-    const binrwir_program_t *program, const runtimec_allocator_t *allocator) {
-    runtimec_status_t status = binrwir_execution_frame_initialize(
+    const binrwir_binfunc_t *program, const runtimec_allocator_t *allocator) {
+    runtimec_status_t status = binrwir_binvthread_frame_initialize(
         frame, program, NULL, 1U, 2U, 0U);
 
     *output_bindings = NULL;
@@ -331,8 +331,8 @@ static void test_copy_writes_into_body(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
     test_value_t destination;
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -383,9 +383,9 @@ static void test_copy_writes_into_body(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -396,8 +396,8 @@ static void test_parameter_read_uses_binding_address(void) {
     runtimec_allocator_t allocator = test_allocator(&counters);
     test_value_t parameter_value;
     test_value_t destination;
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -455,9 +455,9 @@ static void test_parameter_read_uses_binding_address(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -467,8 +467,8 @@ static void test_goto_skips_instruction(void) {
     runtimec_allocator_t allocator = test_allocator(&counters);
     test_value_t skipped;
     test_value_t done;
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -545,9 +545,9 @@ static void test_goto_skips_instruction(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -561,8 +561,8 @@ static void test_branch_selects_target(int64_t condition) {
     runtimec_allocator_t allocator = test_allocator(&counters);
     test_value_t then_value;
     test_value_t else_value;
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -658,9 +658,9 @@ static void test_branch_selects_target(int64_t condition) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -668,8 +668,8 @@ static void test_branch_selects_target(int64_t condition) {
 static void test_call_reports_target_symbol(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -709,7 +709,7 @@ static void test_call_reports_target_symbol(void) {
         runtimec_string_view_t symbol_type =
             runtimec_string_view_make(NULL, 0U);
 
-        RUNTIMEC_EXPECT(binrwir_program_get_symbol(
+        RUNTIMEC_EXPECT(binrwir_binfunc_get_symbol(
                             program, (uint16_t)exit_state.target_identifier,
                             &name, &symbol_type) == RUNTIMEC_STATUS_SUCCESS);
         RUNTIMEC_EXPECT(memcmp(name.data, "target.function", name.size) == 0);
@@ -717,9 +717,9 @@ static void test_call_reports_target_symbol(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -727,8 +727,8 @@ static void test_call_reports_target_symbol(void) {
 static void test_return_completes_frame(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -758,16 +758,16 @@ static void test_return_completes_frame(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
 
 /* add：读两个 int64、写一个 int64；handler 走与 core 相同的地址数据面。 */
 static runtimec_status_t test_add_handler(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     runtimec_error_t error;
@@ -814,8 +814,8 @@ static void test_add_builtin_handler(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
     test_value_t destination;
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -880,9 +880,9 @@ static void test_add_builtin_handler(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -894,8 +894,8 @@ static void test_add_builtin_handler(void) {
 static void test_unknown_operation_is_internal_inconsistency(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -925,9 +925,9 @@ static void test_unknown_operation_is_internal_inconsistency(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -937,8 +937,8 @@ static void test_foreign_marker_hands_off(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
     test_value_t destination;
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -1004,9 +1004,9 @@ static void test_foreign_marker_hands_off(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -1022,7 +1022,7 @@ static void test_foreign_marker_hands_off(void) {
 static void test_zero_operation_identifier_is_invalid(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     test_instruction_t instruction;
     test_program_source_t source;
 
@@ -1043,8 +1043,8 @@ static void test_zero_operation_identifier_is_invalid(void) {
 static void test_unbound_parameter_is_invalid(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -1094,9 +1094,9 @@ static void test_unbound_parameter_is_invalid(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -1105,8 +1105,8 @@ static void test_unbound_parameter_is_invalid(void) {
 static void test_literal_is_not_writable(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -1152,9 +1152,9 @@ static void test_literal_is_not_writable(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -1167,8 +1167,8 @@ static void test_size_mismatch_is_error(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
     test_value_t destination;
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -1222,16 +1222,16 @@ static void test_size_mismatch_is_error(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
 
 /* 写已完成但 handler 报错：指令不算完成，游标不推进，不置提交标志。 */
 static runtimec_status_t test_failing_handler(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     runtimec_error_t error;
@@ -1253,8 +1253,8 @@ static void test_handler_failure_keeps_cursor(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
     test_value_t destination;
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_t registry;
@@ -1303,9 +1303,9 @@ static void test_handler_failure_keeps_cursor(void) {
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_destroy(bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }

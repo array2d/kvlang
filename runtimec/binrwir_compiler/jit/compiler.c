@@ -40,7 +40,7 @@ runtimec_status_t binrwir_jit_compiler_destroy(binrwir_jit_compiler_t *compiler)
 
 runtimec_status_t binrwir_jit_compile(
     binrwir_jit_compiler_t *compiler,
-    const binrwir_program_t *program,
+    const binrwir_binfunc_t *program,
     const binrwir_execution_plan_t *execution_plan,
     binrwir_jit_compilation_result_t *output_result,
     runtimec_error_t *error) {

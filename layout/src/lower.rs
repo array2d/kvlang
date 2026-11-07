@@ -5209,6 +5209,188 @@ fn check_one_call_shape(
 /// `annotate_call_returns` 之前采的那份）。「必须声明类型」的判据只认它：
 /// 用 `declared_langtypes_by_origin` 会把调用返回类型也算成声明，于是
 /// `t0 = time·now()` 这类整类漏过。
+/// **`inplace` 写参的深度校验**（spec `04-layout语义/04-函数写槽与布局`）。
+///
+/// 三条判据，缺一即报错，缺哪条说哪条：
+///
+/// 1. 函数体内**读到**过它（reads 里出现）；
+/// 2. 函数体内**写过**它（writes 里出现）；
+/// 3. 存在**同一条指令**同时把它列进 reads 与 writes —— 这条才是「深度」。
+///
+/// 第 3 条不能省：`*p -> x; 5 -> *p` 满足 1、2，但它是「先读后覆盖」，不是 inplace。
+/// 判据落在**单条指令的两个操作数区间同时命中同一个名字**，不是「先后都出现过」。
+///
+/// **必须在 `lower_func` 之前跑**（与 `check_call_shapes` 同一个位置）：lowering 会把
+/// `*acc + d -> *acc` 拆成 `_1 = *[0,1]; *[0,1] = add(_1, d)`——读与写落在**两条**
+/// 指令上，第 3 条判据就永远不成立。用源级 AST 判，读参 `*acc` 与写槽 `*acc` 都在
+/// 同一条语句里，判据才是它字面上的意思。
+pub fn check_inplace_parameters(fn_: &Func, diags: &mut Vec<Diagnostic>) {
+    let inplace_names: Vec<(String, String)> = fn_
+        .sig
+        .returns
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.inplace)
+        .map(|(index, p)| (p.name.clone(), format!("*[0,{}]", index + 1)))
+        .collect();
+    if inplace_names.is_empty() {
+        return;
+    }
+    let mut read_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut write_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut same_instruction: std::collections::HashSet<String> = std::collections::HashSet::new();
+    walk_inplace_usage(
+        &fn_.body,
+        &mut read_names,
+        &mut write_names,
+        &mut same_instruction,
+    );
+    for (name, coordinate) in &inplace_names {
+        /*
+         * 名字在源级 AST 里有三种写法，全部归一到裸名后比较：
+         *   `acc`      裸名（值读）
+         *   `*acc`     解引用（读或写）
+         *   `*(acc)`   解引用带括号（`flat()` 对复合基座的写法）
+         * 以及 lowering 之后的坐标形态 `*[0,+k]`。
+         *
+         * **归一用 `normalize_slot_name`**（既有唯一判据），不在这里另写剥括号。
+         */
+        let hit = |set: &std::collections::HashSet<String>| {
+            set.iter().any(|entry| {
+                let (bare, _) = normalize_slot_name(entry);
+                bare == name.as_str() || entry == coordinate
+            })
+        };
+        if !hit(&read_names) {
+            push_write_diag(
+                diags,
+                format!("inplace 写参 `{name}` 在函数体内从未被读；`inplace` 要求「同一指令内既读又写」"),
+            );
+            continue;
+        }
+        if !hit(&write_names) {
+            push_write_diag(
+                diags,
+                format!("inplace 写参 `{name}` 在函数体内从未被写；`inplace` 要求「同一指令内既读又写」"),
+            );
+            continue;
+        }
+        if !hit(&same_instruction) {
+            push_write_diag(
+                diags,
+                format!(
+                    "inplace 写参 `{name}` 只是「先读后写」或「先写后读」，没有**同一条指令**同时读写它——那不是 inplace，请去掉修饰符"
+                ),
+            );
+        }
+    }
+}
+
+/// 递归收集一个表达式里出现的全部操作数名字（裸名、`*name`、`*(name)` 都算）。
+fn collect_operand_names(e: &Expr) -> Vec<String> {
+    if e.is_leaf() {
+        return if e.val.is_empty() {
+            Vec::new()
+        } else {
+            vec![e.val.clone()]
+        };
+    }
+    let mut names = Vec::new();
+    for arg in &e.args {
+        names.extend(collect_operand_names(arg));
+    }
+    names
+}
+
+/// 扫一遍函数体，收集「被读过」「被写过」「同一条指令里既读又写」三种名字集合。
+fn walk_inplace_usage(
+    body: &[Stmt],
+    read_names: &mut std::collections::HashSet<String>,
+    write_names: &mut std::collections::HashSet<String>,
+    same_instruction: &mut std::collections::HashSet<String>,
+) {
+    for st in body {
+        match st {
+            Stmt::Instruction(inst) => {
+                /* 走**表达式树**而不是 `flat()`：`flat()` 对 `*(acc)` 这类复合基座
+                 * 返回空串（实测 `["d", ""]`），用它会漏掉解引用读参。 */
+                let reads: Vec<String> = inst
+                    .expr
+                    .as_ref()
+                    .map(collect_operand_names)
+                    .unwrap_or_default();
+                for r in &reads {
+                    read_names.insert(r.clone());
+                }
+                for w in &inst.writes {
+                    write_names.insert(w.clone());
+                }
+                /*
+                 * 第 3 条的判据：**本条指令**的 reads 与 writes 指向同一个名字。
+                 *
+                 * 两边**先归一再比**：读参在表达式树里是 `acc`，写槽在 `writes` 里
+                 * 是 `*acc` / `*[0,+k]`——字符串不等但指的是同一个形参。判据是
+                 * 「同一个名字」，不是「同一串字符」。
+                 */
+                for r in &reads {
+                    let (read_bare, _) = normalize_slot_name(r);
+                    for w in &inst.writes {
+                        let (write_bare, _) = normalize_slot_name(w);
+                        if read_bare == write_bare {
+                            same_instruction.insert(read_bare.clone());
+                        }
+                    }
+                }
+            }
+            Stmt::Scope(s) => walk_inplace_usage(
+                &s.body,
+                read_names,
+                write_names,
+                same_instruction,
+            ),
+            Stmt::If(s) => {
+                if let Some(c) = &s.cond {
+                    let reads = c.flat().1;
+                    for r in &reads {
+                        read_names.insert(r.clone());
+                    }
+                    for w in &c.writes {
+                        write_names.insert(w.clone());
+                    }
+                    for r in &reads {
+                        if c.writes.iter().any(|w| w == r) {
+                            same_instruction.insert(r.clone());
+                        }
+                    }
+                }
+                walk_inplace_usage(&s.then_, read_names, write_names, same_instruction);
+                walk_inplace_usage(&s.else_, read_names, write_names, same_instruction);
+            }
+            Stmt::While(s) => {
+                if let Some(c) = &s.cond {
+                    let reads = c.flat().1;
+                    for r in &reads {
+                        read_names.insert(r.clone());
+                    }
+                    for w in &c.writes {
+                        write_names.insert(w.clone());
+                    }
+                    for r in &reads {
+                        if c.writes.iter().any(|w| w == r) {
+                            same_instruction.insert(r.clone());
+                        }
+                    }
+                }
+                walk_inplace_usage(&s.body, read_names, write_names, same_instruction);
+            }
+            Stmt::For(s) => {
+                walk_inplace_usage(&s.body, read_names, write_names, same_instruction)
+            }
+            _ => {}
+        }
+    }
+}
+
 pub fn validate_writes(
     fn_: &Func,
     tm: &HashMap<String, String>,

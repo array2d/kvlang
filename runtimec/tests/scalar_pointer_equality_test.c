@@ -21,11 +21,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/frame_bindings.h"
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir/registry.h"
 #include "kvspace/xvalue_head.h"
 #include "vmbin/handlers/scalar.h"
@@ -141,10 +141,10 @@ static runtimec_status_t run_pointer_equality(
     const test_value_t *left, const test_value_t *right,
     binrwir_operation_identifier_t operation_identifier, uint8_t *output_result) {
     runtimec_allocator_t allocator = test_malloc_allocator();
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
-    binrwir_program_t *program = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_binfunc_t *program = NULL;
+    binrwir_binvthread_frame_t frame;
     binrwir_frame_bindings_t *bindings = NULL;
     binrwir_registry_t registry;
     binrwir_instruction_build_request_t request;
@@ -167,13 +167,13 @@ static runtimec_status_t run_pointer_equality(
     identity.binrwir_binary_interface_generation =
         BINRWIR_BINARY_INTERFACE_GENERATION;
     identity.canonical_encoding_revision = 1U;
-    status = binrwir_program_builder_create(&allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(&allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
 
     /* 写槽是 STATIC，类型 bool（1 字节）。 */
-    status = binrwir_program_builder_add_symbol(
+    status = binrwir_binfunc_builder_add_symbol(
         builder, runtimec_string_view_from_c_string("/t/result"),
         runtimec_string_view_from_c_string("bool"), &symbol_index);
 
@@ -188,7 +188,7 @@ static runtimec_status_t run_pointer_equality(
      */
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         uint32_t parameter_index = BINRWIR_ARGUMENT_INDEX_NONE;
-        status = binrwir_program_builder_add_parameter(
+        status = binrwir_binfunc_builder_add_parameter(
             builder, BINRWIR_PARAMETER_DIRECTION_READ, 1U,
             runtimec_string_view_from_c_string("int64"),
             &parameter_index);
@@ -200,7 +200,7 @@ static runtimec_status_t run_pointer_equality(
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         uint32_t parameter_index = BINRWIR_ARGUMENT_INDEX_NONE;
-        status = binrwir_program_builder_add_parameter(
+        status = binrwir_binfunc_builder_add_parameter(
             builder, BINRWIR_PARAMETER_DIRECTION_READ, 2U,
             runtimec_string_view_from_c_string("int64"), &parameter_index);
         if (status == RUNTIMEC_STATUS_SUCCESS) {
@@ -229,7 +229,7 @@ static runtimec_status_t run_pointer_equality(
             &write_argument);
     }
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         return status;
     }
 
@@ -240,17 +240,17 @@ static runtimec_status_t run_pointer_equality(
     request.read_arguments.count = 2U;
     request.write_arguments.data = &write_argument;
     request.write_arguments.count = 1U;
-    status = binrwir_program_builder_add_instruction(builder, &request,
+    status = binrwir_binfunc_builder_add_instruction(builder, &request,
                                                      &instruction_identifier);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, &program);
+        status = binrwir_binfunc_builder_finalize(builder, &program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
 
-    status = binrwir_execution_frame_initialize(&frame, program, NULL, 1U, 2U,
+    status = binrwir_binvthread_frame_initialize(&frame, program, NULL, 1U, 2U,
                                                 0U);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         status = binrwir_frame_bindings_create(&allocator, 4U, &bindings);
@@ -299,8 +299,8 @@ static runtimec_status_t run_pointer_equality(
     if (bindings != NULL) {
         (void)binrwir_frame_bindings_destroy(bindings);
     }
-    (void)binrwir_execution_frame_destroy(&frame);
-    (void)binrwir_program_destroy(program);
+    (void)binrwir_binvthread_frame_destroy(&frame);
+    (void)binrwir_binfunc_destroy(program);
     return status;
 }
 

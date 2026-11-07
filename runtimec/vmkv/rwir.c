@@ -9,7 +9,7 @@
 
 #include "vmkv/rwir.h"
 
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 
 #include <string.h>
 

@@ -915,8 +915,8 @@ SELFTEST_SESSION = """\
 
 SELFTEST_VMBIN_INTERPRETER = """\
 runtimec_status_t
-vmbin_execute(const binrwir_program_t *program, const binrwir_execution_frame_t *in,
-              binrwir_execution_frame_t *out, const binrwir_frame_registry_t *registry,
+vmbin_execute(const binrwir_binfunc_t *program, const binrwir_binvthread_frame_t *in,
+              binrwir_binvthread_frame_t *out, const binrwir_frame_registry_t *registry,
               binrwir_execution_exit_t *exit,
               runtimec_error_t *error) {
     return RUNTIMEC_STATUS_ERROR;
@@ -992,9 +992,9 @@ def selftest_base_tree() -> dict[str, str]:
         "binrwir_compiler/jit/executor.c": SELFTEST_JIT_EXECUTOR,
         "vmkv/encoder.c": SELFTEST_ENCODER,
         "vmbin/interpreter.h": (
-            "runtimec_status_t vmbin_execute(const binrwir_program_t *program,\n"
-            "                                const binrwir_execution_frame_t *in,\n"
-            "                                binrwir_execution_frame_t *out,\n"
+            "runtimec_status_t vmbin_execute(const binrwir_binfunc_t *program,\n"
+            "                                const binrwir_binvthread_frame_t *in,\n"
+            "                                binrwir_binvthread_frame_t *out,\n"
             "                                const binrwir_frame_registry_t *registry,\n"
             "                                binrwir_execution_exit_t *exit,\n"
             "                                runtimec_error_t *error);\n"
@@ -1205,7 +1205,7 @@ SELFTEST_CASES = (
     SelftestCase("forbidden-layer-edge", ("forbidden-layer-edge",),
                  write=(("contract/status.h", "int status_layer;\n"),
                         ("contract/status.c",
-                         '#include "binrwir/program.h"\n' + "int status_layer;\n"))),
+                         '#include "binrwir/binfunc.h"\n' + "int status_layer;\n"))),
     SelftestCase("binrwir-owned-by-vmbin", ("binrwir-owned-by-vmbin",),
                  write=(("vmbin/value.c", "int binrwir_value_copy;\n"),)),
     SelftestCase("policy-merge-non-owner", ("policy-merge-outside-owner",),

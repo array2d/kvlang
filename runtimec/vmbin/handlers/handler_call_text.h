@@ -112,7 +112,7 @@ static inline void vmbin_handler_fail_decode(
  */
 #define VMBIN_HANDLER_BINARY_TEXT_SCALAR(handler_name, function, write_type)       \
     static runtimec_status_t handler_name(                                         \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t left_position_;                                     \
@@ -174,7 +174,7 @@ static inline void vmbin_handler_fail_decode(
 /* 一元文本：一个读参解码，结果同上。 */
 #define VMBIN_HANDLER_UNARY_TEXT(handler_name, function)                           \
     static runtimec_status_t handler_name(                                         \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t read_position_;                                     \
@@ -224,7 +224,7 @@ static inline void vmbin_handler_fail_decode(
  */
 #define VMBIN_HANDLER_TEXT2_INDEX1(handler_name, function, index_type)             \
     static runtimec_status_t handler_name(                                         \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t first_position_;                                    \
@@ -300,7 +300,7 @@ static inline void vmbin_handler_fail_decode(
 #define VMBIN_HANDLER_TEXT_INDEX_SCALAR(handler_name, function, index_type,        \
                                         write_type)                                \
     static runtimec_status_t handler_name(                                         \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t text_position_;                                     \
@@ -359,7 +359,7 @@ static inline void vmbin_handler_fail_decode(
  */
 #define VMBIN_HANDLER_UNARY_TEXT_SCALAR(handler_name, function, write_type)        \
     static runtimec_status_t handler_name(                                         \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t read_position_;                                     \
@@ -407,7 +407,7 @@ static inline void vmbin_handler_fail_decode(
  */
 #define VMBIN_HANDLER_TEXT_INDEX_CREATE(handler_name, function, index_type)        \
     static runtimec_status_t handler_name(                                         \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t text_position_;                                     \
@@ -479,7 +479,7 @@ static inline void vmbin_handler_fail_decode(
  */
 #define VMBIN_HANDLER_FORMAT_INTEGER(handler_name, function, is_signed_value)      \
     static runtimec_status_t handler_name(                                         \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t value_position_;                                    \
@@ -543,7 +543,7 @@ static inline void vmbin_handler_fail_decode(
  */
 #define VMBIN_HANDLER_TEXT_INDEX2(handler_name, function, index_type)              \
     static runtimec_status_t handler_name(                                         \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t text_position_;                                     \
@@ -616,7 +616,7 @@ static inline void vmbin_handler_fail_decode(
 #define VMBIN_HANDLER_SET_BY_ENCODING(handler_name, patch_function,                \
                                       rebuild_function)                            \
     static runtimec_status_t handler_name(                                         \
-                             binrwir_execution_frame_t *frame,                     \
+                             binrwir_binvthread_frame_t *frame,                     \
                              const binrwir_instruction_view_t *instruction,        \
                              binrwir_execution_exit_t *output_exit) {              \
         vmbin_value_location_t text_position_;                                     \

@@ -20,7 +20,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "binrwir/registry.h"
 #include "vmbin/handlers/langtype.h"
