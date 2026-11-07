@@ -394,6 +394,29 @@ runtimec_status_t runtimec_member_key_text(runtimec_string_view_t langtype,
             RUNTIMEC_MEMBER_KEY_TEXT_DIAG_INVALID_REQUEST,
             "member key request is malformed", output, output_length);
     }
+    /*
+     * **旧 map 语法 `[K]·V` 单独指路。**
+     *
+     * `runtimec_langtype_parse` 对含 `·` 的串返回 INVALID（它认为那是畸形），
+     * 但「畸形」与「旧语法」是两件事：前者说不出怎么改，后者能。所以在调
+     * parse 之前先判一次，给出带写法的消息。
+     *
+     * 判据按完整 UTF-8 序列比（`·` = `0xC2 0xB7`）：单字节找会误命中别的字符
+     * 的尾字节。
+     */
+    {
+        for (size_t scan = 0U; scan + 1U < langtype.size; ++scan) {
+            if ((uint8_t)langtype.data[scan] == 0xC2U &&
+                (uint8_t)langtype.data[scan + 1U] == 0xB7U) {
+                return runtimec_member_key_text_fail(
+                    error, RUNTIMEC_STATUS_UNSUPPORTED,
+                    RUNTIMEC_MEMBER_KEY_TEXT_DIAG_UNSUPPORTED_LANGTYPE,
+                    "legacy map syntax '[K]·V' is not accepted; write 'K'V "
+                    "instead (issue #631)",
+                    output, output_length);
+            }
+        }
+    }
     status = runtimec_langtype_parse(langtype, &type);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return runtimec_member_key_text_fail(
@@ -413,11 +436,46 @@ runtimec_status_t runtimec_member_key_text(runtimec_string_view_t langtype,
             "tuple keys have no value form: their text is produced by the "
             "parser from source and never converted from a body",
             output, output_length);
-    case RUNTIMEC_LANGTYPE_FORM_ARRAY:
+    case RUNTIMEC_LANGTYPE_FORM_ARRAY: {
+        /*
+         * `[N]char/X` 是**字符序列的定长存储形态**：字符串字面量的声明类型就是它
+         * （`"键"` → `[1]char/utf32`）。能不能作成员键，判据是**基种类**，不是 form
+         * ——form 说的是存储形状，不是值的语义种类。
+         *
+         * 只接受**单维**字符序列：`[][]char/X` 是「字符序列的序列」，不是字符串。
+         * `[N]int32` / `[]int32` 仍然拒绝——那段 body 会被静默读成单个标量，
+         * 长度恰好匹配时产出的错键不会有任何报错。
+         */
+        runtimec_langtype_t base_type;
+        if (type.dimension_count == 1 &&
+            runtimec_langtype_parse(type.base, &base_type) ==
+                RUNTIMEC_STATUS_SUCCESS &&
+            base_type.form == RUNTIMEC_LANGTYPE_FORM_CHARACTER) {
+            return runtimec_member_key_text_text(&base_type, body, output,
+                                                 capacity, output_length,
+                                                 error);
+        }
         return runtimec_member_key_text_fail(
             error, RUNTIMEC_STATUS_UNSUPPORTED,
             RUNTIMEC_MEMBER_KEY_TEXT_DIAG_UNSUPPORTED_LANGTYPE,
             "a shaped langtype is a value form, not a member key form",
+            output, output_length);
+    }
+    case RUNTIMEC_LANGTYPE_FORM_MAPPING:
+        /*
+         * **map 类型不是成员键的形态。**
+         *
+         * 与 ARRAY 那条不同，修法也不同：ARRAY 是「有值形态但没有可作键的文本」，
+         * 而 map **整个类型就不描述一个可格式化的值**——它的 formatter 在引号里，
+         * 值侧是另一个 map/值，没有任何 body 该被格式化成一个路径段。
+         *
+         * 消息不复用 ARRAY 那条：两条的成因不同，合成一条会让人按错方向查。
+         */
+        return runtimec_member_key_text_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED,
+            RUNTIMEC_MEMBER_KEY_TEXT_DIAG_UNSUPPORTED_LANGTYPE,
+            "a map type is not a member key form: its formatter lives inside the "
+            "quotes and its value side has no body to format",
             output, output_length);
     case RUNTIMEC_LANGTYPE_FORM_UNRECOGNIZED:
         return runtimec_member_key_text_fail(

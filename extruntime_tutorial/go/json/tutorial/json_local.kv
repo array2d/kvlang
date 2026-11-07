@@ -23,11 +23,11 @@ rwfunc test() -> () {
 	json·to(profile) -> j1
 	println("profile =", j1)
 
-	a:[int64]·int64 = {10, 20, 30}
+	a:'[int64]'int64 = {10, 20, 30}
 	json·to(a) -> j2
 	println("map =", j2)
 
-	tags:[int64]·[]char/utf32 = {"a", "b", "c"}
+	tags:'[int64]'[]char/utf32 = {"a", "b", "c"}
 	json·to(tags) -> j3
 	println("tags =", j3)
 }

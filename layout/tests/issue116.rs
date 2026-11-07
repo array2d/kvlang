@@ -10,8 +10,7 @@ fn read_tutorial(path: &str) -> String {
 }
 
 fn body(data: &[u8]) -> &[u8] {
-    let h = kvkind::head(data);
-    kvkind::body(data, &h)
+    data
 }
 
 fn sig(data: &[u8]) -> String {

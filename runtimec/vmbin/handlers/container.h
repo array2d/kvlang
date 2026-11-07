@@ -46,6 +46,7 @@
 #include "contract/status.h"
 #include "contract/diagnostic_band.h"
 #include "contract/view.h"
+#include "vmbin/handlers/handler_call.h"
 
 #include "binrwir/registry.h"
 
@@ -129,16 +130,21 @@ _Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(RUNTIMEC_CONTAINER_DIAG_TARGET_KEY_UN
 
 
 /*
- * 一个 compact 数组的声明 langtype 解析结果：基种类 + 元素字节宽 + 维数。
+ * 一个 compact 数组的声明 langtype 解析结果：基种类 + 元素字节宽 + 各维大小。
  *
  * 导出给 `scatter`：`scatterarray·newscatter` 要把 compact body 按元素宽切开，
  * 它需要同一个解析。**宽度表只有一份**——放在这里而不是各模块各写一张。
+ *
+ * `dimensions[0..dimension_count)` 是**行主序**的各维长度，解析时一并取出。
+ * 多维下标要靠它换算线性偏移；只要维数不要尺寸的调用方无视这个字段即可。
  */
 typedef struct runtimec_container_langtype {
     /* 基种类（`int64`、`char/utf8`…），指向声明文本内部，不拷贝。 */
     runtimec_string_view_t base;
     uint32_t element_size;
     int32_t dimension_count;
+    /* `[d0,d1,…]` 的各维长度，行主序。仅前 `dimension_count` 项有效。 */
+    int64_t dimensions[VMBIN_HANDLER_MAX_INDEX_COUNT];
 } runtimec_container_langtype_t;
 
 /*

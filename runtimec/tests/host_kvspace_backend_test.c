@@ -300,6 +300,164 @@ int main(int argument_count, char **arguments) {
                                       buffer));
     }
 
+    /*
+     * 3b. **纪元只在真观察到搬移时推进**（issue #631 续，回归两条）。
+     *
+     * 判据是双向的，缺一条就把「缓存命中」换成「读到陈旧地址」：
+     *   正向：同一 key、无搬移 ⇒ generation **保持不变**；
+     *   反向：制造一次真搬移 ⇒ generation **必须 +1**。
+     *
+     * 正向那条曾经红过：账本登记用 resolve=0、复核用 resolve=1，指针 key 两种
+     * 模式返回不同地址 ⇒ 每轮都判「搬了」⇒ generation 每调一次 +1 ⇒ 编译缓存
+     * 键永远不同 ⇒ 缓存永不命中（binary_search N=16 实测 33 查询 0 命中、93ms）。
+     */
+    {
+        runtimec_source_revision_t stable;
+        const runtimec_key_view_t revision_function =
+            runtimec_key_view_from_c_string("/lib/sum");
+        EXPECT(runtimec_kvspace_access_source_revision(
+                   services, revision_function, &stable, &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        const uint64_t settled = stable.generation;
+        /* 正向：连查三次，一次都不许动。 */
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            runtimec_source_revision_t again;
+            EXPECT(runtimec_kvspace_access_source_revision(
+                       services, revision_function, &again, &error) ==
+                   RUNTIMEC_STATUS_SUCCESS);
+            EXPECT(again.generation == settled);
+        }
+        /*
+         * 反向：把某个**已登记**的值换成更大的 body，shm 后端必须给它换框
+         * （实测同尺寸重写不搬、放大必搬）。地址一变 ⇒ generation +1。
+         */
+        {
+            uint8_t *before = NULL;
+            uint32_t before_size = 0U;
+            EXPECT(kvspaceGet(handle, "/vthread/v3/[0]/[0,-1]", 0, &before,
+                              &before_size) == 0);
+            char grown_body[512];
+            memset(grown_body, 'x', sizeof(grown_body));
+            EXPECT(store_text(handle, "/vthread/v3/[0]/[0,-1]", grown_body));
+            uint8_t *after = NULL;
+            uint32_t after_size = 0U;
+            EXPECT(kvspaceGet(handle, "/vthread/v3/[0]/[0,-1]", 0, &after,
+                              &after_size) == 0);
+            runtimec_source_revision_t moved;
+            EXPECT(runtimec_kvspace_access_source_revision(
+                       services, revision_function, &moved, &error) ==
+                   RUNTIMEC_STATUS_SUCCESS);
+            /* 地址真变了才要求 +1；后端若原地复用同一 box，那没有可观察的失效。 */
+            if (before != after) {
+                EXPECT(moved.generation == settled + 1U);
+            } else {
+                EXPECT(moved.generation == settled);
+            }
+        }
+    }
+
+    /*
+     * 3c. **指针 key 的双向判据**——这是 3b 抓不到的那一半。
+     *
+     * 缺陷只在指针 key 上暴露：`resolve = 0` 返回指针值自己，`resolve = 1`
+     * 返回它指向的目标，两者地址不同。若账本登记用 0、复核用 1，每一轮扫都
+     * 判「搬了」，generation 恒增。`[0,-1]` 这类非指针槽两种模式同址，所以
+     * **只有这条用例能挡住回归**。
+     */
+    {
+        uint8_t *pointer_wire = NULL;
+        uint64_t pointer_wire_size = 0U;
+        EXPECT(kvspaceXvalueHeadNewPtr((const uint8_t *)"/lib/sum.[0,-1]", 16,
+                                       "int64", &pointer_wire,
+                                       &pointer_wire_size) == 0);
+        char error_text[256];
+        error_text[0] = '\0';
+        EXPECT(kvspaceSetValue(handle, "/vthread/v3/[0]/ptrkey", pointer_wire,
+                               (uint32_t)pointer_wire_size, error_text,
+                               (uint32_t)sizeof(error_text)) == 0);
+        free(pointer_wire);
+
+        /*
+         * **必须走静态解析**：`/vthread/` 下的 key 两种 resolve 模式同址
+         * （帧槽本身不是指针），只有 `/vthread` 之外的指针 key 才会暴露
+         * 「0 给指针自己、1 给目标」这个分歧。实测
+         * `pkey resolve=0 → 0x…01c0 / resolve=1 → 0x…01e0`。
+         */
+        uint8_t *pointer_static_wire = NULL;
+        uint64_t pointer_static_size = 0U;
+        EXPECT(kvspaceXvalueHeadNewPtr((const uint8_t *)"/lib/sum.[0,-1]", 16,
+                                       "int64", &pointer_static_wire,
+                                       &pointer_static_size) == 0);
+        error_text[0] = '\0';
+        EXPECT(kvspaceSetValue(handle, "/lib/sum.[0,-1].ptr", pointer_static_wire,
+                               (uint32_t)pointer_static_size, error_text,
+                               (uint32_t)sizeof(error_text)) == 0);
+        free(pointer_static_wire);
+        runtimec_xvalue_address_t static_pointer_address =
+            RUNTIMEC_XVALUE_ADDRESS_NONE;
+        EXPECT(runtimec_kvspace_access_resolve_static_xvalue_address(
+                   services, &snapshot,
+                   runtimec_key_view_from_c_string("/lib/sum.[0,-1].ptr"),
+                   &static_pointer_address, &error) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(static_pointer_address != RUNTIMEC_XVALUE_ADDRESS_NONE);
+        /*
+         * 账本登记用 **resolve=0**（`resolve_address` 的 `kvspaceGet(..., 0, ...)`）。
+         * 这里直接确认「登记与复核必须是同一个模式」：
+         * resolve=0 读回的就是交出的那个地址；resolve=1 读回的是**目标**，
+         * 地址与长度都不同。若复核用错模式，一次就判 stale ⇒ generation 恒增。
+         *
+         * 这一段是**判据本身的自证**，不依赖代次：它把「两种模式的返回值不同」
+         * 这个事实钉在用例里。
+         */
+        {
+            uint8_t *same_mode = NULL;
+            uint32_t same_mode_size = 0U;
+            EXPECT(kvspaceGet(handle, "/lib/sum.[0,-1].ptr", 0, &same_mode,
+                              &same_mode_size) == 0);
+            EXPECT((uint64_t)(uintptr_t)same_mode ==
+                   (uint64_t)(uintptr_t)static_pointer_address);
+            uint8_t *followed = NULL;
+            uint32_t followed_size = 0U;
+            EXPECT(kvspaceGet(handle, "/lib/sum.[0,-1].ptr", 1, &followed,
+                              &followed_size) == 0);
+            /* 跟随模式必须给出**另一个**地址：这正是「复核模式必须与登记一致」
+             * 的全部理由。若哪天后端把两者合成同一个地址，这条会红——那时才能
+             * 重新考虑账本的对比方式。 */
+            EXPECT((uint64_t)(uintptr_t)followed !=
+                   (uint64_t)(uintptr_t)static_pointer_address);
+        }
+
+        const runtimec_key_view_t revision_function =
+            runtimec_key_view_from_c_string("/lib/sum");
+        runtimec_source_revision_t settled;
+        EXPECT(runtimec_kvspace_access_source_revision(
+                   services, revision_function, &settled, &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        const uint64_t baseline = settled.generation;
+        /*
+         * **每轮之间必须重新登记一次**，否则这条用例抓不到缺陷：
+         * 账本被错模式判 stale 后会把记录**就地刷新成 resolve=1 的地址**，
+         * 于是下一次就匹配了（自愈），只涨一次就停。真实运行里每轮都会重新
+         * 解析同一个 key（用 resolve=0 覆盖登记），两个地址来回交替 ⇒ 每轮都
+         * 判 stale ⇒ generation 恒增。这里用同样的交替把它复现出来：
+         *   登记(resolve=0) → 复核(resolve=1) 判 stale → 刷新成 0x…e0
+         *   → 重新登记回 0x…c0 → 又判 stale……
+         */
+        for (int repeat = 0; repeat < 3; ++repeat) {
+            runtimec_xvalue_address_t re_registered = RUNTIMEC_XVALUE_ADDRESS_NONE;
+            EXPECT(runtimec_kvspace_access_resolve_static_xvalue_address(
+                       services, &snapshot,
+                       runtimec_key_view_from_c_string("/lib/sum.[0,-1].ptr"),
+                       &re_registered, &error) == RUNTIMEC_STATUS_SUCCESS);
+            runtimec_source_revision_t again;
+            EXPECT(runtimec_kvspace_access_source_revision(
+                       services, revision_function, &again, &error) ==
+                   RUNTIMEC_STATUS_SUCCESS);
+            EXPECT(again.generation == baseline);
+        }
+        (void)baseline;
+    }
+
     /* 4. source_revision：读函数的 `‥ctime`，重复取不变，搬移后推进。 */
     {
         runtimec_source_revision_t revision;
@@ -308,31 +466,42 @@ int main(int argument_count, char **arguments) {
         EXPECT(runtimec_kvspace_access_source_revision(services, function_key,
                                         &revision, &error) ==
                RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(revision.generation == 1U);
+        /*
+         * **基线不写死 1**：前面的用例已经制造过搬移，generation 此刻是多少
+         * 取决于前文。判据只关心「这一节里它变不变」，所以要相对基线比。
+         * （写死 1 会让这条用例的通过与否取决于用例顺序——那是脆弱的假信号。）
+         */
+        const uint64_t baseline = revision.generation;
+        EXPECT(baseline != 0U);
         EXPECT(revision.instruction_set_version == 17U);
         EXPECT(runtimec_kvspace_access_source_revision(services, function_key,
                                         &revision, &error) ==
                RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(revision.generation == 1U);
+        EXPECT(revision.generation == baseline);
         /* 重写同一个 key：若后端把值搬进新 box，交出的旧基址失效，generation
          * 必须推进；若后端就地复用同一个 box（同尺寸重写），地址与长度都不变，
-         * 此时没有可观察的失效，generation 保持不变才是正确结果。 */
-        uint8_t *before =
-            (uint8_t *)(uintptr_t)address;
+         * 此时没有可观察的失效，generation 保持不变才是正确结果。
+         *
+         * **两边都用 resolve=0**：账本登记时就是 resolve=0，复核必须同模式比，
+         * 否则指针 key 会拿到目标地址而非指针自身，永远判「搬了」。 */
+        uint8_t *before = NULL;
+        uint32_t before_size = 0U;
+        EXPECT(kvspaceGet(handle, "/lib/sum.[0,-1]", 0, &before,
+                          &before_size) == 0);
         EXPECT(store_text(handle, "/lib/sum.[0,-1]",
                           "a\x00[]int64"));
         uint8_t *after = NULL;
         uint32_t after_size = 0U;
-        EXPECT(kvspaceGet(handle, "/lib/sum.[0,-1]", 1, &after,
+        EXPECT(kvspaceGet(handle, "/lib/sum.[0,-1]", 0, &after,
                                     &after_size) == 0);
         EXPECT(after != NULL);
         EXPECT(runtimec_kvspace_access_source_revision(services, function_key,
                                         &revision, &error) ==
                RUNTIMEC_STATUS_SUCCESS);
         if (after == before) {
-            EXPECT(revision.generation == 1U);
+            EXPECT(revision.generation == baseline);
         } else {
-            EXPECT(revision.generation == 2U);
+            EXPECT(revision.generation == baseline + 1U);
         }
     }
 

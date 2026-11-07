@@ -65,6 +65,23 @@
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
+
+/* **下标个数上限**：一次下标访问最多带这么多个下标，也即数组最多这么多维。
+ *
+ * 它是同一个数的两个名字所指——`indices[]` 能放几个下标，`dimensions[]` 就能
+ * 描述几维。所以两处用一个常量，**不留两个同义常量**。
+ *
+ * 多于它返回 UNSUPPORTED，**不静默截断**：截断会让 `[1,2,3,4,5]int64` 被当成
+ * 前四维算偏移，写到一个看起来合法、实际错误的位置上。
+ *
+ * 定义在这里而不是 `container.h`：使用它的两个 handler 宏在本文件，而
+ * `container.c` 反向包含本文件。放反了就得让本文件包含 `container.h`，
+ * 那是循环包含。 */
+#define VMBIN_HANDLER_MAX_INDEX_COUNT 8
+
+/* 长度未定的一维（`[]T`，等价 `[.]T`）。解析时记成它，**不是** 0 或 1：
+ * 需要确定长度的调用方（多维下标线性化）看到它必须失败，不能猜一个值。 */
+#define RUNTIMEC_CONTAINER_DIMENSION_UNBOUNDED INT64_C(-1)
 #include "contract/diagnostic_band.h"
 #include "binrwir/execution_frame.h"
 #include "binrwir/instruction.h"
@@ -142,7 +159,32 @@ typedef enum vmbin_handler_call_diagnostic {
      *   `runtimec/contract/kvspace_access.c` 的 `RUNTIMEC_KVSPACE_KEY_CAPACITY`
      *   （1024，栈缓冲尺寸）与 `kvspace-c/src/kvspace.c` 的 `>= 1024` 后端拒收。
      */
-    VMBIN_HANDLER_CALL_DIAG_KEY_TOO_LONG = 0x4A0A
+    VMBIN_HANDLER_CALL_DIAG_KEY_TOO_LONG = 0x4A0A,
+    /*
+     * **超出运行时定长缓冲**（当前使用者：字符串算子，`STRING_TEXT_CODEPOINT_CAPACITY`）。
+     *
+     * ── 判据是「缓冲」，不是「字符串太长」──────────────────────────────
+     *
+     * 名字里的 `STRING` 说的是**第一个**撞上它的算子，不是判据的范围。判据是
+     * 「这件事的容量由运行时的定长缓冲决定，而不是由数据本身决定」。将来别的
+     * 定长缓冲撞上限（JSON、正则、任何 `T x[N]` 的栈容器）**复用本码**，
+     * 不要再开 `0x4A0C`——那个数会被下一个人当成「又一种字符串问题」。
+     *
+     * **不复用 `INSUFFICIENT_CAPACITY`（0x4A06）**：理由与上一条 `KEY_TOO_LONG`
+     * 逐字相同——0x4A06 是「我的缓冲小、给我更大的就能成」（可重试）；本码是
+     * 「这个定长缓冲根本装不下，程序换多久都跑不了」（不可重试）。
+     *
+     * **也不复用 `LENGTH_MISMATCH`（0x4A03）**：那是「值体宽度与逻辑函数要求的
+     * 宽度不符」，已经拿到值之后的判定。容量不足是还没写完。把它报成 0x4A03，
+     * 用户会去改自己的数据宽度，而真正的原因是拼接结果太长。
+     *
+     * 上界来源：`vmbin/handlers/string_text.h` 的 `STRING_TEXT_CODEPOINT_CAPACITY`
+     * （1024 码点）与 `vmbin/handlers/handler_call_text.h` 的
+     * `VMBIN_HANDLER_CREATE_BUFFER_CAPACITY`（4096 字节 = 1024 × 4）。
+     * **两个数必须对得上**：只改一边会得到一个说谎的上限——实测过，把码点上限
+     * 提到 1024 而字节缓冲还是 512，130 个码点照样失败。
+     */
+    VMBIN_HANDLER_CALL_DIAG_STRING_TOO_LONG = 0x4A0B
 } vmbin_handler_call_diagnostic_t;
 
 /* 段断言：本模块的码必须落在自己的段内（见 contract/diagnostic_band.h）。 */
@@ -154,6 +196,8 @@ _Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_HANDLER_CALL_DIAG_NON_FINITE, R
                "VMBIN_HANDLER_CALL_DIAG_NON_FINITE must stay inside its diagnostic band");
 _Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_HANDLER_CALL_DIAG_KEY_TOO_LONG, RUNTIMEC_DIAGNOSTIC_BAND_HANDLER_CALL),
                "VMBIN_HANDLER_CALL_DIAG_KEY_TOO_LONG must stay inside its diagnostic band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_HANDLER_CALL_DIAG_STRING_TOO_LONG, RUNTIMEC_DIAGNOSTIC_BAND_HANDLER_CALL),
+               "VMBIN_HANDLER_CALL_DIAG_STRING_TOO_LONG must stay inside its diagnostic band");
 
 /*
  * 存储能表达的键文本长度上界（**不含结尾 NUL**）：**1023 字节**。
@@ -417,6 +461,17 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
         }                                                                          \
     } while (0)
 
+/* 变参族的 arity 失败出口：判据由调用方自己写（读参个数是**范围**而不是定值），
+ * 这里只产生与定值版**完全相同**的诊断与返回码——两条出口产生同一个码，
+ * 读者才不会以为 `0x4A01` 有两个来源。 */
+#define VMBIN_HANDLER_REQUIRE_ARITY_FAIL_(output_exit, instruction)                \
+    do {                                                                           \
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,                   \
+                           VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY,                    \
+                           (instruction)->source_logical_program_counter);         \
+        return RUNTIMEC_STATUS_ERROR;                                              \
+    } while (0)
+
 /*
  * ── 类型化宏：逻辑函数直接拿 `T *`，不需要自己转型 ─────────────────────
  *
@@ -643,10 +698,56 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
 
 
 /*
- * 二元 · 数组下标：读参是 compact 数组 + 一个整数下标，写参是元素。
+ * 「数组 + N 个下标」读参的**准备**：定位数组、逐个取出下标的值、取数组声明类型。
  *
- * 逻辑函数拿「body + 长度 + 声明类型 + 下标 + 写缓冲 + 容量」。下标宽度在这里核，
- * 数组类型在这里取——两者都属于「参数准备」，不属于元素访问逻辑。
+ * 单独成函数而不是写成宏体：这套准备逻辑在**读**与**写**两个族里逐字相同，
+ * 各写一遍就是两份同一个规则；而写进宏体会让两个 handler 都超出门禁的 5 行上限
+ * （实测 18 行 / 17 行）——那不是「handler 在分岔」，是准备步骤被塞进了 handler。
+ *
+ * 下标个数由 layout 按源码里的个数发射，运行期与声明维数的核对在
+ * `container_element_offset` 里（那是唯一判据点），此处只做**形状合法性**：
+ * 至少一个下标、不超过 `VMBIN_HANDLER_MAX_INDEX_COUNT`。
+ */
+static inline runtimec_status_t vmbin_handler_prepare_indices(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, size_t index_count,
+    int64_t *indices, vmbin_value_location_t *output_array,
+    runtimec_string_view_t *output_array_langtype,
+    binrwir_execution_exit_t *output_exit) {
+    vmbin_value_location_t index_position;
+    runtimec_error_t error;
+    runtimec_status_t status;
+
+    if (index_count == 0U ||
+        index_count > VMBIN_HANDLER_MAX_INDEX_COUNT) {
+        VMBIN_HANDLER_REQUIRE_ARITY_FAIL_(output_exit, instruction);
+    }
+    VMBIN_HANDLER_LOCATE_READ(frame, instruction, 0U, output_array, output_exit);
+    for (size_t ordinal = 0U; ordinal < index_count; ++ordinal) {
+        VMBIN_HANDLER_LOCATE_READ(frame, instruction, ordinal + 1U,
+                                  &index_position, output_exit);
+        VMBIN_HANDLER_REQUIRE(index_position, int64_t, output_exit, instruction);
+        indices[ordinal] =
+            *(const int64_t *)(const void *)index_position.read_bytes;
+    }
+    runtimec_error_reset(&error);
+    status = vmbin_value_access_langtype(
+        frame, &instruction->read_arguments.data[0], output_array_langtype,
+        &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        vmbin_handler_fail(output_exit, status,
+                           VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                           instruction->source_logical_program_counter);
+        return RUNTIMEC_STATUS_ERROR;
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 数组下标读：读参是 compact 数组 + **N 个整数下标**（N ≥ 1），写参是元素。
+ *
+ * 单下标是 N == 1 的特例，走同一条路径——不为「一维」留第二种写法，否则
+ * 「单下标行为不变」这条回归判据就没有唯一事实源可以对照。
  */
 #define VMBIN_HANDLER_ARRAY_INDEX(handler_name, function, index_type)              \
     static runtimec_status_t handler_name(                                         \
@@ -654,35 +755,22 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         vmbin_value_location_t array_position_;                                    \
-        vmbin_value_location_t index_position_;                                    \
         vmbin_value_location_t write_position_;                                    \
         runtimec_string_view_t array_langtype_;                                    \
-        runtimec_error_t vmbin_handler_error_;                                     \
-        runtimec_status_t vmbin_handler_status_;                                   \
+        int64_t indices_[VMBIN_HANDLER_MAX_INDEX_COUNT];                       \
+        const size_t index_count_ = instruction->read_arguments.count - 1U;        \
                                                                                    \
-        VMBIN_HANDLER_REQUIRE_ARITY(instruction, 2U, 1U, output_exit);             \
-        VMBIN_HANDLER_LOCATE_READ(frame, instruction, 0U, &array_position_,        \
-                                  output_exit);                                    \
-        VMBIN_HANDLER_LOCATE_READ(frame, instruction, 1U, &index_position_,        \
-                                  output_exit);                                    \
-        VMBIN_HANDLER_LOCATE_WRITE(frame, instruction, 0U, &write_position_,       \
-                                   output_exit);                                   \
-        VMBIN_HANDLER_REQUIRE(index_position_, index_type, output_exit,            \
-                              instruction);                                        \
-        runtimec_error_reset(&vmbin_handler_error_);                               \
-        vmbin_handler_status_ = vmbin_value_access_langtype(                       \
-            frame, &instruction->read_arguments.data[0], &array_langtype_,         \
-            &vmbin_handler_error_);                                                \
-        if (vmbin_handler_status_ != RUNTIMEC_STATUS_SUCCESS) {                    \
-            vmbin_handler_fail(output_exit, vmbin_handler_status_,                 \
-                               VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,              \
-                               instruction->source_logical_program_counter);       \
+        if (vmbin_handler_prepare_indices(frame, instruction, index_count_,        \
+                                          indices_, &array_position_,              \
+                                          &array_langtype_, output_exit) !=        \
+            RUNTIMEC_STATUS_SUCCESS) {                                             \
             return RUNTIMEC_STATUS_ERROR;                                          \
         }                                                                          \
-        function(array_position_.read_bytes, array_position_.size,                 \
-                 array_langtype_,                                                  \
-                 *(const index_type *)(const void *)index_position_.read_bytes,    \
-                 write_position_.write_bytes, write_position_.size, output_exit);  \
+        VMBIN_HANDLER_LOCATE_WRITE(frame, instruction, 0U, &write_position_,       \
+                                   output_exit);                                   \
+        function(indices_, index_count_, write_position_.write_bytes,              \
+                 write_position_.size, array_position_.read_bytes,                 \
+                 array_position_.size, array_langtype_, output_exit);              \
         return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR                    \
                    ? output_exit->status                                           \
                    : RUNTIMEC_STATUS_SUCCESS;                                      \
@@ -690,10 +778,12 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
 
 
 /*
- * 三元 · 数组下标写：读参是「数组 + 整数下标 + 新值」，写参是数组本身（同槽 patch）。
+ * 数组下标写：读参是「数组 + **N 个整数下标** + 新值」（N ≥ 1），
+ * 写参是数组本身（同槽 patch）。
  *
  * 与 `_ARRAY_INDEX` 的差别：写参就是读参那个槽，改的是它的 body 里一段字节，
- * head 与 attr 不动。逻辑函数拿「body + 长度 + 类型 + 下标 + 新值 + 目标指针」。
+ * head 与 attr 不动。逻辑函数拿「下标 int64 值数组 + 个数 + 新值 + 目标指针 +
+ * 目标长度 + 声明类型」。
  */
 #define VMBIN_HANDLER_ARRAY_INDEX_WRITE(handler_name, function, index_type)        \
     static runtimec_status_t handler_name(                                         \
@@ -701,37 +791,23 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         vmbin_value_location_t array_position_;                                    \
-        vmbin_value_location_t index_position_;                                    \
         vmbin_value_location_t value_position_;                                    \
         runtimec_string_view_t array_langtype_;                                    \
-        runtimec_error_t vmbin_handler_error_;                                     \
-        runtimec_status_t vmbin_handler_status_;                                   \
+        int64_t indices_[VMBIN_HANDLER_MAX_INDEX_COUNT];                       \
+        const size_t index_count_ = instruction->read_arguments.count - 2U;        \
                                                                                    \
-        VMBIN_HANDLER_REQUIRE_ARITY(instruction, 3U, 1U, output_exit);             \
-        VMBIN_HANDLER_LOCATE_READ(frame, instruction, 0U, &array_position_,        \
-                                  output_exit);                                    \
-        VMBIN_HANDLER_LOCATE_READ(frame, instruction, 1U, &index_position_,        \
-                                  output_exit);                                    \
-        VMBIN_HANDLER_LOCATE_READ(frame, instruction, 2U, &value_position_,        \
-                                  output_exit);                                    \
-        VMBIN_HANDLER_REQUIRE(index_position_, index_type, output_exit,            \
-                              instruction);                                        \
-        runtimec_error_reset(&vmbin_handler_error_);                               \
-        vmbin_handler_status_ = vmbin_value_access_langtype(                       \
-            frame, &instruction->read_arguments.data[0], &array_langtype_,         \
-            &vmbin_handler_error_);                                                \
-        if (vmbin_handler_status_ != RUNTIMEC_STATUS_SUCCESS) {                    \
-            vmbin_handler_fail(output_exit, vmbin_handler_status_,                 \
-                               VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,              \
-                               instruction->source_logical_program_counter);       \
+        if (vmbin_handler_prepare_indices(frame, instruction, index_count_,        \
+                                          indices_, &array_position_,              \
+                                          &array_langtype_, output_exit) !=        \
+            RUNTIMEC_STATUS_SUCCESS) {                                             \
             return RUNTIMEC_STATUS_ERROR;                                          \
         }                                                                          \
+        VMBIN_HANDLER_LOCATE_READ(frame, instruction, index_count_ + 1U,           \
+                                  &value_position_, output_exit);                  \
         VMBIN_HANDLER_REQUIRE_WRITABLE(array_position_, output_exit, instruction); \
-        function(array_position_.read_bytes, array_position_.size,                 \
-                 array_langtype_,                                                  \
-                 *(const index_type *)(const void *)index_position_.read_bytes,    \
-                 value_position_.read_bytes, value_position_.size,                 \
-                 array_position_.write_bytes, output_exit);                        \
+        function(indices_, index_count_, value_position_.read_bytes,               \
+                 value_position_.size, array_position_.write_bytes,                \
+                 array_position_.size, array_langtype_, output_exit);              \
         return output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR                    \
                    ? output_exit->status                                           \
                    : RUNTIMEC_STATUS_SUCCESS;                                      \

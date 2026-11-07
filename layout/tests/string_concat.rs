@@ -70,7 +70,7 @@ fn op_texts(db: &str) -> Vec<(String, String)> {
         let key = format!("/lib/t/{name}");
         let alloc = kv.get_one(&key);
         let kind = kvkind::kind(&alloc, &kv.langtype_of(&key));
-        let b = kvkind::body(&alloc, &kvkind::head(&alloc));
+        let b = kvkind::body(&alloc);
         let text = String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned();
         out.push((kind, text));
     }

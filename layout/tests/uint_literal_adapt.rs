@@ -31,8 +31,7 @@ fn fresh_kv(tag: &str) -> (TempStore, Kv) {
 
 fn slot_text(kv: &mut Kv, key: &str) -> String {
     let v = kv.get_one(key);
-    let h = kvkind::head(&v);
-    let b = kvkind::body(&v, &h);
+    let b = kvkind::body(&v);
     String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 

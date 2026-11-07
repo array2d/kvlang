@@ -79,6 +79,89 @@ pub fn normalize_slot_name(text: &str) -> (String, bool) {
     (name.to_string(), dereferenced)
 }
 
+/// 字符类型的**编码名**：`char/utf8` → `utf8`。非字符类型 → None。
+///
+/// 矩阵 `character-concat-kind` 要比较的是「编码」而不是「类型串」：
+/// `[]char/utf32`（数组）与 `char/utf32`（标量）是同一个编码，拼接结果只看编码。
+/// 所以先剥掉 `[]`/`[N]` 形状段与前导 `*`，再取 `char/` 之后那一段。
+fn char_encoding_of(langtype: &str) -> Option<String> {
+    let mut text = langtype.trim();
+    while let Some(rest) = text.strip_prefix('*') {
+        text = rest;
+    }
+    /* 形状段：`[]` 或 `[N]` / `[k]·V`——字符值只可能有前一种，剥掉即可。 */
+    if let Some(rest) = text.strip_prefix('[') {
+        let end = rest.find(']')?;
+        text = &rest[end + 1..];
+    }
+    text.strip_prefix("char/").map(str::to_string)
+}
+
+/// 操作数类型在**拼接**语境下的类型：空 ⇒ `None`（**未知不参与判定**）。
+///
+/// 这正是 `walk_inst` 兜底里那条注释要求的「只取真正有类型的操作数」，之前
+/// 只有一个调用点照做、另一处没有，于是「未知」被当成「非字符串」喂进
+/// `char_encoding_of` 的 `?`，产出一条**假冲突**：
+/// `concat 的结果类型无法确定：操作数编码 ["char/utf32", "int64"]`——
+/// 而 `v`（`base·x` 的成员读）当时根本没有类型，`char/utf32` 是别处的残影。
+///
+/// **一处定义**：判定「这个操作数该不该参与编码收敛」不许两处各写一份。
+fn concat_operand_type(langtype: &str) -> Option<String> {
+    let text = langtype.trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.to_string())
+    }
+}
+
+/// `string·concat` 的结果编码：**跟随操作数的共同编码**（矩阵 `character-concat-kind`）。
+///
+/// - 两侧同编码 ⇒ 该编码；
+/// - `char/ascii` 是两侧的子集 ⇒ 提升到另一侧的编码；
+/// - utf8 × utf32 ⇒ `None`，调用方失败封闭（矩阵要求显式转换，**不偷偷收敛**）；
+/// - 全是 ascii / 无操作数 ⇒ value 侧默认编码（§一：未标注以 utf32 承载）。
+///
+/// **一处定义，两处调用**（`infer_op_type` 与 `exact_kind`）。这两个函数各有一份
+/// 结果类型规则，曾经都硬写 `char/utf8`——矩阵改了之后两份都要跟，分开写必然漂移。
+///
+/// `operand_types` 是各操作数的 langtype；非字符类型 ⇒ `None`（由下游实参校验报错，
+/// 这里不发明类型）。
+fn concat_result_encoding(operand_types: &[String]) -> Option<String> {
+    let mut encoding: Option<String> = None;
+    for langtype in operand_types {
+        let this = char_encoding_of(langtype)?;
+        if this == "ascii" {
+            continue;
+        }
+        match &encoding {
+            None => encoding = Some(this),
+            Some(known) if *known == this => {}
+            Some(_) => return None,
+        }
+    }
+    /*
+     * **形状恒为 `[]`**（架构师裁决 2026-11-06）：concat 是变长操作，结果长度由内容
+     * 决定，与任一操作数的定长形状无关。
+     *
+     * 三条依据：
+     *   1. 把 `[8]+[8]` 标成 `[16]` 是「用一次具体求值的结果当类型」，换一组操作数
+     *      （`[8]` 与 `[]`）就不成立；类型必须在所有取值下都成立。
+     *   2. `[N]char` 是**字面量的存储形状**，不是算子结果的形状——**编码跟随、
+     *      形状归序列**，与「实例化即拷贝」同一条。
+     *   3. 一条规则覆盖四种输入（`[N]+[N]`、`[N]+[]`、`[]+[]`、字面量+变量）。
+     *      若允许长度累加，就要为「两边都定长」与「至少一边不定长」写两条，
+     *      而它们只差编译期知不知道长度——那是优化空间，不是语义分叉。
+     *
+     * 曾经取第一个操作数的前缀：`[8]+[8]` 得 `[8]`（长度错）、
+     * `"/lib/" + name` 得 `char/utf32`（形状丢），两种都错。
+     */
+    Some(match encoding {
+        None => format!("[]{}", super::kvkind::KIND_CHAR),
+        Some(known) => format!("[]char/{known}"),
+    })
+}
+
 fn is_string_kind(t: &str) -> bool {
     t.contains("char")
 }
@@ -97,7 +180,22 @@ fn is_string_kind(t: &str) -> bool {
 /// 这是**能力缺失**而不是语言规定：spec 明说存在性判定本应对任意类型成立，
 /// 在 `nonnull` 落地前先在 layout 期报错，不得据此把合法代码改掉。
 pub fn is_none_comparable(t: &str) -> bool {
-    !t.is_empty() && (t.starts_with('*') || t.starts_with('/'))
+    /* **任意单一类型都可与 None 比较**（存在性判定）。
+     *
+     * 依据：spec `03-类型系统/03-种类-代码与特殊值.kv`「None 判据」——None 在
+     * kvspace 即「这个 key 没有值」，而任意类型的槽同样可能没有值。所以 `i:int64
+     * == None` 与 `p:*T == None` 在语言层是同一件事，只是运行期走不同算子
+     * （`nonnull` vs `ptreq`）。判据按 `!= None` 的存在性语义给，不按「哪些类型
+     * 有指针前缀」给。
+     *
+     * **唯一例外是 EXTENSION（`@T`）**：它的运行时语义本期不实现（spec
+     * `03-类型系统/03-种类-代码与特殊值.kv`「扩展定位」只保留线格式），判空无从
+     * 兑现，所以拒。拒的是**类型本身不在能力面内**，不是「它没有值」。
+     *
+     * 空类型仍然拒：那说明上面根本没推出类型，放行等于把「推不出来」翻译成
+     * 「可以判空」，是一条假合法。
+     */
+    !t.is_empty() && !t.starts_with('@')
 }
 
 /// 值类型 `value` 是否匹配声明表达式 `decl`（支持 `a|b|c` 有限 union）。
@@ -159,7 +257,9 @@ fn atom_matches(a: &str, v: &str) -> bool {
     if ar == "bool" || vr == "bool" {
         return ar == vr;
     }
-    if ar.contains(keytree::MEMBER_SEP) || ar == "stringkeymap" || vr.contains(keytree::MEMBER_SEP)
+    if super::kvkind::is_map_langtype(&ar)
+        || ar == "stringkeymap"
+        || super::kvkind::is_map_langtype(&vr)
     {
         return ar == vr;
     }
@@ -171,7 +271,8 @@ fn atom_matches(a: &str, v: &str) -> bool {
 }
 
 fn is_container_type(t: &str) -> bool {
-    t == "stringkeymap" || t.contains(keytree::MEMBER_SEP)
+    /* 判据走 `is_map_langtype`（唯一）：类型串里的 `·` 已消除（issue #631）。 */
+    t == "stringkeymap" || super::kvkind::is_map_langtype(t)
 }
 
 /// `[]` 下标校验：xv·at/xv·set 基座若为容器类型 → 报错，逼用 `base·key` 成员读/写。
@@ -179,7 +280,7 @@ fn is_container_ty(ty: &str) -> bool {
     // 剥掉间接性前缀 `*`/`@` 再判：签名里 `p:*Point`、`m:*[int64]·int64` 的 `*` 是传递方式，
     // 类型本体仍是值容器——不剥会把这类参数误判为"未定义容器"，成员写全部被拒。
     let t = ty.trim_start_matches(['*', '@']);
-    t.contains(keytree::MEMBER_SEP) || t.starts_with('/')
+    super::kvkind::is_map_langtype(t) || t.starts_with('/')
 }
 
 /// 容器字面量的写目标必须带**完整 map langtype**（`{memitemkeylangtype}·{memitemvaluelangtype}`）。
@@ -243,11 +344,13 @@ fn check_container_inst(s: &Instruction, fn_: &Func, diags: &mut Vec<Diagnostic>
         ann
     };
     let msg = if declared.is_empty() {
-        format!("container literal `{{…}}` on {target:?} needs a map langtype, e.g. `{target}:[]char/utf8·int64 = {{}}`")
+        /* 提示文案用**新形式**（issue #631）：`'<formatter>'<value>`。 */
+        format!("container literal `{{…}}` on {target:?} needs a map langtype, e.g. `{target}:'[]char/utf8'int64 = {{}}`")
     } else if !super::langtype::valid_langtype(declared) {
         format!("invalid langtype {declared:?} on container literal target {target:?}")
-    } else if !declared.contains(keytree::MEMBER_SEP) {
-        format!("container type {declared:?} is not a map langtype; expect `{{memitemkeylangtype}}·{{memitemvaluelangtype}}`")
+    } else if !super::kvkind::is_map_langtype(declared) {
+        /* 判据走 `is_map_langtype`（唯一）：类型串里的 `·` 已消除。 */
+        format!("container type {declared:?} is not a map langtype; expect `'{{memitemkeylangtype}}'{{memitemvaluelangtype}}`")
     } else {
         return;
     };
@@ -481,6 +584,245 @@ impl LabelGen {
 /// call 结果槽带 callee 返回类型：把 rwfunc/rwir 声明的返回类型写进调用指令的
 /// `write_types`（声明类型，不是推断类型）。递归/互递归无碍——`sigs` 是文件级
 /// 签名表，在各函数体 layout 之前已建好；跨文件调用不在本表内，保持原样。
+/// **用户写下的类型注解**集合（只认源码里的 `x:T`，不含任何自动补注）。
+///
+/// 必须在 `annotate_call_returns` **之前**采集：那个函数把调用返回类型填进
+/// `write_types`，之后两者在数据上就分不开了——`t0 = time·now()` 因此一直
+/// 躲过「必须声明类型」的检查，而它恰恰是最典型的一类。
+/// **#632 的 layout 侧落点**：路径串 base 的动态成员写，位置槽 `_pN` 的类型
+/// 取**写入值的静态类型**。
+///
+/// `v -> h·*key`（`h:[]char/*` 是父路径文本）展开成两条指令：
+///   `_p1 := resolveptr(h, key)`   ← 位置槽
+///   `v -> *_p1`                   ← 写入
+///
+/// `_p1` 的目标 kindexpr 不能从 base 推（路径串没有容器类型），但**写入方带着
+/// 类型**——这正是 #632「写侧带类型」：类型由写入方携带，layout 不发明。
+///
+/// **边界（缺一不可）**：
+///   1. 只补 `_pN` 这一种内部位置槽；用户变量、成员槽一律不碰；
+///   2. 只在前一条指令是 `kvspace/key·resolveptr` 时补——那证明它就是这次展开
+///      生成的那一格；
+///   3. 写入值静态类型推不出来 ⇒ **不补**，让 `check_resolveptr_write_slot`
+///      报「需要显式类型注解」。不默认成任何类型。
+///
+/// **有声明类型的 map 写不受影响**：那条路 `check_resolveptr_write_slot` 早已
+/// 放行（`container_value`/`container_elem` 能得出成员类型），走不到这里。
+pub fn annotate_position_slot_types(fn_: &mut Func, tm: &HashMap<String, String>) {
+    annotate_position_slots_in(&mut fn_.body, tm);
+}
+
+fn annotate_position_slots_in(body: &mut [Stmt], tm: &HashMap<String, String>) {
+    for st in body.iter_mut() {
+        match st {
+            Stmt::Scope(s) => annotate_position_slots_in(&mut s.body, tm),
+            Stmt::If(s) => {
+                annotate_position_slots_in(&mut s.then_, tm);
+                annotate_position_slots_in(&mut s.else_, tm);
+            }
+            Stmt::While(s) => annotate_position_slots_in(&mut s.body, tm),
+            Stmt::For(s) => annotate_position_slots_in(&mut s.body, tm),
+            _ => {}
+        }
+    }
+    /*
+     * 配对规则：`resolveptr` 那条的后一条若是 `v -> *_pN`，则 `_pN` 的类型
+     * 取 `v` 的静态类型——**补在 `resolveptr` 那条指令上**。
+     *
+     * 为什么补前一条而不是后一条：`check_resolveptr_write_slot` 校验的是
+     * `resolveptr` 自己的写槽（`_pN`）。补在后一条（`*_pN`）上，校验看不见。
+     * 这个位置差一格，就是「判据补了却一条不生效」的来源。
+     */
+    let positions: Vec<usize> = body
+        .iter()
+        .enumerate()
+        .filter(|(_, st)| {
+            matches!(st, Stmt::Instruction(inst)
+                if inst.expr.as_ref().is_some_and(|e| e.op == "kvspace/key·resolveptr"))
+        })
+        .map(|(index, _)| index)
+        .collect();
+    for index in positions {
+        let Some(next) = body.get(index + 1) else { continue };
+        let Stmt::Instruction(write_inst) = next else { continue };
+        if write_inst.writes.len() != 1
+            || write_inst.write_types.first().is_some_and(|t| !t.is_empty())
+        {
+            continue;
+        }
+        let Some(slot) = write_inst.writes[0].strip_prefix('*') else {
+            continue;
+        };
+        if !(slot.starts_with("_p") && slot[2..].chars().all(|c| c.is_ascii_digit())) {
+            continue;
+        }
+        /*
+         * **只在 base 是路径串时补**。
+         *
+         * 有声明类型的 map（`m:'[]char/utf8'int64` 的 `5 -> m·*k`）本来就能从
+         * 容器类型推出成员类型，`check_resolveptr_write_slot` 早已放行——
+         * 给它补 `int64` 会把 `_p1:*int64` 覆盖成 `int64`，实测报
+         * `cannot assign *int64 to int64`，把一条已绿的路径打红。
+         *
+         * 判据是**同一个** `base_is_path_string`，不另写一份。
+         */
+        let base_name = match &body[index] {
+            Stmt::Instruction(position_inst) => position_inst
+                .expr
+                .as_ref()
+                .and_then(|expr| expr.args.first())
+                .map(|a| a.val.clone())
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        let base_type = arg_type(&ast::leaf(&base_name), tm);
+        if !base_is_path_string(&base_type) {
+            continue;
+        }
+        let Some(value_type) = position_slot_value_type(write_inst) else {
+            continue;
+        };
+        let Stmt::Instruction(position_inst) = &mut body[index] else {
+            continue;
+        };
+        if position_inst.write_types.first().is_none_or(|t| t.is_empty()) {
+            /* `_pN` 是**位置槽**，类型是 `*T`（不是 `T`）——`resolveptr` 的写参
+             * 语义就是「产出一个指向成员的 Ptr」。写成裸 `T` 会让编码器把
+             * `resolveptr` 的结果类型判成非指针，撞能力掩码
+             * （实测 `result type is outside the capability mask`）。 */
+            position_inst.write_types = vec![format!("*{value_type}")];
+        }
+        /* 写入那条的写槽（`*_pN`）同样要带类型：它是**写参**，编码器要求
+         * 「写参必须有具体类型，没有例外」。两条指令说的是同一个值的类型。 */
+        let Stmt::Instruction(write_mut) = &mut body[index + 1] else {
+            continue;
+        };
+        if write_mut.write_types.first().is_none_or(|t| t.is_empty()) {
+            write_mut.write_types = vec![value_type];
+        }
+    }
+    /*
+     * **读侧**：`_N := resolveptr(...)` 后跟 `z:T = *_N` 时，`_N` 装的是位置，
+     * 类型是 `*T`——`T` 由作者注解给出。
+     *
+     * 与写侧的分工：写侧的类型来自**写入值**（#632），读侧来自**读入目标**的
+     * 声明。两者都是「由携带类型的那一侧给」，layout 不发明。
+     *
+     * **守卫与写侧同一个**（`base_is_path_string`）：有声明类型的 map
+     * （`m:'[]char/utf8'int64` 的 `m·*k -> z:int64`）本来就能推出成员类型，
+     * 给它补 `*int64` 会把它打红——上一版就是这里没加守卫，37 掉到 36。
+     */
+    let read_positions: Vec<usize> = body
+        .iter()
+        .enumerate()
+        .filter(|(_, st)| {
+            matches!(st, Stmt::Instruction(inst)
+                if inst.expr.as_ref().is_some_and(|e| e.op == "kvspace/key·resolveptr")
+                    && inst.write_types.first().is_none_or(|t| t.is_empty()))
+        })
+        .map(|(index, _)| index)
+        .collect();
+    for index in read_positions {
+        let base_name = match &body[index] {
+            Stmt::Instruction(position_inst) => position_inst
+                .expr
+                .as_ref()
+                .and_then(|expr| expr.args.first())
+                .map(|a| a.val.clone())
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        if !base_is_path_string(&arg_type(&ast::leaf(&base_name), tm)) {
+            continue;
+        }
+        /* 把要用的三个事实先取出来，再改——避免同时借 `body` 两次。 */
+        let produced = match &body[index] {
+            Stmt::Instruction(position_inst) => {
+                position_inst.writes.first().cloned().unwrap_or_default()
+            }
+            _ => String::new(),
+        };
+        let deref_type = match body.get(index + 1) {
+            Some(Stmt::Instruction(use_inst)) => {
+                let source = use_inst
+                    .expr
+                    .as_ref()
+                    .filter(|expr| expr.op == ast::DEREF_OP)
+                    .and_then(|expr| expr.args.first())
+                    .map(|a| a.val.clone());
+                let target_type = use_inst
+                    .write_types
+                    .first()
+                    .filter(|t| !t.is_empty())
+                    .cloned();
+                match (source, target_type) {
+                    (Some(source), Some(target))
+                        if source == produced && produced.starts_with('_') =>
+                    {
+                        Some(format!("*{target}"))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        if let (Some(position_type), Stmt::Instruction(position_mut)) =
+            (deref_type, &mut body[index])
+        {
+            position_mut.write_types = vec![position_type];
+        }
+    }
+}
+
+/// 这条写入指令的**值**的静态类型；推不出来返回 `None`（不猜）。
+fn position_slot_value_type(inst: &Instruction) -> Option<String> {
+    let e = inst.expr.as_ref()?;
+    /*
+     * 判据复用 `arg_type`——它已经把三条都覆盖了：字面量（`quote != 0` →
+     * `[]char/utf32`）、数字文本（`5` → `int64`）、变量（查 `tm`）。
+     *
+     * **不在本函数里再写一份**：`lit` 字段在 parser 之后被抹成 `LitNone`
+     * （实测 `val="5" lit=LitNone`），按 `lit` 判一律返回 `None`——那正是
+     * 「补了判据却一条不生效」的来源。`arg_type` 走 `val` 文本，不受影响。
+     *
+     * 推不出来 ⇒ `None` ⇒ **不补**，交给 `check_resolveptr_write_slot`
+     * 报「需要显式类型注解」。不默认成任何类型。
+     */
+    let t = arg_type(e, &HashMap::new());
+    (!t.is_empty()).then_some(t)
+}
+
+pub fn declared_annotated_names(fn_: &Func) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    collect_annotated(&fn_.body, &mut names);
+    names
+}
+
+fn collect_annotated(body: &[Stmt], names: &mut std::collections::HashSet<String>) {
+    for st in body {
+        match st {
+            Stmt::Instruction(s) => {
+                for (j, w) in s.writes.iter().enumerate() {
+                    if j < s.write_types.len()
+                        && !s.write_types[j].is_empty()
+                        && slot_is_plain_name(w)
+                    {
+                        names.insert(w.clone());
+                    }
+                }
+            }
+            Stmt::Scope(s) => collect_annotated(&s.body, names),
+            Stmt::If(s) => {
+                collect_annotated(&s.then_, names);
+                collect_annotated(&s.else_, names);
+            }
+            Stmt::While(s) => collect_annotated(&s.body, names),
+            Stmt::For(s) => collect_annotated(&s.body, names),
+            _ => {}
+        }
+    }
+}
+
 pub fn annotate_call_returns(fn_: &mut Func, sigs: &SigTable) {
     annotate_returns_body(&mut fn_.body, sigs);
 }
@@ -729,6 +1071,7 @@ fn return_inst() -> Stmt {
         arrow_left: false,
         operator: false,
         operand_kind: String::new(),
+            pos: Pos::default(),
     })
 }
 
@@ -1010,7 +1353,9 @@ fn lower_for_with_cont(
     // ndarray·numel/xv·at（见 spec 控制流脱糖）。判据看**声明的类型**：mapexpr 的 base 恒含
     // `key·value` 的那个 `·`（`[int64]·int64`、`[]char/utf8·int64`），compact 数组不含。
     let is_container = s.iter.op == "map·new"
-        || (s.iter.is_leaf() && tm.get(&s.iter.val).is_some_and(|t| t.contains(keytree::MEMBER_SEP)));
+        || (s.iter.is_leaf()
+            && tm.get(&s.iter.val)
+                .is_some_and(|t| super::kvkind::is_map_langtype(t)));
 
     // 迭代源：裸标识符直接原地遍历；表达式（如数组字面量）先物化到临时槽。
     let mut init_body = Vec::new();
@@ -1032,6 +1377,7 @@ fn lower_for_with_cont(
             arrow_left: true,
             operator: false,
             operand_kind: String::new(),
+            pos: Pos::default(),
         }));
         slot
     };
@@ -1045,6 +1391,7 @@ fn lower_for_with_cont(
             arrow_left: false,
             operator: false,
             operand_kind: String::new(),
+            pos: Pos::default(),
         }));
     } else {
         init_body.push(Stmt::Instruction(Instruction {
@@ -1055,6 +1402,7 @@ fn lower_for_with_cont(
             arrow_left: false,
             operator: false,
             operand_kind: String::new(),
+            pos: Pos::default(),
         }));
     }
     init_body.push(goto_label(&cond_label));
@@ -1067,6 +1415,7 @@ fn lower_for_with_cont(
         arrow_left: false,
         operator: false,
         operand_kind: String::new(),
+            pos: Pos::default(),
     };
     let lt_inst = Instruction {
         comments: Vec::new(),
@@ -1079,6 +1428,7 @@ fn lower_for_with_cont(
         arrow_left: false,
         operator: false,
         operand_kind: String::new(),
+            pos: Pos::default(),
     };
     let cond_body = vec![
         Stmt::Instruction(add_inst),
@@ -1104,6 +1454,7 @@ fn lower_for_with_cont(
             arrow_left: false,
             operator: false,
             operand_kind: String::new(),
+            pos: Pos::default(),
         }));
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
@@ -1116,6 +1467,7 @@ fn lower_for_with_cont(
             arrow_left: false,
             operator: false,
             operand_kind: String::new(),
+            pos: Pos::default(),
         }));
     } else {
         body_insts.push(Stmt::Instruction(Instruction {
@@ -1129,6 +1481,7 @@ fn lower_for_with_cont(
             arrow_left: false,
             operator: false,
             operand_kind: String::new(),
+            pos: Pos::default(),
         }));
     }
     body_insts.extend(body_inner);
@@ -1171,22 +1524,102 @@ fn lower_for_with_cont(
 
 // ── 展开嵌套调用 ────────────────────────────────────────────────────
 
+/// 本指令是不是 `== None` / `!= None`（判存在）。
+///
+/// 只有这一种父指令走「解引用不物化成值」那条路：它要的是**位置**，不是值。
+/// 判据只看算子与是否含 `None` 操作数，不看左值形态——左值是什么由 `flatten`
+/// 自己去认。
+fn is_none_comparison(inst: &Instruction) -> bool {
+    let Some(e) = inst.expr.as_ref() else {
+        return false;
+    };
+    if e.op != "==" && e.op != "!=" {
+        return false;
+    }
+    e.args.iter().any(|a| a.is_leaf() && a.val == "None")
+}
+
 fn flatten_nested_calls(inst: &Instruction, lg: &mut LabelGen) -> (Instruction, Vec<Stmt>) {
     let mut extra = Vec::new();
     let mut flat = inst.clone();
-    flat.expr = inst.expr.as_ref().map(|e| flatten_expr(e, lg, &mut extra));
+    let none_test = is_none_comparison(inst);
+    flat.expr = inst
+        .expr
+        .as_ref()
+        .map(|e| flatten_expr_with(e, lg, &mut extra, none_test));
     (flat, extra)
 }
 
 fn flatten_expr(e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>) -> Expr {
+    flatten_expr_with(e, lg, extra, false)
+}
+
+/// `none_test` = 本层父指令是不是 `== None` / `!= None`。
+///
+/// 那个形态要的是**位置**（「这个成员有没有值」），不是它的值。把解引用读成
+/// 一个值槽（`_1:int64 = *_2`）之后，判存在就变成了「判已解出来的值」，而缺失
+/// 成员的「值」是 0 字节的 None——写进标量槽必报 `0x4406`，判存在根本执行不到。
+/// 所以在这一支里让父指令**直接**拿指针槽并置 `dereference`（解引用回到「读参
+/// 上的标记」这个既有约定），不插中间取值指令。
+fn flatten_expr_with(
+    e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>, none_test: bool,
+) -> Expr {
     if e.is_leaf() {
         return e.clone();
+    }
+    /*
+     * `h·*c != None`：左值是**动态成员读**，展开形态是
+     * `DEREF(resolveptr(base, key))`。这里只把 `resolveptr` 那一条指令物化出来
+     * （它产出的是**位置**），父指令直接读那个位置槽并跟一跳——不产生
+     * `_N:<值类型> = *_pos` 那条取值指令。
+     *
+     * **只在 none_test 下走这条**：别的父指令要的是值，仍按原路物化。
+     */
+    if none_test && e.op == ast::DEREF_OP {
+        if let Some(inner) = e.args.first() {
+            if inner.op == "kvspace/key·resolveptr" {
+                /*
+                 * 把 `resolveptr` 那一条指令原样物化出来（它产出**位置** `_P`），
+                 * 然后让父指令读 `*_P`——**不再插一条 `_N:<值类型> = *_P`**。
+                 *
+                 * 判据是「这条子表达式只在这里用一次」，所以没有第二处要读值。
+                 */
+                let position_slot = lg.tmp();
+                extra.push(Stmt::Instruction(Instruction {
+                    comments: Vec::new(),
+                    expr: Some(inner.clone()),
+                    writes: vec![position_slot.clone()],
+                    write_types: Vec::new(),
+                    arrow_left: false,
+                    operator: false,
+                    operand_kind: String::new(),
+            pos: Pos::default(),
+                }));
+                return ast::leaf(&format!("*{position_slot}"));
+            }
+        }
     }
     let mut new_args = Vec::with_capacity(e.args.len());
     for arg in &e.args {
         if !arg.is_leaf() {
+            let flat_expr = flatten_expr_with(arg, lg, extra, none_test);
+            /*
+             * **判存在的父指令：deref 叶子不物化。**
+             *
+             * `h·*c != None` 里，`h·*c` 递归回来是叶子 `*_P`（`op` 为空、
+             * `val` 是 `"*_P"`）。它要的是**位置**，不是值——再物化成
+             * `_N:<值类型> = *_P` 就把位置解成了值，而缺失成员的值是 0 字节
+             * None，写进标量槽必报 `0x4406 SIZE_MISMATCH`，`nonnull` 永远
+             * 执行不到。
+             *
+             * 判据是「父指令是 `==`/`!= None`」且「递归结果是 deref 叶子」。
+             * 两个条件在这里都能看见，不额外传状态。
+             */
+            if none_test && flat_expr.is_leaf() && flat_expr.val.starts_with(ast::DEREF_OP) {
+                new_args.push(flat_expr);
+                continue;
+            }
             let tmp = lg.tmp();
-            let flat_expr = flatten_expr(arg, lg, extra);
             /* **物化成临时槽时要把类型一起带过去**：`struct·new(原型路径, …)` 的
              * 类型就是那个原型路径（第一个实参，字符串字面量），不需要猜；不带的
              * 话临时槽落成空类型，编码器报「non-concrete langtype」。
@@ -1213,6 +1646,7 @@ fn flatten_expr(e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>) -> Expr {
                 arrow_left: false,
                 operator: false,
                 operand_kind: String::new(),
+                pos: Pos::default(),
             }));
             new_args.push(ast::leaf(&tmp));
         } else {
@@ -1242,6 +1676,7 @@ fn br_inst(cond: &str, t_label: &str, f_label: &str) -> Stmt {
         arrow_left: false,
         operator: false,
         operand_kind: String::new(),
+            pos: Pos::default(),
     })
 }
 
@@ -1254,6 +1689,7 @@ fn goto_label(label: &str) -> Stmt {
         arrow_left: false,
         operator: false,
         operand_kind: String::new(),
+            pos: Pos::default(),
     })
 }
 
@@ -1291,6 +1727,7 @@ fn expand_sparse(base: &str, e: &Expr, wtypes: &[String], _lg: &mut LabelGen) ->
         arrow_left: true,
         operator: false,
         operand_kind: String::new(),
+        pos: Pos::default(),
     };
     vec![Stmt::Instruction(inst)]
 }
@@ -1304,6 +1741,7 @@ fn make_copy_inst(val: &str, dest: &str) -> Stmt {
         arrow_left: false,
         operator: false,
         operand_kind: String::new(),
+            pos: Pos::default(),
     })
 }
 
@@ -1557,6 +1995,7 @@ fn per_write_types(
     inst: &Instruction,
     tm: &mut HashMap<String, String>,
     structs: &StructTable,
+    output_type_failure: &mut Option<String>,
 ) -> Vec<Option<String>> {
     let Some(e) = &inst.expr else {
         return Vec::new();
@@ -1570,7 +2009,8 @@ fn per_write_types(
             String::new()
         } else {
             let annotated = inst.write_types.first().map(String::as_str).unwrap_or("");
-            infer_op_type(&opcode, &reads, tm, annotated, structs)
+            infer_op_type(&opcode, &reads, tm, annotated, structs,
+                          output_type_failure)
         }
     };
     (0..inst.writes.len())
@@ -1591,7 +2031,8 @@ fn infer_inst(inst: &Instruction, tm: &mut HashMap<String, String>, structs: &St
     if inst.writes.is_empty() {
         return;
     }
-    let types = per_write_types(inst, tm, structs);
+    let mut ignored_conflict = None;
+    let types = per_write_types(inst, tm, structs, &mut ignored_conflict);
     for (w, t) in inst.writes.iter().zip(types) {
         if w.is_empty() || w.starts_with(keytree::MEMBER_SEP) {
             continue;
@@ -1752,7 +2193,8 @@ fn record_inst_sets(
     // Member reads, `scatterarray·at`, and `kvspace·get` may yield `None` on missing keys; keep unannotated destination slots nullable.
     let nullable_lookup = (symbol::lookup(&op).word == "assign" && reads.len() > 1)
         || matches!(op.as_str(), "scatterarray·at" | "kvspace·get");
-    let types = per_write_types(s, tm, structs);
+    let mut concat_conflict = None;
+    let types = per_write_types(s, tm, structs, &mut concat_conflict);
     for (j, w) in s.writes.iter().enumerate() {
         if w.is_empty() || w.starts_with(keytree::MEMBER_SEP) {
             continue;
@@ -1898,6 +2340,7 @@ fn infer_op_type(
     tm: &mut HashMap<String, String>,
     annotated: &str,
     structs: &StructTable,
+    output_type_failure: &mut Option<String>,
 ) -> String {
     if matches!(opcode, "return" | "goto" | "br" | "call") {
         return String::new();
@@ -1924,7 +2367,22 @@ fn infer_op_type(
         if let Some(first) = reads.first() {
             if let Some((base, tail)) = first.split_once(keytree::MEMBER_SEP) {
                 let base_type = slot_type(base, tm);
-                return member_chain_type(&base_type, tail, structs).unwrap_or_default();
+                return match member_chain_type(&base_type, tail, structs) {
+                    Some(t) => t,
+                    None => {
+                        /* **推不出就是失败信号，不是「空类型」**。
+                         *
+                         * 空类型在下游是合法状态（「没有声明」），拿它当哨兵之后
+                         * 分不出「作者没写」与「成员链断了」：`v` 没类型，判空、
+                         * 算术、写槽校验各自给出自己的解释，没有一个指向真正断在
+                         * 哪一段。这里记下基座名、成员链、基座类型，由 `walk_inst`
+                         * 产出具名诊断。 */
+                        *output_type_failure = Some(format!(
+                            "成员读 `{first}` 的类型推不出：基座 `{base}` 的类型 `{base_type}` 无法沿 `{tail}` 逐段下钻"
+                        ));
+                        String::new()
+                    }
+                };
             }
         }
         if reads.len() > 1 {
@@ -1981,13 +2439,49 @@ fn infer_op_type(
          * 失败**（不是静默错值）。这是 #634 长期方案必须解决的一格，在那之前
          * 动态键 + 字符串拼接不可用。**不许为了让它"能跑"而把未知猜成字符串**，
          * 那正是 038 那条 bug 的形态。 */
+        /*
+         * **字符串 `+` 的结果编码跟随操作数**（矩阵 `character-concat-kind`）。
+         *
+         * 这一处是**真正生效的落点**：`infer_type_sets` 在 `specialize` 之前跑，
+         * 此时 `e.op` 还是字形 `+`，所以下面 `"string·concat"` 那个分支根本进不来
+         * （探针实测：`expr_op=Some("+")`）。曾经这里硬写 `char/utf8`，与
+         * §一「value 侧默认 utf32」冲突：`result = ""`（utf32）与 `result + "M"`
+         * （恒 utf8）写同一槽，收成并集 `[]char/utf32|char/utf8`，编码器报
+         * `non-concrete langtype`（六例）。
+         *
+         * **判据与原来逐字相同**（任一操作数是字符串族 ⇒ 按字符串规则处理），
+         * 只把「返回什么编码」交给共用的 `concat_result_encoding`——那里实现矩阵的
+         * 三档：同编码取该编码、ascii 提升、utf8×utf32 不收敛。
+         * 不改「是不是字符串」这一层的判据，否则会波及非字符串的 `+`。
+         */
         for r in reads {
             let t = slot_type(r, tm);
             let members = type_members(&t);
             if (!members.is_empty() && members.iter().all(|m| is_string_kind(m)))
                 || is_string_kind(&t)
             {
-                return "char/utf8".to_string();
+                /* **只喂真正有类型的操作数**：空类型是「未知」，不是「一种编码」。
+                 * 喂进去会让 `char_encoding_of` 的 `?` 直接返回 None，产出一条与
+                 * 事实无关的假冲突（实测 `operand_types = ["char/utf32", "int64"]`
+                 * 里那个 `char/utf32` 是别处的残影，`v` 本身无类型）。 */
+                let operand_types: Vec<String> = reads
+                    .iter()
+                    .filter_map(|read| concat_operand_type(&slot_type(read, tm)))
+                    .collect();
+                return match concat_result_encoding(&operand_types) {
+                    Some(t) => t,
+                    None => {
+                        /* **失败信号不许折成空串**：空类型本身是合法的「缺席」，
+                         * 用它当哨兵，下游分不开「没标注」与「编码不兼容」。
+                         * 记下成因与两侧编码，由调用方产出具名诊断。 */
+                        *output_type_failure = Some(format!(
+                            "concat 的结果类型无法确定：操作数编码 {} 没有共同编码",
+                            operand_types.iter().map(|t| format!("`{t}`"))
+                                .collect::<Vec<_>>().join(" 与 ")
+                        ));
+                        String::new()
+                    }
+                };
             }
         }
         let word = symbol::lookup(opcode).word.to_string();
@@ -2084,16 +2578,47 @@ fn infer_op_type(
         }
         "compactarray·langtype" => return "[]char/utf8".to_string(),
         "compactarray·shape" => return "[]int64".to_string(),
-        /* 拼接结果**恒 char/utf8**（矩阵 `character-concat-kind`：两侧各自解码成
-         * Unicode 标量序列，结果统一编码一次为 char/utf8）。**不随操作数编码变**：
-         * `char/ascii` 与 `char/utf32` 拼出来同样是 char/utf8。
+        /* 拼接结果**跟随操作数的共同编码**（矩阵 `character-concat-kind`）：
+         *   - 两侧同编码 ⇒ 该编码；
+         *   - `char/ascii` 是两侧的子集 ⇒ 提升到另一侧的编码；
+         *   - utf8 × utf32 ⇒ **INVALID**，必须显式转换，不偷偷收敛。
          *
-         * 这里是它唯一的落点：`string·concat` 是**语义名**，不在字形表里，所以上面
-         * 的 arith 分支根本进不去（`symbol::lookup("string·concat").arith == false`）。
+         * **曾经这里恒返回 `char/utf8`**，那是矩阵改动前的老规则，与
+         * `26-字符串编码.kv` §三「utf8 直接喂 string 包函数是 TypeError」自相矛盾：
+         * `result = ""`（§一：value 侧默认 utf32）与 `result + "M"`（恒 utf8）
+         * 写同一个槽，收成并集 `[]char/utf32|char/utf8`，编码器报
+         * `non-concrete langtype`（六例，`08-leetcode/{012,022,067}` 等）。
+         * 而且照旧规则推下去，concat 会不断产出自己下一步要拒绝的 utf8 值。
          *
-         * 与 coding4 的「值的字节形态服从写槽声明 langtype」配套：handler 按写槽
-         * 编码，写槽类型由这里给出。两边对齐后同一份 handler 自动正确。 */
-        "string·concat" => return "char/utf8".to_string(),
+         * 「值的字节形态服从写槽声明 langtype」是**存储侧**规则（写入时按声明编码），
+         * 与**表达式结果类型**不在同一层：结果类型由操作数推，写入时再按槽类型编码。
+         *
+         * **这里没有 `"string·concat"` 分支，是故意的。** 走到本函数时 `e.op` 还是
+         * 源码字形 `+`（`infer_type_sets` 在 `specialize` 之前跑），那个语义名根本
+         * 不会出现——写在这里也永远不执行。真落点是本函数上面处理 `+` 的字符串支。
+         */
+        /*
+         * `kvspace/key·resolveptr(base, key) -> Ptr`：指向容器成员。
+         * 与 `expr_result_type` 的同一分支**同一个判据**——两处都在 specialize
+         * 之前/之后各算一次结果类型，必须给出一致的答案。
+         */
+        "kvspace/key·resolveptr" => {
+            /* base 是 `*T` 时解一层再取成员（多段迭代的形态）；取不到 ⇒ 空，
+             * 由 layout 期具名检查报错。**不产裸 `*`**——那是「不知道」。 */
+            let base = reads.first().map(|r| slot_type(r, tm)).unwrap_or_default();
+            let container = deref_value_type(&base);
+            /* 路径串基座 ⇒ 成员类型不可知（判据唯一，见 `base_is_path_string`）。 */
+            if base_is_path_string(container) {
+                return String::new();
+            }
+            let member = container_value(container)
+                .or_else(|| container_elem(container))
+                .unwrap_or_default();
+            if member.is_empty() {
+                return String::new();
+            }
+            return format!("*{member}");
+        }
         "string·char" | "string·set" | "string·slice" | "string·formatint"
         | "string·formatuint" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),
@@ -2194,8 +2719,12 @@ fn infer_op_type(
 /// 表达式操作数的静态类型：字符串字面量按 quote/lit 判定（val 本身不含引号，
 /// 不能当变量名查 tm，否则 `"a" + "bc"` 会被同名变量 `a` 带偏）。
 fn arg_type(e: &Expr, tm: &HashMap<String, String>) -> String {
+    /* 字面量的类型**只有一处判据**（`lit_to_type`）。这里曾经自写一套，
+     * 字符串给 `char/utf32` 而 `lit_to_type` 给 `[]char/utf32`——同一事实两个答案，
+     * 于是 `"/lib/" + name` 的拼接结果被降成标量（实测 `base` 的槽类型是 `char/utf32`
+     * 而非 `[]char/utf32`）。quote != 0 的也是字符串字面量，走同一条。 */
     if e.quote != 0 || matches!(e.lit, LitKind::LitString | LitKind::LitRawString) {
-        return "char/utf32".to_string();
+        return lit_to_type(LitKind::LitString).to_string();
     }
     match e.lit {
         LitKind::LitInt => "int64".to_string(),
@@ -2203,17 +2732,36 @@ fn arg_type(e: &Expr, tm: &HashMap<String, String>) -> String {
         LitKind::LitBool => "bool".to_string(),
         _ => {
             if e.op == ast::MEMBER_READ_OP {
-                // 成员读 `base·seg…`：按基座类型逐段取 value 类型。
-                // 基座可以是复合表达式（`(*p)·x` 的基座是解引用），不能只查 `val`。
-                let mut ty = e
+                /*
+                 * 成员读 `base·seg…`：按基座类型逐段取 value 类型。
+                 *
+                 * **必须走 `member_chain_type`，不能在这里自己 `container_value`
+                 * 逐段下钻**：`container_value("[]char/utf32")` 把字符串当成
+                 * **char 数组**，返回 `char/utf32`——于是路径串基座
+                 * （`h:[]char/utf32` 的 `h·*k`）得到一个假的成员类型，报
+                 * 「cannot assign char/utf32 to int64」。`member_chain_type` 里
+                 * 已有「字符族基座 = 路径串 ⇒ 返回 None（不猜）」的判据，这里
+                 * 走第二条路就等于把那条判据绕过去了。
+                 *
+                 * 这是**同一个事实的第二份答案**：`expr_result_type` 早就走
+                 * `member_chain_type`，本处却自己推一遍，两边一旦分叉就是这个症状。
+                 */
+                let base = e
                     .args
                     .first()
                     .map(|a| arg_type(a, tm))
                     .unwrap_or_default();
-                for _ in e.args.iter().skip(1) {
-                    ty = container_value(&ty).unwrap_or_default();
+                if base.is_empty() {
+                    return String::new();
                 }
-                return ty;
+                let tail: Vec<&str> =
+                    e.args.iter().skip(1).map(|a| a.val.as_str()).collect();
+                return member_chain_type(
+                    &base,
+                    &tail.join(&keytree::MEMBER_SEP.to_string()),
+                    &StructTable::default(),
+                )
+                .unwrap_or_default();
             }
             // `*p` 解引用：表达式类型是**指针指向的类型**，不是 `*T` 本身。
             // 形参名在 tm 里记作 `*T`（新参数模型的传递方式），剥一层即得值类型。
@@ -2283,7 +2831,10 @@ fn slot_type(name: &str, tm: &HashMap<String, String>) -> String {
      * 「以 `"` 开头且不含 `·`」，不是「首尾配对」。
      */
     if name.starts_with('"') && !name.contains(keytree::MEMBER_SEP) {
-        return "char/utf32".to_string();
+        /* 与 `lit_to_type` 同源：字符串字面量的值是 `[]char/utf32`（变长数组），
+         * 不是裸 `char/utf32`（单个码点）。曾经这里自写 `char/utf32`，与
+         * `lit_to_type` 打架。 */
+        return lit_to_type(LitKind::LitString).to_string();
     }
     if name == "true" || name == "false" {
         return "bool".to_string();
@@ -2455,7 +3006,8 @@ fn exact_kind(
 ) -> Option<String> {
     if e.is_leaf() {
         if e.quote != 0 || matches!(e.lit, LitKind::LitString | LitKind::LitRawString) {
-            return Some("char/utf32".to_string());
+            /* 同 `lit_to_type`：字符串值是 `[]char/utf32`，不是裸 `char/utf32`。 */
+            return Some(lit_to_type(LitKind::LitString).to_string());
         }
         return match e.lit {
             LitKind::LitInt => Some("int64".to_string()),
@@ -2551,8 +3103,35 @@ fn exact_kind(
         }
         "string·parsefloat" => return Some("float64".to_string()),
         // 字符串族结果：类型精确，供字符串 `+` 的脱糖判定。
-        // `string·concat` 恒 `char/utf8`（矩阵 `character-concat-kind`），与操作数编码无关。
-        "string·concat" => return Some("char/utf8".to_string()),
+        //
+        // **这个分支是活的**：源码可以直接写 `string·concat("foo", "bar")`
+        // （`11-string/04-cmp-concat.kv` 就是），那时 `e.op` 一开始就是语义名，
+        // 不经过 `+` → specialize 那条路。删掉它会让该用例报
+        // `local '_3' is written with a non-concrete langtype`（实测 executed 118→117）。
+        //
+        // 与 `infer_op_type` 的 `+` 字符串支走**同一个** `concat_result_encoding`。
+        "string·concat" => {
+            /*
+             * **字面量走 `literal_slot_type`，不能只查表。** `exact_kind` 对
+             * `"foo"` 这种字符串字面量返回 None（它查的是变量表），
+             * `unwrap_or_default()` 会把它展成空串，于是整个编码判不出来——
+             * `11-string/04-cmp-concat.kv` 的 `_3` 就报 non-concrete langtype。
+             * 字面量自带编码（`""` → 默认 utf32，`"x"` 同），由
+             * `literal_slot_type` 给出，与 `infer_op_type` 的 `slot_type` 同源。
+             */
+            let operand_types: Vec<String> = e
+                .args
+                .iter()
+                .map(|a| match exact_kind(a, declared, stable) {
+                    Some(t) if !t.is_empty() => t,
+                    /* 字面量按 `LitKind` 取类型——**不是** `literal_slot_type`：
+                     * 那个函数把参数当**槽名**查表，字面量文本（`"foo"` 带引号）
+                     * 在表里查不到，会返回空串。`lit_to_type` 才是字面量的入口。 */
+                    _ => lit_to_type(a.lit).to_string(),
+                })
+                .collect();
+            return concat_result_encoding(&operand_types);
+        }
         "string·char" | "string·set" | "string·slice" | "string·formatint"
         | "string·formatuint" => return Some("char/utf32".to_string()),
         _ => {}
@@ -3220,10 +3799,27 @@ pub(crate) fn container_elem(ty: &str) -> Option<String> {
 }
 
 /// map value kind：第一个 `·` 之后。
+/// map 的**值侧**类型（`'<formatter>'<value>` 里的 `<value>`）。
+///
+/// **判据走 `is_map_langtype`（唯一），切分走单引号配对**——不再按 `·` 切。
+/// 旧形式 `K·V` 的 `·` 在类型串里已彻底消除（issue #631），这里若还在找 `·`，
+/// 会在新形式下一个都切不出来（而且静默返回 None，看起来像「不是 map」）。
 pub fn container_value(ty: &str) -> Option<String> {
     let t = ty.trim_start_matches('*');
-    let i = t.find(keytree::MEMBER_SEP)?;
-    Some(t[i + keytree::MEMBER_SEP.len()..].to_string())
+    if !super::kvkind::is_map_langtype(t) {
+        return None;
+    }
+    /*
+     * 文法：第一个 `'` 开头，闭引号是**其后第一个** `'`（本轮引号内不出现 `'`，
+     * 所以不需要转义规则）。闭引号之后到串尾是值侧。
+     */
+    let rest = &t[1..];
+    let closing = rest.find('\'')?;
+    let value = &rest[closing + 1..];
+    if value.is_empty() {
+        return None;
+    }
+    Some(value.to_string())
 }
 
 /// 调用结果类型：**返回类型是实参的函数**的那些算子。
@@ -3250,6 +3846,32 @@ pub fn call_result_type(
     argument_literals: &[Option<String>],
 ) -> Option<String> {
     match operation {
+        /*
+         * `string·concat`：结果编码**跟随操作数**（矩阵 `character-concat-kind`）。
+         *
+         * 走到这里的都是**显式调用** `string·concat(a, b)`——`+` 那条路在
+         * `infer_op_type` 里就返回了，不会到 `call_result_type`。
+         */
+        "string·concat" => {
+            /*
+             * 字面量实参的类型要从 `argument_literals` 取：`value_type_of` 查的是
+             * 变量表，字符串字面量在那儿查不到（返回 None），于是 `types` 只剩空串。
+             * 字面量的编码由它自己的 LitKind 决定——这里是**引号内文本**，
+             * 与 `lit_to_type(LitKind::LitString)` 同一条：value 侧默认 `char/utf32`。
+             */
+            let types: Vec<String> = argument_types
+                .iter()
+                .enumerate()
+                .map(|(index, t)| match t {
+                    Some(known) if !known.is_empty() => known.clone(),
+                    _ => match argument_literals.get(index).and_then(|l| l.as_deref()) {
+                        Some(_) => super::kvkind::KIND_CHAR.to_string(),
+                        None => String::new(),
+                    },
+                })
+                .collect();
+            concat_result_encoding(&types)
+        }
         // 容器键类型。
         "kvspace·listat" => container_key_type(argument_types.first()?.as_deref()?),
         // 形态变换：compact `[]T` ↔ 散列 `[int64]·T`（spec 11：散列数组的容器 langtype
@@ -3274,17 +3896,19 @@ pub fn call_result_type(
 /// `[]T`（compact）→ `[int64]·T`（散列）。已是散列形态 → None（无隐式跨形态）。
 fn compact_to_scatter(ty: &str) -> Option<String> {
     let t = ty.trim_start_matches('*');
-    if t.contains(keytree::MEMBER_SEP) || !t.starts_with('[') {
+    /* 已是散列形态（map 类型）→ None：无隐式跨形态。判据走 `is_map_langtype`。 */
+    if super::kvkind::is_map_langtype(t) || !t.starts_with('[') {
         return None;
     }
     let element = container_elem(t)?;
-    Some(format!("[int64]{}{element}", keytree::MEMBER_SEP))
+    /* 产出**新形式** `'[int64]'<element>`（issue #631：类型串里不再有 `·`）。 */
+    Some(format!("'[int64]'{element}"))
 }
 
 /// `[K]·V`（散列）→ `[]V`（compact）。
 fn scatter_to_compact(ty: &str) -> Option<String> {
     let t = ty.trim_start_matches('*');
-    if !t.contains(keytree::MEMBER_SEP) {
+    if !super::kvkind::is_map_langtype(t) {
         return None;
     }
     let value = container_value(t)?;
@@ -3297,7 +3921,7 @@ fn scatter_to_compact(ty: &str) -> Option<String> {
 /// 切片源必须是 compact（`[]T`）；结果类型与源相同。
 fn compact_argument_type(ty: &str) -> Option<String> {
     let t = ty.trim_start_matches('*');
-    if t.contains(keytree::MEMBER_SEP) || !t.starts_with('[') {
+    if super::kvkind::is_map_langtype(t) || !t.starts_with('[') {
         return None;
     }
     Some(t.to_string())
@@ -3326,8 +3950,15 @@ fn reinterpret_target_type(literal: Option<&str>) -> Option<String> {
 ///     这条是**缺口不是设计**——给 struct 编一个键类型连用例都没有，属于发明语义。
 pub fn container_key_type(ty: &str) -> Option<String> {
     let t = ty.trim_start_matches('*');
-    let i = t.find(keytree::MEMBER_SEP)?;
-    let key = &t[..i];
+    /*
+     * **切分走单引号**（issue #631）：`'<formatter>'<value>` 里 formatter 就是
+     * 键侧。不再按 `·` 切——类型串里的 `·` 已彻底消除。
+     */
+    if !super::kvkind::is_map_langtype(t) {
+        return None;
+    }
+    let closing = t[1..].find('\'')? + 1;
+    let key = &t[1..closing];
     if key.starts_with("/lib/") {
         return None;
     }
@@ -3405,7 +4036,43 @@ pub fn resolve_slot_type(
     member_chain_type(&ty, &tail.join(&keytree::MEMBER_SEP.to_string()), structs)
 }
 
-/// 沿 `·` 逐段取成员类型：mapexpr 取 value、数组取元素、struct 取字段声明。
+/// 沿 `·` 逐段取成员类型：路径串基座**未知**、mapexpr 取 value、数组取元素、struct 取字段声明。
+///
+/// **字符族的成员读结果类型是未知，不是 `char/<enc>`。**
+///
+/// `base:[]char/utf32` 是**路径串**（spec `03-类型系统/15-成员访问.kv`：路径 base 的
+/// 成员解析成 `<base 的 body>·name`）。它的成员是什么类型是**运行期事实**——目标
+/// XValue 的头才知道。可 `[]char/utf32` 又恰好长得像一维数组，于是这里会走到
+/// `container_elem` 的 `char/utf32` 一支，把「未知」答成「单码点」。
+///
+/// 那不是保守估计，是**发明类型**：`base·x` 的值实测被写成 `char/utf32`，随后
+/// `v != None` 靠这个假类型通过 layout 校验（真实值是不是字符串完全没有依据）。
+/// 见 `workspace/622/looker1/reflect-kv-none-compare-repro.md`。
+///
+/// 所以字符族基座在这里**先于数组分支**返回 `None`，把「推不出」交回调用方：
+/// `code.rs` 的成员读槽于是允许缺席，由运行期按目标头定型（沿用
+/// `decision-type-from-target-local.md` 与 `vmkv` 的 `type_from_target` 通道）。
+///
+/// **`None` 不等于放行**：调用方要么有类型来自目标的通道，要么具名失败——不许
+/// 拿空类型当「随便什么类型」。
+/// 这个基座类型是不是**路径串**（`[]char/*` 且不是字符串键 map）。
+///
+/// 路径串的成员类型是**运行期事实**，编译期不可知——`h:[]char/utf32` 的
+/// `h·*k` 里成员是什么类型取决于 `k` 求值出来的键指向哪一格。
+///
+/// **唯一判据**：`container_elem`/`container_value` 会把 `[]char/utf32` 当成
+/// char 数组、返回 `char/utf32`，于是「成员类型」变成了「字符串的元素类型」。
+/// 判据必须是**基种类**，不是「串里出现 char」：`'[]char/utf8'int64` 是字符串
+/// 键的 map，基种类是 `int64`，它的成员类型在值侧、layout 推得出。
+///
+/// `member_chain_type` 与 `resolveptr` 的两处结果类型推导都调这一份——
+/// 同一个事实出现两份答案，就是「一条 int64 写入被报成 char/utf32」的来源。
+pub(crate) fn base_is_path_string(base: &str) -> bool {
+    let bare = base.trim_start_matches('*');
+    !super::kvkind::is_map_langtype(bare)
+        && super::kvkind::is_char_kind(super::kvkind::parse_langtype(bare).1.as_str())
+}
+
 pub(crate) fn member_chain_type(start: &str, tail: &str, structs: &StructTable) -> Option<String> {
     let mut ty = start.to_string();
     if tail.is_empty() {
@@ -3426,6 +4093,15 @@ pub(crate) fn member_chain_type(start: &str, tail: &str, structs: &StructTable) 
             if let Some(inner) = ty.strip_prefix('*') {
                 ty = inner.to_string();
             }
+        }
+        /* 字符族基座 = 路径串：成员类型是运行期事实，**不猜**（见本函数文档）。
+         *
+         * 判据是**基种类**，不是「串里出现 char」：`'[]char/utf8'int64` 是**字符串键
+         * 的 map**，基种类是 `int64`，它的成员类型在 map 的值侧、layout 能推。
+         * 用 `is_string_kind`（`contains("char")`）会把这类 map 一起判成路径串，
+         * 实测让 `m·*k`、`m·a` 的动态键用例整条失去类型。 */
+        if base_is_path_string(&ty) {
+            return None;
         }
         if let Some(v) = container_value(&ty) {
             ty = v;
@@ -3723,6 +4399,7 @@ fn expr_result_type(
     tm: &HashMap<String, String>,
     annotated: &str,
     structs: &StructTable,
+    output_type_failure: &mut Option<String>,
 ) -> String {
     if e.is_leaf() {
         return arg_type(e, tm);
@@ -3768,11 +4445,47 @@ fn expr_result_type(
     }
     let sym = symbol::lookup(&e.op);
     if sym.arith {
-        for a in &e.args {
-            let t = arg_type(a, tm);
-            if is_string_kind(&t) {
-                return t;
+        /* **字符串族一律走 `concat_result_encoding`**：编码跟随操作数、形状恒 `[]`，
+         * 编码不收敛 ⇒ 记冲突并返回空（由 `walk_inst` 报具名诊断）。
+         *
+         * 曾经这里是「返回第一个字符串操作数的类型」——那既不做编码收敛检查
+         * （`[]char/utf8 + []char/utf32` 静默通过），也不改形状
+         * （`[8]+[8]` 得 `[8]`）。同一件事的第二个实现，与 `infer_op_type` 打架。 */
+        /* **只取真正有类型的操作数**：`e.args` 里可能混着尚未解析出类型的名字
+         * （如调用目标）。空类型不是「编码不兼容」，把它喂进去会让
+         * `char_encoding_of` 的 `?` 直接返回 None，产生假冲突。 */
+        let known: Vec<String> = e
+            .args
+            .iter()
+            .map(|a| arg_type(a, tm))
+            .filter_map(|t| concat_operand_type(&t))
+            .collect();
+        if known.iter().any(|t| is_string_kind(t)) {
+            /* 有一侧是字符串、另一侧类型推不出 ⇒ 这条 `+` 是不是拼接**静态不可判**。
+             * 报出来：让它以「推不出」的身份失败，而不是被当成数值加法产出一个
+             * `int64`（那是把未知翻译成确定的错答案，p1 说的「奇怪地成功」）。 */
+            if known.len() < e.args.len() {
+                *output_type_failure = Some(format!(
+                    "concat 的结果类型无法确定：{} 个操作数里只有 {} 个有静态类型",
+                    e.args.len(),
+                    known.len()
+                ));
+                return String::new();
             }
+            return match concat_result_encoding(&known) {
+                Some(t) => t,
+                None => {
+                    *output_type_failure = Some(format!(
+                        "concat 的结果类型无法确定：操作数编码 {} 没有共同编码",
+                        known
+                            .iter()
+                            .map(|t| format!("`{t}`"))
+                            .collect::<Vec<_>>()
+                            .join(" 与 ")
+                    ));
+                    String::new()
+                }
+            };
         }
         for a in &e.args {
             if arg_type(a, tm) == "float64" {
@@ -3788,12 +4501,58 @@ fn expr_result_type(
         let t = e.args.first().map(|a| arg_type(a, tm)).unwrap_or_default();
         return format!("*{t}");
     }
+    /*
+     * `kvspace/key·resolveptr(base, key) -> Ptr`：指针指向**容器成员**的类型。
+     *
+     * target kindexpr 从 base 的容器类型取（spec §四：结果类型由写槽声明给，
+     * layout 必须能静态定出，定不出就报错，不许编一个）。`m:[int64]·int64` 的
+     * 成员类型是 `int64`；compact `[3]int64` 的元素类型也是 `int64`。
+     * base 是 Ptr 时先剥一层（多段迭代的形态）。
+     */
+    if e.op == "kvspace/key·resolveptr" {
+        /*
+         * 结果类型 = `*` + **成员类型**。成员类型只能从 base 的容器类型取：
+         *   `[int64]·int64`（map）      → `container_value` → `int64`
+         *   `[3]int64`（compact 数组）  → `container_elem`  → `int64`
+         *
+         * **取不到就返回空**（不编一个）：base 是字符串常量时，它表达的是
+         * 「父路径文本」，成员类型在运行期才知道。这种情形由写槽声明兜底——
+         * `p:*int64 = …` 能给出，注解优先于本函数。
+         */
+        let base = e.args.first().map(|a| arg_type(a, tm)).unwrap_or_default();
+        let container = deref_value_type(&base);
+        /*
+         * **字符族 base 是路径文本，成员类型不可知**——`h:[]char/utf32` 的
+         * `h·*k` 里，`k` 运行期才求值，成员是什么类型编译期无从得知。
+         *
+         * 判据与 `member_chain_type` 里那条**同一句话**，不另写一份：
+         * `container_elem("[]char/utf32")` 会把字符串当成 **char 数组**、返回
+         * `char/utf32`，于是一条 int64 写入被报成
+         * 「cannot assign char/utf32 to int64」——报错指向的是成员的「元素类型」，
+         * 而真实成因是「基座根本不是容器」。
+         *
+         * 取不到 ⇒ 返回空 ⇒ 由写槽注解兜底（`p:*int64 = …` 能给出）。
+         * **不是「任何类型都放过」**：空 rhs 在 `check_assignable` 里直接返回，
+         * 而真正需要类型的地方（模板槽 §写槽必须有注解）仍会具名失败。
+         */
+        if base_is_path_string(container) {
+            return String::new();
+        }
+        let member = container_value(container)
+            .or_else(|| container_elem(container))
+            .unwrap_or_default();
+        if member.is_empty() {
+            return String::new();
+        }
+        return format!("*{member}");
+    }
     if is_cast_op(&e.op) {
         return e.op.clone();
     }
     let mut tm2 = tm.clone();
     let reads: Vec<String> = e.args.iter().map(|a| a.val.clone()).collect();
-    infer_op_type(&e.op, &reads, &mut tm2, annotated, structs)
+    infer_op_type(&e.op, &reads, &mut tm2, annotated, structs,
+                  output_type_failure)
 }
 
 fn collect_declared(body: &[Stmt], declared: &mut HashMap<String, String>) {
@@ -3831,26 +4590,27 @@ fn walk_writes(
     tm: &HashMap<String, String>,
     structs: &StructTable,
     declared: &HashMap<String, String>,
+    annotated: &std::collections::HashSet<String>,
     diags: &mut Vec<Diagnostic>,
 ) {
     for st in body {
         match st {
-            Stmt::Instruction(s) => walk_inst(s, sigs, tm, structs, declared, diags),
-            Stmt::Scope(s) => walk_writes(&s.body, sigs, tm, structs, declared, diags),
+            Stmt::Instruction(s) => walk_inst(s, sigs, tm, structs, declared, annotated, diags),
+            Stmt::Scope(s) => walk_writes(&s.body, sigs, tm, structs, declared, annotated, diags),
             Stmt::If(s) => {
                 if let Some(c) = &s.cond {
-                    walk_inst(c, sigs, tm, structs, declared, diags);
+                    walk_inst(c, sigs, tm, structs, declared, annotated, diags);
                 }
-                walk_writes(&s.then_, sigs, tm, structs, declared, diags);
-                walk_writes(&s.else_, sigs, tm, structs, declared, diags);
+                walk_writes(&s.then_, sigs, tm, structs, declared, annotated, diags);
+                walk_writes(&s.else_, sigs, tm, structs, declared, annotated, diags);
             }
             Stmt::While(s) => {
                 if let Some(c) = &s.cond {
-                    walk_inst(c, sigs, tm, structs, declared, diags);
+                    walk_inst(c, sigs, tm, structs, declared, annotated, diags);
                 }
-                walk_writes(&s.body, sigs, tm, structs, declared, diags);
+                walk_writes(&s.body, sigs, tm, structs, declared, annotated, diags);
             }
-            Stmt::For(s) => walk_writes(&s.body, sigs, tm, structs, declared, diags),
+            Stmt::For(s) => walk_writes(&s.body, sigs, tm, structs, declared, annotated, diags),
             _ => {}
         }
     }
@@ -4081,17 +4841,147 @@ fn provable_arg_type(
     }
 }
 
+/// 本条指令是不是字符串拼接（`string·concat`，或源码 `+` 且至少一侧是字符串族）。
+/// 本条指令是不是**字符串**拼接。
+///
+/// 判据是「`string·concat` **且**至少一侧操作数静态可知是字符串族」——
+/// 只看 op 会把数值 `+` 也算进来（`add` 是同一个字形族），于是任何推不出类型的
+/// 数值加法都会被报成「编码不兼容」，那是把一个诊断变成了噪声源。
+fn is_concat_instruction(s: &Instruction, tm: &HashMap<String, String>) -> bool {
+    let Some(e) = s.expr.as_ref() else {
+        return false;
+    };
+    if e.op != "string·concat" && !matches!(e.op.as_str(), "+" | "add") {
+        return false;
+    }
+    /*
+     * **`string·concat` 一定是拼接，哪怕操作数类型推不出。**
+     *
+     * 判据「至少一侧静态是字符串」只在字形 `+` / `add` 上成立——那里要先决定
+     * 这条 `+` 是不是拼接。到了语义名 `string·concat` 已经**定了**：layout 不会
+     * 把数值加法改名成它，所以再问一遍操作数类型，只会让「操作数类型缺席」
+     * 的拼接被漏判，落进「无诊断 + 写槽无类型」的空白。
+     */
+    if e.op == "string·concat" {
+        return true;
+    }
+    e.args
+        .iter()
+        .any(|a| is_string_kind(&arg_type(a, tm)))
+}
+
+/// 拼接编码冲突的消息：带**两侧编码**，不只说「无效类型」。
+fn concat_conflict_message(e: &Expr, tm: &HashMap<String, String>) -> String {
+    let operand_types: Vec<String> = e
+        .args
+        .iter()
+        .map(|a| {
+            let t = slot_type(&a.val, tm);
+            if t.is_empty() {
+                lit_to_type(a.lit).to_string()
+            } else {
+                t
+            }
+        })
+        .collect();
+    format!(
+        "concat 的结果类型无法确定：操作数编码 {} 没有共同编码",
+        operand_types
+            .iter()
+            .filter(|t| !t.is_empty())
+            .map(|t| format!("`{t}`"))
+            .collect::<Vec<_>>()
+            .join(" 与 ")
+    )
+}
+
+/// layout 自己造的临时槽：`_N`、`_while_2`、`_p1` 这类。
+///
+/// **判据是名字前缀 `_` 加上「后面全是数字或全小写标识符」**，与 `LabelGen::tmp`
+/// / `next` 的产出形态一致。豁免它们的理由：它们不是用户变量，用户无从给它们
+/// 写类型注解；要求注解等于让所有控制流与解引用展开都编不过。
+fn is_layout_temporary_slot(name: &str) -> bool {
+    let Some(rest) = name.strip_prefix('_') else {
+        return false;
+    };
+    !rest.is_empty()
+        && rest
+            .chars()
+            .all(|c| c.is_ascii_digit() || c.is_ascii_lowercase() || c == '_')
+}
+
+/// **写槽必须有用户类型注解**（架构师裁决：严格类型语言，不做 Python 式推断）。
+///
+/// 判据是「这个名字在 `declared` 里有没有条目」——`declared` 由 `collect_declared`
+/// 建，只收**源码里写下了注解**的写槽（形参另由 `value_langtypes` 并入）。所以
+/// 没有条目 = 用户没写 = 这次赋值是在凭空造一个变量。
+///
+/// 诊断里要带上**推断出来的类型**：用户据此直接补注解，不必自己去推。类型从
+/// `tm`（`infer_types` 的结果）取；推不出来就不写那一句，不编一个。
+fn check_declared_write_slots(
+    s: &Instruction,
+    tm: &HashMap<String, String>,
+    annotated: &std::collections::HashSet<String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    /*
+     * **layout 合成指令的写槽不是用户变量**，豁免。
+     *
+     * 判据是**指令的来历**，不是名字形状（架构师裁决）：`pos == 0:0` 表示这条
+     * 指令不是从源码某一行直接来的，而是 layout 展开出来的。`for (f in data)`
+     * 的 `f` 就是典型——它由 `lower_for_with_cont` 绑定，源码里没有、也不可能有
+     * 类型注解，按名字形状判（`_` 前缀）永远认不出来。
+     */
+    if s.pos.line == 0 {
+        return;
+    }
+    for w in &s.writes {
+        if !slot_is_plain_name(w) || annotated.contains(w) {
+            continue;
+        }
+        /* `_` 是**显式丢弃**（spec `04-layout语义/03-函数`：「不需要的写参用 `_`
+         * 显式丢弃」），它不是变量，无从也不必给类型。 */
+        if w == "_" {
+            continue;
+        }
+        /* layout 自己造的位置/临时槽（`_p1`、`_5`）：用户无从给它们注解。
+         * 这一条**必须留着**——`_p1` 那条指令带着源码位置（它由 desugar 生成，
+         * 但继承了语句的 pos），只按「指令是合成的」豁免会漏掉它。 */
+        if is_layout_temporary_slot(w) {
+            continue;
+        }
+        let inferred = tm.get(w).map(String::as_str).unwrap_or("");
+        let hint = if inferred.is_empty() {
+            String::new()
+        } else {
+            format!("（当前推断为 {inferred}）")
+        };
+        diags.push(Diagnostic {
+            pos: s.pos,
+            warn: false,
+            info: false,
+            message: format!("变量 '{w}' 未声明类型；请写成 '{w}:T'{hint}"),
+            source: String::new(),
+            src_file: String::new(),
+            src_name: String::new(),
+        });
+    }
+}
+
 fn walk_inst(
     s: &Instruction,
     sigs: &SigTable,
     tm: &HashMap<String, String>,
     structs: &StructTable,
     declared: &HashMap<String, String>,
+    annotated: &std::collections::HashSet<String>,
     diags: &mut Vec<Diagnostic>,
 ) {
     let Some(e) = &s.expr else { return };
+    check_declared_write_slots(s, tm, annotated, diags);
     check_call_args(e, sigs, tm, declared, diags);
     check_implicit_deref_member(e, tm, declared, diags);
+    check_resolveptr_write_slot(s, e, tm, diags);
     if e.op == format!("struct{}new", keytree::MEMBER_SEP) {
         check_struct_literal(e, structs, diags);
     }
@@ -4115,7 +5005,51 @@ fn walk_inst(
     }
 
     let annotated = s.write_types.first().map(String::as_str).unwrap_or("");
-    let rhs = expr_result_type(e, tm, annotated, structs);
+    let mut type_failure = None;
+    let rhs = expr_result_type(e, tm, annotated, structs, &mut type_failure);
+    /* **推不出类型 ⇒ 具名失败**，不折叠成空类型。
+     *
+     * 三个来源都要查：
+     *   1. `infer_op_type` 的 `+` 分支（e.op 还是字形 `+` 时）——编码不收敛；
+     *   2. `infer_op_type` 的 `=` 分支——成员链断在某一段；
+     *   3. `expr_result_type` 的 arith 分支（specialize 之后 op 已是语义名）——
+     *      它返回 `Option`，`None` 就是「编码不收敛」，被 `unwrap_or_default`
+     *      折成空串后更隐蔽。
+     *
+     * 空类型本身是合法的「缺席」，用它当哨兵会让下游分不清「没标注」与
+     * 「推不出」——这是 `哨兵须越出数据域` 的同族。
+     */
+    if type_failure.is_none() && rhs.is_empty() && is_concat_instruction(s, tm) {
+        /* 兜底要分两种「rhs 为空」，**不许混成一条**：
+         *
+         *   1. 有操作数**根本没有类型** ⇒ 推不出。报「哪一个操作数没有类型」；
+         *   2. 全都有类型但编码不收敛 ⇒ 报两侧编码。
+         *
+         * 曾经这里只判第 2 种（先 `filter(!is_empty)` 再问编码），于是第 1 种
+         * 落到「一片空白」：`rhs` 空、无诊断、写槽无类型，错误推迟到编码器
+         * 报 `parameter has no langtype at all`——把 layout 的失败说成编码器的
+         * 缺陷。更糟的是 `filter` 之后若只剩一个操作数，`concat_result_encoding`
+         * 会**成功**（单操作数恒收敛），于是第 1 种连那条假冲突都不报。 */
+        let known: Vec<String> = e
+            .args
+            .iter()
+            .map(|a| arg_type(a, tm))
+            .filter(|t| !t.is_empty())
+            .collect();
+        if known.len() < e.args.len() {
+            type_failure = Some(format!(
+                "concat 的结果类型无法确定：{} 个操作数里只有 {} 个有静态类型——推不出类型的操作数不参与编码收敛",
+                e.args.len(),
+                known.len()
+            ));
+        } else if !known.is_empty() && concat_result_encoding(&known).is_none() {
+            type_failure = Some(concat_conflict_message(e, tm));
+        }
+    }
+    if let Some(message) = type_failure {
+        let slot = s.writes.first().cloned().unwrap_or_default();
+        push_write_diag(diags, format!("{message}（槽 `{slot}`）"));
+    }
     for (j, w) in s.writes.iter().enumerate() {
         if w.is_empty() {
             return;
@@ -4271,19 +5205,171 @@ fn check_one_call_shape(
 }
 
 /// typed 写槽校验（[[赋值转换]]）：可赋性 + 字面量可表示性 + 容器字面量元素。
+/// `annotated` 是**用户写下的注解**（`declared_annotated_names` 在
+/// `annotate_call_returns` 之前采的那份）。「必须声明类型」的判据只认它：
+/// 用 `declared_langtypes_by_origin` 会把调用返回类型也算成声明，于是
+/// `t0 = time·now()` 这类整类漏过。
 pub fn validate_writes(
     fn_: &Func,
     tm: &HashMap<String, String>,
     structs: &StructTable,
     sigs: &SigTable,
+    annotated: &std::collections::HashSet<String>,
 ) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     // 用 `pointer_type()`（带传递方式前缀），与 `declared_langtypes_by_origin()` 同一来源——
     // 这里曾用 `p.ty.clone()`（剥过前缀），于是 `**N $h` 的 `h` 记成 `/lib/N`，
     // 写侧 `*h` 就比读侧少一层 `*`。**同一事实不能有两份构造**。
     let declared = declared_langtypes_by_origin(fn_);
-    walk_writes(&fn_.body, sigs, tm, structs, &declared, &mut diags);
+    walk_writes(&fn_.body, sigs, tm, structs, &declared, annotated, &mut diags);
     diags
+}
+
+/// `kvspace/key·resolveptr(base, key)` 的写槽**必须有显式类型注解**。
+///
+/// 判据的由来（架构师裁决 2026-11-06）：成员类型只能从 base 的容器类型静态得出；
+/// base 是字符串（父路径文本）时，容器类型要到运行期才知道。此时唯一能给出
+/// target kindexpr 的地方就是**写槽声明**（`p:T = …`）。
+///
+/// **为什么在 layout 期报、不留到编码期**：编码器的 `code=43`
+/// （`local … non-concrete langtype`）是**兜底**，它答的是「这条 wire 编不了」，
+/// 不是「你的源码缺一个类型注解」。两件事混在一个码里，用户看到的是内部错误
+/// 而不是自己的错。
+fn check_resolveptr_write_slot(
+    s: &Instruction,
+    e: &Expr,
+    tm: &HashMap<String, String>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    if e.op != "kvspace/key·resolveptr" || s.writes.len() != 1 {
+        return;
+    }
+    /*
+     * **只检查「写侧展开」，不检查「读侧读入」。**
+     *
+     * 两种形态都会产出一条 `resolveptr` 指令，但写目标的身份完全不同：
+     *
+     *   写侧：`v -> base·*k` ⇒ `p := resolveptr(base,k); v -> *p`
+     *         写槽 `p` 是**内部临时槽**（`_p<N>`），它的类型必须由 layout 定出
+     *         ⇒ 定不出就是真缺口，报错。
+     *
+     *   读侧：`base·*k -> v` ⇒ `v := *resolveptr(base,k)`
+     *         写槽是**用户自己的变量** `v`，`resolveptr` 只是它的来源；
+     *         `v` 的类型可以由它自己的声明/后续用法推，**不该在这里要求注解**。
+     *         曾把两者混为一谈，于是 `stdlib/kvlang/reflect.kv` 的
+     *         `base·*key -> v`（v 是任意值，类型本来就静态不可知）被误报。
+     *
+     * 判据：写槽名是不是我生成的临时槽。用户变量不是。
+     */
+    let write_name = s.writes.first().cloned().unwrap_or_default();
+    let is_internal_position_slot =
+        write_name.starts_with("_p") && write_name[2..].chars().all(|c| c.is_ascii_digit());
+    if !is_internal_position_slot {
+        return;
+    }
+    /* 写槽已有注解（`p:T = …`）⇒ 类型可静态定，放行。 */
+    if s.write_types.first().is_some_and(|t| !t.is_empty()) {
+        return;
+    }
+    /*
+     * **临时槽（`_p1` 这类）不该让用户看到**：它是我展开动态键时生成的内部名，
+     * 用户源码里没有这个东西。报错必须回溯到源码表达式（`h·*key`），否则
+     * 用户拿着一句「写槽 "_p1" 需要注解」根本不知道该改哪一行。
+     */
+    let write_name = s.writes.first().cloned().unwrap_or_default();
+    let display = if write_name.starts_with('_') {
+        let base_text = e.args.first().map(|a| a.val.as_str()).unwrap_or("");
+        let key_text = e.args.get(1).map(|a| a.val.as_str()).unwrap_or("");
+        format!("{base_text}·*{key_text}")
+    } else {
+        write_name.clone()
+    };
+    let base_argument = e.args.first();
+    let base = base_argument.map(|a| a.val.as_str()).unwrap_or("");
+    /* 字面量在变量表里查不到，`slot_type` 会返回空——但它的形态是确定的
+     * （字符串字面量就是「父路径文本」），报错要说准，不能让用户看到「未知」。 */
+    let base_type = match base_argument {
+        Some(a) if a.lit != LitKind::LitNone => lit_to_type(a.lit).to_string(),
+        _ => slot_type(base, tm),
+    };
+    /* base 的成员类型能静态得出 —— 那是 map / compact 容器，无需注解。 */
+    let container = deref_value_type(&base_type);
+    /*
+     * **字符串不是容器，是父路径文本**——必须先排除。
+     * `[]char/utf32` 经 `container_elem` 会得出 `char/utf32`，看着像「成员类型可定」，
+     * 但那是**字符元素**，不是「这条路径下某个成员的值的类型」。把两者混起来，
+     * 这条检查就会静默放行，用户拿回编码期的 `code=43`。
+     */
+    if container_value(container).is_some() {
+        return;
+    }
+    /*
+     * 数组元素（`[3]int64`）也是可定的成员类型；但 `[]char/utf32` 的「元素」是
+     * **字符**，不是「这条路径下某个成员的值的类型」——两者都用 `container_elem`
+     * 会混。判据：**没有 `·` 且是字符形** ⇒ 是父路径文本，不是容器。
+     */
+    if container_elem(container).is_some()
+        && !(!container.contains(super::keytree::MEMBER_SEP) && is_string_kind(container))
+    {
+        return;
+    }
+    /*
+     * **base 是指针时必须放行**：这是多段迭代的形态
+     * （`p2 := resolveptr(p1, k2)` 里 `p1` 就是 Ptr），以及「动态键位置」的读侧
+     * （`*_p -> v` 里的 `_p`）。指针的值就是 target 路径，成员类型由它指向的
+     * 位置决定，不是「静态定不出」。
+     *
+     * 这条放行不放松「静态定不出就报错」：字符串 base 仍然报错，因为它表达的是
+     * 父路径文本，成员类型确实无从得知。
+     */
+    if base_type.starts_with('*') {
+        return;
+    }
+    /*
+     * **临时槽的类型此刻可能还推不出来**（`_3` 这类 lowering 生成的槽）。
+     * 它是**实现产物**，不是用户写的表达式——对着它报「请加类型注解」等于让用户
+     * 去注解一个他看不见的名字。类型传播是下游的职责，这里放行。
+     *
+     * 判据是「临时槽」这个事实（`_` 开头 + 纯标识符），不是「类型为空」——
+     * 后者会被用户真的漏写类型的情形命中，那才该报。
+     */
+    if base.starts_with('_') && base.chars().all(|c| c == '_' || c.is_alphanumeric()) {
+        return;
+    }
+    /*
+     * **判「是不是字符串」不能用 `is_string_kind`**：那个函数只查 `contains("char")`，
+     * 于是 `[]char/utf8·int64`（**键是字符串的 map**）也被算成字符串——而它的
+     * 成员类型明确是 `int64`，根本不该进这条报错。
+     * 判据用「第一个 `·` 之前是否是字符形」：map 有 `·`，字符串没有。
+     */
+    /*
+     * 判「父路径文本」：**不是 map 类型**且是字符形。
+     * 判据走 `is_map_langtype`（唯一）——旧写法用 `!contains("·")`，而 `·`
+     * 在类型串里已彻底消除（issue #631），那个判据恒为 true，会把
+     * `'[]char/utf8'int64` 这种**键是字符串的 map** 也判成父路径文本。
+     */
+    let is_path_text =
+        !super::kvkind::is_map_langtype(deref_value_type(&base_type)) && is_string_kind(&base_type);
+    let base_kind = if base_type.is_empty() {
+        "未知"
+    } else if is_path_text {
+        "字符串（父路径文本）"
+    } else {
+        "非容器"
+    };
+    diags.push(Diagnostic {
+        pos: Pos { line: 0, col: 0 },
+        warn: false,
+        info: false,
+        message: format!(
+            "kvspace/key·deref（由 `{display}` 展开）：写槽 {:?} 需要显式类型注解\
+             （如 `{}:T = …`）——base {base:?} 的形态是{base_kind}，成员类型无法静态得出",
+            display, write_name
+        ),
+        source: String::new(),
+        src_file: String::new(),
+        src_name: String::new(),
+    });
 }
 
 #[cfg(test)]
@@ -4432,15 +5518,15 @@ mod call_result_type_tests {
         // 键值异型：`[]char/utf32·int64` 的键是字符串、值是 int64。
         // 若这里返回 int64，就是「碰巧在 [int64]·int64 上对」的那个错。
         assert_eq!(
-            call_result_type("kvspace·listat", &types(&["[]char/utf32·int64"]), &no_literals()),
+            call_result_type("kvspace·listat", &types(&["\'[]char/utf32\'int64"]), &no_literals()),
             Some("[]char/utf32".to_string())
         );
         assert_eq!(
-            call_result_type("kvspace·listat", &types(&["[int64]·int64"]), &no_literals()),
+            call_result_type("kvspace·listat", &types(&["\'[int64]\'int64"]), &no_literals()),
             Some("int64".to_string())
         );
         assert_eq!(
-            call_result_type("kvspace·listat", &types(&["int32·int32"]), &no_literals()),
+            call_result_type("kvspace·listat", &types(&["\'int32\'int32"]), &no_literals()),
             Some("int32".to_string())
         );
     }
@@ -4452,7 +5538,7 @@ mod call_result_type_tests {
             None
         );
         assert_eq!(
-            call_result_type("kvspace·listat", &types(&["[int64,int64]·int64"]), &no_literals()),
+            call_result_type("kvspace·listat", &types(&["\'[int64,int64]\'int64"]), &no_literals()),
             None
         );
         assert_eq!(call_result_type("kvspace·listat", &[None], &no_literals()), None);
@@ -4464,15 +5550,15 @@ mod call_result_type_tests {
         // compact ↔ 散列：`[]T` ↔ `[int64]·T`
         assert_eq!(
             call_result_type("scatterarray·newscatter", &types(&["[]int64"]), &no_literals()),
-            Some("[int64]·int64".to_string())
+            Some("\'[int64]\'int64".to_string())
         );
         assert_eq!(
-            call_result_type("scatterarray·newcompact", &types(&["[int64]·int64"]), &no_literals()),
+            call_result_type("scatterarray·newcompact", &types(&["\'[int64]\'int64"]), &no_literals()),
             Some("[]int64".to_string())
         );
         // 已是目标形态 → None，不做隐式跨形态转换
         assert_eq!(
-            call_result_type("scatterarray·newscatter", &types(&["[int64]·int64"]), &no_literals()),
+            call_result_type("scatterarray·newscatter", &types(&["\'[int64]\'int64"]), &no_literals()),
             None
         );
         assert_eq!(
@@ -4485,7 +5571,7 @@ mod call_result_type_tests {
             Some("[]int64".to_string())
         );
         assert_eq!(
-            call_result_type("compactarray·newslice", &types(&["[int64]·int64"]), &no_literals()),
+            call_result_type("compactarray·newslice", &types(&["\'[int64]\'int64"]), &no_literals()),
             None
         );
         // 取元素
@@ -4523,9 +5609,16 @@ mod call_result_type_tests {
 
     #[test]
     fn operators_outside_the_rule_table_get_no_type() {
+        /* `string·concat` 的返回类型：**编码跟随操作数、形状恒 `[]`**
+         * （矩阵 `character-concat-kind` + 2026-11-06 shape 裁决）。
+         * 所以 `char/utf32 + char/utf32 ⇒ []char/utf32`——不是裸 `char/utf32`。
+         *
+         * 期望值变更史：先是 `None`（旧规则「结果恒 char/utf8，不在规则表里」），
+         * 再是 `char/utf32`（编码跟随但**形状照抄操作数**），现为 `[]char/utf32`
+         * （concat 是变长操作，结果形状归序列，不照抄操作数的定长形状）。 */
         assert_eq!(
             call_result_type("string·concat", &types(&["char/utf32"]), &no_literals()),
-            None
+            Some("[]char/utf32".to_string())
         );
         assert_eq!(call_result_type("compactarray·fill", &types(&["[]int64"]), &no_literals()), None);
         assert_eq!(container_key_type("int64"), None);

@@ -189,6 +189,19 @@ pub fn valid_langtype(expr: &str) -> bool {
     if let Some(inner) = expr.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
         return valid_langtype(inner);
     }
+    /*
+     * **map 类型（`'<formatter>'<value>`，issue #631）**：按文法校验三段——
+     * 首字符 `'`、恰好一个闭引号、闭引号后非空且不含 `'`（本轮不支持嵌套）。
+     *
+     * 不交给 `valid_atom`：它按「裸名 / `[...]`」判，`'...'` 两样都不是。
+     */
+    if crate::kvkind::is_map_langtype(expr) {
+        let Some(closing) = expr[1..].find('\'') else {
+            return false; /* 引号未闭合 */
+        };
+        let value = &expr[closing + 2..];
+        return !value.is_empty() && !value.contains('\'');
+    }
     expr.is_empty() || expr.split('|').all(valid_atom)
 }
 
@@ -262,6 +275,22 @@ fn expand_atom(s: &str) -> String {
         return s.to_string();
     }
     // mapexpr `key·value`：键可以是 `[` 起头（字符串键/标量元组键）或**裸标量**，
+    /*
+     * **map 类型（`'<formatter>'<value>`，issue #631）：键侧原样、值侧递归展开。**
+     *
+     * 判据走 `is_map_langtype`（唯一）。旧写法按 `·` 切，新形式里 `·` 已消除，
+     * 于是 map 串会一路落到末尾的 `format!("/lib/{s}")`——实测
+     * `'[]char/utf8'int64` 被包成 `/lib/'[]char/utf8'int64`，
+     * 首字符成了 `/` 而不是 `'`，所有 `is_map_langtype` 判据随之失效（连锁）。
+     */
+    if crate::kvkind::is_map_langtype(s) {
+        if let Some(closing) = s[1..].find('\'') {
+            let key = &s[1..closing + 1];
+            let value = &s[closing + 2..];
+            return format!("'{key}'{}", expand_struct_refs(value));
+        }
+        return s.to_string(); /* 引号未闭合：原样返回，由下游判据拒绝 */
+    }
     // 只有 value 侧需要展开 struct 名；整串当 structref 包成 `/lib/<key·value>` 是错的。
     if let Some(i) = s.find('·') {
         let key = &s[..i];

@@ -83,7 +83,8 @@ def retired_surface_names() -> set[str]:
 # ---------------------------------------------------------------------------------------
 # TypeSet: bit index -> kind. 0..17 keep the #583 §4.7 mapping; 18 is the pointer category,
 # which the §4.7 snapshot (taken from runtimec2's LangType) did not have. `None` is the
-# empty mask, never a member. Bits above 18 are reserved and must stay zero.
+# empty mask, never a member. Bit 19 is the `any_single` marker (must be exclusive);
+# bits above 19 are reserved and must stay zero.
 # ---------------------------------------------------------------------------------------
 KIND_BITS = {
     "int8": 0, "int16": 1, "int32": 2, "int64": 3,
@@ -92,8 +93,13 @@ KIND_BITS = {
     "char/utf8": 11, "char/utf32": 12, "char/ascii": 13,
     "array": 14, "stringkeymap": 15, "structref": 16, "ext": 17,
     "pointer": 18,
+    # 位 19：**任意单一类型**标记。只由 `nonnull` 族使用，且必须独占——
+    # 与任何具体位同时置位都是误用（见 validate 里的独占校验）。
+    # 为什么不是「掩码 0」：0 在本表已有既定语义「参数化行，签名由 /lib 给」，
+    # 复用它会逼读者从上下文猜这一行到底是哪种。
+    "any_single": 19,
 }
-TYPE_SET_WIDTH = 19
+TYPE_SET_WIDTH = 20
 TYPE_SET_LIMIT = 1 << TYPE_SET_WIDTH
 
 
@@ -120,6 +126,7 @@ ARRAY = type_set("array")
 STRING_KEY_MAP = type_set("stringkeymap")
 STRUCT_REF = type_set("structref")
 POINTER = type_set("pointer")
+ANY_SINGLE = type_set("any_single")
 FLOAT64 = type_set("float64")
 
 # 签名表允许出现的名字型 langtype。
@@ -321,6 +328,14 @@ VALUE_ROWS = (
      "FORBIDDEN", ("boolean-equality",), "value"),
     ("DEBUGGER", "debugger", 0x0023, 0, 0, "NONE", "NONE", "FORBIDDEN",
      ("debugger-pauses-execution",), "control"),
+    # `nonnull` / `nonnull·not`：存在性判定（`x == None` / `x != None`）。
+    # 读侧掩码是 ANY_SINGLE（任意单一类型），结果恒 boolean。
+    # 不走特化表：`None` 在 wire 上是空 body 字面量，没有类型可写进 first/second mask，
+    # 改由编码器在「某侧是 None 字面量且另一侧不是引用」时归一化到这两条（见 encoder）。
+    ("NONNULL", "nonnull", 0x01A4, ANY_SINGLE, BOOLEAN, "NONE", "BOOLEAN",
+     "FORBIDDEN", ("none-criterion",), "value"),
+    ("NONNULL_NOT", "nonnull·not", 0x01A5, ANY_SINGLE, BOOLEAN, "NONE", "BOOLEAN",
+     "FORBIDDEN", ("none-criterion",), "value"),
     ("CALL", "call", 0x0024, 0, 0, "NONE", "NONE", "FORBIDDEN",
      ("control-flow-primitives",), "control"),
     ("RETURN", "return", 0x0025, 0, 0, "NONE", "NONE", "FORBIDDEN",
@@ -531,6 +546,11 @@ FAMILY_ROWS = (
     # （任何可作为键的值都收，拒绝面由 handler 按 `contract/langtype` 判）。
     FamilyRow("kvspace/key", "tostr", 0x01A3, "float-member-key-identity",
               0, CHARACTER_UTF8),
+    # `kvspace/key·resolveptr(base, keyvalue) -> Ptr`：由 base 与运行期键值算出目标
+    # 位置（spec `05-runtime语义/12-动态键` §二）。与 `abs` **并列的两条**：
+    # `abs` 取已有位置，`resolveptr` 拼出新位置；产出同为指针形态。
+    # 写掩码 POINTER：结果一定是指针，与 `abs` 同一判据。
+    FamilyRow("kvspace/key", "resolveptr", 0x01A6, "pointer-target-key-text", 0, POINTER),
 )
 
 # ---------------------------------------------------------------------------------------
@@ -610,6 +630,7 @@ IDENTIFIER_WORDS = {
     "uint64": "UNSIGNED_64", "int63": "SIGNED_63", "intn": "BELOW",
     "abs": "ADDRESS_OF",
     "tostr": "TOSTRING",
+    "resolveptr": "RESOLVE_POINTER",
 }
 
 FAMILY_IDENTIFIER_WORDS = {
@@ -832,6 +853,13 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
             mask = row.read_mask if name == "read" else row.write_mask
             if mask & ~(TYPE_SET_LIMIT - 1):
                 findings.append(f"{row.identifier}: {name} mask sets a reserved bit")
+            # `any_single` 是**独占**标记：说「任意单一类型」时再列具体类型是
+            # 自相矛盾（要么任意，要么列全）。放行并集会让人以为「any_single |
+            # int64」是「任意单型或 int64 特例」，而运行期无从区分。
+            if (mask & ANY_SINGLE) != 0 and mask != ANY_SINGLE:
+                findings.append(
+                    f"{row.identifier}: {name} mask sets any_single together with "
+                    f"concrete kinds; the marker must be exclusive")
         for decision in row.decisions:
             if decision not in decisions:
                 findings.append(f"{row.identifier}: unknown behavior decision {decision}")

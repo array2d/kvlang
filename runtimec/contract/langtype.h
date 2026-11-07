@@ -64,6 +64,15 @@ typedef enum runtimec_langtype_form {
     RUNTIMEC_LANGTYPE_FORM_STRING,
     RUNTIMEC_LANGTYPE_FORM_ARRAY,
     RUNTIMEC_LANGTYPE_FORM_TUPLE,
+    /*
+     * map 类型：`'<formatter>'<value>`（issue #631）。**键侧是 formatter**，
+     * 不是「键的类型」——它规定「什么值格式化成什么路径段文本」，因为 member
+     * key 永远活在路径系统里、从不进入任何 XValue 的 body。
+     *
+     * 改名前是 `K·V`，那时 map 落在 `UNRECOGNIZED`（靠「不是已知 form」识别）；
+     * 现在它是一等 form，所有 `switch (form)` 都必须为它写明行为。
+     */
+    RUNTIMEC_LANGTYPE_FORM_MAPPING,
     RUNTIMEC_LANGTYPE_FORM_UNRECOGNIZED
 } runtimec_langtype_form_t;
 
@@ -84,13 +93,24 @@ typedef enum runtimec_langtype_char_encoding {
     RUNTIMEC_LANGTYPE_CHAR_ENCODING_ASCII
 } runtimec_langtype_char_encoding_t;
 
-/* 解析结果。字段的有效性由 `form` 决定，不在别的字段上重复编码。 */
+/*
+ * 解析结果。字段的有效性由 `form` 决定，不在别的字段上重复编码。
+ *
+ * **判「值是什么种类」用 `base`，不要用 `form` 或文本首字节。**
+ * `[1]char/utf32`（字符串字面量的声明类型）是 ARRAY 形态，按 `form` 判会把它当成
+ * 「不是字符」；按首字节（`[`）判同样错。种类在 `base`（剥掉形状段后的 `char/utf32`），
+ * 形状在 `dimension_count` 与原文前缀。这一条已被三个人各踩一次。
+ */
 typedef struct runtimec_langtype {
     /* 基种类文本（`int64`、`char/utf8`…），指向入参内部，不拷贝。 */
     runtimec_string_view_t base;
     runtimec_langtype_form_t form;
     runtimec_langtype_scalar_t scalar;               /* form == SCALAR */
     uint32_t scalar_width;                           /* form == SCALAR；其余 0 */
+    /*
+     * 只在 CHARACTER / STRING 填。**`[N]char/X` 是 ARRAY 形态，这里不自填**——
+     * 拿它判「这是不是字符序列」会得到 0。
+     */
     runtimec_langtype_char_encoding_t char_encoding; /* CHARACTER / STRING */
     /* 形状维度段个数；无前缀 0。`[]char/utf8` 与 `[.]char/utf8` 都是 1。 */
     int32_t dimension_count;

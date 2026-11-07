@@ -1,8 +1,7 @@
 use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 
 fn body(data: &[u8]) -> &[u8] {
-    let h = kvkind::head(data);
-    kvkind::body(data, &h)
+    data
 }
 
 /// Run only when `KVLANG_TEST_REDIS_DSN` is explicitly set to avoid polluting a local Redis instance.

@@ -6,6 +6,8 @@
  *       V.body；任何不确定处失败封闭，不用默认提升或占位地址换取成功。
  */
 
+#include <stdio.h>
+
 #include "vmkv/encoder.h"
 
 #include <string.h>
@@ -876,6 +878,21 @@ static runtimec_status_t vmkv_encoder_classify_read_arguments(
         uint32_t type_set = VMKV_RWIR_TYPE_SET_NONE;
         const vmkv_parameter_type_result_t result =
             vmkv_parameter_type_classify(declared, &type_set);
+        /*
+         * **`ANY_SINGLE` 行豁免「必须有具体类型」**：`nonnull` / `nonnull·not`
+         * 的读参恰恰**就是**一个没有类型的 None 字面量——那是它的定义域，不是
+         * 缺席。若这里要求具体类型，能力行落地了却永远编不过。
+         *
+         * 范围严格：只有该行读侧掩码**恰好是 ANY_SINGLE 这一位**才豁免。并集、
+         * 以及任何别的行都不受影响——不许把「没有类型」变成通用口子。
+         */
+        if (result == VMKV_PARAMETER_TYPE_RESULT_NONE &&
+            vmkv_encoder_requires_classification(operation->capability) &&
+            operation->capability->read_parameter_type_set ==
+                VMKV_RWIR_TYPE_SET_ANY_SINGLE) {
+            encoder->parameter_type_sets[ordinal] = VMKV_RWIR_TYPE_SET_NONE;
+            continue;
+        }
         /* 并集与空类型在任何位置都不接受：那不是「不分类」，是「没有类型」。 */
         if (result == VMKV_PARAMETER_TYPE_RESULT_UNION) {
             return vmkv_encoder_fail(
@@ -1025,33 +1042,26 @@ static runtimec_status_t vmkv_encoder_resolve_write_types(
          ++ordinal) {
         const runtimec_string_view_t declared =
             source->write_arguments[ordinal].parameter_type_name;
+        /*
+         * **写参必须有具体类型，没有例外。**
+         *
+         * 这里曾有一条豁免：读来源是单个 STATIC 绝对 key 时，允许写参类型缺席，
+         * 由运行期从目标 XValue 头取（裁决 `decision-type-from-target-local.md`）。
+         * 那条豁免已随「局部必须声明类型」的规则落地而失效——实测 246 条语料
+         * （40 + 206）里，豁免分支**一次都没有被进入**，是死代码。
+         *
+         * 现在缺类型是**规则违约**，不是可豁免的情形：layout 必须给出具体类型。
+         * 失败封闭，没有后门。
+         */
         if (declared.size == 0U || declared.data == NULL ||
             memchr(declared.data, '|', declared.size) != NULL) {
-            /*
-             * **写参也可以没有类型**——当且仅当本条指令的读来源是一次 STATIC
-             * 绝对 key 引用（裁决 `decision-type-from-target-local.md`）。
-             *
-             * 那时代码形态是 `绝对 key -> 局部`：读进来什么类型，写侧就是什么
-             * 类型，**由运行期从目标 XValue 头取**。layout 不知道、编码器也不该猜。
-             * 编码出来仍是一个普通槽（类型字符串为空），`create_unbound_local`
-             * 在第一次写时按写入 wire 的头定它的类型。
-             *
-             * 范围严格：只认「只有一个读参、且它是 STATIC」这一格。其余任何
-             * 缺失仍是具名失败——不许把缺席类型变成通用口子。
-             */
-            const bool type_from_target =
-                source->read_argument_count == 1U &&
-                source->read_arguments[0].key_addressability ==
-                    VMKV_KEY_ADDRESSABILITY_STATIC;
-            if (!type_from_target) {
-                return vmkv_encoder_fail(
-                    error, RUNTIMEC_STATUS_UNSUPPORTED,
-                    VMKV_ENCODER_DIAG_INVALID_PARAMETER_TYPE,
-                    "vmkv encoder: write parameter has no concrete langtype",
-                    operation->logical_program_counter);
-            }
-            targets[ordinal] = runtimec_string_view_make(NULL, 0U);
-            continue;
+            return vmkv_encoder_fail(
+                error, RUNTIMEC_STATUS_UNSUPPORTED,
+                VMKV_ENCODER_DIAG_INVALID_PARAMETER_TYPE,
+                "vmkv encoder: write parameter has no concrete langtype; "
+                "layout must declare one (missing type is a rule violation, "
+                "not an exemptible case)",
+                operation->logical_program_counter);
         }
         targets[ordinal] = declared;
     }
@@ -1184,6 +1194,105 @@ static runtimec_status_t vmkv_encoder_encode_temporary_output(
  * 「将来有人加一条并集行」——删掉分支等于把规则一起删掉。**不要把它们算进
  * 覆盖率：没有用例能走到。**
  */
+/* 视图与 C 串逐字节相等（本文件内唯一的文本比较，避免各处手写 memcmp 三件套）。 */
+static bool vmkv_encoder_view_equals(runtimec_string_view_t view,
+                                     const char *text) {
+    const size_t size = strlen(text);
+
+    return view.size == size && view.data != NULL &&
+           memcmp(view.data, text, size) == 0;
+}
+
+/*
+ * 该操作数是不是 **None 字面量**。
+ *
+ * 判据取自 wire 事实，不取 langtype 文本：None 的字面量是**空 body + 无 langtype**。
+ * 不从 `parameter_type_name` 判——layout 已经把它补成了「另一侧的类型」（那是
+ * 给编码器分类用的上下文类型），照它判会把 None 认成 `int64` 而永远不触发。
+ *
+ * `literal` 只有内联字面量才有效；其余引用形态（槽/形参）不可能是 None 字面量。
+ */
+static bool vmkv_encoder_operand_is_none(
+    const vmkv_rwir_argument_view_t *argument) {
+    if (argument == NULL) {
+        return false;
+    }
+    /*
+     * 判据：**参数类型名、字面量 langtype、字面量 body 三者都为空**。
+     *
+     * 不判 `literal.bytes.data != NULL`：空 body 的字面量在视图里 data 可能就是
+     * NULL（实测过——加了这个前提，判据永不成立，归一化从不触发，`== None`
+     * 静默走数值 `eq`）。空 body 的「空」由 `size == 0` 表达，`data` 是不是空
+     * 指针与语义无关。
+     *
+     * 三空同时成立才是 None：只有 body 空而类型在，那是空字符串/空容器，不是
+     * None（spec `03-类型系统/03` 的 None 判据第 2 条）。
+     */
+    /*
+     * 判据：**参数类型名为空 + 字面量 langtype 为空 + 字面量是「None 形态的 wire」**。
+     *
+     * 最后一条件不能用 `bytes.size == 0`：`new_none()` 产的是**完整的 16 字节
+     * 空 head wire**（body 0 字节、无 langtype 记录），bytes.size 是 16 不是 0。
+     * 实测过：按 size==0 判，归一化永不触发。
+     *
+     * None 形态的判据与 spec `03-类型系统/03`「None 判据」同一组：head 里的
+     * bodylen 为 0，且 attr 区没有 langtype 记录（attrslen 为 0 —— 一条记录
+     * 都没有才叫「无 langtype」）。
+     */
+    if (argument->parameter_type_name.size != 0U ||
+        argument->literal.langtype.size != 0U) {
+        return false;
+    }
+    if (argument->literal.bytes.size == 0U) {
+        return true; /* 完全空：调用方连 wire 都没给，按 None 处理 */
+    }
+    if (argument->literal.bytes.size < KVSPACE_XVALUE_HEAD_LEN ||
+        argument->literal.bytes.data == NULL) {
+        return false;
+    }
+    {
+        kvspaceXvalueHead head;
+
+        memcpy(&head, argument->literal.bytes.data, sizeof head);
+        return kvspaceXvalueHeadLen(&head) == 0U &&
+               kvspaceXvalueHeadAttrsLen(&head) == 0U;
+    }
+}
+
+/*
+ * 该操作数的类型是不是**引用**（Ptr `*T` 或 structref `/lib/X`）。
+ *
+ * 分岔依据：引用判空走 `ptreq`（语义是「目标路径是否为空」），非引用判空走
+ * `nonnull`（语义是「这个位置有没有值」）。两者不能合流——把引用判空吞进
+ * `nonnull` 会让 `p == None` 在 p 指向一个存在的目标时答错。
+ */
+static bool vmkv_encoder_type_is_reference(runtimec_string_view_t type_name) {
+    if (type_name.size == 0U || type_name.data == NULL) {
+        return false;
+    }
+    return type_name.data[0] == '*' || type_name.data[0] == '/';
+}
+
+/*
+ * 两个读参里哪一侧是 None 字面量；都不是则返回 2。
+ *
+ * 两侧都是 None 时返回 0（`None == None`）——那在本步骤里会走到「另一侧也是
+ * None ⇒ 不是引用 ⇒ 选 nonnull」，语义上正确：两侧都无值，`nonnull(None)` 为
+ * false，`==` 取反后为 true。
+ */
+static size_t vmkv_encoder_none_operand_side(
+    const vmkv_encoder_t *encoder,
+    const vmkv_rwir_instruction_view_t *source_instruction) {
+    (void)encoder;
+    if (vmkv_encoder_operand_is_none(&source_instruction->read_arguments[0])) {
+        return 0U;
+    }
+    if (vmkv_encoder_operand_is_none(&source_instruction->read_arguments[1])) {
+        return 1U;
+    }
+    return 2U;
+}
+
 static bool vmkv_encoder_side_rejects_pointer(
     uint32_t type_set, const vmkv_rwir_argument_view_t *arguments,
     size_t argument_count) {
@@ -1251,11 +1360,69 @@ runtimec_status_t vmkv_encode_instruction(
      */
     const bool is_rwfunc_call = vmkv_rwir_manifest_is_rwfunc_call(
         source_instruction->operation_langtype);
+    /*
+     * `None` 判空的**归一化**（在能力查找之前做，因为它要改的正是被查找的名字）。
+     *
+     * `x == None` / `x != None` / `m·*k != None` 在 wire 上两侧的类型不对称：
+     * `None` 侧是**空 body 字面量**，没有类型可进特化表。所以它不能靠
+     * `RUNTIMEC_RWIR_SPECIALIZATION`（那张表按「两侧同掩码」选行），只能在这里
+     * 按「**这一侧的值是 None 字面量** + **另一侧不是引用**」两个条件改选：
+     *
+     *   另一侧是引用（`*T` / `/lib/X`） ⇒ 保持 `==`/`!=`，由特化表选 `ptreq`
+     *                                     （引用判空是另一套语义，不能吞掉）
+     *   另一侧不是引用               ⇒ 改选 `nonnull`（`!=`）/ `nonnull·not`（`==`）
+     *
+     * 这不是「在编码层再造一套算子选择」：特化表表达不了「一侧无类型」的形态，
+     * 而 layout 已经把这个操作数的**上下文类型**补好了（`code.rs` 的 none_type），
+     * 本步只把「值是 None」这一个事实翻成算子名。
+     *
+     * 与数值 `eq` 的分界也在这一步：`None` 判空若回落到 `eq`，会把 None 当 0 比较
+     * ——空 body 读成零值，那是静默错误。
+     */
+    runtimec_string_view_t operation_name = source_instruction->operation_name;
+    /*
+     * 归一化会同时**改算子名与实参形状**——两件事必须一起做，只改名字就是当前
+     * 那个违约：指令声称自己是 `nonnull`（一元），却带着 `==` 的两条实参。
+     *
+     * 手法照抄本文件已有的 `dereferenced_view`：**派生一份视图**，后续流程全部读
+     * 它。这样 8 处按 `read_argument_count` 循环的地方一处都不用改——它们本来
+     * 就从视图里读条数。
+     */
+    vmkv_rwir_instruction_view_t normalized_view;
+    const vmkv_rwir_instruction_view_t *instruction_view = source_instruction;
+    if (!is_rwfunc_call && source_instruction->read_argument_count == 2U &&
+        (vmkv_encoder_view_equals(operation_name, "==") ||
+         vmkv_encoder_view_equals(operation_name, "!="))) {
+        const size_t none_side = vmkv_encoder_none_operand_side(
+            encoder, source_instruction);
+        if (none_side < 2U) {
+            const size_t other = none_side == 0U ? 1U : 0U;
+            const runtimec_string_view_t other_type =
+                source_instruction->read_arguments[other].parameter_type_name;
+            if (!vmkv_encoder_type_is_reference(other_type)) {
+                operation_name = vmkv_encoder_view_equals(operation_name, "!=")
+                                     ? runtimec_string_view_from_c_string("nonnull")
+                                     : runtimec_string_view_from_c_string("nonnull·not");
+                /*
+                 * `nonnull` / `nonnull·not` 是**一元**：它的定义域是「这个位置
+                 * 有没有值」，只有一个操作数有意义。丢掉 None 那一侧，留下的
+                 * 就是被检查的那个值。
+                 *
+                 * `read_arguments` 与 `read_argument_count` 一起改，其余字段
+                 * （opcode langtype、pc、写参）原样保留。
+                 */
+                normalized_view = *source_instruction;
+                normalized_view.read_arguments =
+                    &source_instruction->read_arguments[other];
+                normalized_view.read_argument_count = 1U;
+                instruction_view = &normalized_view;
+            }
+        }
+    }
     const vmkv_rwir_capability_t *capability =
         is_rwfunc_call
             ? vmkv_rwir_manifest_capability(RUNTIMEC_RWIR_CALL)
-            : vmkv_rwir_manifest_find_operation(
-                  source_instruction->operation_name);
+            : vmkv_rwir_manifest_find_operation(operation_name);
     if (capability == NULL) {
 #ifdef RUNTIMEC_TEMP_PRINTLN
         /*
@@ -1276,7 +1443,7 @@ runtimec_status_t vmkv_encode_instruction(
          */
         binrwir_operation_identifier_t temporary_identifier = 0U;
         if (vmkv_encoder_temp_output_identifier(
-                source_instruction->operation_name, &temporary_identifier)) {
+                instruction_view->operation_name, &temporary_identifier)) {
             runtimec_status_t temp_status =
                 vmkv_encoder_encode_temporary_output(
                     encoder, request, builder, local_types, function,
@@ -1297,7 +1464,7 @@ runtimec_status_t vmkv_encode_instruction(
         output_instruction->operation_identifier =
             BINRWIR_OPERATION_IDENTIFIER_FOREIGN;
         output_instruction->logical_program_counter =
-            source_instruction->logical_program_counter;
+            instruction_view->logical_program_counter;
         output_instruction->read_arguments = (binrwir_argument_span_t){0};
         output_instruction->write_arguments = (binrwir_argument_span_t){0};
         output_instruction->read_parameter_types = NULL;
@@ -1334,20 +1501,20 @@ runtimec_status_t vmkv_encode_instruction(
     }
     if (vmkv_encoder_side_rejects_pointer(
             capability->read_parameter_type_set,
-            source_instruction->read_arguments,
-            source_instruction->read_argument_count) ||
+            instruction_view->read_arguments,
+            instruction_view->read_argument_count) ||
         vmkv_encoder_side_rejects_pointer(
             capability->write_parameter_type_set,
-            source_instruction->write_arguments,
-            source_instruction->write_argument_count)) {
+            instruction_view->write_arguments,
+            instruction_view->write_argument_count)) {
         return vmkv_encoder_fail(
             error, RUNTIMEC_STATUS_UNSUPPORTED,
             VMKV_ENCODER_DIAG_UNMAPPED_PARAMETER_TYPE,
             "vmkv encoder: a pointer operand has no representable type text",
             logical_program_counter);
     }
-    const size_t read_count = source_instruction->read_argument_count;
-    const size_t write_count = source_instruction->write_argument_count;
+    const size_t read_count = instruction_view->read_argument_count;
+    const size_t write_count = instruction_view->write_argument_count;
     /*
      * `rwfunc` 调用在读参区最前多占一个 FUNCTION 引用（目标函数）。所有「读参之后」
      * 的偏移都必须带上它，否则写参会落到读参的槽位上——那不会报错，只会把写参
@@ -1385,7 +1552,7 @@ runtimec_status_t vmkv_encode_instruction(
     const vmkv_rwir_capability_t *selected = NULL;
     const vmkv_rwir_specialization_result_t specialization =
         vmkv_rwir_manifest_find_specialization(
-            source_instruction->operation_name, encoder->parameter_type_sets,
+            instruction_view->operation_name, encoder->parameter_type_sets,
             read_count, &selected);
     if (specialization == VMKV_RWIR_SPECIALIZATION_RESULT_INVERTED) {
         return vmkv_encoder_fail(
@@ -1400,7 +1567,17 @@ runtimec_status_t vmkv_encode_instruction(
     }
     const vmkv_rwir_capability_t *selected_capability = operation.capability;
 
-    if (selected_capability->read_parameter_type_set !=
+    /*
+     * `ANY_SINGLE` 行**跳过掩码匹配**：它的读参就是没有类型的 None 字面量
+     * （`parameter_type_sets` 是 `NONE`），按位与任何具体位都是 0。要求匹配等于
+     * 要求「任意单一类型」这个标记必须列出全部具体类型——那正是它要避免的事。
+     *
+     * 范围严格：只有掩码**恰好是 ANY_SINGLE 这一位**才跳过；并集与其它行不受影响。
+     */
+    if (selected_capability->read_parameter_type_set ==
+        VMKV_RWIR_TYPE_SET_ANY_SINGLE) {
+        /* 见上：无类型读参是这个能力行的定义域，不参与掩码匹配。 */
+    } else if (selected_capability->read_parameter_type_set !=
         VMKV_RWIR_TYPE_SET_NONE) {
         for (size_t ordinal = 0U; ordinal < read_count; ++ordinal) {
             if ((encoder->parameter_type_sets[ordinal] &
@@ -1461,7 +1638,7 @@ runtimec_status_t vmkv_encode_instruction(
          * BINRWIR_REFERENCE_FUNCTION 的约定；路径前缀由 vmbin 在调用入口拼）。
          * opcode 槽的 body 是完整路径，这里剥掉 `/lib/`。
          */
-        runtimec_string_view_t target_name = source_instruction->operation_name;
+        runtimec_string_view_t target_name = instruction_view->operation_name;
         if (vmkv_encoder_strip_library_prefix(&target_name) &&
             target_name.size == 0U) {
             return vmkv_encoder_fail(
@@ -1472,7 +1649,7 @@ runtimec_status_t vmkv_encode_instruction(
         }
         uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
         status = vmkv_encoder_register_symbol(
-            builder, target_name, source_instruction->operation_langtype,
+            builder, target_name, instruction_view->operation_langtype,
             &symbol_index, logical_program_counter, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return status;
@@ -1495,19 +1672,19 @@ runtimec_status_t vmkv_encode_instruction(
     for (size_t ordinal = 0U; ordinal < read_count; ++ordinal) {
         status = vmkv_encoder_map_argument(
             request, builder, local_types, function,
-            &source_instruction->read_arguments[ordinal], false,
+            &instruction_view->read_arguments[ordinal], false,
             &encoder->arguments[target_arguments + ordinal],
             logical_program_counter, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return status;
         }
         encoder->argument_types[target_arguments + ordinal] =
-            source_instruction->read_arguments[ordinal].parameter_type_name;
+            instruction_view->read_arguments[ordinal].parameter_type_name;
     }
     for (size_t ordinal = 0U; ordinal < write_count; ++ordinal) {
         status = vmkv_encoder_map_argument(
             request, builder, local_types, function,
-            &source_instruction->write_arguments[ordinal], false,
+            &instruction_view->write_arguments[ordinal], false,
             &encoder->arguments[write_region_begin + ordinal],
             logical_program_counter, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -1518,7 +1695,7 @@ runtimec_status_t vmkv_encode_instruction(
     output_instruction->operation_identifier =
         selected_capability->operation_identifier;
     output_instruction->logical_program_counter =
-        source_instruction->logical_program_counter;
+        instruction_view->logical_program_counter;
     output_instruction->read_arguments.data = encoder->arguments;
     /* 调用多一个 FUNCTION 引用（目标函数），它在分区最前。 */
     output_instruction->read_arguments.count = read_region_end;

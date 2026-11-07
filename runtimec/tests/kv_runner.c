@@ -84,6 +84,7 @@
 #include "binrwir/specialize.h"
 #include "engine/execution_window.h"
 #include "engine/session.h"
+#include "engine/frame_driver.h"
 #include <kvspace/kvspace.h>
 
 #include "contract/kvspace_access.h"
@@ -253,13 +254,14 @@ static void runtimec_deallocate(void *context, void *allocation, size_t size,
 #define KVRUN_MAX_ARGUMENTS 16U
 
 /* 一帧的执行结果，够调用方判「继续 / 结束 / 失败」。 */
-typedef enum frame_outcome {
-    FRAME_OUTCOME_INVALID = 0,
-    FRAME_OUTCOME_DONE,
-    FRAME_OUTCOME_HANDOFF,
-    FRAME_OUTCOME_ERROR,
-    FRAME_OUTCOME_EXECUTE_FAILED
-} frame_outcome_t;
+/* 帧结果直接沿用驱动的枚举：**不另立一套**。抄一份的后果是两边取值不一致时
+ * （比如给 DONE 加了分支）比对判据静默走错支。 */
+typedef frame_driver_outcome_t frame_outcome_t;
+#define FRAME_OUTCOME_INVALID FRAME_DRIVER_OUTCOME_INVALID
+#define FRAME_OUTCOME_DONE FRAME_DRIVER_OUTCOME_DONE
+#define FRAME_OUTCOME_HANDOFF FRAME_DRIVER_OUTCOME_HANDOFF
+#define FRAME_OUTCOME_ERROR FRAME_DRIVER_OUTCOME_ERROR
+#define FRAME_OUTCOME_EXECUTE_FAILED FRAME_DRIVER_OUTCOME_EXECUTE_FAILED
 
 typedef struct runner_environment {
     void *layout_library;
@@ -277,6 +279,8 @@ typedef struct runner_environment {
     void *kvspace_handle;
     runtimec_kvspace_access_t *kvspace_access;
     runtimec_session_t *session;
+    /* 调用帧驱动。状态由本环境持有（驱动本身无文件级可变状态）。 */
+    frame_driver_t frame_driver;
     char directory[256];
     char data_source[320];
     unsigned sequence;
@@ -397,6 +401,13 @@ static bool case_store_open(runner_environment_t *environment,
                 (int)error.status, error.message.data ? error.message.data : "");
         return false;
     }
+    /* 驱动按 store/session 重建：它的 effective key 表是**帧级**事实，
+     * 跨用例复用会把上一条的写参 key 带到下一条。 */
+    if (frame_driver_initialize(&environment->frame_driver,
+                                environment->session) != RUNTIMEC_STATUS_SUCCESS) {
+        fprintf(stderr, "case store: frame driver initialize failed\n");
+        return false;
+    }
     return true;
 }
 
@@ -460,569 +471,7 @@ static runtimec_status_t case_store_close(runner_environment_t *environment) {
  * `depth` 是当前帧号（根帧 1），子帧 `depth + 1`。**必须递增**：复用同一帧号会让
  * 子帧覆盖调用方帧——那种错不会立刻崩，而是算错。
  */
-/*
- * ── 写参槽的**有效 key**（驱动自持的一张表）──────────────────────────
- *
- * 背景：`wrap(3) -> y` 的时候，`wrap` 的写参 `*o` 在帧建起来时**已经绑到最终
- * 接收者** `y` 上（窗口的 bindings 做了这件事）。所以当 `wrap` 再往下调用
- * `seta(*n) -> *o` 时，子调用要写的那个 key **不是** `/vthread/1/[2]/[0,+1]`
- * （那只是 wrap 自己的槽），而是 `y` 的 key。写槽 key 就等于写到一个没人读的地方
- * ——实测 `seta` 写对了、`y` 恒为 0。
- *
- * **为什么由驱动记，而不是查窗口**：驱动是这些 key 的**来源**——它自己决定每次
- * 调用给被调方传哪个 key（`callee_arguments[...].key`）。记下自己做过的决定不是
- * 「复制窗口的状态」，而是同一事实回到产生它的地方。窗口的 bindings 是它自己的
- * 派生缓存，且未通过公共 API 暴露。
- *
- * 表项是 `(帧路径, 写参序号) → 该写参被绑到的 key`。帧弹出时**按帧路径整段清掉**，
- * 否则同深度复用目录时会串到上一次调用的 key。
- */
-#define KVRUN_EFFECTIVE_KEY_CAPACITY 256U
 
-typedef struct runner_effective_key {
-    char frame_path[128];
-    uint16_t parameter_slot;
-    char key[128];
-} runner_effective_key_t;
-
-static runner_effective_key_t g_effective_keys[KVRUN_EFFECTIVE_KEY_CAPACITY];
-static size_t g_effective_key_count;
-
-/* 记一条；同 (帧路径, 槽) 覆盖（递归同帧号不会重入，覆盖即正确）。 */
-static void effective_key_record(const char *frame_path, uint16_t slot,
-                                 const char *key) {
-    for (size_t ordinal = 0U; ordinal < g_effective_key_count; ++ordinal) {
-        if (g_effective_keys[ordinal].parameter_slot == slot &&
-            strcmp(g_effective_keys[ordinal].frame_path, frame_path) == 0) {
-            snprintf(g_effective_keys[ordinal].key,
-                     sizeof(g_effective_keys[ordinal].key), "%s", key);
-            return;
-        }
-    }
-    if (g_effective_key_count >= KVRUN_EFFECTIVE_KEY_CAPACITY) {
-        return;
-    }
-    runner_effective_key_t *entry = &g_effective_keys[g_effective_key_count++];
-    snprintf(entry->frame_path, sizeof(entry->frame_path), "%s", frame_path);
-    entry->parameter_slot = slot;
-    snprintf(entry->key, sizeof(entry->key), "%s", key);
-}
-
-/* 查一条；没有则返回 NULL。 */
-static const char *effective_key_lookup(const char *frame_path,
-                                        uint16_t slot) {
-    for (size_t ordinal = 0U; ordinal < g_effective_key_count; ++ordinal) {
-        if (g_effective_keys[ordinal].parameter_slot == slot &&
-            strcmp(g_effective_keys[ordinal].frame_path, frame_path) == 0) {
-            return g_effective_keys[ordinal].key;
-        }
-    }
-    return NULL;
-}
-
-/* 帧弹出：把该帧的所有记录整段清掉（同一个 frame_path 前缀只属于它）。 */
-static void effective_key_forget_frame(const char *frame_path) {
-    size_t kept = 0U;
-    for (size_t ordinal = 0U; ordinal < g_effective_key_count; ++ordinal) {
-        if (strcmp(g_effective_keys[ordinal].frame_path, frame_path) == 0) {
-            continue;
-        }
-        if (kept != ordinal) {
-            g_effective_keys[kept] = g_effective_keys[ordinal];
-        }
-        kept += 1U;
-    }
-    g_effective_key_count = kept;
-}
-
-static frame_outcome_t execute_frame_until_done(
-    runner_environment_t *environment, const char *function_path,
-    uint32_t source_pc, int32_t depth, const char *frame_segment,
-    const char *vthread_identifier,
-    const runtimec_argument_description_t *arguments, size_t argument_count,
-    unsigned *out_callee_depth, binrwir_execution_exit_t *out_exit) {
-    char frame_path[128];
-    /*
-     * 目录名带唯一序号：`/vthread/{vid}/[{depth}.#{serial}]`。
-     * `depth` 保留在最前面，读的人仍能一眼看出层级；序号保证同深度多次调用
-     * 不共用目录（见 `g_frame_serial` 的注释）。
-     */
-    const int frame_length =
-        snprintf(frame_path, sizeof(frame_path), "/vthread/%s/[%s]",
-                 vthread_identifier, frame_segment);
-    if (frame_length < 0 || (size_t)frame_length >= sizeof(frame_path)) {
-        return FRAME_OUTCOME_INVALID;
-    }
-    runtimec_execution_window_request_t request;
-    memset(&request, 0, sizeof(request));
-    request.function_path = runtimec_string_view_from_c_string(function_path);
-    request.vthread_identifier =
-        runtimec_string_view_from_c_string(vthread_identifier);
-    request.frame_path = runtimec_string_view_from_c_string(frame_path);
-    request.stack_identifier = depth;
-    request.source_logical_program_counter = source_pc;
-    request.arguments = arguments;
-    request.argument_count = argument_count;
-
-    runtimec_execution_window_result_t result;
-    memset(&result, 0, sizeof(result));
-    runtimec_error_t error;
-    memset(&error, 0, sizeof(error));
-    /* 窗口的 message 是**线程局部静态缓冲**（`execution_window.c:922`），
-     * 下一次失败会覆盖它。所以这里立刻拷走，之后任何再失败的调用都会冲掉原话。 */
-    char message_copy[256];
-    message_copy[0] = '\0';
-    if (runtimec_execution_window_execute(environment->session, &request,
-                                          &result, &error) !=
-        RUNTIMEC_STATUS_SUCCESS) {
-        *out_exit = result.execution_exit;
-        if (error.message.data != NULL && error.message.size != 0U) {
-            const size_t copy = error.message.size < sizeof(message_copy) - 1U
-                                    ? error.message.size
-                                    : sizeof(message_copy) - 1U;
-            memcpy(message_copy, error.message.data, copy);
-            message_copy[copy] = '\0';
-        }
-        /* 把窗口给的消息带出来：`detail` 是分类码，`message` 才是能定位的那句。
-         * 只在 `execute_frame_until_done` 里打一次，不往回调方穿透。 */
-        /* `detail_code` 一个字段承载**两个枚举**：窗口自己的诊断码
-         * （`execution_window.c:33-50`，6=COMPILE_FAILED）与解释器的诊断码
-         * （`interpreter.h:43-51`，6=UNRESOLVED_TARGET）。
-         *
-         * 分辨办法：**窗口的 fail 路径会把 error 填上**（`execution_window.c:903-933`
-         * 那条会写 "instruction execution failed (execution exit detail=…)"），
-         * 而窗口自己提前返回的路径不会带这句。所以 `message` 空 = 窗口层失败。
-         * 这也是 `execution_window.c:905` 注释里说的「读的人会把两者读错」。 */
-        return FRAME_OUTCOME_EXECUTE_FAILED;
-    }
-    *out_exit = result.execution_exit;
-    /* 本帧实际执行的 Program。递归时每帧不同，所以**从结果里取**，
-     * 不能存在驱动里当全局——那就是「一个函数只有一个活动帧」的错误假设。 */
-    const binrwir_program_t *frame_program = result.program;
-    switch (result.execution_exit.kind) {
-    case BINRWIR_EXECUTION_EXIT_DONE:
-        return FRAME_OUTCOME_DONE;
-    case BINRWIR_EXECUTION_EXIT_HANDOFF:
-        return FRAME_OUTCOME_HANDOFF;
-    case BINRWIR_EXECUTION_EXIT_ERROR:
-        return FRAME_OUTCOME_ERROR;
-    case BINRWIR_EXECUTION_EXIT_CALL: {
-        /* 返回链断裂：调用方没给 resume 点。spec 要求报错并保留帧，
-         * **不许**当成「跑完了」。 */
-        if (result.execution_exit.resume_logical_program_counter ==
-            BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE) {
-            return FRAME_OUTCOME_ERROR;
-        }
-        /* 被调函数名在符号池里（不含 `/lib/`，见 encoder.c:1222-1226），
-         * 补前缀才是它的绝对路径。名字可能已带包前缀（`outer/inner·add1`），
-         * 补的是 `/lib/` 这一段，名字原样。 */
-        runtimec_string_view_t callee_name =
-            runtimec_string_view_make(NULL, 0U);
-        runtimec_string_view_t callee_langtype =
-            runtimec_string_view_make(NULL, 0U);
-        /* `binrwir_program_get_symbol` 返回 **runtimec_status_t**，不是 bool。
-         * 写成 `!get_symbol(...)` 会把 SUCCESS(0) 取反成 true，于是每次解析都
-         * 判失败——两套返回值语义混用，而且不报错，只是走错分支。 */
-        if (binrwir_program_get_symbol(
-                frame_program,
-                (uint16_t)result.execution_exit.target_identifier,
-                &callee_name, &callee_langtype) != RUNTIMEC_STATUS_SUCCESS ||
-            callee_name.size == 0U) {
-            return FRAME_OUTCOME_ERROR;
-        }
-        /* **必须用 `%.*s` + size**：`runtimec_string_view_t` 是长度视图，
-         * 不保证 NUL 终止。用 `%s` 会把视图后面的字节读进来——实测拼出
-         * `/lib/add1rwfuncvint64int64`，于是 source revision 查不到，
-         * 而错误只报「不可用」，看起来像 store 坏了。 */
-        char callee_path[CASE_PATH_CAPACITY];
-        const int callee_length =
-            snprintf(callee_path, sizeof(callee_path), "/lib/%.*s",
-                     (int)callee_name.size, callee_name.data);
-        if (callee_length < 0 ||
-            (size_t)callee_length >= sizeof(callee_path)) {
-            return FRAME_OUTCOME_ERROR;
-        }
-        /* ── 物化常量实参到被调帧的 `._lit<i>` ─────────────────────
-         *
-         * spec `04-layout语义/03-函数:15-17`：字面量实参**在调用绑定期**物化为
-         * 被调帧的 `._lit<i>` KV 值，再按地址传给函数。
-         * （与 `05-runtime语义/04-函数调用:127-133` 不冲突——那条管同一个 Program
-         * 内的普通 rwir，常量内联为 LITERAL 引用、不落临时 key。两个域。）
-         *
-         * `add1(41)` 是跨帧 rwfunc 调用，`*int64 $x` 是指针绑定需要一个 key，
-         * 所以 `41` 必须物化。落点是新帧目录下，所以这里先建目录。
-         */
-        /*
-         * **不在这里预建子帧目录**：帧路径由 `execute_frame_until_done` 自己算
-         * （含唯一序号 `g_frame_serial`），执行窗口的 `ensure_frame` 会建它。
-         *
-         * 曾经在这里按 `/[depth+1]` 先 mkindex：那时两处算的是同一个名字，所以
-         * 看不出问题；加了序号之后两处算法不一致，预建的目录和实际用的对不上，
-         * 而 `ensure_frame` 又会因「帧上已有另一个函数」被拒——正是它要修的那个
-         * 症状。**同一件事两个地方算，就是这个下场。**
-         */
-        /* 取出 call 指令的读参项（跳过最前的 FUNCTION 那个）。 */
-        uint32_t call_instruction_identifier = 0U;
-        binrwir_instruction_view_t call_instruction;
-        memset(&call_instruction, 0, sizeof(call_instruction));
-        if (binrwir_program_find_instruction(
-                frame_program,
-                result.execution_exit.logical_program_counter,
-                &call_instruction_identifier) != RUNTIMEC_STATUS_SUCCESS ||
-            binrwir_program_get_instruction(frame_program,
-                                            call_instruction_identifier,
-                                            &call_instruction) !=
-                RUNTIMEC_STATUS_SUCCESS) {
-            return FRAME_OUTCOME_ERROR;
-        }
-        /* 驱动只给**描述**，物化归 `execution_window`。
-         *
-         * 早先这里自己拼 `._lit<i>` 并 `set_value`——那是让缺少 snapshot 的层
-         * 去造 key：绕开来会破坏 revision（实测 `function source revision differs`），
-         * 硬造又等于抄一份窗口的内部状态。两种都是第二份真相。 */
-        runtimec_argument_description_t callee_arguments[KVRUN_MAX_ARGUMENTS];
-        char read_local_keys[KVRUN_MAX_ARGUMENTS][128];
-        char write_target_keys[KVRUN_MAX_ARGUMENTS][128];
-        char write_target_langtypes[KVRUN_MAX_ARGUMENTS][128];
-        size_t callee_argument_count = 0U;
-        memset(callee_arguments, 0, sizeof(callee_arguments));
-        for (size_t ordinal = 0U;
-             ordinal < call_instruction.read_arguments.count &&
-             callee_argument_count < KVRUN_MAX_ARGUMENTS;
-             ++ordinal) {
-            const binrwir_argument_t *argument =
-                &call_instruction.read_arguments.data[ordinal];
-            if (argument->reference_kind == BINRWIR_REFERENCE_FUNCTION) {
-                continue;
-            }
-            if (argument->reference_kind == BINRWIR_REFERENCE_LITERAL) {
-                runtimec_bytes_view_t wire;
-                runtimec_string_view_t literal_langtype;
-                memset(&wire, 0, sizeof(wire));
-                if (binrwir_program_get_literal(frame_program,
-                                                argument->payload, &wire,
-                                                &literal_langtype) !=
-                    RUNTIMEC_STATUS_SUCCESS) {
-                    return FRAME_OUTCOME_ERROR;
-                }
-                callee_arguments[callee_argument_count].source =
-                    RUNTIMEC_ARGUMENT_SOURCE_LITERAL;
-                callee_arguments[callee_argument_count].literal_bytes = wire;
-                callee_arguments[callee_argument_count].literal_langtype =
-                    literal_langtype;
-                callee_argument_count += 1U;
-                continue;
-            }
-            if (argument->reference_kind == BINRWIR_REFERENCE_LOCAL) {
-                /* 变量实参（`fib(a)` 的 `a`）：它**已经存在**于调用方帧，
-                 * 所以是 EXISTING_KEY，窗口不创建。
-                 *
-                 * 这正是递归与单层调用的实质差别：单层的实参多是字面量，
-                 * 递归的实参是上一层算出来的局部。 */
-                runtimec_string_view_t local_name =
-                    runtimec_string_view_make(NULL, 0U);
-                runtimec_string_view_t local_langtype =
-                    runtimec_string_view_make(NULL, 0U);
-                if (binrwir_program_get_symbol(frame_program,
-                                               (uint16_t)argument->slot,
-                                               &local_name, &local_langtype) !=
-                        RUNTIMEC_STATUS_SUCCESS ||
-                    local_name.size == 0U) {
-                    return FRAME_OUTCOME_ERROR;
-                }
-                /*
-                 * key 用**本帧自己的 `frame_path`**，不用 `depth` 重算。
-                 *
-                 * `depth` 是帧号，`frame_path` 才是地址——引入子帧段
-                 * `<depth+1>.<call_site_pc>`（`[2.1]` 这种）之后，两者
-                 * **不再是同一个东西**。此处曾按 depth 重算 ``/<vid>/[depth]/<name>``，
-                 * 于是 key 指向 `[2]/n1` 而真实是 `[1]/n1`——一个不存在的帧，
-                 * `bind_slot` 解析失败（`ARGUMENT_UNRESOLVED`），所有带局部
-                 * 实参的调用全挂。
-                 */
-                if (binrwir_frame_local_key(
-                        runtimec_string_view_from_c_string(frame_path),
-                        runtimec_string_view_make(local_name.data,
-                                                  local_name.size),
-                        read_local_keys[callee_argument_count],
-                        sizeof(read_local_keys[callee_argument_count])) ==
-                    SIZE_MAX) {
-                    return FRAME_OUTCOME_ERROR;
-                }
-                callee_arguments[callee_argument_count].source =
-                    RUNTIMEC_ARGUMENT_SOURCE_EXISTING_KEY;
-                callee_arguments[callee_argument_count].key =
-                    runtimec_string_view_from_c_string(
-                        read_local_keys[callee_argument_count]);
-                callee_argument_count += 1U;
-                continue;
-            }
-            /* 其它 kind（STATIC / PARAMETER_*）本阶段失败封闭。 */
-            return FRAME_OUTCOME_ERROR;
-        }
-        /* 写参：指向调用方帧的槽。此刻可能还不存在（`add1(41) -> v` 的 `v`），
-         * 所以描述成 WRITE_TARGET——**要不要创建由窗口判**，驱动不做这个判断。 */
-        for (size_t ordinal = 0U;
-             ordinal < call_instruction.write_arguments.count &&
-             callee_argument_count < KVRUN_MAX_ARGUMENTS;
-             ++ordinal) {
-            const binrwir_argument_t *argument =
-                &call_instruction.write_arguments.data[ordinal];
-            /*
-             * 写槽可以是**局部**（`add1(41) -> v`），也可以是**本帧自己的形参写位置**
-             * （`fib(n1) -> (*a, *b)`）。后者是递归的形态：写回的不是新变量，
-             * 而是调用方签名里那个 `*T $name`。
-             *
-             * 两者的 key **不同形**（见 `binrwir_frame_bindings.h`）：
-             *   局部  `/vthread/<vid>/[<depth>]/<name>`
-             *   形参  `/vthread/<vid>/[<depth>]/[0,+<ordinal+1>]`
-             * 所以这里按 kind 分派，但 key 一律由 `binrwir_frame_*_key` 拼——
-             * 拼法只有一处，本驱动不自己拼。
-             */
-            if (argument->reference_kind == BINRWIR_REFERENCE_PARAMETER_WRITE) {
-                /*
-                 * 形参写位置：key 由 helper 拼，本驱动不自己拼。
-                 * `slot` 是**该方向内的序号**（argidx），从 0 起。
-                 *
-                 * ── 用**本帧**的 `frame_path`，不是被调方那段 ──────────────
-                 *
-                 * 写参 `*o` 是**调用方签名里的槽**：被调方写它，等于写调用方的
-                 * `/vthread/<vid>/[<本帧段>]/[0,+N]`。用它自己的 `callee` 段去拼
-                 * ——那是被调帧的槽——值就写进了子帧，调用方永远读不到（症状：
-                 * `inner(*n) -> *o` 之后 `*o` 恒为 0，而单层 `inner(3) -> r` 正常，
-                 * 因为那一层调用方就是根帧、恰好同段）。
-                 *
-                 * **LOCAL 实参那一支（上面）已经用同一条判据修过**，注释原文
-                 * 「`depth` 是帧号，`frame_path` 才是地址」。这里用的是同一个
-                 * `frame_path` 局部量——两处取帧路径只有这一个来源。
-                 *
-                 * **契约（对正式驱动同样成立）**：驱动负责把写参槽绑到**调用者
-                 * key**；runtime 只认绑定，不自己推导「写参该落在哪」。
-                 */
-                /*
-                 * **先查本帧该写参的有效 key**：本帧自己被调进来时，这个写参
-                 * 已经被绑到某个最终接收者。查不到（根帧、或该层没经由本驱动
-                 * 传递）才用本帧自己的槽 key。
-                 */
-                const char *effective =
-                    effective_key_lookup(frame_path, argument->slot);
-                size_t parameter_key_size = SIZE_MAX;
-                if (effective != NULL) {
-                    const size_t effective_size = strlen(effective);
-                    if (effective_size + 1U <=
-                        sizeof(write_target_keys[callee_argument_count])) {
-                        memcpy(write_target_keys[callee_argument_count],
-                               effective, effective_size + 1U);
-                        parameter_key_size = effective_size;
-                    }
-                }
-                if (parameter_key_size == SIZE_MAX) {
-                    parameter_key_size = binrwir_frame_parameter_key(
-                        runtimec_string_view_from_c_string(frame_path),
-                        argument->slot, true,
-                        write_target_keys[callee_argument_count],
-                        sizeof(write_target_keys[callee_argument_count]));
-                }
-                if (parameter_key_size == SIZE_MAX) {
-                    return FRAME_OUTCOME_ERROR;
-                }
-                /*
-                 * 形参的 langtype 只能从**调用方 Program 的签名**取：
-                 * `slot` 是该方向内的序号，签名表里就是它。
-                 */
-                runtimec_string_view_t parameter_type =
-                    runtimec_string_view_make(NULL, 0U);
-                {
-                    binrwir_program_view_t view;
-                    if (binrwir_program_get_view(frame_program, &view) !=
-                            RUNTIMEC_STATUS_SUCCESS ||
-                        (size_t)argument->slot >=
-                            view.signature.write_parameter_count) {
-                        return FRAME_OUTCOME_ERROR;
-                    }
-                    parameter_type =
-                        view.signature.write_parameter_types[argument->slot];
-                }
-                const int type_written = snprintf(
-                    write_target_langtypes[callee_argument_count],
-                    sizeof(write_target_langtypes[callee_argument_count]),
-                    "%.*s", (int)parameter_type.size, parameter_type.data);
-                if (type_written < 0 ||
-                    (size_t)type_written >=
-                        sizeof(write_target_langtypes[callee_argument_count])) {
-                    return FRAME_OUTCOME_ERROR;
-                }
-                callee_arguments[callee_argument_count].source =
-                    RUNTIMEC_ARGUMENT_SOURCE_WRITE_TARGET;
-                callee_arguments[callee_argument_count].key =
-                    runtimec_string_view_from_c_string(
-                        write_target_keys[callee_argument_count]);
-                callee_arguments[callee_argument_count].literal_langtype =
-                    runtimec_string_view_from_c_string(
-                        write_target_langtypes[callee_argument_count]);
-                callee_argument_count += 1U;
-                continue;
-            }
-            if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL) {
-                return FRAME_OUTCOME_ERROR;
-            }
-            runtimec_string_view_t local_name =
-                runtimec_string_view_make(NULL, 0U);
-            runtimec_string_view_t local_langtype =
-                runtimec_string_view_make(NULL, 0U);
-            if (binrwir_program_get_symbol(frame_program,
-                                           (uint16_t)argument->slot,
-                                           &local_name, &local_langtype) !=
-                    RUNTIMEC_STATUS_SUCCESS ||
-                local_name.size == 0U) {
-                return FRAME_OUTCOME_ERROR;
-            }
-            /* 同读参：key 用本帧 `frame_path`，不用 `depth` 重算。 */
-            if (binrwir_frame_local_key(
-                    runtimec_string_view_from_c_string(frame_path),
-                    runtimec_string_view_make(local_name.data,
-                                              local_name.size),
-                    write_target_keys[callee_argument_count],
-                    sizeof(write_target_keys[callee_argument_count])) ==
-                SIZE_MAX) {
-                return FRAME_OUTCOME_ERROR;
-            }
-            const int langtype_written = snprintf(
-                write_target_langtypes[callee_argument_count],
-                sizeof(write_target_langtypes[callee_argument_count]), "%.*s",
-                (int)local_langtype.size, local_langtype.data);
-            if (langtype_written < 0 ||
-                (size_t)langtype_written >=
-                    sizeof(write_target_langtypes[callee_argument_count])) {
-                return FRAME_OUTCOME_ERROR;
-            }
-            callee_arguments[callee_argument_count].source =
-                RUNTIMEC_ARGUMENT_SOURCE_WRITE_TARGET;
-            callee_arguments[callee_argument_count].key =
-                runtimec_string_view_from_c_string(
-                    write_target_keys[callee_argument_count]);
-            callee_arguments[callee_argument_count].literal_langtype =
-                runtimec_string_view_from_c_string(
-                    write_target_langtypes[callee_argument_count]);
-            callee_argument_count += 1U;
-        }
-        if (out_callee_depth != NULL) {
-            *out_callee_depth = (unsigned)depth + 1U;
-        }
-        /* 递归进入被调帧。**深度递增**——复用同一帧号会让子帧覆盖调用方帧，
-         * 那是「能跑一会儿但算错」的形态。 */
-        /* 被调函数的 Program 由窗口内部 encode，驱动这里传 NULL：
-         * `execute` 会用自己的 Program，并把结果里的 `program` 交回来。
-         * **不自己 encode**——两个编码入口是这条链上最贵的错误。 */
-        /* 被调帧用自己的 exit 变量：共用一个的话，被调在产出 exit 之前失败时
-         * 调用方会读到**上一次**的 exit —— 那是「以看起来合理的值失败」。 */
-        binrwir_execution_exit_t callee_exit;
-        memset(&callee_exit, 0, sizeof(callee_exit));
-        /*
-         * 子帧段 = `<depth+1>.<call_site_pc>`。
-         *
-         * 帧身份必须来自**调用链**，不是计数器：
-         *   - 同一调用点重复调用 ⇒ 同一段 ⇒ 复用同一帧（不增长）；
-         *   - 不同调用点 ⇒ call_site_pc 不同 ⇒ 区分得开；
-         *   - 递归 ⇒ depth 不同 ⇒ 区分得开；
-         *   - 跑两遍 ⇒ 完全一样（帧路径可寻址，崩溃恢复靠的就是它）。
-         *
-         * 曾经只用 `<depth>`：同一深度先后调两个不同函数会撞同一帧路径，
-         * `ensure_frame` 因「帧上已有另一个函数」拒绝（detail=13）。改用全局
-         * 计数器是错的——不可确定、无法复用、无限增长。
-         */
-        char callee_frame_segment[64];
-        const int callee_segment_length = snprintf(
-            callee_frame_segment, sizeof(callee_frame_segment), "%d.%u",
-            (int)depth + 1,
-            (unsigned)result.execution_exit.logical_program_counter);
-        if (callee_segment_length < 0 ||
-            (size_t)callee_segment_length >= sizeof(callee_frame_segment)) {
-            return FRAME_OUTCOME_ERROR;
-        }
-        /*
-         * **登记本次调用给出的写参 key**（按被调方帧路径 + 槽号）。
-         *
-         * 被调方自己的 `*o` 写参若是 PARAMETER_WRITE，它要用的是**这里给它的那个
-         * key**，不是它自己帧里的槽 key。反过来不记，就是让它写到一个没人读的地方。
-         */
-        char callee_frame_path[128];
-        const int callee_path_length = snprintf(
-            callee_frame_path, sizeof(callee_frame_path), "/vthread/%s/[%s]",
-            vthread_identifier, callee_frame_segment);
-        if (callee_path_length > 0 &&
-            (size_t)callee_path_length < sizeof(callee_frame_path)) {
-            /* **槽号是写参方向内的序号**（`argument->slot`），不是 `callee_arguments`
-             * 里的位置——后者把读参与写参混在一个数组里，直接用 ordinal 会错位。 */
-            uint16_t write_ordinal = 0U;
-            for (size_t ordinal = 0U; ordinal < callee_argument_count;
-                 ++ordinal) {
-                const runtimec_argument_description_t *description =
-                    &callee_arguments[ordinal];
-                if (description->source != RUNTIMEC_ARGUMENT_SOURCE_WRITE_TARGET) {
-                    continue;
-                }
-                char key_text[128];
-                const size_t key_size = description->key.size;
-                if (key_size == 0U || key_size + 1U > sizeof(key_text)) {
-                    write_ordinal += 1U;
-                    continue;
-                }
-                memcpy(key_text, description->key.data, key_size);
-                key_text[key_size] = '\0';
-                effective_key_record(callee_frame_path, write_ordinal, key_text);
-                write_ordinal += 1U;
-            }
-        }
-        const frame_outcome_t callee_outcome = execute_frame_until_done(
-            environment, callee_path, KVRUN_CALLEE_ENTRY_SOURCE_PC,
-            depth + 1, callee_frame_segment, vthread_identifier,
-            callee_arguments, callee_argument_count, NULL, &callee_exit);
-        /* 子帧结束：它那一段的记录全部作废，否则同深度复用目录会串 key。 */
-        if ((size_t)callee_path_length < sizeof(callee_frame_path)) {
-            effective_key_forget_frame(callee_frame_path);
-        }
-        if (callee_outcome != FRAME_OUTCOME_DONE) {
-            /*
-             * 子帧没跑完（ERROR / HANDOFF / INVALID）：**必须把它的 exit 交出去**。
-             *
-             * 曾经这里直接 `return callee_outcome;`——`out_exit` 一个字节都没写，
-             * 于是调用方拿到的是**本帧自己那条 CALL 的 exit**（`kind=2 status=0`），
-             * 子帧的失败被整个吞掉。症状看起来像「跑到一条 call 就没人接了」，
-             * 实际是「子帧失败了，但从没被报告上去」。
-             *
-             * 实测（2026-11-05）：`fib` 第三层报 `kind=6 status=3 detail=9`，
-             * 父帧拿到的却是 `kind=2 status=0`。
-             */
-            *out_exit = callee_exit;
-            return callee_outcome;
-        }
-        /* 被调回来了：回到调用方的 resume 点。
-         * 写参结果**不用搬运**——`*T $name` 是「指向调用方 key，读写沿链直达」
-         * （spec 05/04-函数调用 的形态表）。 */
-        /* 恢复调用方时**不能**再传本次的实参：`arguments` 是「调用被调方时用的」，
-         * 不是调用方自己的。传错会让调用方的帧绑定被重新绑到被调的实参上——
-         * 那是「以奇怪的方式跑一会儿然后算错」。
-         *
-         * 调用方的实参是它被调进来时那份，这里原样传 `arguments` 恰恰是错的：
-         * 递归时 `fib(a)` 的 `a` 属于**被调那次**，恢复 fib 自身执行时，
-         * 它要用的仍是自己被调时绑的那份。 */
-        /* 恢复执行时**必须传本帧自己的实参**（形参 `arguments`）。
-         *
-         * 曾经传 NULL，理由是「`arguments` 是调用被调方时用的」——那是把两件事
-         * 混了：`callee_arguments` 才是「给被调方的」；本帧的 `arguments` 是
-         * **它自己被调进来时收到的那份**，恢复续跑必须原样再给一次，
-         * 否则 `bind_parameters` 会因实参个数不足直接拒（detail=8）。 */
-        return execute_frame_until_done(
-            environment, function_path,
-            result.execution_exit.resume_logical_program_counter, depth,
-            frame_segment, vthread_identifier, arguments, argument_count,
-            NULL, out_exit);
-    }
-    default:
-        return FRAME_OUTCOME_INVALID;
-    }
-}
 
 /*
  * 先让外部能力在 /lib 下存在。
@@ -1852,9 +1301,9 @@ int main(int argument_count, char **arguments) {
              * 「layout 拒绝」绝大多数是真错误，只有被**明确标记**为能力缺口的那一条
              * 才计 blocked。判据是**产生方打的标记**，不是 runner 从文本猜语义。
              *
-             * 目前唯一产生方：`layout/src/code.rs` 的「非指针判空」诊断，前缀
-             * `[capability:nonnull]`——那是 spec 承认的能力缺失（`nonnull` 未实现），
-             * 不是程序写错了。
+             * 产生方当前**没有**：`nonnull` 能力行落地后，原「非指针判空」那条
+             * `[capability:nonnull]` 诊断已改成真错误（EXTENSION 与空类型仍是真错误）。
+             * 机制保留——下一个能力缺口会用到它，且删掉等于把分类规则一起删掉。
              */
             static const char capability_prefix[] = "[capability:";
             const char *capability = strstr(error_text, capability_prefix);
@@ -2080,9 +1529,11 @@ int main(int argument_count, char **arguments) {
             const bool capturing_stdout =
                 redirect_stream_to(FILENO_STDOUT, output_path,
                                    sizeof(output_path), &saved_stdout);
-            const frame_outcome_t frame_outcome = execute_frame_until_done(
-                &environment, function_path, 1U, 1, "1",
-                vthread_identifier, NULL, 0U, NULL, &frame_exit);
+            char driver_message[256];
+            const frame_outcome_t frame_outcome = frame_driver_execute(
+                &environment.frame_driver, function_path, 1U, 1, "1",
+                vthread_identifier, NULL, 0U, &frame_exit, driver_message,
+                sizeof(driver_message));
             if (capturing_stdout) {
                 restore_stream(FILENO_STDOUT, saved_stdout, output_path,
                                captured_output, sizeof(captured_output));

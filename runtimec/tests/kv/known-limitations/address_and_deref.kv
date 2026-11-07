@@ -15,9 +15,9 @@
 //   42
 //   100
 rwfunc test() -> () {
-	42 -> x
-	&x -> p
-	*p -> q
+	42 -> x:int64
+	&x -> p:*int64
+	*p -> q:int64
 	println(q)
 	100 -> *p
 	println(x)

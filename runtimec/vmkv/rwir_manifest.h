@@ -44,8 +44,12 @@ extern "C" {
 #define VMKV_RWIR_TYPE_SET_STRUCT_REFERENCE (UINT32_C(1) << 16)
 #define VMKV_RWIR_TYPE_SET_EXTENSION (UINT32_C(1) << 17)
 #define VMKV_RWIR_TYPE_SET_POINTER (UINT32_C(1) << 18)
+/* 位 19：**任意单一类型**标记，必须独占（与任何具体位并集即非法）。
+   只有 `nonnull` / `nonnull·not` 用；它的意义是「这个操作数可以是任意单一种类」，
+   所以它不能被枚举成具体位——那会退回成一份会漂的类型白名单。 */
+#define VMKV_RWIR_TYPE_SET_ANY_SINGLE (UINT32_C(1) << 19)
 
-#define VMKV_RWIR_TYPE_SET_WIDTH 19U
+#define VMKV_RWIR_TYPE_SET_WIDTH 20U
 #define VMKV_RWIR_TYPE_SET_LIMIT (UINT32_C(1) << VMKV_RWIR_TYPE_SET_WIDTH)
 #define VMKV_RWIR_TYPE_SET_RESERVED_MASK (~(VMKV_RWIR_TYPE_SET_LIMIT - UINT32_C(1)))
 

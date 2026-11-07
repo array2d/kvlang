@@ -8,6 +8,6 @@ rwfunc add1(*int64 $x) -> (*int64 $r) {
 }
 
 rwfunc test() -> () {
-	add1(41) -> v
+	add1(41) -> v:int64
 	println(v)
 }

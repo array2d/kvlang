@@ -7,8 +7,8 @@
 //   -42
 //   ff
 rwfunc test() -> () {
-	a = string·formatint(-42)
+	a:char/utf32 = string·formatint(-42)
 	println(a)
-	b = string·formatuint(255, 16)
+	b:char/utf32 = string·formatuint(255, 16)
 	println(b)
 }

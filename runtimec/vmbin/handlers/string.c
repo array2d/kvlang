@@ -38,10 +38,6 @@
 #include "vmbin/handlers/handler_call_text.h"
 #include "vmbin/value_access.h"
 
-/* 一个字符串算子最多处理这么多个码点；超限失败封闭，不静默截断。 */
-#define STRING_CODEPOINT_CAPACITY 128U
-#define STRING_BYTES_CAPACITY \
-    (STRING_CODEPOINT_CAPACITY * RUNTIMEC_CHAR_CODEC_UTF8_MAX_BYTES)
 #define STRING_KEY_CAPACITY 512U
 
 
@@ -207,9 +203,14 @@ static void string_concat_of(const string_text_t *left,
     string_text_t joined;
 
     *output_length = 0U;
-    if (left->count + right->count > STRING_CODEPOINT_CAPACITY) {
+    if (left->count + right->count > STRING_TEXT_CODEPOINT_CAPACITY) {
+        /*
+         * **不报 `LENGTH_MISMATCH`**：那条说「值体宽度与要求的宽度不符」，
+         * 用户会去改自己的数据宽度；而真正的原因是拼接结果超过运行时定长缓冲。
+         * 也不报 `INSUFFICIENT_CAPACITY`（可重试）——这个上限换多久都跑不了。
+         */
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_OUT_OF_MEMORY,
-                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
+                           VMBIN_HANDLER_CALL_DIAG_STRING_TOO_LONG,
                            output_exit->logical_program_counter);
         return;
     }

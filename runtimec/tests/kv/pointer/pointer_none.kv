@@ -8,7 +8,7 @@
 rwfunc test() -> () {
 	p:*int64 = None
 	println(p == None)
-	x = 7
+	x:int64 = 7
 	&x -> p
 	println(p != None)
 	println(*p)

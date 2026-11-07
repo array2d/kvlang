@@ -17,12 +17,12 @@
  *   0x0108 compactarray·set     rwir_catalog.def:408  array-element-access-by-kind
  *
  * **已知限制（有意留到下一批，不是遗忘）**：
- *   - `new` 的 body 打包用定长栈缓冲 `CONTAINER_NEW_BODY_CAPACITY`（512 字节，
+ *   - `new` 的 body 打包用定长栈缓冲 `CONTAINER_NEW_BODY_CAPACITY`（8192 字节，
  *     no-malloc 基线）。超过即失败，细节码
  *     `RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER`——**那是缓冲上限，不是内存不足**。
- *     正解是流式写或让存储层分配，属下一批。
- *   - `at` / `set` 只做 **1 维**。多维要解析 langtype 的 dims 做行主序扁平化，
- *     超过本模块的简洁判据（一条 handler ≈15 行），单独立一条。
+ *     正解是流式写或让存储层分配（`kvspaceXvalueHeadNewTensor`），属下一批。
+ *   - `at` / `set` 的**多维**已支持（`container_element_offset` 按 langtype 的
+ *     dims 做行主序扁平化，每维独立边界检查）。剩下的限制只有数组总字节数那条。
  */
 
 #include "vmbin/handlers/container.h"
@@ -48,8 +48,34 @@
 /* 帧内槽 key 的上限：与 host 侧同量级，够放 `/vthread/<vid>/[d]/<符号名>`。 */
 #define CONTAINER_KEY_CAPACITY 512U
 
-/* `new` 的 body 打包缓冲。no-malloc：定长栈缓冲，超限失败封闭而不是静默截断。 */
-#define CONTAINER_NEW_BODY_CAPACITY 512U
+/*
+ * `new` 的 body 打包缓冲。no-malloc：定长栈缓冲，超限失败封闭而不是静默截断。
+ *
+ * **8192 字节 = 1024 个 int64**。这个数是「本实现受理的上限」，不是「内存够不够」：
+ * 超出仍报 `RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER`（`0x4301`），
+ * **不截断、不降级、不悄悄换成堆分配**——截断会产出一个 head 自称合法、字节却少了
+ * 的值，那比失败难查得多。
+ *
+ * 为什么是 8192 而不是更小：benchmark 的 quicksort 扫描到 N=128（128 × 8 = 1024
+ * 字节），而 512 会让它 `0x4301`。取 8 倍余量给同类规模留空间，同时仍在栈上——
+ * 单个 8KB 帧对递归深度 log₂N 的 quicksort、以及 nqueens 都可接受。
+ *
+ * **再往上就该换实现，不是继续加这个数**：`kvspaceXvalueHeadNewTensor` 让存储层
+ * 分配，栈帧不随元素数增长。加这个常量只是把分水岭推后，不是消除它。
+ *
+ * ── 覆盖情况：只有一半 ────────────────────────────────────────────────
+ *
+ * `runtimec/tests/kv/array/body_capacity_exact.kv` 钉住**恰好上限**（1024 个 int64
+ * 走完整 layout → 执行链路，必须 executed 且输出 1024）。
+ *
+ * TODO(#待建): over-limit 用例等语料运行器支持「期望运行期失败」。
+ * 超限那一半（1025 个元素必须报 `0x4301`）今天写不成语料：运行器只有
+ * pass / fail / blocked 加「期望 layout 错误」，超限会被记成 fail——而它其实是
+ * 正确的拒绝，那会给语料留一条永远红且红得没名分的用例。
+ * **不要**用「断言这个常量等于 8192」顶替：那是代理指标，测的是下面这个数字，
+ * 不是行为。判据是「改掉上限，用例结论要跟着变」。
+ */
+#define CONTAINER_NEW_BODY_CAPACITY 8192U
 
 /* 下标参数与本批元素宽度都是标量：8 字节足够放下任何一个整数 kind。 */
 #define CONTAINER_SCALAR_CAPACITY 8U
@@ -82,17 +108,82 @@ runtimec_status_t runtimec_container_langtype_parse(
     output->base = runtimec_string_view_make(NULL, 0U);
     output->element_size = 0U;
     output->dimension_count = 0;
+    memset(output->dimensions, 0, sizeof(output->dimensions));
     if (langtype.size == 0U) {
         return RUNTIMEC_STATUS_UNSUPPORTED;
     }
+    /*
+     * 形状段：`[a][b]…` 与 `[a,b,…]` **两种写法**都要认，且都取出各维长度。
+     *
+     * 只数维数不取尺寸时，多维下标只能按 body 长度反推——那是另一种判据，
+     * 而它在「body 比声明短」的畸形值上会给出一个看起来正常的偏移。
+     */
     while (offset < langtype.size && langtype.data[offset] == '[') {
         const char *closing = memchr(langtype.data + offset, ']',
                                      langtype.size - offset);
-        if (closing == NULL || closing == langtype.data + offset) {
+        size_t cursor = offset + 1U;
+
+        if (closing == NULL) {
             return RUNTIMEC_STATUS_UNSUPPORTED;
         }
+        /*
+         * 空 `[]` 等价 `[.]`：**恰一维、长度未定**（`[]int64` 就是「变长一维序列」）。
+         *
+         * 这不是畸形，是语言里的语法。把它判成畸形会让 `a:[]int64 = [10,20,30]`
+         * 这种最基本的写法整条失败——实测就是这么红的（`0x4302` at pc=1）。
+         * 「未定」记成 `-1`：下面的 `prod(dims)` 与边界检查都对它特判，
+         * 而任何需要**确定长度**的调用方（多维下标）看到它就直接失败，
+         * 不会把它当成 0 或 1 蒙混过去。
+         */
+        if (closing == langtype.data + offset + 1U) {
+            if (dimension_count >= VMBIN_HANDLER_MAX_INDEX_COUNT) {
+                return RUNTIMEC_STATUS_UNSUPPORTED;
+            }
+            output->dimensions[dimension_count] = RUNTIMEC_CONTAINER_DIMENSION_UNBOUNDED;
+            ++dimension_count;
+            offset = (size_t)(closing - langtype.data) + 1U;
+            continue;
+        }
+        while (cursor < (size_t)(closing - langtype.data)) {
+            int64_t value = 0;
+            int consumed = 0;
+
+            while (cursor < (size_t)(closing - langtype.data)) {
+                const char character = langtype.data[cursor];
+
+                if (character < '0' || character > '9') {
+                    break;
+                }
+                /* 溢出即失败：算出一个回绕的维度会让下面的边界检查全部失效。 */
+                if (value > (INT64_MAX - (character - '0')) / 10) {
+                    return RUNTIMEC_STATUS_UNSUPPORTED;
+                }
+                value = value * 10 + (character - '0');
+                ++cursor;
+                consumed = 1;
+            }
+            if (consumed == 0) {
+                return RUNTIMEC_STATUS_UNSUPPORTED;
+            }
+            /*
+             * 维度 0 是**畸形**，不是「空数组」：`prod(dims)` 会变成 0，
+             * 于是「body_size == prod * width」对任何空 body 都成立，多维
+             * 偏移也恒为 0——一个永远写得进去的位置。
+             */
+            if (value <= 0 ||
+                dimension_count >= VMBIN_HANDLER_MAX_INDEX_COUNT) {
+                return RUNTIMEC_STATUS_UNSUPPORTED;
+            }
+            output->dimensions[dimension_count] = value;
+            ++dimension_count;
+            if (cursor < (size_t)(closing - langtype.data)) {
+                if (langtype.data[cursor] != ',') {
+                    return RUNTIMEC_STATUS_UNSUPPORTED;
+                }
+                ++cursor;
+            }
+        }
         offset = (size_t)(closing - langtype.data) + 1U;
-        ++dimension_count;
     }
     if (dimension_count == 0 || offset >= langtype.size) {
         return RUNTIMEC_STATUS_UNSUPPORTED;
@@ -926,115 +1017,238 @@ static runtimec_status_t container_langtype_handler(
                             instruction->source_logical_program_counter);
 }
 
-/*
- * 元素读：`基址 + i × 宽`。**成功才写 `*element` 与 `*output_element_size`，
- * 失败只写 `exit`**——哨兵不出这个函数，调用方不需要翻译。
- *
- * 越界与负下标都失败（行为矩阵的负向判据）——判据是**长度**，与类型无关。
- */
-static void container_read_element(const uint8_t *body, size_t body_size,
-                                   runtimec_string_view_t langtype, int64_t index,
-                                   uint8_t *element, size_t element_capacity,
-                                   size_t *output_element_size,
-                                   binrwir_execution_exit_t *output_exit) {
-    runtimec_container_langtype_t type;
-
-    if (runtimec_container_langtype_parse(langtype, &type) !=
-            RUNTIMEC_STATUS_SUCCESS ||
-        type.element_size == 0U || index < 0 ||
-        (uint64_t)index >= body_size / type.element_size) {
-        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                           RUNTIMEC_CONTAINER_DIAG_INDEX_OUT_OF_RANGE,
-                           output_exit->logical_program_counter);
-        return;
-    }
-    if (type.element_size > element_capacity) {
-        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
-                           VMBIN_HANDLER_CALL_DIAG_LENGTH_MISMATCH,
-                           output_exit->logical_program_counter);
-        return;
-    }
-    *output_element_size = type.element_size;
-    memcpy(element, body + (size_t)index * type.element_size, type.element_size);
-}
-
-/* 逻辑函数：一行。 */
-static inline void container_at_compute(const uint8_t *body, size_t body_size,
-                                        runtimec_string_view_t langtype,
-                                        int64_t index, uint8_t *element,
-                                        size_t element_capacity,
-                                        binrwir_execution_exit_t *output_exit) {
-    size_t element_size = 0U;
-    container_read_element(body, body_size, langtype, index, element, element_capacity, &element_size, output_exit);
-}
-
-VMBIN_HANDLER_ARRAY_INDEX(container_at_handler, container_at_compute,
-                             int64_t)
 
 /*
- * 元素写：**仅同槽 patch**——改的是 body 里的一段字节，head 与 attr 一个字节不动。
- * **成功不写哨兵，失败只写 `exit`**。
+ * ── 多维下标 → 元素线性偏移 ──────────────────────────────────────────
  *
- * 判序有讲究：**先判值宽（形状问题，与下标无关），再判下标**。两者都失败时报宽度
- * ——形状不对时「下标是否越界」没有意义，报它会把读者引向错误的第二因。
+ * `m[i, j]` 的下标个数与声明的维数由 layout 决定，**运行期必须核对**：一个
+ * 二维数组用三个下标访问是程序错，不能靠「多余的下标乘出来的偏移仍然落在
+ * body 里」蒙混过去——那会写到一个看起来合法、实际是另一个元素的位置。
+ *
+ * 判据顺序（**形状先于下标**）：
+ *
+ *   1. 声明能否解析、各维是否齐全；
+ *   2. `body_size == prod(dims) * element_size` —— 不等即 `MALFORMED`。
+ *      **不能用「body 够长」代替**：body 比声明长说明这个值根本不是那个形状，
+ *      按声明算出的偏移读写的就不是同一个元素；
+ *   3. 每个下标独立做 `0 <= ik < dk` —— 任一越界即 `INDEX_OUT_OF_RANGE`，
+ *      且**在算偏移之前**判，避免乘法越界；
+ *   4. 行主序线性化：`linear = ((i0*d1 + i1)*d2 + i2)…`。
+ *
+ * **单下标走的是同一条**：`dimension_count == 1` 时它退化成 `index < d0`，
+ * 与旧的「`index < body_size / element_size`」在合法输入上等价，而后者在
+ * 「body 比声明长」时会更宽——那是旧行为的漏洞，不是本函数要保留的语义。
  */
-static void container_write_element(const uint8_t *body, size_t body_size,
-                                    runtimec_string_view_t langtype,
-                                    int64_t index, const uint8_t *value,
-                                    size_t value_size, uint8_t *target,
-                                    binrwir_execution_exit_t *output_exit) {
-    runtimec_container_langtype_t type;
+static void container_element_offset(
+    size_t body_size, runtimec_string_view_t langtype, const int64_t *indices,
+    size_t index_count, runtimec_container_langtype_t *output_type,
+    int64_t *output_linear, binrwir_execution_exit_t *output_exit) {
+    int64_t total = 1;
+    int64_t linear = 0;
+    size_t dimension;
 
-    (void)body; /* 同槽 patch 只写不读。 */
-    if (runtimec_container_langtype_parse(langtype, &type) !=
+    *output_linear = 0;
+    if (runtimec_container_langtype_parse(langtype, output_type) !=
             RUNTIMEC_STATUS_SUCCESS ||
-        type.element_size == 0U) {
+        output_type->element_size == 0U) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                            RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
                            output_exit->logical_program_counter);
         return;
     }
-    if (value_size != type.element_size) {
-        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
-                           RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH,
-                           output_exit->logical_program_counter);
-        return;
-    }
-    if (index < 0 || (uint64_t)index >= body_size / type.element_size) {
+    if ((int32_t)index_count != output_type->dimension_count) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                            RUNTIMEC_CONTAINER_DIAG_INDEX_OUT_OF_RANGE,
                            output_exit->logical_program_counter);
         return;
     }
-    memcpy(target + (size_t)index * type.element_size, value, value_size);
+    /*
+     * 未定长度（`[]T`）只在**一维**时有意义：`dimensions[0] == UNBOUNDED`
+     * 表示「这个序列有多长由 body 决定」。
+     *
+     * 一维的情形直接把 body 的长度当作该维长度——这是唯一不需要猜的地方，
+     * 因为 body 是既成事实。多维里出现未定维度则**没有确定形状**，任何线性化
+     * 都会算出一个别的位置，所以直接失败，不按 body 反推一个形状出来。
+     */
+    if (output_type->dimensions[0] == RUNTIMEC_CONTAINER_DIMENSION_UNBOUNDED) {
+        if (index_count != 1U) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               RUNTIMEC_CONTAINER_DIAG_INDEX_OUT_OF_RANGE,
+                               output_exit->logical_program_counter);
+            return;
+        }
+        if (body_size % output_type->element_size != 0U) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               RUNTIMEC_CONTAINER_DIAG_RESHAPE_SIZE_MISMATCH,
+                               output_exit->logical_program_counter);
+            return;
+        }
+        total = (int64_t)(body_size / output_type->element_size);
+        for (dimension = 1U; dimension < index_count; ++dimension) {
+            if (output_type->dimensions[dimension] <= 0) {
+                vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                   RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                                   output_exit->logical_program_counter);
+                return;
+            }
+        }
+    } else {
+        for (dimension = 0U; dimension < index_count; ++dimension) {
+            if (output_type->dimensions[dimension] <= 0) {
+                vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                   RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                                   output_exit->logical_program_counter);
+                return;
+            }
+            /* 乘法前先判上界：`total` 溢出会让下面的等值判据永远为假。 */
+            if (total > INT64_MAX / output_type->dimensions[dimension]) {
+                vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                   RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,
+                                   output_exit->logical_program_counter);
+                return;
+            }
+            total *= output_type->dimensions[dimension];
+        }
+    }
+    if (total != (int64_t)(body_size / output_type->element_size) ||
+        body_size % output_type->element_size != 0U) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_RESHAPE_SIZE_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    for (dimension = 0U; dimension < index_count; ++dimension) {
+        /*
+         * 边界用 `total` 而非 `dimensions[0]` 表达第 0 维：未定长度时
+         * `dimensions[0]` 是哨兵 `-1`，拿它做上界会让任何下标都越界。
+         */
+        const int64_t bound = dimension == 0U
+                                  ? total
+                                  : output_type->dimensions[dimension];
+
+        if (indices[dimension] < 0 || indices[dimension] >= bound) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               RUNTIMEC_CONTAINER_DIAG_INDEX_OUT_OF_RANGE,
+                               output_exit->logical_program_counter);
+            return;
+        }
+        linear = linear * bound + indices[dimension];
+    }
+    *output_linear = linear;
 }
 
-/* 逻辑函数：一行。 */
-static inline void container_set_compute(const uint8_t *body, size_t body_size,
-                                         runtimec_string_view_t langtype,
-                                         int64_t index, const uint8_t *value,
-                                         size_t value_size, uint8_t *target,
-                                         binrwir_execution_exit_t *output_exit) {
-    container_write_element(body, body_size, langtype, index, value, value_size, target, output_exit);
+/* `container_element_offset` 的**判断题**版本：算得出返回 true，失败已写出口。
+ *
+ * 两个 compute 都要「算不出来就停」，各写一遍 `if (kind == ERROR) return;` 就是
+ * 两次同一个判据。**判据仍只有一份**（在 `container_element_offset` 里），
+ * 这里只把「有没有失败」翻译成控制流。
+ */
+static inline bool container_element_position(
+    size_t body_size, runtimec_string_view_t langtype, const int64_t *indices,
+    size_t index_count, runtimec_container_langtype_t *output_type,
+    int64_t *output_linear, binrwir_execution_exit_t *output_exit) {
+    container_element_offset(body_size, langtype, indices, index_count,
+                             output_type, output_linear, output_exit);
+    return output_exit->kind != BINRWIR_EXECUTION_EXIT_ERROR;
 }
 
-VMBIN_HANDLER_ARRAY_INDEX_WRITE(container_set_handler, container_set_compute,
-                                  int64_t)
+/* 逻辑函数：N 个下标（N == 声明维数）。`indices` 已经是 int64 值。 */
+/* 写出一个元素：**只做 memcpy**，判据都在 `container_element_offset` 与宽度检查里。
+ *
+ * 拆成两步的理由：写与读共用同一套「下标 → 偏移 + 元素宽」，读写各自只差最后一步。
+ * 把判据写在两个 compute 里就是两份同一个规则。
+ */
+static void container_store_element(uint8_t *target, int64_t linear,
+                                    uint32_t element_size, const uint8_t *value,
+                                    size_t value_size,
+                                    binrwir_execution_exit_t *output_exit) {
+    if (value_size != element_size) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                           RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    memcpy(target + (size_t)linear * element_size, value, value_size);
+}
+
+/* 逻辑函数一行：定位（含全部判据）→ 写一个元素。 */
+static void container_set_multi_compute(const int64_t *indices,
+                                        size_t index_count,
+                                        const uint8_t *value,
+                                        size_t value_size, uint8_t *target,
+                                        size_t target_size,
+                                        runtimec_string_view_t langtype,
+                                        binrwir_execution_exit_t *output_exit) {
+    runtimec_container_langtype_t type;
+    int64_t linear = 0;
+
+    if (container_element_position(target_size, langtype, indices, index_count, &type, &linear, output_exit))
+        container_store_element(target, linear, type.element_size, value, value_size, output_exit);
+}
+
+/* 读侧同构：N 个下标 → 拷出那一个元素。 */
+/* 读出一个元素：判据全在 `container_element_position` 与容量检查里，这里只搬字节。 */
+static void container_load_element(const uint8_t *body, int64_t linear,
+                                   uint32_t element_size, uint8_t *element,
+                                   size_t element_capacity,
+                                   binrwir_execution_exit_t *output_exit) {
+    if (element_size > element_capacity) {
+        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
+                           RUNTIMEC_CONTAINER_DIAG_VALUE_WIDTH_MISMATCH,
+                           output_exit->logical_program_counter);
+        return;
+    }
+    memcpy(element, body + (size_t)linear * element_size, element_size);
+}
+
+/* 逻辑函数一行：定位（含全部判据）→ 搬一个元素。 */
+static void container_at_multi_compute(const int64_t *indices,
+                                       size_t index_count, uint8_t *element,
+                                       size_t element_capacity,
+                                       const uint8_t *body, size_t body_size,
+                                       runtimec_string_view_t langtype,
+                                       binrwir_execution_exit_t *output_exit) {
+    runtimec_container_langtype_t type;
+    int64_t linear = 0;
+
+    if (container_element_position(body_size, langtype, indices, index_count, &type, &linear, output_exit))
+        container_load_element(body, linear, type.element_size, element, element_capacity, output_exit);
+}
+
+VMBIN_HANDLER_ARRAY_INDEX(container_at_handler, container_at_multi_compute,
+                             int64_t)
+
+VMBIN_HANDLER_ARRAY_INDEX_WRITE(container_set_handler,
+                                container_set_multi_compute, int64_t)
 
 
 
 
-static void container_newreshape_build(
+
+
+
+/*
+ * `compactarray·newreshape(src, dims…)`：读参是**源 + N 个维度**，而维度在这里
+ * **不参与计算**——layout 已经把目标形状编进了写槽的声明 langtype（`[d0,d1]T`），
+ * 而 `container_replace_langtype` 读的正是那份声明。
+ *
+ * 所以本 handler 只消费第 1 个读参，其余维度参数**收下但不看**。它们不能省：
+ * layout 按源码实参逐个发射，收 1 个会因为 arity 不符整条失败（实测
+ * `0x4A01` at pc=9，挡着 `04-ndarray/subscript_write.kv`）。
+ *
+ * 校验仍要留：**至少一个读参**，否则连源都没有。多出来的维度不做数值核对——
+ * 真正的守恒判据（`prod(dims) * width == body_size`）在 `container_replace_langtype`
+ * 里，且它必须用写槽声明算，不能再从这些参数算一遍（那会是第二份形状事实）。
+ */
+static runtimec_status_t container_newreshape_handler(
     binrwir_execution_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
-    const vmbin_value_location_t *source,
-    const runtimec_string_view_t *source_langtype,
     binrwir_execution_exit_t *output_exit) {
-    (void)source;
-    (void)source_langtype;
-    (void)container_replace_langtype(frame, instruction, 0, output_exit);
+    if (instruction->read_arguments.count < 1U) {
+        VMBIN_HANDLER_REQUIRE_ARITY_FAIL_(output_exit, instruction);
+    }
+    return container_replace_langtype(frame, instruction, 0, output_exit);
 }
-VMBIN_HANDLER_CREATE_ONE(container_newreshape_handler, container_newreshape_build)
 
 static void container_newreinterpret_build(
     binrwir_execution_frame_t *frame,
@@ -1547,7 +1761,33 @@ static void container_struct_create(binrwir_execution_frame_t *frame,
         container_struct_clone(frame, instruction, slot_key, output_exit) &&
         container_index_container(frame, instruction, slot_key, sizeof(slot_key),
                                   output_exit)) {
+        runtimec_error_t error;
+
         (void)container_struct_fields(frame, instruction, slot_key, output_exit);
+        /*
+         * ── **写完必须绑定**（与 `vmbin_handler_write_new_value` 末尾同一步）──
+         *
+         * 这一处曾经漏了，症状不是「建不出来」而是**建出来了读不到**：
+         * `e1:Node = {val=1}` 之后 `p:Node = e1` 报 `UNBOUND_SLOT`（`0x4403`，
+         * 被解释器包成 `0x4107`），因为 `copy` 的读参 `locate` 在绑定表里找不到
+         * 这个槽。**复用 `e1` 的原地读写不走绑定表**（按 key 现解析），所以只做
+         * 「建完立刻读自己」测不出来——必须用「拷到另一个变量」才暴露。
+         *
+         * 与 `array_append.kv`（`compactarray·new` 建出 `a` 却没绑）是同一族。
+         * 判据是行为式的：**创建型算子执行后，写目标槽必须出现在绑定表里**。
+         *
+         * 绑定失败必须具名失败，不许「建了但没绑还继续」——那会让下游拿到
+         * 一个「存储里有、绑定表里没有」的槽，症状与本次修复前一模一样。
+         */
+        runtimec_error_reset(&error);
+        if (vmbin_value_access_bind_write_target(
+                frame, &instruction->write_arguments.data[0],
+                runtimec_key_view_make(slot_key, strlen(slot_key)),
+                &error) != RUNTIMEC_STATUS_SUCCESS) {
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                               VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
+                               instruction->source_logical_program_counter);
+        }
     }
 }
 

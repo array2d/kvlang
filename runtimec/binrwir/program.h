@@ -182,6 +182,22 @@ runtimec_status_t binrwir_program_builder_add_symbol(
  * langtype 是同一个值的具体 langtype。LITERAL 参数项的 payload 就是这里返回的池
  * 下标。字节与类型文本都借用至 finalize，之后 Program 自持。
  */
+/*
+ * `wire_bytes` 是否恰好是一条 **None 值**：head 自洽 + 空 body + 空 attr。
+ *
+ * **这是「空 langtype 是否合法」的唯一判据**，三个调用点共用：
+ *   `binrwir_program_builder_add_literal`（字面量登记）、
+ *   `binrwir_program_validate`（Program 完整性）、
+ *   `binrwir_signature_validate` 的空类型分支（经参数项交叉）。
+ *
+ * None 的定义见 spec `03-类型系统/03-种类-代码与特殊值.kv`「None 判据」：
+ * 空 body + wire 无 langtype + key 不是目录。本谓词只回答 wire 那一半（空 body、
+ * 空 attr、head 自洽）；「是不是引用」「是不是目录」由调用方按各自上下文补。
+ *
+ * 判据全部取自线格式访问器，本模块不写偏移算术。
+ */
+bool binrwir_literal_is_none_value(runtimec_bytes_view_t wire_bytes);
+
 runtimec_status_t binrwir_program_builder_add_literal(
     binrwir_program_builder_t *builder, runtimec_bytes_view_t wire_bytes,
     runtimec_string_view_t langtype, uint32_t *output_literal_index);

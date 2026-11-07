@@ -130,7 +130,6 @@ static void test_tuples(void) {
 /* 不在本表的类型：解析成功，但形态是 UNRECOGNIZED（**不等于可当键**）。 */
 static void test_unrecognized(void) {
     const char *const spellings[] = {"time", "time/duration", "/lib/Point",
-                                     "[]char/utf8\xc2\xb7int64",
                                      "stringkeymap", "/lib/kvlang/x"};
 
     for (size_t ordinal = 0U;
@@ -139,6 +138,49 @@ static void test_unrecognized(void) {
 
         LANGTYPE_EXPECT(parsed.form == RUNTIMEC_LANGTYPE_FORM_UNRECOGNIZED);
     }
+}
+
+/*
+ * map 类型（issue #631）：`'<formatter>'<value>`。
+ *
+ * **用例来自 `workspace/622/coding2/map-type-syntax-cases.md`**（唯一输入源）。
+ * Rust 侧 `layout/src/kvkind.rs` 的 `map_langtype_tests` 用**同一份清单**断言，
+ * 两边的判定结果必须逐条相同——不同就说明两边语义没对齐，不要改用例迁就实现。
+ */
+static void test_mapping_spellings(void) {
+    /* #1–#8：合法 map 类型，全部应是 MAPPING。 */
+    const char *const map_spellings[] = {
+        "'int64'int64",                     /* #1 标量 formatter */
+        "'[]char/utf8'int64",               /* #2 字符串 formatter（utf8） */
+        "'[]char/utf32'int64",              /* #3 字符串 formatter（utf32） */
+        "'[int64]'int64",                   /* #4 一元元组 */
+        "'[float64,float64]'[]char/utf32",  /* #5 二元元组 */
+        "'[int32,int32]'int64",             /* #6 二元元组 */
+        "'[int64]\xc2\xb7[]char/utf8'int64", /* #7 两段 key */
+        "'bool'int64",                      /* #8 bool formatter */
+    };
+    for (size_t ordinal = 0U;
+         ordinal < sizeof(map_spellings) / sizeof(map_spellings[0]); ++ordinal) {
+        const runtimec_langtype_t parsed = langtype_of(map_spellings[ordinal]);
+
+        LANGTYPE_EXPECT(parsed.form == RUNTIMEC_LANGTYPE_FORM_MAPPING);
+    }
+    /*
+     * #3 与 #2 的核心断言：formatter 描述的是**被格式化值的编码**，
+     * 输出恒是路径文本。两者都应判为 map——编码不进路径形态。
+     */
+    LANGTYPE_EXPECT(langtype_of("'[]char/utf8'int64").form ==
+                    langtype_of("'[]char/utf32'int64").form);
+
+    /* #13 缺开头引号 ⇒ 不是 map 形态。 */
+    LANGTYPE_EXPECT(langtype_of("int64'int64").form !=
+                    RUNTIMEC_LANGTYPE_FORM_MAPPING);
+
+    /* #15–#16 非 map。 */
+    LANGTYPE_EXPECT(langtype_of("[]char/utf8").form !=
+                    RUNTIMEC_LANGTYPE_FORM_MAPPING);
+    LANGTYPE_EXPECT(langtype_of("[2]float64").form !=
+                    RUNTIMEC_LANGTYPE_FORM_MAPPING);
 }
 
 /*
@@ -180,6 +222,7 @@ int main(void) {
     test_arrays();
     test_tuples();
     test_unrecognized();
+    test_mapping_spellings();
     test_malformed();
     test_failure_clears_output();
     if (failures != 0) {

@@ -141,6 +141,17 @@ endfunction()
 runtimec_add_component(runtimec_contract contract)
 runtimec_add_component(runtimec_binrwir binrwir)
 runtimec_add_component(runtimec_vmkv vmkv)
+
+# `vmkv/rwir_manifest.c` 用 `#include` 直接引入 `specification/*.def`。CMake 只追踪
+# 源文件列表里的 `.c/.h`，**不追踪被 include 的 `.def`**——生成器重写 def 之后，
+# `cmake --build` 认为 `.o` 仍然新鲜，于是别名表/能力表停留在旧内容，新算子静默落成
+# `foreign()`（不报错，运行期才以「能力不存在」的形式出现）。这里把 `.def` 显式登记为
+# 依赖，让增量构建跟上生成物。
+file(GLOB rwir_specification_defs CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/specification/*.def")
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/vmkv/rwir_manifest.c"
+    PROPERTIES OBJECT_DEPENDS "${rwir_specification_defs}")
 runtimec_add_component(runtimec_binrwir_compiler binrwir_compiler)
 runtimec_add_component(runtimec_vmbin vmbin)
 runtimec_add_component(runtimec_engine engine)
@@ -208,6 +219,53 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(capability_probe PRIVATE
         -Wall -Wextra -Wpedantic -Werror)
 endif()
+
+# `kvlangrun`：命令行驱动，benchmark 的 kvlang 列用它跑 .kv 文件。
+#
+# 与 `capability_probe` 的区别：那是分类器（不给期望值），这是**执行入口**——
+# 把一个 .kv 跑到底，把被跑程序的 stdout 原样交给调用方。产物由 Makefile 搬到
+# bin/，与其它产物同规矩。
+#
+# **必须带 TEMP_PRINTLN**：benchmark 用例靠 println 输出 `__bench_ns:`；关掉它，
+# 驱动能跑但一行都打不出来，而 run.py 只会报「没有 __bench_ns」——把「打印被
+# 编译掉了」误报成「程序没跑到那一步」。
+add_executable(kvlangrun tools/kvlangrun.c)
+target_compile_features(kvlangrun PRIVATE c_std_11)
+target_include_directories(kvlangrun PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+# **链带 println 的副本，不是产品库。**
+#
+# 产品 `runtimec_vmbin` / `runtimec_engine` 恒不含 println（`.so` 的符号表里不能有它）。
+# 本驱动要跑 benchmark 的 case，那些 case 全靠 `println("__bench_ns:", …)` 打计时行，
+# 所以必须链 `runtimec_kv_runner_*` 那三个副本（同一份源文件 + 额外宏）。
+#
+# 曾经链的是产品目标：`opid=0xFF01` 在 registry 里查不到，执行期落进 `switch` 的
+# default → FOREIGN → HANDOFF → `handoff was not claimed in time`——**失败现场与
+# 真实成因（链错目标）毫无关系**。
+target_link_libraries(kvlangrun PRIVATE
+    runtimec_contract
+    runtimec_kv_runner_vmbin runtimec_kv_runner_vmkv runtimec_kv_runner_engine
+    "${RUNTIMEC_KVSPACE_LIBRARY_PATH}" "${CMAKE_DL_LIBS}" m)
+set_target_properties(kvlangrun PROPERTIES
+    BUILD_RPATH "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}")
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(kvlangrun PRIVATE
+        -Wall -Wextra -Wpedantic -Werror)
+endif()
+# **无条件定义，不跟随 `RUNTIMEC_TEMP_PRINTLN` 选项。**
+#
+# 本驱动把被测程序的 stdout 原样交给调用方，而 benchmark 的每个 case 都用
+# `println("__bench_ns:", …)` 打计时行。没有 println 它一行输出都没有——不是
+# 「少个功能」，是**这个驱动失去意义**。
+#
+# 曾经这里是 `if(RUNTIMEC_TEMP_PRINTLN)`：Release 树默认 OFF，于是 layout 编出的
+# `opid=0xFF01`（println）在 registry 里查不到，执行期落进 `switch` 的 default →
+# FOREIGN → HANDOFF → 等一个不存在的外部认领 → `handoff was not claimed in time`。
+# **失败现场与真实成因（构建缺宏）毫无关系**，一圈人查了 UB / dangling / 编码期
+# 三个方向才回到这里。所以条件化本身是错的，不是「默认值选错了」。
+target_compile_definitions(kvlangrun PRIVATE RUNTIMEC_TEMP_PRINTLN=1)
 
 # 开关只决定宏：temp_println.c 由 GLOB 收进源文件表，关闭时整个文件被
 # `#ifdef RUNTIMEC_TEMP_PRINTLN` 编成空翻译单元，不留任何符号。

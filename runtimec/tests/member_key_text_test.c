@@ -232,13 +232,22 @@ static void test_variable_dimension_same_key(void) {
     const char text[] = "中文";
     const char *const spellings[] = {"[]char/utf8", "[.]char/utf8",
                                      "[?]char/utf8", "[*]char/utf8",
-                                     "[+]char/utf8"};
+                                     "[+]char/utf8",
+                                     /* 定长形态是**同一个值**的另一种存储形状：
+                                      * 字符串字面量的声明类型就是它。 */
+                                     "[2]char/utf8"};
     char expected[sizeof(text)];
 
     memcpy(expected, text, sizeof(text));
     for (size_t ordinal = 0U;
          ordinal < sizeof(spellings) / sizeof(spellings[0]); ++ordinal) {
         expect_text(spellings[ordinal], text, sizeof(text) - 1U, expected);
+    }
+    /* utf32 的定长形态同样产出同一个键。 */
+    {
+        const uint8_t codepoints[] = {0x2d, 0x4e, 0x00, 0x00,
+                                      0x87, 0x65, 0x00, 0x00};
+        expect_text("[2]char/utf32", codepoints, sizeof(codepoints), "中文");
     }
 }
 
@@ -352,7 +361,10 @@ static void test_rejections(void) {
         /* 形状：`[]int32` 是最要紧的一条——body 恰好 4 字节时会被静默当单个 int32。 */
         {"[]int32", int32_body, sizeof(int32_body),
          "a shaped langtype is a value form"},
-        {"[4]char/utf8", text_body, sizeof(text_body),
+        /* `[4]char/utf8` **不再**在这张表：它是字符序列的定长形态，能作成员键
+         * （见 test_variable_dimension_same_key）。留在拒绝表里的只有「基种类不是
+         * char」的形状，以及多维字符序列。 */
+        {"[][]char/utf8", text_body, sizeof(text_body),
          "a shaped langtype is a value form"},
         {"[][]char/utf8", text_body, sizeof(text_body),
          "a shaped langtype is a value form"},
@@ -361,8 +373,9 @@ static void test_rejections(void) {
         /* 不在表：解析成功，但形态不是可用键。 */
         {"time", int32_body, sizeof(int32_body),
          "langtype cannot be a member key"},
+        /* 旧 map 语法：按 p5 不兼容，但**必须指路**——见成员键层的专门分支。 */
         {"[]char/utf8\xc2\xb7int64", text_body, sizeof(text_body),
-         "langtype cannot be a member key"},
+         "legacy map syntax '[K]·V' is not accepted; write 'K'V instead"},
     };
 
     for (size_t ordinal = 0U; ordinal < sizeof(cases) / sizeof(cases[0]);

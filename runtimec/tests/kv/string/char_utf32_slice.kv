@@ -4,7 +4,7 @@
 // 期望输出:
 //   中文
 rwfunc test() -> () {
-	s = "中文测试"
-	t = string·slice(s, 0, 2)
+	s:[]char/utf32 = "中文测试"
+	t:char/utf32 = string·slice(s, 0, 2)
 	println(t)
 }

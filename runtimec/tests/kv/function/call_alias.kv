@@ -8,7 +8,7 @@ rwfunc inc(*int64 $x) -> (*int64 $r) {
 }
 
 rwfunc test() -> () {
-	5 -> v
+	5 -> v:int64
 	inc(v) -> v
 	println(v)
 }

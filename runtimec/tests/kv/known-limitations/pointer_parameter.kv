@@ -16,12 +16,12 @@
 // 期望输出:
 //   41
 rwfunc read_target(**int64 $p) -> (*int64 $r) {
-	*p -> local
+	*p -> local:int64
 	*local -> *r
 }
 
 rwfunc test() -> () {
-	x = 41
-	read_target(&x) -> v
+	x:int64 = 41
+	read_target(&x) -> v:int64
 	println(v)
 }

@@ -19,8 +19,8 @@
 #include <kvspace/kvspace.h>
 #include <kvspace/xvalue_head.h>
 
-/* kvspace 拒绝长度 >= 1024 的 key；超过即无法表达，不是可重试错误。 */
-#define RUNTIMEC_KVSPACE_KEY_CAPACITY 1024U
+/* `RUNTIMEC_KVSPACE_KEY_CAPACITY` 现在定义在 `contract/kvspace_access.h`：
+ * 地址账本的 key 槽与建 key 的缓冲必须共用同一个上界。 */
 
 /* `‥` U+2025：kvspace 的运行期成员分隔符（与 include/kvspace/const.h 一致）。 */
 #define RUNTIMEC_KVSPACE_RUNTIME_MEMBER_SEPARATOR "\xE2\x80\xA5"
@@ -547,15 +547,38 @@ runtimec_status_t runtimec_kvspace_access_source_revision(
      * 比较本身保留：它仍然告诉调用方「地址账本已过期」，这是有价值的信息；
      * 修的是「用过一次就该落定」这件事。
      */
+    /*
+     * 扫全部槽。**命中一次就落定**：同 key 只有一槽，所以同一代里搬两次只留
+     * 最后那个地址——这是有意的，不是遗漏。`changed` 从设计上就是 bool
+     * （「整批重定位只算一次纪元推进」），「搬了几次」这条信息今天没有消费者；
+     * 产出它要维护历史，而历史只会随调用次数增长，正是本账本要消灭的东西。
+     *
+     * **复核必须用登记时的同一个 resolve 模式。** 曾经这里写死 `resolve = 1`，
+     * 而登记走 `resolve = 0`——指针 key 在两种模式下返回**不同的地址**
+     * （实测：`/ptr` resolve=0 → `0x…1c0` 的指针值本体；resolve=1 →
+     * `0x…1e0` 的目标）。于是每一轮扫都判一次「搬了」，`changed` 恒为 true，
+     * `generation` **每调一次 source_revision 就 +1**；而 generation 是编译
+     * 缓存键的一部分 ⇒ 缓存永不命中 ⇒ 每次 execute 重编整个 Program。
+     * 实测 binary_search N=16：33 次缓存查询 → 18 个不同 generation、0 命中，
+     * 93ms；账本修复后账本不再增长，但这一条不修缓存照样全 miss。
+     */
     bool changed = false;
     size_t index = 0U;
-    while (index < adapter->resolved_address_count) {
+    while (index < adapter->resolved_address_capacity) {
         runtimec_kvspace_resolved_address_t *record =
             &adapter->resolved_addresses[index];
+
+        if (record->key_size == 0U) {
+            index += 1U; /* 空槽 */
+            continue;
+        }
         uint8_t *value = NULL;
         uint32_t value_size = 0U;
+        char record_key[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+        memcpy(record_key, record->key, record->key_size);
+        record_key[record->key_size] = '\0';
         const int read_status =
-            kvspaceGet(adapter->handle, record->key, 1, &value, &value_size);
+            kvspaceGet(adapter->handle, record_key, 0, &value, &value_size);
         const bool stale =
             read_status != 0 || value == NULL ||
             (uint64_t)(uintptr_t)value != record->address ||
@@ -566,11 +589,14 @@ runtimec_status_t runtimec_kvspace_access_source_revision(
         }
         changed = true;
         if (read_status != 0 || value == NULL) {
-            /* key 已不存在：从账本移除（尾元素前移），**不推进 index**——
-             * 让下一个元素落到同一位置被检查。 */
-            adapter->resolved_addresses[index] =
-                adapter->resolved_addresses[adapter->resolved_address_count - 1U];
+            /*
+             * key 已不存在：**清空该槽**。开放寻址不能像稠密数组那样把尾元素
+             * 搬进来——那样会破坏探测链，让另一个 key 的槽永远找不到。清空后
+             * 探测到空槽即中止，链的语义仍然成立（后续插入会复用这个空槽）。
+             */
+            record->key_size = 0U;
             adapter->resolved_address_count -= 1U;
+            index += 1U;
             continue;
         }
         /* 仍在，只是被搬了：就地刷新，下一轮同一个 key 就不会再被判为失效。 */
@@ -578,10 +604,18 @@ runtimec_status_t runtimec_kvspace_access_source_revision(
         record->observed_size = (uint64_t)value_size;
         index += 1U;
     }
-    if (!adapter->generation_started || changed ||
-        adapter->generation == 0U) {
-        adapter->generation += 1U;
+    /*
+     * **纪元只在真的观察到搬移时前进。**
+     *
+     * `generation` 描述的是「存储布局变过没有」，它是编译缓存键的一部分；
+     * 把「这一轮扫到了什么」也塞进同一个变量，就等于让缓存每次都失效。
+     * 所以判据只有 `changed`（外加首次启动的一次初始化）。
+     */
+    if (!adapter->generation_started || adapter->generation == 0U) {
+        adapter->generation = 1U;
         adapter->generation_started = true;
+    } else if (changed) {
+        adapter->generation += 1U;
     }
     revision->instance_identifier = adapter->instance_identifier;
     revision->generation = adapter->generation;
@@ -606,8 +640,173 @@ runtimec_status_t runtimec_kvspace_access_source_revision(
  * 静态与帧两条解析共用这一段：形状校验、地址来源、零地址检查完全一致，
  * 差别只在调用方对 key 形状与生命周期前提的判定。
  */
+/*
+ * ── 地址账本：按 key 查地址的表 ────────────────────────────────────────
+ *
+ * **它是表，不是日志。** 唯一的消费者 `source_revision` 遍历它，逐条问「这个
+ * key 的地址还是那个地址吗」；同一个 key 被问 N 次，就该只有一条答案。
+ *
+ * 曾经它是追加数组：每次解析 `count++`，同 key 反复登记。实测
+ * （`workspace/tmp/helper/memgrow-214409/SUMMARY.md`）一次空函数调用追加 5 条
+ * × 1040 字节，而整段程序只有 9 个不同 key——**把「调用次数」当成了容量增长轴**，
+ * N=800 时账本 4 MB。
+ */
+
+/* 账本槽上限：1024 槽 × 1050 字节 ≈ 1.04 MiB。走到这里说明「调用次数」又被
+ * 当成了「key 数」，应当响亮失败而不是继续吃内存。 */
+#define RUNTIMEC_KVSPACE_LEDGER_SLOT_LIMIT 1024U
+/* 装载因子上限 3/4：开放寻址线性探测在 0.75 以上探测长度劣化快。 */
+#define RUNTIMEC_KVSPACE_LEDGER_LOAD_NUMERATOR 3U
+#define RUNTIMEC_KVSPACE_LEDGER_LOAD_DENOMINATOR 4U
+
+static uint64_t runtimec_kvspace_access_key_hash(const char *key, size_t size) {
+    /* FNV-1a 64：够散、无表、无状态。碰撞由下面的逐字节比兜住。 */
+    uint64_t hash = UINT64_C(1469598103934665603);
+    size_t index;
+
+    for (index = 0U; index < size; ++index) {
+        hash ^= (uint64_t)(uint8_t)key[index];
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+/*
+ * 找一个 key 的槽：命中返回其下标，否则返回**它该插入的空槽**下标。
+ * `slots == NULL` 时只用于「该不该扩容」，调用方保证 capacity 非零。
+ */
+static size_t runtimec_kvspace_access_ledger_probe(
+    const runtimec_kvspace_resolved_address_t *slots, size_t capacity,
+    const char *key, uint16_t key_size, uint64_t key_hash) {
+    size_t index = (size_t)(key_hash & (uint64_t)(capacity - 1U));
+
+    for (;;) {
+        const runtimec_kvspace_resolved_address_t *slot = &slots[index];
+
+        if (slot->key_size == 0U) {
+            return index; /* 空槽：未命中，这里就是插入点 */
+        }
+        if (slot->key_hash == key_hash && slot->key_size == key_size &&
+            memcmp(slot->key, key, key_size) == 0) {
+            return index; /* 命中 */
+        }
+        index = (index + 1U) & (capacity - 1U);
+    }
+}
+
+/* 扩容到 new_capacity 并重新插入现有槽。失败时账本**原样可用**。 */
+static runtimec_status_t runtimec_kvspace_access_ledger_grow(
+    runtimec_kvspace_access_t *adapter, size_t new_capacity,
+    runtimec_error_t *error) {
+    runtimec_kvspace_resolved_address_t *grown =
+        (runtimec_kvspace_resolved_address_t *)runtimec_allocator_allocate(
+            &adapter->allocator,
+            new_capacity * sizeof(*grown), _Alignof(runtimec_kvspace_resolved_address_t));
+
+    if (grown == NULL) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_OUT_OF_MEMORY, 44,
+            "address ledger allocation failed");
+    }
+    memset(grown, 0, new_capacity * sizeof(*grown));
+    for (size_t ordinal = 0U; ordinal < adapter->resolved_address_capacity;
+         ++ordinal) {
+        const runtimec_kvspace_resolved_address_t *source =
+            &adapter->resolved_addresses[ordinal];
+
+        if (source->key_size == 0U) {
+            continue;
+        }
+        grown[runtimec_kvspace_access_ledger_probe(
+            grown, new_capacity, source->key, source->key_size,
+            source->key_hash)] = *source;
+    }
+    if (adapter->resolved_addresses != NULL) {
+        (void)runtimec_allocator_deallocate(
+            &adapter->allocator, adapter->resolved_addresses,
+            adapter->resolved_address_capacity * sizeof(*grown),
+            _Alignof(runtimec_kvspace_resolved_address_t));
+    }
+    adapter->resolved_addresses = grown;
+    adapter->resolved_address_capacity = new_capacity;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 登记一条「key → 当前地址」。**同 key 就地更新，不追加。**
+ *
+ * 空 key 在**插入之前**具名拒绝：`key_size == 0` 同时是空槽判据，一条空 key
+ * 走到插入会把一个占用槽静默清空（地址还在、按槽查变成空槽），账本从此丢一条
+ * 复核记录。键在语言里不可能为空，出现即说明 key 拼接错了。
+ */
+static runtimec_status_t runtimec_kvspace_access_ledger_record(
+    runtimec_kvspace_access_t *adapter, const char *key_text, size_t key_size,
+    uint64_t address, uint64_t observed_size, runtimec_error_t *error) {
+    const uint64_t key_hash =
+        runtimec_kvspace_access_key_hash(key_text, key_size);
+    size_t index;
+
+    if (key_size == 0U) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, 66,
+            "cannot record an empty key in the address ledger");
+    }
+    if (key_size >= RUNTIMEC_KVSPACE_KEY_CAPACITY) {
+        /* 与建 key 的缓冲同界，正常路径到不了这里；到了就是有人绕过了同界。 */
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED, 67,
+            "resolved key exceeds the address ledger capacity");
+    }
+    if (adapter->resolved_address_capacity == 0U) {
+        runtimec_status_t status = runtimec_kvspace_access_ledger_grow(
+            adapter, 16U, error);
+
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+    }
+    if ((adapter->resolved_address_count + 1U) *
+            RUNTIMEC_KVSPACE_LEDGER_LOAD_DENOMINATOR >
+        adapter->resolved_address_capacity *
+            RUNTIMEC_KVSPACE_LEDGER_LOAD_NUMERATOR) {
+        if (adapter->resolved_address_capacity >=
+            RUNTIMEC_KVSPACE_LEDGER_SLOT_LIMIT) {
+            return runtimec_kvspace_access_fail(
+                error, RUNTIMEC_STATUS_OUT_OF_MEMORY, 68,
+                "address ledger is full; the key count must not grow with "
+                "call count");
+        }
+        runtimec_status_t status = runtimec_kvspace_access_ledger_grow(
+            adapter, adapter->resolved_address_capacity * 2U, error);
+
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+    }
+    index = runtimec_kvspace_access_ledger_probe(
+        adapter->resolved_addresses, adapter->resolved_address_capacity,
+        key_text, (uint16_t)key_size, key_hash);
+    if (adapter->resolved_addresses[index].key_size == 0U) {
+        adapter->resolved_address_count += 1U; /* 新 key 才占新槽 */
+        adapter->resolved_addresses[index].key_size = (uint16_t)key_size;
+        adapter->resolved_addresses[index].key_hash = key_hash;
+        memcpy(adapter->resolved_addresses[index].key, key_text, key_size);
+    }
+    adapter->resolved_addresses[index].address = address;
+    adapter->resolved_addresses[index].observed_size = observed_size;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 解析一个 key 的当前地址。
+ *
+ * `record` 为 false 的调用方**不登记**：它们只借代次、不持有返回的地址。
+ * **传 false 的调用方，今后若开始持有该地址，必须改回 true**——不登记的地址
+ * 不会被 `source_revision` 复核，存储搬移后它会变成悬空读数。这不是「默认优化」，
+ * 是「我承诺不持有它」的声明。
+ */
 static runtimec_status_t runtimec_kvspace_access_resolve_address(
-    runtimec_kvspace_access_t *adapter, const char *key_text,
+    runtimec_kvspace_access_t *adapter, const char *key_text, bool record,
     runtimec_xvalue_address_t *output_xvalue_address,
     runtimec_error_t *error) {
     uint8_t *value = NULL;
@@ -634,38 +833,15 @@ static runtimec_status_t runtimec_kvspace_access_resolve_address(
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_ERROR, 43, "kvspace returned a null address");
     }
-    if (adapter->resolved_address_count == adapter->resolved_address_capacity) {
-        const size_t capacity =
-            adapter->resolved_address_capacity == 0U
-                ? 16U
-                : adapter->resolved_address_capacity * 2U;
-        runtimec_kvspace_resolved_address_t *grown =
-            runtimec_allocator_allocate(&adapter->allocator,
-                                        capacity * sizeof(*grown),
-                                        alignof(runtimec_kvspace_resolved_address_t));
-        if (grown == NULL) {
-            return runtimec_kvspace_access_fail(
-                error, RUNTIMEC_STATUS_OUT_OF_MEMORY, 44,
-                "address ledger allocation failed");
+    if (record) {
+        const size_t key_size = strlen(key_text);
+        const runtimec_status_t status = runtimec_kvspace_access_ledger_record(
+            adapter, key_text, key_size, address, (uint64_t)value_size, error);
+
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
         }
-        if (adapter->resolved_address_count != 0U) {
-            memcpy(grown, adapter->resolved_addresses,
-                   adapter->resolved_address_count * sizeof(*grown));
-        }
-        if (adapter->resolved_addresses != NULL) {
-            (void)runtimec_allocator_deallocate(
-                &adapter->allocator, adapter->resolved_addresses,
-                adapter->resolved_address_capacity * sizeof(*grown),
-                alignof(runtimec_kvspace_resolved_address_t));
-        }
-        adapter->resolved_addresses = grown;
-        adapter->resolved_address_capacity = capacity;
     }
-    runtimec_kvspace_resolved_address_t *record =
-        &adapter->resolved_addresses[adapter->resolved_address_count++];
-    record->address = address;
-    record->observed_size = (uint64_t)value_size;
-    memcpy(record->key, key_text, strlen(key_text) + 1U);
     *output_xvalue_address = address;
     return RUNTIMEC_STATUS_SUCCESS;
 }
@@ -698,7 +874,7 @@ runtimec_status_t runtimec_kvspace_access_resolve_static_xvalue_address(
             "keys under /vthread are rewritten during execution");
     }
     return runtimec_kvspace_access_resolve_address(
-        adapter, key_text, output_xvalue_address, error);
+        adapter, key_text, true, output_xvalue_address, error);
 }
 
 /*
@@ -706,9 +882,10 @@ runtimec_status_t runtimec_kvspace_access_resolve_static_xvalue_address(
  * 而不是 compilation 租约：返回当前 generation，调用方在每次访问前比对，
  * 不等即失效重绑。动态拼出的 key（不以 `/vthread/` 开头的相对路径）一律拒绝。
  */
-runtimec_status_t runtimec_kvspace_access_resolve_frame_xvalue_address(
+static runtimec_status_t runtimec_kvspace_access_resolve_frame_address(
     runtimec_kvspace_access_t *access, const runtimec_snapshot_t *snapshot,
-    runtimec_key_view_t key, runtimec_xvalue_address_t *output_xvalue_address,
+    runtimec_key_view_t key, bool record,
+    runtimec_xvalue_address_t *output_xvalue_address,
     uint64_t *output_generation, runtimec_error_t *error) {
     (void)snapshot;
     runtimec_kvspace_access_t *adapter = access;
@@ -737,7 +914,7 @@ runtimec_status_t runtimec_kvspace_access_resolve_frame_xvalue_address(
             "key is not a frame slot under /vthread");
     }
     runtimec_status_t status = runtimec_kvspace_access_resolve_address(
-        adapter, key_text, output_xvalue_address, error);
+        adapter, key_text, record, output_xvalue_address, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         *output_xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
         return status;
@@ -749,6 +926,15 @@ runtimec_status_t runtimec_kvspace_access_resolve_frame_xvalue_address(
     }
     *output_generation = adapter->generation;
     return RUNTIMEC_STATUS_SUCCESS;
+}
+
+runtimec_status_t runtimec_kvspace_access_resolve_frame_xvalue_address(
+    runtimec_kvspace_access_t *access, const runtimec_snapshot_t *snapshot,
+    runtimec_key_view_t key, runtimec_xvalue_address_t *output_xvalue_address,
+    uint64_t *output_generation, runtimec_error_t *error) {
+    return runtimec_kvspace_access_resolve_frame_address(
+        access, snapshot, key, true, output_xvalue_address, output_generation,
+        error);
 }
 
 /* 把一段文本写成持久槽：`/vthread/<vthread>/‥<member>`，无 langtype 系统键。 */
@@ -1221,11 +1407,21 @@ runtimec_status_t runtimec_kvspace_access_frame_generation(
             error, RUNTIMEC_STATUS_INVALID, 89, "library key formatting failed");
     }
 
+    /*
+     * **`record = false`**：本函数只为拿代次，返回的地址当场丢弃、谁都拿不到。
+     * 传 false 的调用方**今后若开始持有该地址，必须改回 true**——不登记的地址
+     * 不会被 `source_revision` 复核，存储搬移后会变成悬空读数。
+     *
+     * 顺带去掉的是原本 60% 的无效登记：实测一次函数调用登记 5 个 key，其中 3 个
+     * 是 `‥lib` 这类系统键（`workspace/tmp/helper/memgrow-214409/SUMMARY.md`）。
+     * 它们的地址搬移只会来自「帧目录重建」（`frame_state` 的 storage_generation
+     * 独立处理）或「存储整体换代」（`instance_identifier` 在 source_revision
+     * 第一段就拦下）——账本提供的信息全是已经知道的。
+     */
     runtimec_xvalue_address_t xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
-    runtimec_status_t status = runtimec_kvspace_access_resolve_frame_xvalue_address(
-        adapter, snapshot,
-        runtimec_key_view_make(library_key, (size_t)written), &xvalue_address,
-        output_generation, error);
+    runtimec_status_t status = runtimec_kvspace_access_resolve_frame_address(
+        adapter, snapshot, runtimec_key_view_make(library_key, (size_t)written),
+        false, &xvalue_address, output_generation, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         *output_generation = 0U;
         return status;

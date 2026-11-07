@@ -8,6 +8,6 @@ rwfunc 两倍(*int64 $数值) -> (*int64 $结果) {
 }
 
 rwfunc test() -> () {
-	变量 = 21
+	变量:int64 = 21
 	println(两倍(变量))
 }

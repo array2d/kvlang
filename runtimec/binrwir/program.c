@@ -16,6 +16,9 @@
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
+#include "contract/kvspace_access.h"
+/* 线格式只有一份：None 字面量的判据走公共头的访问器，本文件不写偏移算术。 */
+#include "kvspace/xvalue_head.h"
 
 #define BINRWIR_PROGRAM_INITIAL_CAPACITY 4U
 
@@ -628,9 +631,20 @@ static int binrwir_program_pools_are_invalid(
         const binrwir_program_literal_record_t *literal =
             &program->literals[ordinal];
 
-        if (literal->wire_bytes.size == 0U ||
-            binrwir_signature_validate_parameter_type(literal->langtype) !=
-                RUNTIMEC_STATUS_SUCCESS) {
+        /*
+         * 与 `add_literal` 是**同一个判据**，只是位置在 Program 的池上：
+         * 空 langtype 合法当且仅当该字面量本身是 None 值。三处调用同一个谓词，
+         * 判据只有一份。
+         */
+        if (literal->wire_bytes.size == 0U) {
+            return 1;
+        }
+        if (literal->langtype.size == 0U) {
+            if (!binrwir_literal_is_none_value(literal->wire_bytes)) {
+                return 1;
+            }
+        } else if (binrwir_signature_validate_parameter_type(
+                       literal->langtype) != RUNTIMEC_STATUS_SUCCESS) {
             return 1;
         }
     }
@@ -666,6 +680,43 @@ runtimec_status_t binrwir_program_get_identity(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+/*
+ * 签名校验的回调：**空参数类型何时合法**。
+ *
+ * 合法当且仅当该参数项是 **LITERAL** 引用，且它指向的字面量满足
+ * `binrwir_literal_is_none_value`（空 body + 空 attr + head 自洽）。
+ *
+ * 判据本体只有一份（那个谓词），本函数只做「参数项 → 引用种类 → 字面量」的
+ * 三段交叉。`rwfunc` 形参签名里不可能出现 LITERAL 引用，所以函数签名那一侧
+ * 天然不会被放宽——放行的是「None **字面量**」这个事实，不是「空类型」的形状。
+ */
+static bool binrwir_program_empty_parameter_type_is_legal(void *context,
+                                                          int is_write,
+                                                          size_t ordinal) {
+    const binrwir_program_t *program = (const binrwir_program_t *)context;
+    const uint32_t *indices =
+        is_write != 0 ? program->write_parameters.argument_indices
+                      : program->read_parameters.argument_indices;
+    const size_t count = is_write != 0 ? program->write_parameters.count
+                                       : program->read_parameters.count;
+    const binrwir_argument_t *argument;
+    const binrwir_program_literal_record_t *literal;
+
+    if (indices == NULL || ordinal >= count) {
+        return false;
+    }
+    if (indices[ordinal] >= program->argument_count) {
+        return false;
+    }
+    argument = &program->arguments[indices[ordinal]];
+    if (argument->reference_kind != BINRWIR_REFERENCE_LITERAL ||
+        argument->payload >= program->literal_count) {
+        return false;
+    }
+    literal = &program->literals[argument->payload];
+    return binrwir_literal_is_none_value(literal->wire_bytes);
+}
+
 runtimec_status_t binrwir_program_validate(const binrwir_program_t *program) {
     binrwir_signature_view_t signature;
     size_t text_size = 0U;
@@ -691,7 +742,10 @@ runtimec_status_t binrwir_program_validate(const binrwir_program_t *program) {
         binrwir_program_array_shape_is_invalid(signature.alias_rules,
                                                signature.alias_rule_count) ||
         binrwir_program_pools_are_invalid(program) ||
-        binrwir_signature_validate(&signature) != RUNTIMEC_STATUS_SUCCESS) {
+        binrwir_signature_validate_permitting_empty_types(
+            &signature, (void *)(uintptr_t)program,
+            binrwir_program_empty_parameter_type_is_legal) !=
+            RUNTIMEC_STATUS_SUCCESS) {
         return RUNTIMEC_STATUS_INVALID;
     }
     /* 文本池恰好装下全部类型串与符号名、字节池恰好装下全部字面量：多一个字节或
@@ -1461,17 +1515,56 @@ runtimec_status_t binrwir_program_builder_add_symbol(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+bool binrwir_literal_is_none_value(runtimec_bytes_view_t wire_bytes) {
+    const kvspaceXvalueHead *head;
+    uint64_t total;
+
+    if (wire_bytes.size < KVSPACE_XVALUE_HEAD_LEN || wire_bytes.data == NULL) {
+        return false;
+    }
+    head = (const kvspaceXvalueHead *)(const void *)wire_bytes.data;
+    /* `TotalLen` 一并校验 padding、layout 与总长溢出；0 表示 head 不自洽
+       （合法总长至少 16）。 */
+    total = kvspaceXvalueHeadTotalLen(head);
+    /*
+     * **`total == size`，不是 `<=`**：字面量的 `wire_bytes` 就是一条**完整**
+     * wire（槽的 wire + 它的 size），没有拼接存储。`<=` 会放过「尾巴上挂着
+     * 多余字节」的畸形 wire——那种 wire 的 body 偏移与总长对不上，属于该被拒的
+     * 形态。
+     */
+    return total != 0U && total == (uint64_t)wire_bytes.size &&
+           kvspaceXvalueHeadAttrsLen(head) == 0U &&
+           runtimec_xvalue_body_from_wire(wire_bytes).size == 0U;
+}
+
 runtimec_status_t binrwir_program_builder_add_literal(
     binrwir_program_builder_t *builder, runtimec_bytes_view_t wire_bytes,
     runtimec_string_view_t langtype, uint32_t *output_literal_index) {
     if (output_literal_index != NULL) {
         *output_literal_index = BINRWIR_LITERAL_INDEX_NONE;
     }
+    /*
+     * **空 langtype 合法，当且仅当 `wire_bytes` 本身恰好是一条 None 值。**
+     *
+     * None 的定义（spec `03-类型系统/03-种类-代码与特殊值.kv`「None 判据」）：
+     * head 自洽 + `bodylen == 0` + `attrslen == 0`——即「空 body、无 langtype 记录」。
+     * 它没有类型**就是**它的语义，所以不能让 `validate_parameter_type` 把它拒掉。
+     *
+     * 谓词必须窄到只容它一个：放宽成「wire 非空即可」会让**任何忘记给类型的
+     * 字面量**都进池，而这条检查是登记处唯一拦「无类型操作数」的地方。
+     * 非 None 的 wire（`bodylen != 0` 或带 attr）配空 langtype 仍然拒绝。
+     */
     if (!binrwir_program_builder_is_writable(builder) ||
         output_literal_index == NULL || wire_bytes.size == 0U ||
-        wire_bytes.data == NULL ||
-        binrwir_signature_validate_parameter_type(langtype) !=
-            RUNTIMEC_STATUS_SUCCESS) {
+        wire_bytes.data == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    if (langtype.size == 0U) {
+        if (!binrwir_literal_is_none_value(wire_bytes)) {
+            return RUNTIMEC_STATUS_INVALID;
+        }
+    } else if (binrwir_signature_validate_parameter_type(langtype) !=
+               RUNTIMEC_STATUS_SUCCESS) {
         return RUNTIMEC_STATUS_INVALID;
     }
     if (builder->literal_count >= UINT32_MAX) {

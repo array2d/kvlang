@@ -97,7 +97,7 @@ fn connect(dir: &TempDir) -> Kv {
 fn empty_map_literal_is_map_new_with_annotated_type() {
     let (dir, out) = layout(
         "empty",
-        "lib p {\n\trwfunc f() -> () {\n\t\tm:[int64]·[]char/utf8 = {}\n\t}\n}\n",
+        "lib p {\n\trwfunc f() -> () {\n\t\tm:'[int64]'[]char/utf8 = {}\n\t}\n}\n",
     );
     let out = out.unwrap();
     assert!(
@@ -112,7 +112,7 @@ fn empty_map_literal_is_map_new_with_annotated_type() {
     assert_eq!((nr, nw), (0, 1), "空 map 是零读参、一写参");
     assert_eq!(
         write_type(&mut kv, dir_key, 1),
-        "[int64]·[]char/utf8",
+        "'[int64]'[]char/utf8",
         "写槽类型必须来自声明处标注"
     );
 }
@@ -122,7 +122,7 @@ fn empty_map_literal_is_map_new_with_annotated_type() {
 fn non_empty_map_literal_is_map_new() {
     let (dir, out) = layout(
         "nonempty",
-        "lib p {\n\trwfunc f() -> () {\n\t\tm:int64·int64 = {1 2 3}\n\t}\n}\n",
+        "lib p {\n\trwfunc f() -> () {\n\t\tm:'int64'int64 = {1 2 3}\n\t}\n}\n",
     );
     assert!(out.unwrap().status.success());
     let mut kv = connect(&dir);
@@ -164,8 +164,8 @@ fn unannotated_container_literal_is_rejected() {
 #[test]
 fn no_literal_form_emits_obj() {
     for (tag, body) in [
-        ("obj-empty", "m:[int64]·int64 = {}\n\t"),
-        ("obj-nonempty", "m:int64·int64 = {1 2}\n\t"),
+        ("obj-empty", "m:'[int64]'int64 = {}\n\t"),
+        ("obj-nonempty", "m:'int64'int64 = {1 2}\n\t"),
     ] {
         let src = format!("lib p {{\n\trwfunc f() -> () {{\n\t\t{body}}}\n}}\n");
         let (dir, out) = layout(tag, &src);
@@ -197,7 +197,7 @@ fn no_literal_form_emits_obj() {
 fn signature_declaration_supplies_the_map_type() {
     let (dir, out) = layout(
         "sig",
-        "rwfunc build() -> (*[]char/utf8·int64 $m) {\n\t{n=42; x=7} -> *m\n}\n",
+        "rwfunc build() -> (*'[]char/utf8'int64 $m) {\n\t{n=42; x=7} -> *m\n}\n",
     );
     let out = out.unwrap();
     assert!(

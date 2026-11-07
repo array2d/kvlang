@@ -1,8 +1,7 @@
 use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 
 fn body(data: &[u8]) -> &[u8] {
-    let h = kvkind::head(data);
-    kvkind::body(data, &h)
+    kvkind::body(data)
 }
 
 fn sig(data: &[u8]) -> String {
@@ -183,7 +182,7 @@ fn compile_control_flow_is_single_plane() {
 #[test]
 fn compile_while_goto_targets_are_int64() {
     let (_store, mut kv) = fresh_kv();
-    let src = "rwfunc sum_to(*int64 $n) -> (*int64 $acc) {\n    0 -> *acc\n    1 -> i\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n";
+    let src = "rwfunc sum_to(*int64 $n) -> (*int64 $acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n";
     compile(&mut kv, src).unwrap();
     let children = kv.list("/lib/sum_to/", false, false);
     assert!(

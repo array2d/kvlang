@@ -87,12 +87,41 @@ _Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_VALUE_ACCESS_DIAG_DEREFERENCE_T
  * wire），但一旦出现「只读且 body 粒度」的引用种类，用不可写性去推就会把 body
  * 当成 wire 再剥一次头，读到越界内存——而且多数用例仍不崩，只是值错了。
  */
+/*
+ * `None` 判据要的三个**事实**（spec `03-类型系统/03-种类` 的 `is_none`）。
+ *
+ * 存事实、不存结论：判据是谓词 `vmbin_value_location_is_none`，只能有一处。
+ * 三个字段各自可以是「未知」——某些派生路径拿不到 wire（例如只有 body 视图、
+ * 且反推不出 XValue 基址）。**未知不等于「不是 None」**：默认 false 会让需要
+ * 这个判据的调用点静默走错分支，正是 `0x4406` 通用消息压过具名诊断的来源。
+ */
+typedef enum vmbin_value_fact {
+    VMBIN_VALUE_FACT_UNKNOWN = 0,
+    VMBIN_VALUE_FACT_NO = 1,
+    VMBIN_VALUE_FACT_YES = 2
+} vmbin_value_fact_t;
+
 typedef struct vmbin_value_location {
     const uint8_t *read_bytes;
     uint8_t *write_bytes;
     size_t size;
     bool is_whole_wire;
+    /* ── 以下三项是 `is_none` 的输入事实 ────────────────────────────── */
+    vmbin_value_fact_t body_is_empty;      /* wire 头的 bodylen == 0 */
+    vmbin_value_fact_t has_langtype_record;/* attrs 里有 langtype 记录 */
+    vmbin_value_fact_t is_directory_key;   /* 该 key 是目录（不以值的形式存在） */
 } vmbin_value_location_t;
+
+/*
+ * `is_none` 的**唯一判据**：空 body ∧ 无 langtype 记录 ∧ 非目录键。
+ *
+ * 返回三态：任一事实未知 ⇒ `VMBIN_VALUE_FACT_UNKNOWN`，调用点必须据此**具名
+ * 失败**，不得当成「不是 None」。与编码期的 `binrwir_literal_is_none_value`
+ * 用同一组 wire 事实（bodylen / attrslen），共享测试见
+ * `runtimec/tests/none_criterion_test.c`。
+ */
+vmbin_value_fact_t vmbin_value_location_is_none(
+    const vmbin_value_location_t *location);
 
 /*
  * 解析一个参数项。字面量与内联绑定给出池内只读视图（`is_whole_wire = true`，
@@ -142,6 +171,47 @@ runtimec_status_t vmbin_value_access_langtype(
     runtimec_string_view_t *output_langtype, runtimec_error_t *error);
 
 /*
+ * **这个 langtype 是不是 structref 值**（指向容器的引用，body = 目标 key 路径）。
+ *
+ * 判据只有两条，都在类型串本身上：
+ *   - `/lib/<Name>`（原型路径形式，见 `03-类型系统/struct.kv`）；
+ *   - `def struct`（容器头自己的 langtype，见 `17-struct.kv`）。
+ *
+ * **`*T` 不算**：那是 kvlang 指针（body = 目标 key，跟一跳才是容器），不是引用值。
+ * 两者 body 形状一样但语义不同，混在一起会让 `q = p` 的指针拷贝被误当成别名。
+ */
+bool vmbin_value_access_langtype_is_structref(runtimec_string_view_t langtype);
+
+/*
+ * **路径串**：`[]char/<enc>` 或 `char/<enc>` 的值，body 就是父路径本身
+ * （spec `15-成员访问.kv`「路径串」：字符数组的值即父路径）。
+ */
+bool vmbin_value_access_langtype_is_path_string(runtimec_string_view_t langtype);
+
+/*
+ * **容器类型**：map（`'<formatter>'<value>`，`FORM_MAPPING`）或 structref（`/lib/<Name>`）。
+ *
+ * 判据**只用 langtype，不看 body 长度**：空 body 也是合法标量值的形态（空串），
+ * 拿长度判会把空串误伤成容器。
+ */
+bool vmbin_value_access_langtype_is_container(runtimec_string_view_t langtype);
+
+/*
+ * **整值写**：按写槽的**声明类型**重建一条 wire 并写进去，长度不必与现值相等。
+ *
+ * 与 `write_body` 的分工是硬的：`write_body` 是**定宽就地改**（宽度不等即
+ * `SIZE_MISMATCH`，那道检查是「写入宽度必须与声明一致」的唯一所在，不许绕）；
+ * 本函数是**换整个值**（长度由写入内容决定）。
+ *
+ * 目前只有一个消费方：`copy` 的 structref 引用分支——路径文本与被写槽的旧 body
+ * 长度基本不等，走定宽路径必然失败。
+ */
+runtimec_status_t vmbin_value_access_write_whole_value(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, runtimec_bytes_view_t body,
+    runtimec_error_t *error);
+
+/*
  * **值的形态**：普通值 / 指针 / 扩展。
  *
  * 只有这三种；它们由 **langtype 首字符**（`*` / `@` / 其它）决定——head 里已经
@@ -176,6 +246,18 @@ runtimec_status_t vmbin_value_access_form(
     runtimec_error_t *error);
 
 /*
+ * 同 `vmbin_value_access_form`，但**不跟 `dereference`**：要指针值本身的形态。
+ *
+ * `ptreq` / `ptreq·not` 比较的是两个指针是否指向同一目标（matrix:66），
+ * 跟跳之后拿到的就是目标的形态——既会跳到不存在的目标上失败，
+ * 也会把「指针 vs None」错判成「值 vs None」。
+ */
+runtimec_status_t vmbin_value_access_form_unfollowed(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, uint8_t *output_form,
+    runtimec_error_t *error);
+
+/*
  * ── body 粒度：上面三条的并列版本 ────────────────────────────────────
  *
  * 为什么要有第二组：上面三条对**字面量**给的是整条 wire（16 字节 head + body +
@@ -196,6 +278,23 @@ runtimec_status_t vmbin_value_access_form(
  * 这一条，它只改变「读出来的是哪一段」。
  */
 runtimec_status_t vmbin_value_access_locate_body(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument,
+    vmbin_value_location_t *output_location, runtimec_error_t *error);
+
+/*
+ * **读语义**的同款定位：解引用到不存在的目标时给 **None**（空 body），不是失败。
+ *
+ * 规范 `05-runtime语义/12-动态键.kv` §四：「`resolveptr` 定位到的目标不存在时，
+ * **读得 `None`**；普通绝对 key 的读仍失败封闭。」
+ *
+ * 与 `locate_body` 的差别只在解引用那一支：
+ *   - 写路径用 `locate_body` —— 缺失即失败，随后 `write_body` 创建（#632 写侧）；
+ *   - 读路径用本函数 —— 缺失即 None（本函数）。
+ *
+ * **普通绝对 key 的读不经这里放宽**：它不走解引用分支，仍具名失败。
+ */
+runtimec_status_t vmbin_value_access_locate_body_read(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error);

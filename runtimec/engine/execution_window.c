@@ -19,6 +19,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <kvspace/kvspace.h>
+#include <kvspace/xvalue_head.h>
+
 #include "binrwir/execution_frame.h"
 #include "binrwir/frame_bindings.h"
 #include "binrwir/program.h"
@@ -123,6 +126,128 @@ static runtimec_program_counter_t runtimec_execution_window_make_program_counter
             : (int32_t)source_program_counter;
     return counter;
 }
+
+/*
+ * ── 形参帧槽的**第二跳**：把形参槽物化成一条指向「调用方实参 key」的指针 ──
+ *
+ * 规范 `03-类型系统/16-ptr.kv:116` 与 `05-runtime语义/04-函数调用.kv`「两种参数
+ * 形态」：`*T $name` 的帧槽是**双层 kvlang 指针**——调用点把实参 key 写成 `*T`，
+ * 帧内再叠一层 `**T`；体内 `*name` 沿链直达调用方目标。
+ *
+ * 所以形参槽不是绑定表里的一个条目就够：它必须是**存储里的一个 key**，
+ * 其 body 是调用方实参 key 的路径文本，指针性由 wire 的 ptr 位承载。
+ *
+ * 之前只有绑定表那一跳（把调用方的值地址直接记在形参槽号上），于是：
+ *   - `*arr` 靠绑定表能拿到值，看起来「能用」；
+ *   - 但 `resolveptr(argument0, k)` 这类**按 key 派生**的路径拿不到形参槽的目标
+ *     ——它去读形参槽的 body，那里什么都没有（空 body 的容器），于是拼出
+ *     `<形参槽>·k` 这个从不存在的 key。`binary_search` 就是这样红的。
+ *
+ * **只对读参做**：写参的目标由调用方 key 承载（写回直达），语义不同。
+ * 没传实参的形参槽不物化——读 `*name` 仍应具名失败（反向对照）。
+ *
+ * ── 验收状态（2026-11-06 20:05，树 235998ed）──────────────────────────
+ *
+ * **实现已完成；反向对照已过；「让 `binary_search` 转绿」这一条未达成。**
+ *
+ * 已完成：
+ *   - 标量形参照旧（`take(*int64 $p)` + `take(42)`）；
+ *   - 写参写回照旧（`sum(*[]int64) -> (*int64 $acc)`、`unary -> *r`）；
+ *   - Debug 与 Release **两套构建结论一致**，均等于改动前基线（无回归）。
+ *
+ * 未达成：`binary_search` 仍报 `0x4005 read parameter type is outside the
+ * capability mask`——那是 layout 侧 `resolveptr` 的读参声明类型带 `*`，掩码
+ * 匹配不上，**不是本函数引入的**（关掉本函数的调用，`0x4005` 不变）。
+ *
+ * 「未传参的槽读 `*name` 仍失败」未单测：那种帧在 `bind_parameters` 的
+ * `argument_count` 校验处就被拒，走不到这里——由参数个数校验保证。
+ *
+ * 不要把「没验」读成「没做」。复验清单见
+ * `workspace/622/coding3/two-hop-status.md`。
+ */
+static runtimec_status_t runtimec_execution_window_materialize_parameter_pointer(
+    runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
+    const runtimec_execution_window_request_t *request,
+    const binrwir_program_t *program, const runtimec_string_view_t *parameter_type,
+    uint32_t ordinal, const runtimec_string_view_t *caller_key,
+    runtimec_execution_window_diagnostic_t *output_detail,
+    runtimec_error_t *error) {
+    char slot_key_text[256];
+    char langtype_text[256];
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    char message[256];
+    size_t slot_length;
+
+    /* 形参槽 key：`<frame_path>/[0,-<ordinal+1>]`，拼法只来自 frame_bindings。 */
+    slot_length = binrwir_frame_parameter_key(
+        runtimec_string_view_make(request->frame_path.data,
+                                  request->frame_path.size),
+        (uint16_t)ordinal, false, slot_key_text, sizeof(slot_key_text));
+    if (slot_length == SIZE_MAX) {
+        *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED;
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    /* langtype 用**声明的源级类型**（`*T`）：ptr 位由构造器按它定。 */
+    if (parameter_type->size == 0U ||
+        parameter_type->size + 1U > sizeof(langtype_text)) {
+        *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED;
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    memcpy(langtype_text, parameter_type->data, parameter_type->size);
+    langtype_text[parameter_type->size] = '\0';
+    /*
+     * 值只有 `*T` 才需要这一跳：`*T` 表示「这个形参是一个指针值」，帧槽要先
+     * 指向调用方的 key，体内 `*name` 再跟一跳。非指针形参按值传，没有第二跳。
+     */
+    if (langtype_text[0] != '*') {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    if (kvspaceXvalueHeadNewPtr(
+            (const uint8_t *)caller_key->data, (uint32_t)caller_key->size,
+            langtype_text, &wire, &wire_size) != 0 ||
+        wire == NULL || wire_size > UINT32_MAX) {
+        *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED;
+        return RUNTIMEC_STATUS_ERROR;
+    }
+    message[0] = '\0';
+    if (kvspaceSetValue(host->handle, slot_key_text, wire,
+                        (uint32_t)wire_size, message,
+                        (uint32_t)sizeof(message)) != 0) {
+        free(wire);
+        *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED;
+        return RUNTIMEC_STATUS_ERROR;
+    }
+    free(wire);
+    (void)snapshot;
+    (void)program;
+    (void)error;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 一次窗口执行允许的**签名参数个数上限**（读参 + 写参）。
+ *
+ * 与 `frame_driver.h` 的 `FRAME_DRIVER_MAX_CALLEE_ARGUMENT_ENTRIES`（16）**不是同一个概念**，
+ * 故意分开：
+ *   - 驱动侧那个是「一次调用**驱动**愿意携带多少实参」——它是栈数组的容量；
+ *   - 本值是「一个**函数签名**最多能有多少个形参」——它是语言/编码层的事实，
+ *     与谁在驱动无关。测试、byteseek、JIT 各有自己的调用方。
+ *
+ * 为什么必须有：形参槽号是 `uint16`，但更要紧的是「参数个数」会流向多条按个数
+ * 分配的路径（绑定表容量、物化缓冲、未来的 JIT 帧布局）。本层原先**没有任何
+ * 上限检查**——一个 65 参数的签名会让绑定表按 65 开容量，而栈缓冲只有 64 格
+ * （那个数组现已改成单缓冲复用，但**别处的按个数分配仍在**）。
+ *
+ * 超限 ⇒ 具名失败，不往下走、不截断。
+ */
+#define RUNTIMEC_EXECUTION_WINDOW_MAX_PARAMETERS 64U
+
+/* 物化 key 的缓冲容量：`<frame_path>/<name>` 或 `<frame_path>/[0,±N]`。
+ * 实测帧路径 20–30 字节、局部名最长约 34 字节，256 留了充分余量；
+ * **不足时 `binrwir_frame_local_key` 返回 SIZE_MAX 而不截断**，所以这个值
+ * 只影响「能编多长的名字」，不会让 key 悄悄指错槽。 */
+#define RUNTIMEC_EXECUTION_WINDOW_KEY_CAPACITY 256U
 
 /* 解析一个绝对槽键并写进绑定表；代数必须与本次快照一致且非零。 */
 static runtimec_status_t runtimec_execution_window_bind_slot(
@@ -291,9 +416,23 @@ static runtimec_status_t runtimec_execution_window_bind_parameters(
     size_t read_count;
     size_t write_count;
     size_t ordinal;
-    /* 物化后的 key 文本。放本栈上：`bind_slot` 只在本函数内借用。
-     * 每个 key 上限 256——`/vthread/<vid>/[<depth>]/<name>` 的实测长度远小于此。 */
-    char materialized_keys[64][256];
+    /*
+     * 物化后的 key 文本：**一个缓冲，每轮复用**。
+     *
+     * 曾经是 `char materialized_keys[64][256]`——16 KB 的栈数组，objdump 实测让本
+     * 函数单帧占 **16,656 字节**（`sub $0x1000` 逐页探测 16 次 + 256）。8 MB 栈
+     * 因此只撑得住约 490 层嵌套，实测 830 层通过、840 层崩。
+     *
+     * **不需要二维**：每个参数是「materialize → 物化指针 → bind_slot」三步，
+     * 在本轮内用完；下一轮不回头引用上一轮的 key。而
+     * `binrwir_frame_bindings_bind` 会 `copy_keys` **复制** key 文本
+     * （`binrwir/frame_bindings.c`），所以借用的栈缓冲可以安全复用。
+     *
+     * 副作用是好的：没有数组下标，也就没有「参数 > 64 越界踩栈」这个缺陷。
+     * 但**签名侧仍要有上限**（见下面的 `RUNTIMEC_EXECUTION_WINDOW_MAX_PARAMETERS`）
+     * ——没有数组不等于可以无限多参数，别的路径仍可能按参数个数分配。
+     */
+    char materialized_key[RUNTIMEC_EXECUTION_WINDOW_KEY_CAPACITY];
 
     /*
      * 「这一帧的绑定已建立」与参数个数无关：**空绑定也是一次绑定**。
@@ -319,6 +458,28 @@ static runtimec_status_t runtimec_execution_window_bind_parameters(
         *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_COUNT;
         return RUNTIMEC_STATUS_INVALID;
     }
+    /*
+     * 签名参数个数上限：**先查上限，再按个数做任何事**。
+     * 超限是具名失败，不是截断、不是「跑到哪算哪」——失败消息带函数路径与数量。
+     */
+    if (read_count + write_count >
+        (size_t)RUNTIMEC_EXECUTION_WINDOW_MAX_PARAMETERS) {
+        static _Thread_local char parameter_count_message[160];
+        (void)snprintf(parameter_count_message,
+                       sizeof(parameter_count_message),
+                       "function takes %zu parameters (read %zu + write %zu), "
+                       "exceeding the supported limit of %u",
+                       read_count + write_count, read_count, write_count,
+                       (unsigned)RUNTIMEC_EXECUTION_WINDOW_MAX_PARAMETERS);
+        runtimec_error_set(error, RUNTIMEC_STATUS_UNSUPPORTED,
+                           RUNTIMEC_ERROR_DOMAIN_CONTRACT,
+                           RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_COUNT,
+                           runtimec_string_view_from_c_string(
+                               parameter_count_message),
+                           RUNTIMEC_PROGRAM_COUNTER_NONE);
+        *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_COUNT;
+        return RUNTIMEC_STATUS_UNSUPPORTED;
+    }
     for (ordinal = 0U; ordinal < read_count; ++ordinal) {
         uint16_t binding_slot = BINRWIR_FRAME_BINDING_SLOT_NONE;
         if (vmbin_frame_slot_of_parameter(program,
@@ -332,7 +493,21 @@ static runtimec_status_t runtimec_execution_window_bind_parameters(
         runtimec_string_view_t resolved_key;
         runtimec_status_t status = runtimec_execution_window_materialize_argument(
             host, snapshot, request, &request->arguments[ordinal], ordinal,
-            materialized_keys[ordinal], sizeof(materialized_keys[ordinal]),
+            materialized_key, sizeof(materialized_key), &resolved_key,
+            output_detail, error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return status;
+        }
+        /*
+         * **第二跳**：先把形参槽物化成「指向调用方 key 的指针」，再做绑定。
+         *
+         * 顺序要紧：绑定表记的是「这个槽现在指向哪」，而指针 key 是**存储里的
+         * 实体**——`resolveptr(argument0, k)` 读的就是它。先写存储再绑，两步看到
+         * 的是同一个目标。
+         */
+        status = runtimec_execution_window_materialize_parameter_pointer(
+            host, snapshot, request, program,
+            &program_view.signature.read_parameter_types[ordinal], ordinal,
             &resolved_key, output_detail, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return status;
@@ -358,8 +533,7 @@ static runtimec_status_t runtimec_execution_window_bind_parameters(
         runtimec_status_t status = runtimec_execution_window_materialize_argument(
             host, snapshot, request,
             &request->arguments[read_count + ordinal], read_count + ordinal,
-            materialized_keys[read_count + ordinal],
-            sizeof(materialized_keys[read_count + ordinal]), &resolved_key,
+            materialized_key, sizeof(materialized_key), &resolved_key,
             output_detail, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return status;
@@ -1224,6 +1398,59 @@ runtimec_status_t runtimec_execution_window_execute(
         /* 挂不进去就把这次失败**当执行失败上报**：停在 waiting 却没进队列，
          * 与「跑完了」无法区分，那是「以看起来合理的值失败」。 */
         if (status != RUNTIMEC_STATUS_SUCCESS) {
+            /*
+             * 超时的错误消息**必须说出是哪个算子**。
+             *
+             * `runtimec_kvspace_access_handoff` 只知道「没人来认领」，它看不到
+             * 算子名；而名字在这一层已经查到了（上面的 `operation`，来自 opcode
+             * 槽——layout 写进去的就是源码里的算子名）。不用它就是让失败丢掉
+             * 唯一能定位的事实：曾经 Release 树缺 `RUNTIMEC_TEMP_PRINTLN`，
+             * `println` 被编成 FOREIGN，现场报的是「handoff was not claimed in
+             * time」——**一个字都没提 println**，一圈人查了 UB / dangling /
+             * 编码期才回到构建配置。
+             *
+             * 末句「is a handler missing from this build?」是有用的提示：那次的
+             * 根因正是缺宏，见到这句就能直接想到。
+             */
+            if (status == RUNTIMEC_STATUS_WAIT &&
+                operation.data != NULL && operation.size != 0U) {
+                char detail_text[768];
+                /*
+                 * **先把算子名拷进独立缓冲，再拼消息。**
+                 *
+                 * `operation` 指向 `operation_key`（外层栈数组），而 `detail_text`
+                 * 是本 `if` 内层的新数组。直接让 `snprintf` 同时「读 operation、
+                 * 写 detail_text」，编译器可以复用同一段栈槽——实测拼出来的是
+                 * `this instru` 这种半截文本，**是读到了正在被写的缓冲**。
+                 *
+                 * 拷贝一次切断这个别名关系，之后两者互不相干。
+                 */
+                char operation_text[512];
+                size_t operation_length = operation.size;
+
+                if (operation_length >= sizeof(operation_text)) {
+                    operation_length = sizeof(operation_text) - 1U;
+                }
+                memcpy(operation_text, operation.data, operation_length);
+                operation_text[operation_length] = '\0';
+                const int written = snprintf(
+                    detail_text, sizeof(detail_text),
+                    "no extension claimed this instruction (0x%08X) at pc %u in %.*s "
+                    "— the opcode slot reads `%s`; is a handler missing from this build?",
+                    (unsigned)BINRWIR_OPERATION_IDENTIFIER_FOREIGN,
+                    (unsigned)execution_exit.logical_program_counter,
+                    (int)request->function_path.size,
+                    request->function_path.data, operation_text);
+
+                if (written > 0 && (size_t)written < sizeof(detail_text) &&
+                    error != NULL) {
+                    runtimec_error_set(
+                        error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT,
+                        (int64_t)RUNTIMEC_EXECUTION_WINDOW_DIAG_HANDOFF_UNCLAIMED,
+                        runtimec_string_view_make(detail_text, (size_t)written),
+                        RUNTIMEC_PROGRAM_COUNTER_NONE);
+                }
+            }
             output_result->status = status;
             output_result->execution_exit.status = status;
         }

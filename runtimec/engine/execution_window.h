@@ -62,7 +62,15 @@ typedef enum runtimec_execution_window_diagnostic_t {
      * （比如「runner 有没有打 encode 的 message」）去分诊，而那个通道一换就失效，
      * 失效时还不报错。诊断码本身要说得出「死在哪一步」。
      */
-    RUNTIMEC_EXECUTION_WINDOW_DIAG_SPECIALIZE_FAILED = UINT32_C(0x4000) + 21U
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_SPECIALIZE_FAILED = UINT32_C(0x4000) + 21U,
+    /*
+     * 撞到 FOREIGN 挂进队列，但没有扩展来认领（超时）。
+     *
+     * **必须与其它窗口码分开**：它回答的是「哪个算子没人处理」，而不是「窗口
+     * 内部哪一步坏了」。消息里带算子名、opid、pc 与函数路径——曾经这条只剩
+     * 「handoff was not claimed in time」，一个字都没说是什么算子。
+     */
+    RUNTIMEC_EXECUTION_WINDOW_DIAG_HANDOFF_UNCLAIMED = UINT32_C(0x4000) + 22U
 } runtimec_execution_window_diagnostic_t;
 
 /* 段断言：窗口的码必须在自己的段内（见 contract/diagnostic_band.h）。 */
@@ -70,6 +78,10 @@ _Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(
                    RUNTIMEC_EXECUTION_WINDOW_DIAG_SPECIALIZE_FAILED,
                    RUNTIMEC_DIAGNOSTIC_BAND_EXECUTION_WINDOW),
                "window diagnostic must stay inside its band");
+_Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(
+                   RUNTIMEC_EXECUTION_WINDOW_DIAG_HANDOFF_UNCLAIMED,
+                   RUNTIMEC_DIAGNOSTIC_BAND_EXECUTION_WINDOW),
+               "handoff-unclaimed diagnostic must stay inside its band");
 
 /* 一个实参的来源。判据是「执行窗口要不要创建它」，不是「谁声明的它」。 */
 typedef enum runtimec_argument_source {

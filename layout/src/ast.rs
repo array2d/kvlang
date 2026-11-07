@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use super::scanner::Pos;
 use super::symbol;
 
 // ── 语句 ─────────────────────────────────────────────────────────────
@@ -467,6 +468,12 @@ pub struct Instruction {
     /// 该算子的操作数目标 kind（promotion 结果）。opcode 不再携带类型后，未定型
     /// 整数字面量操作数要按它落槽，否则 `uint64_var > 1` 里的 `1` 会落成 int64。
     pub operand_kind: String,
+    /// 这条指令在源码里的起始位置（1-based）。
+    ///
+    /// 诊断要指路就必须有它：`error: 0:0:` 对 1900 处迁移毫无用处，而
+    /// `error: <file>:5:1:` 能直接跳过去。由 `parse_inst` 在解析该语句时记录；
+    /// layout 自己合成的指令留 `Pos::default()`（0:0），它们没有源码位置可言。
+    pub pos: Pos,
 }
 
 impl Instruction {

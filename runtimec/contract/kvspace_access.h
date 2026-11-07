@@ -47,6 +47,15 @@ typedef uint64_t runtimec_value_body_address_t;
 /* body 起点相对 XValue 基址的固定偏移。**只有一个定义点**，两种输入形态共用。 */
 #define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES KVSPACE_XVALUE_HEAD_LEN
 
+/*
+ * key 文本缓冲的容量 = **kvspace 能接受的 key 上界**（它拒绝长度 >= 本值的 key）。
+ *
+ * **只有一个定义点**：建 key 的缓冲（本模块二十余处）与地址账本记录的 key 槽
+ * 必须是同一个数。两个数出现分歧时，症状是「能建出来的 key 存不进账本」——
+ * 一个编码一个含义。
+ */
+#define RUNTIMEC_KVSPACE_KEY_CAPACITY 1024U
+
 #ifdef __cplusplus
 static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 16U,
               "V.body must start 16 bytes after the XValue base");
@@ -71,10 +80,19 @@ typedef struct runtimec_handoff_request {
 typedef runtimec_status_t (*runtimec_kvspace_list_visitor_function_t)(
     void *context, runtimec_key_view_t key, runtimec_error_t *error);
 
+/*
+ * 地址账本的一个槽：**key 是主键**（一 key 一条，重复解析就地更新，见 .c 的
+ * `runtimec_kvspace_access_ledger_record`）。
+ *
+ * `key_size == 0` 是**唯一**的空槽判据——不另设 `occupied` 位：两个字段描述
+ * 同一件事就是两份真相，而它们一旦不同步，症状是「槽里有地址却查不到」。
+ */
 typedef struct runtimec_kvspace_resolved_address {
     uint64_t address;
     uint64_t observed_size;
-    char key[1024];
+    uint64_t key_hash; /* 命中判据的一半；另一半是 key 逐字节比 */
+    uint16_t key_size;
+    char key[RUNTIMEC_KVSPACE_KEY_CAPACITY];
 } runtimec_kvspace_resolved_address_t;
 
 typedef struct runtimec_kvspace_access {
@@ -88,8 +106,8 @@ typedef struct runtimec_kvspace_access {
     uint64_t instance_identifier;
     /* 以下为实现内部状态：解析过的地址与当前 generation。调用方不得读写。 */
     struct runtimec_kvspace_resolved_address *resolved_addresses;
-    size_t resolved_address_count;
-    size_t resolved_address_capacity;
+    size_t resolved_address_count;    /* 已占用槽数 */
+    size_t resolved_address_capacity; /* 槽数（2 的幂） */
     uint64_t generation;
     bool generation_started;
 } runtimec_kvspace_access_t;

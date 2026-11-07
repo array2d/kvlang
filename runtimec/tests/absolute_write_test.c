@@ -139,7 +139,7 @@ static void test_write_existing_key_succeeds(const char *layout_path,
     layout_error[0] = '\0';
     const char *source =
         "rwfunc main() -> () {\n"
-        "    x = 41\n"
+        "    x:int64 = 41\n"
         "    x + 1 -> /abs_write_result\n"
         "}\n";
     EXPECT(layout_code(source, data_source_name, entry,
@@ -464,13 +464,13 @@ int main(int argument_count, char **arguments) {
     test_read_missing_key_fails_at_execution(
         arguments[1], arguments[2],
         "rwfunc main() -> () {\n"
-        "    /abs_never_written -> x\n"
+        "    x:int64 = /abs_never_written\n"
         "}\n",
         "never-written");
     test_read_missing_key_fails_at_execution(
         arguments[1], arguments[2],
         "rwfunc main() -> () {\n"
-        "    /abs_read_before_write -> x\n"
+        "    x:int64 = /abs_read_before_write\n"
         "    7 -> /abs_read_before_write\n"
         "}\n",
         "read-before-write");

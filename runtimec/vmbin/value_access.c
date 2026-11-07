@@ -9,9 +9,11 @@
  *       的事，vmbin 不做，也不回退成按 key 写。
  */
 
+#include "contract/langtype.h"
 #include "value_access.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "binrwir/frame_bindings.h"
@@ -75,6 +77,109 @@ static runtimec_status_t vmbin_value_access_locate_member(
             VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
             "member key cannot be built");
     }
+    /*
+     * ── base 的值本身是路径时，成员键沿该路径展开 ──────────────────────
+     *
+     * spec `15-成员访问.kv`：「base 必须是容器……或**路径串**」。这一条在实现里
+     * 很长一段时间是**空条款**——没有任何代码
+     * 读过「base 的值」当路径用。
+     *
+     * 触发它的第一个真实形态是 structref 引用值：`*cur -> _5` 之后 `_5` 的 body
+     * 就写着目标容器的 key（`/vthread/1/[1]/n1`），而 `_5·val` 若按 `_5` 这个
+     * **符号名**拼键，就是 `/vthread/1/[2.7]/_5·val` —— 那个 key 从来不存在，
+     * 链表/树这类「解引用存进局部再迭代」的写法整类失败。
+     *
+     * **代价**：这里比原来多一次 `kvspaceGet`（先取 base 的值、再解析成员）。
+     * 借用视图，不分配：读回的是存储内指针，不是拷贝。
+     *
+     * 判据两条同时成立才沿路径走，缺一不猜：
+     *   1. base 的**声明类型**是 structref 或路径串（`*T` 指针不在内——它的 body
+     *      也是 key，但语义是「跟一跳」，混用会让指针拷贝被当成别名）；
+     *   2. base 的**值 body 以 `/` 开头**（真的是一条绝对路径）。
+     */
+    {
+        /*
+         * **判据是「base 的值是不是一条绝对路径」，不是「base 的类型是什么」。**
+         *
+         * 先试过按类型判（`vmbin_value_access_langtype` 查 base 的声明类型），
+         * 实测走不通：`argument` 是 `_5·val` 这个**成员**符号，它的类型是成员值
+         * （`int64`）；而按名字查 base（`_5`）还需要一条「按名字找符号下标」的
+         * 接口——符号池只有「按下标取值」，没有反向索引。
+         *
+         * 值的形态本身就是充分证据：**绝对路径文本以 `/` 开头**，而 `int64`、
+         * `bool`、数组 body 都不可能以 `/` 开头（标量的首字节是数值，数组是元素
+         * 编码）。所以这里读一次 base 的 body、看首字节，比补一条反查接口更短，
+         * 且判据更贴近事实。
+         *
+         * **代价**：比原来多一次 `kvspaceGet`（先取 base 的值、再解析成员）。
+         * 借用视图，不分配——读回的是存储内指针，不是拷贝。
+         *
+         * 长度上限 512 是 key 缓冲的容量；真正的合法性由随后那次 key 解析把关。
+         */
+        runtimec_string_view_t base_name = runtimec_string_view_make(
+            member_name.data, member_name.size);
+        vmbin_value_location_t base_value;
+        const char *separator = NULL;
+        (void)base_value;
+
+        for (size_t offset = 0U; offset + 2U <= member_name.size; ++offset) {
+            if ((uint8_t)member_name.data[offset] == 0xC2U &&
+                (uint8_t)member_name.data[offset + 1U] == 0xB7U) {
+                separator = member_name.data + offset;
+                break;
+            }
+        }
+        if (separator != NULL) {
+            base_name = runtimec_string_view_make(
+                member_name.data, (size_t)(separator - member_name.data));
+        }
+        /*
+         * **base 的值要按 base 自己的 key 去读**，不能复用 `argument`：
+         * `argument` 指向成员符号（`_5·val`），对它能定位到的是成员、不是 base。
+         * 这里先拼出 `<帧根>/<base 名>`，解析它的 XValue，再读 body——就是
+         * 「多一次 kvspaceGet」那一笔。
+         */
+        if (separator != NULL) {
+            char base_key[512];
+            const int written = snprintf(
+                base_key, sizeof(base_key), "%.*s/%.*s",
+                (int)frame->frame_path.size, frame->frame_path.data,
+                (int)base_name.size, base_name.data);
+
+            if (written > 0 && (size_t)written < sizeof(base_key)) {
+                runtimec_xvalue_address_t base_address =
+                    RUNTIMEC_XVALUE_ADDRESS_NONE;
+                uint64_t base_generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
+
+                if (runtimec_kvspace_access_resolve_frame_xvalue_address(
+                        frame->kvspace_access, &frame->snapshot,
+                        runtimec_key_view_from_c_string(base_key),
+                        &base_address, &base_generation, NULL) ==
+                        RUNTIMEC_STATUS_SUCCESS &&
+                    base_address != RUNTIMEC_XVALUE_ADDRESS_NONE) {
+                    const runtimec_value_body_address_t base_body =
+                        runtimec_xvalue_body_address(base_address);
+                    const size_t base_size =
+                        (size_t)runtimec_value_body_length(base_body);
+
+                    if (base_body != RUNTIMEC_VALUE_BODY_ADDRESS_NONE &&
+                        base_size != 0U &&
+                        ((const uint8_t *)(uintptr_t)base_body)[0] == '/' &&
+                        base_size + member_name.size + 1U <= sizeof(key_text)) {
+                        const size_t tail_size =
+                            member_name.size -
+                            (size_t)(separator - member_name.data);
+
+                        memcpy(key_text, (const void *)(uintptr_t)base_body,
+                               base_size);
+                        memcpy(key_text + base_size, separator, tail_size);
+                        key_text[base_size + tail_size] = '\0';
+                    }
+                }
+            }
+        }
+        (void)base_value;
+    }
     status = runtimec_kvspace_access_resolve_frame_xvalue_address(
         frame->kvspace_access, &frame->snapshot,
         runtimec_key_view_from_c_string(key_text), &xvalue_address,
@@ -118,6 +223,73 @@ static runtimec_status_t vmbin_value_access_locate_member(
 
 
 /* 前向声明：解引用要先借用「不带 dereference 的同一参数」的普通解析。 */
+/*
+ * `is_none` 的**唯一判据**。三态：任一事实未知 ⇒ UNKNOWN。
+ *
+ * 与编码期 `binrwir_literal_is_none_value` 用同一组 wire 事实
+ * （`bodylen == 0` 且 `attrslen == 0`），不各写一套边界。
+ */
+vmbin_value_fact_t vmbin_value_location_is_none(
+    const vmbin_value_location_t *location) {
+    if (location == NULL || location->body_is_empty == VMBIN_VALUE_FACT_UNKNOWN ||
+        location->has_langtype_record == VMBIN_VALUE_FACT_UNKNOWN ||
+        location->is_directory_key == VMBIN_VALUE_FACT_UNKNOWN) {
+        return VMBIN_VALUE_FACT_UNKNOWN;
+    }
+    if (location->is_directory_key == VMBIN_VALUE_FACT_YES) {
+        return VMBIN_VALUE_FACT_NO;
+    }
+    return (location->body_is_empty == VMBIN_VALUE_FACT_YES &&
+            location->has_langtype_record == VMBIN_VALUE_FACT_NO)
+               ? VMBIN_VALUE_FACT_YES
+               : VMBIN_VALUE_FACT_NO;
+}
+
+/*
+ * 从已定位的位置填 `is_none` 的三个事实。
+ *
+ * 拿得到 wire 头就填真值；拿不到（派生路径上只有 body 视图且反推不出基址）
+ * 就留 `UNKNOWN`——**不许默认成「不是 None」**（架构师裁决：拿不到事实时
+ * 调用点必须具名失败，默认 false 正是 `0x4406` 通用消息压过具名诊断的来源）。
+ */
+static void vmbin_value_access_fill_none_facts(
+    vmbin_value_location_t *location) {
+    const void *wire = NULL;
+
+    if (location == NULL) {
+        return;
+    }
+    if (location->is_whole_wire) {
+        wire = location->read_bytes;
+    } else if (location->read_bytes != NULL) {
+        const runtimec_xvalue_address_t base =
+            runtimec_value_body_xvalue_address(
+                (runtimec_value_body_address_t)(uintptr_t)location->read_bytes);
+        if (base != RUNTIMEC_XVALUE_ADDRESS_NONE) {
+            wire = (const void *)(uintptr_t)base;
+        }
+    }
+    if (wire == NULL) {
+        return; /* 三个字段保持 UNKNOWN */
+    }
+    {
+        const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)wire;
+        const uint64_t total = kvspaceXvalueHeadTotalLen(head);
+
+        if (total == 0U) {
+            return; /* head 不自洽：事实未知，不猜 */
+        }
+        location->body_is_empty = kvspaceXvalueHeadLen(head) == 0U
+                                      ? VMBIN_VALUE_FACT_YES
+                                      : VMBIN_VALUE_FACT_NO;
+        location->has_langtype_record =
+            kvspaceXvalueHeadAttrsLen(head) == 0U ? VMBIN_VALUE_FACT_NO
+                                                  : VMBIN_VALUE_FACT_YES;
+    }
+    /* 目录键：位置本身是 index（body 为空且 key 以 `/` 结尾）——本层拿不到
+     * key 文本，保持调用点传入的既有值（默认 NO）。 */
+}
+
 static runtimec_status_t vmbin_value_access_locate_plain(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument,
@@ -134,10 +306,10 @@ static runtimec_status_t vmbin_value_access_locate_plain(
  *   4. 只返回目标位置：绑定表仍记参数项那个槽，**不把 target 写进绑定表**
  *      （绑定表是「槽 → 值」的一次性事实，每跳都写就把表变成了缓存）。
  */
-static runtimec_status_t vmbin_value_access_dereference(
+static runtimec_status_t vmbin_value_access_dereference_ex(
     const binrwir_execution_frame_t *frame,
-    const binrwir_argument_t *argument, vmbin_value_location_t *output_location,
-    runtimec_error_t *error) {
+    const binrwir_argument_t *argument, bool missing_target_is_none,
+    vmbin_value_location_t *output_location, runtimec_error_t *error) {
     binrwir_argument_t plain = *argument;
     vmbin_value_location_t pointer_location;
     runtimec_xvalue_address_t target_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
@@ -198,17 +370,48 @@ static runtimec_status_t vmbin_value_access_dereference(
                 error);
         }
     }
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return status;
+    /*
+     * ── 解引用**读**到不存在的目标 ⇒ `None` ──────────────────────────────
+     *
+     * spec `05-runtime语义/12-动态键.kv` §四：「`resolveptr` 定位到的目标不存在时，
+     * **读得 `None`**（成员访问语义）；普通绝对 key 的读仍失败封闭。」
+     *
+     * 这是「解引用**写**创建目标」的读侧对偶，两条走不同入口：
+     *   - 写（`write_body`）拿到的仍是失败，随后去创建；
+     *   - 读（本支，`missing_target_is_none`）交出一条**空 body、无 langtype**
+     *     的 None 位置，让 `cur == None` 成立。
+     *
+     * **只有解引用这一层给 None**：普通绝对 key 的读不经这里，仍具名失败。
+     * 这正是规范那句「两者走不同路径，不冲突」的落地。
+     */
+    if (status != RUNTIMEC_STATUS_SUCCESS ||
+        target_address == RUNTIMEC_XVALUE_ADDRESS_NONE ||
+        runtimec_xvalue_body_address(target_address) ==
+            RUNTIMEC_VALUE_BODY_ADDRESS_NONE) {
+        if (missing_target_is_none) {
+            output_location->read_bytes = NULL;
+            output_location->write_bytes = NULL;
+            output_location->size = 0U;
+            output_location->is_whole_wire = false;
+            /*
+             * 解引用到的目标**不存在** ⇒ 按 spec `12-动态键` §四 它就是 `None`，
+             * 而这正是 `is_none` 三条全部成立的情形（没有 wire，也就没有 body、
+             * 没有 langtype 记录）。**这不是「拿不到事实」，是事实本身**——
+             * 三者标 YES/NO/NO，让谓词直接答 YES，不要在调用点重判一次。
+             */
+            output_location->body_is_empty = VMBIN_VALUE_FACT_YES;
+            output_location->has_langtype_record = VMBIN_VALUE_FACT_NO;
+            output_location->is_directory_key = VMBIN_VALUE_FACT_NO;
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+        return status != RUNTIMEC_STATUS_SUCCESS
+                   ? status
+                   : vmbin_value_access_fail(
+                         error, RUNTIMEC_STATUS_INVALID,
+                         VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
+                         "dereference target has no derivable body");
     }
     target_body = runtimec_xvalue_body_address(target_address);
-    if (target_address == RUNTIMEC_XVALUE_ADDRESS_NONE ||
-        target_body == RUNTIMEC_VALUE_BODY_ADDRESS_NONE) {
-        return vmbin_value_access_fail(
-            error, RUNTIMEC_STATUS_INVALID,
-            VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
-            "dereference target has no derivable body");
-    }
     output_location->read_bytes = (const uint8_t *)(uintptr_t)target_body;
     output_location->write_bytes = (uint8_t *)(uintptr_t)target_body;
     output_location->size = runtimec_value_body_length(target_body);
@@ -221,19 +424,32 @@ runtimec_status_t vmbin_value_access_locate(
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error) {
     if (output_location != NULL) {
-        *output_location = (vmbin_value_location_t){NULL, NULL, 0U, false};
+        *output_location = (vmbin_value_location_t){
+            .read_bytes = NULL,
+            .write_bytes = NULL,
+            .size = 0U,
+            .is_whole_wire = false,
+            .body_is_empty = VMBIN_VALUE_FACT_UNKNOWN,
+            .has_langtype_record = VMBIN_VALUE_FACT_UNKNOWN,
+            .is_directory_key = VMBIN_VALUE_FACT_NO};
     }
     if (frame == NULL || argument == NULL || output_location == NULL) {
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_INVALID,
             VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST, "invalid locate request");
     }
+    runtimec_status_t status;
     if (argument->dereference != 0U) {
-        return vmbin_value_access_dereference(frame, argument, output_location,
-                                              error);
+        status = vmbin_value_access_dereference_ex(frame, argument, false,
+                                                   output_location, error);
+    } else {
+        status = vmbin_value_access_locate_plain(frame, argument,
+                                                 output_location, error);
     }
-    return vmbin_value_access_locate_plain(frame, argument, output_location,
-                                           error);
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        vmbin_value_access_fill_none_facts(output_location);
+    }
+    return status;
 }
 
 static runtimec_status_t vmbin_value_access_locate_plain(
@@ -247,7 +463,14 @@ static runtimec_status_t vmbin_value_access_locate_plain(
     runtimec_status_t status;
 
     if (output_location != NULL) {
-        *output_location = (vmbin_value_location_t){NULL, NULL, 0U, false};
+        *output_location = (vmbin_value_location_t){
+            .read_bytes = NULL,
+            .write_bytes = NULL,
+            .size = 0U,
+            .is_whole_wire = false,
+            .body_is_empty = VMBIN_VALUE_FACT_UNKNOWN,
+            .has_langtype_record = VMBIN_VALUE_FACT_UNKNOWN,
+            .is_directory_key = VMBIN_VALUE_FACT_NO};
     }
     if (frame == NULL || frame->program == NULL || argument == NULL ||
         output_location == NULL) {
@@ -457,6 +680,75 @@ runtimec_status_t vmbin_value_access_read(
  * 引用 `locate` 给的已经是 body，原样返回——再加一次剥离就会把 body 当 wire
  * 解，读出一个不存在的位置。
  */
+/*
+ * **读语义**的定位：解引用到不存在的目标时给 None（空 body），不是失败。
+ *
+ * 与 `locate_body` 的唯一差别就在解引用那一支；其余引用种类完全共用。
+ * 调用方**只该是读路径**（`read_body`、打印、比较等）：写路径走 `locate_body`，
+ * 那里缺失仍失败、随后由 `write_body` 创建（#632 的写侧）。
+ */
+runtimec_status_t vmbin_value_access_locate_body_read(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument,
+    vmbin_value_location_t *output_location, runtimec_error_t *error) {
+    vmbin_value_location_t location;
+    runtimec_status_t status;
+
+    if (output_location != NULL) {
+        *output_location = (vmbin_value_location_t){
+            .read_bytes = NULL,
+            .write_bytes = NULL,
+            .size = 0U,
+            .is_whole_wire = false,
+            .body_is_empty = VMBIN_VALUE_FACT_UNKNOWN,
+            .has_langtype_record = VMBIN_VALUE_FACT_UNKNOWN,
+            .is_directory_key = VMBIN_VALUE_FACT_NO};
+    }
+    if (frame == NULL || argument == NULL || output_location == NULL) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST, "invalid locate request");
+    }
+    if (argument->dereference != 0U) {
+        status = vmbin_value_access_dereference_ex(frame, argument, true,
+                                                   output_location, error);
+        if (status == RUNTIMEC_STATUS_SUCCESS) {
+            vmbin_value_access_fill_none_facts(output_location);
+        }
+        return status;
+    }
+    status = vmbin_value_access_locate_plain(frame, argument, &location, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    /* 事实要在**剥成 body 之前**取：剥完就没有 wire 头可读了。 */
+    vmbin_value_access_fill_none_facts(&location);
+    if (!location.is_whole_wire) {
+        *output_location = location;
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    {
+        const runtimec_value_body_address_t body_address =
+            runtimec_xvalue_body_address(
+                (runtimec_xvalue_address_t)(uintptr_t)location.read_bytes);
+
+        if (body_address == RUNTIMEC_VALUE_BODY_ADDRESS_NONE) {
+            return vmbin_value_access_fail(
+                error, RUNTIMEC_STATUS_INVALID,
+                VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
+                "wire has no derivable value body");
+        }
+        *output_location = location;
+        output_location->read_bytes =
+            (const uint8_t *)(uintptr_t)body_address;
+        output_location->write_bytes = NULL;
+        output_location->size =
+            (size_t)runtimec_value_body_length(body_address);
+        output_location->is_whole_wire = false;
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 runtimec_status_t vmbin_value_access_locate_body(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument,
@@ -511,7 +803,9 @@ runtimec_status_t vmbin_value_access_read_body(
             error, RUNTIMEC_STATUS_INVALID,
             VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST, "invalid read buffer");
     }
-    status = vmbin_value_access_locate_body(frame, argument, &location, error);
+    /* 读路径：解引用到缺失目标给 None（空 body），不是失败。 */
+    status = vmbin_value_access_locate_body_read(frame, argument, &location,
+                                                 error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -1065,6 +1359,93 @@ runtimec_status_t vmbin_value_access_locate_write(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+/*
+ * 解引用写目标的**创建**：目标 key 由指针值给出，类型由写槽声明给出。
+ *
+ * 只被 `write_body` 在「`dereference` 且定位失败」时调用——**读路径永不创建**。
+ */
+static runtimec_status_t vmbin_value_access_create_dereference_target(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, runtimec_bytes_view_t value,
+    runtimec_error_t *error) {
+    binrwir_argument_t plain = *argument;
+    vmbin_value_location_t pointer_value;
+    runtimec_string_view_t declared = runtimec_string_view_make(NULL, 0U);
+    char langtype_text[256];
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    char message[256];
+    runtimec_status_t status;
+
+    if (frame->kvspace_access == NULL) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+            "frame carries no kvspace access to create a dereference target");
+    }
+    /* 指针值 = 目标 key。用不带 dereference 的同一参数取它。 */
+    plain.dereference = 0U;
+    status = vmbin_value_access_locate_body(frame, &plain, &pointer_value,
+                                            error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    if (pointer_value.read_bytes == NULL || pointer_value.size == 0U ||
+        pointer_value.read_bytes[0] != '/') {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
+            "dereference target key is not an absolute key");
+    }
+    /* 类型取**写槽声明**：`*T` 的 `*` 是传递方式，剥一层才是值类型。 */
+    status = vmbin_value_access_langtype(frame, argument, &declared, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    if (declared.size != 0U && declared.data[0] == '*') {
+        declared = runtimec_string_view_make(declared.data + 1U,
+                                             declared.size - 1U);
+    }
+    if (declared.size == 0U || declared.size + 1U > sizeof(langtype_text)) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE,
+            "dereference write target has no usable declared langtype");
+    }
+    memcpy(langtype_text, declared.data, declared.size);
+    langtype_text[declared.size] = '\0';
+    if (kvspaceXvalueHeadNewSlack(value.data, (uint64_t)value.size,
+                                  (uint64_t)value.size, langtype_text, &wire,
+                                  &wire_size) != 0 ||
+        wire == NULL || wire_size > UINT32_MAX) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_ERROR,
+            VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
+            "dereference write target cannot be encoded as an XValue");
+    }
+    message[0] = '\0';
+    {
+        char key_text[512];
+        const size_t key_size = pointer_value.size < sizeof(key_text) - 1U
+                                    ? pointer_value.size
+                                    : sizeof(key_text) - 1U;
+
+        memcpy(key_text, pointer_value.read_bytes, key_size);
+        key_text[key_size] = '\0';
+        if (kvspaceSetValue(frame->kvspace_handle, key_text, wire,
+                            (uint32_t)wire_size, message,
+                            sizeof(message)) != 0) {
+            free(wire);
+            return vmbin_value_access_fail(
+                error, RUNTIMEC_STATUS_ERROR,
+                VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
+                "dereference write target could not be created in storage");
+        }
+    }
+    free(wire);
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 runtimec_status_t vmbin_value_access_write_body(
     const binrwir_execution_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
@@ -1108,6 +1489,39 @@ runtimec_status_t vmbin_value_access_write_body(
     }
     status = vmbin_value_access_locate_body(frame, argument, &location, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
+        /*
+         * 先确认**目标真的不存在**：定位失败也可能来自「key 在、但不是值」之类
+         * 的其它原因。只有「解引用后的目标 key 解析不出 XValue」才创建；
+         * 别的失败原样上报——把失败一律转成创建会掩盖真实错误。
+         *
+         * ── 解引用写目标尚不存在 ⇒ **创建**（`05-runtime语义/12-动态键.kv` §一）──
+         *
+         * 规范写明「`resolveptr` 不判目标是否存在……若提前判存在，`v -> base·*k`
+         * 的首次写永远不成立」。所以「写到不存在的目标」不是错误，是**写即创建**
+         * （#632）在解引用形态上的落地：`h·*k` 里的 `k` 运行期才定，目标的 key
+         * 只有指针值自己知道。
+         *
+         * 三条边界，一条都不许放宽：
+         *   1. **只对写参带 `dereference` 时**生效；读路径仍失败（读不存在的目标
+         *      是真实错误）；
+         *   2. key 取自**指针值本身**（它的 body 就是目标 key，与 `dereference`
+         *      跟跳用的是同一份字节）；
+         *   3. 类型取**写槽的声明类型**（`*T` 剥一层），不是写入值的头——写新值
+         *      以写入方携带的类型为准是 #632 的另一半。
+         *
+         * 创建之后**重新定位**再走下面的定宽路径：宽度检查仍在，只是这次目标存在。
+         */
+        if (argument->dereference != 0U) {
+            status = vmbin_value_access_create_dereference_target(
+                frame, argument, value, error);
+            if (status != RUNTIMEC_STATUS_SUCCESS) {
+                return status;
+            }
+            status = vmbin_value_access_locate_body(frame, argument, &location,
+                                                    error);
+        }
+    }
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
     if (location.write_bytes == NULL) {
@@ -1117,7 +1531,29 @@ runtimec_status_t vmbin_value_access_write_body(
             "a literal is not a writable location");
     }
     /* **定宽路径一字不动**：size 比对与 memcpy 都保留——它是快路径，也是
-     * 「写入宽度必须与声明一致」这道检查的唯一所在。 */
+     * 「写入宽度必须与声明一致」这道检查的唯一所在。
+     *
+     * ── 但消息要分得清是哪一种「宽度不符」────────────────────────────────
+     *
+     * 判据是**「写进来的这条值是不是 `None`」**（空 body），不是「读参带不带
+     * dereference 位」：`h·*c -> cur` 的 copy 在编码期已经把解引用读成了一条
+     * **普通 0 字节值**，到这一层 `dereference` 早已是 0。按位判会让这条消息
+     * 永远不出现，退回到那句「宽度不符」——实测就是这样，改了判据却一条都没
+     * 命中。
+     *
+     * 而目标槽是**已声明的标量**（`cur:int64` / `ex:bool`）——严格类型语言里
+     * 它不存在「无值」这种状态，所以这是类型错误，不是「凑巧宽度不等」。
+     *
+     * 两种成因给同一条 `0x4406`，但**消息必须指出路**：只说「宽度不符」，看日志的
+     * 人要去猜「我写错了宽度」还是「这个位置本来就没有值」。k_nucleotide 在这条
+     * 消息上绕了三轮，前两轮都归错因（先怀疑缺 deref 位，再怀疑推断变量）。
+     */
+    /*
+     * `None` 落进有值的位置：由**调用方**判（那里拿得到源操作数的 langtype）。
+     * 本函数只有 body 视图，判不出 `is_none` 的第二条（无 langtype 记录）——
+     * 拿目标槽宽度倒推是代理指标，会漏掉「None 写进变长声明槽」那一格。
+     */
+
     if (value.size != location.size) {
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_ERROR,
@@ -1163,6 +1599,84 @@ runtimec_status_t vmbin_value_access_write(
         memcpy(location.write_bytes, value.data, value.size);
     }
     return RUNTIMEC_STATUS_SUCCESS;
+}
+
+runtimec_status_t vmbin_value_access_write_whole_value(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, runtimec_bytes_view_t body,
+    runtimec_error_t *error) {
+    if (!runtimec_bytes_view_is_valid(body)) {
+        return vmbin_value_access_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST, "invalid write body");
+    }
+    /*
+     * 复用既有创建入口，不新造第三条写路径：它按**写槽声明类型**建 wire、
+     * `kvspaceSetValue` 覆盖、再把 LOCAL 槽重新绑到新地址。这三件事正是
+     * 「换整个值」需要的全部。
+     *
+     * STATIC 写目标同样走这里：`create_static_target` 与它做的是同一件事
+     * （按声明类型整值写），只是 key 的派生不同——`create_unbound_local` 里
+     * 对非 LOCAL 的引用种类会具名失败，所以 STATIC 先分派过去。
+     */
+    if (argument->reference_kind == BINRWIR_REFERENCE_STATIC) {
+        return vmbin_value_access_create_static_target(frame, argument, body,
+                                                       error);
+    }
+    return vmbin_value_access_create_unbound_local(frame, argument, body, error);
+}
+
+bool vmbin_value_access_langtype_is_structref(runtimec_string_view_t langtype) {
+    if (!runtimec_string_view_is_valid(langtype) || langtype.size == 0U) {
+        return false;
+    }
+    /* 串首 `*` 是指针（值是 key，跟一跳才是容器），不是引用值。 */
+    if (langtype.data[0] == '*') {
+        return false;
+    }
+    if (langtype.size >= 10U &&
+        memcmp(langtype.data, "def struct", 10U) == 0) {
+        return true;
+    }
+    return langtype.size > sizeof("/lib/") - 1U &&
+           memcmp(langtype.data, "/lib/", sizeof("/lib/") - 1U) == 0;
+}
+
+bool vmbin_value_access_langtype_is_container(runtimec_string_view_t langtype) {
+    runtimec_langtype_t parsed;
+
+    if (vmbin_value_access_langtype_is_structref(langtype)) {
+        return true;
+    }
+    if (!runtimec_string_view_is_valid(langtype) || langtype.size == 0U) {
+        return false;
+    }
+    if (runtimec_langtype_parse(langtype, &parsed) != RUNTIMEC_STATUS_SUCCESS) {
+        return false;
+    }
+    return parsed.form == RUNTIMEC_LANGTYPE_FORM_MAPPING;
+}
+
+bool vmbin_value_access_langtype_is_path_string(runtimec_string_view_t langtype) {
+    runtimec_string_view_t rest = langtype;
+
+    if (!runtimec_string_view_is_valid(langtype) || langtype.size == 0U) {
+        return false;
+    }
+    if (langtype.data[0] == '*') {
+        return false;
+    }
+    /* `[]char/utf8` / `[]char/utf32` / `[N]char/<enc>`：剥维度前缀再看基类型。 */
+    while (rest.size != 0U && rest.data[0] == '[') {
+        const char *closing = memchr(rest.data, ']', rest.size);
+
+        if (closing == NULL) {
+            return false;
+        }
+        rest = runtimec_string_view_make(closing + 1,
+                                         rest.size - (size_t)(closing - rest.data) - 1U);
+    }
+    return rest.size >= 5U && memcmp(rest.data, "char/", 5U) == 0;
 }
 
 runtimec_status_t vmbin_value_access_langtype(
@@ -1268,6 +1782,26 @@ runtimec_status_t vmbin_value_access_langtype(
      * **声明的类型**（含 `*`），不猜调用方想问哪一个。
      */
     return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * **取形态但不跟 dereference**：`ptreq` 这类「比较指针值本身」的算子要的是
+ * 指针/None/标量三态，**不是指针指向的那个值**。
+ *
+ * 跟跳会：① 跳到不存在的目标就失败（`h·*k != None` 判存在时的常见情形）；
+ * ② 即使跳成功，拿到的也是目标的形态而非指针的形态——两件事。
+ *
+ * 与 `vmbin_value_access_form` 的唯一差别是这一步：其余（wire 定位、
+ * langtype 首字符定形态）完全共用，不复制实现。
+ */
+runtimec_status_t vmbin_value_access_form_unfollowed(
+    const binrwir_execution_frame_t *frame,
+    const binrwir_argument_t *argument, uint8_t *output_form,
+    runtimec_error_t *error) {
+    binrwir_argument_t plain = *argument;
+
+    plain.dereference = 0U;
+    return vmbin_value_access_form(frame, &plain, output_form, error);
 }
 
 runtimec_status_t vmbin_value_access_form(

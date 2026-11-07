@@ -9,6 +9,6 @@ rwfunc divmod(*int64 $n, *int64 $d) -> (*int64 $q, *int64 $r) {
 }
 
 rwfunc test() -> () {
-	divmod(17, 5) -> q, r
+	divmod(17, 5) -> q:int64, r:int64
 	println(q, r)
 }

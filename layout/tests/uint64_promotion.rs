@@ -56,14 +56,14 @@ fn temp_dir(tag: &str) -> TempDir {
 
 fn slot_text(kv: &mut Kv, key: &str) -> String {
     let v = kv.get_one(key);
-    let b = kvkind::body(&v, &kvkind::head(&v));
+    let b = kvkind::body(&v);
     String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 
 /// 读参槽 kind + body 的前 8 字节小端值（内联整数标量）。
 fn integer_slot(kv: &mut Kv, key: &str) -> (String, u64) {
     let v = kv.get_one(key);
-    let b = kvkind::body(&v, &kvkind::head(&v)).to_vec();
+    let b = kvkind::body(&v).to_vec();
     let mut raw = [0u8; 8];
     let n = b.len().min(8);
     raw[..n].copy_from_slice(&b[..n]);

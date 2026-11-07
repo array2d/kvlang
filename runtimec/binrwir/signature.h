@@ -10,6 +10,7 @@
  *       每个参数恰好一个具体 langtype，union 与空类型都不属于签名。
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -67,6 +68,20 @@ typedef struct binrwir_signature_view {
 
 runtimec_status_t
 binrwir_signature_validate(const binrwir_signature_view_t *signature);
+
+/*
+ * 同上，但**放宽空参数类型**：某个参数类型为空时，只要调用方的
+ * `empty_type_is_legal(context, is_write, ordinal)` 返回真就放行。
+ *
+ * 为什么用回调而不是在本层判 None：None 的判据要「参数项 → 引用种类 → 字面量」
+ * 三段交叉，本层只有类型串数组。判据本体在调用方且**只有一份**，本层只复用
+ * 自己的形状与 alias 规则校验。
+ *
+ * `rwfunc` 形参签名走的是不带回调的那条，因此不会被放宽。
+ */
+runtimec_status_t binrwir_signature_validate_permitting_empty_types(
+    const binrwir_signature_view_t *signature, void *context,
+    bool (*empty_type_is_legal)(void *context, int is_write, size_t ordinal));
 runtimec_status_t binrwir_signature_get_alias_policy(
     const binrwir_signature_view_t *signature, uint32_t read_parameter_index,
     uint32_t write_parameter_index, binrwir_alias_policy_t *output_policy);

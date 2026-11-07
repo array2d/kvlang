@@ -7,8 +7,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "binrwir/operation_identifiers.h"
 #include "binrwir/program.h"
 #include "contract/view.h"
+#include <kvspace/xvalue_head.h>
 
 static int failures;
 
@@ -1373,6 +1375,124 @@ static void test_program_query_failure_shape(void) {
     RUNTIMEC_EXPECT(binrwir_program_destroy(NULL) == RUNTIMEC_STATUS_INVALID);
 }
 
+/*
+ * `add_literal` 对**空 langtype** 的判据：只容 None 值，不容「忘记给类型」。
+ *
+ * 两条必须成对：只测第一组（None 登记成功）等于把检查删了——一个「无条件放行」
+ * 的实现也能让第一组绿；第二组才证明谓词是窄的。
+ */
+static void test_literal_empty_langtype_only_for_none(void) {
+    test_allocator_context_t counters = {0U, false, 0U};
+    runtimec_allocator_t allocator = test_allocator(&counters);
+    binrwir_program_identity_t identity = fixture_identity();
+    binrwir_program_builder_t *builder = NULL;
+    uint32_t literal_index = 0U;
+    /* None 值：16 字节 head、bodylen 0、attrslen 0。 */
+    uint8_t none_wire[KVSPACE_XVALUE_HEAD_LEN] = {0};
+    /* 非 None：bodylen 8（前 8 字节小端 8），attrslen 0，其余 0。 */
+    uint8_t typed_body_wire[KVSPACE_XVALUE_HEAD_LEN + 8U] = {0};
+
+    typed_body_wire[0] = 8U;
+    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+                                                   &builder) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    /* ① None 值 + 空 langtype ⇒ 必须成功。 */
+    literal_index = BINRWIR_LITERAL_INDEX_NONE;
+    RUNTIMEC_EXPECT(binrwir_program_builder_add_literal(
+                        builder,
+                        runtimec_bytes_view_make(none_wire, sizeof(none_wire)),
+                        runtimec_string_view_make(NULL, 0U),
+                        &literal_index) == RUNTIMEC_STATUS_SUCCESS);
+    /* ② 非 None（bodylen 8）+ 空 langtype ⇒ 必须失败。 */
+    RUNTIMEC_EXPECT(binrwir_program_builder_add_literal(
+                        builder,
+                        runtimec_bytes_view_make(typed_body_wire,
+                                                 sizeof(typed_body_wire)),
+                        runtimec_string_view_make(NULL, 0U),
+                        &literal_index) == RUNTIMEC_STATUS_INVALID);
+    /* ③ 同一 wire 给了类型 ⇒ 成功（证明 ② 拒的是「缺类型」，不是「wire 形状」）。 */
+    RUNTIMEC_EXPECT(binrwir_program_builder_add_literal(
+                        builder,
+                        runtimec_bytes_view_make(typed_body_wire,
+                                                 sizeof(typed_body_wire)),
+                        runtimec_string_view_from_c_string("int64"),
+                        &literal_index) == RUNTIMEC_STATUS_SUCCESS);
+    (void)binrwir_program_builder_destroy(builder);
+}
+
+/*
+ * 第 4 向（甲方案的关键边界）：**None 值 + 空 langtype，但该参数项不是 LITERAL
+ * 引用 ⇒ 必须失败**。放行的是「None 这个事实」，不是「空类型的形状」——一个
+ * 指向「空类型槽」的 LOCAL 参数不是 None，`nonnull` 对它没有意义。
+ *
+ * 这条钉在 Program 层：构造一个 LOCAL 引用、其符号 langtype 为空，参数类型也
+ * 空，看 `binrwir_program_validate` 是否拒。本用例只用构造器与 finalize，
+ * 不依赖 vmbin。
+ */
+static void test_empty_parameter_type_requires_none_literal(void) {
+    test_allocator_context_t counters = {0U, false, 0U};
+    runtimec_allocator_t allocator = test_allocator(&counters);
+    binrwir_program_identity_t identity = fixture_identity();
+    binrwir_program_builder_t *builder = NULL;
+    binrwir_program_t *program = NULL;
+    binrwir_argument_t read_argument;
+    binrwir_argument_t write_argument;
+    binrwir_instruction_build_request_t request;
+    uint16_t local_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+    uint16_t target_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+    uint32_t write_literal = 0U;
+    uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
+
+    RUNTIMEC_EXPECT(binrwir_program_builder_create(&allocator, &identity,
+                                                   &builder) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    /* 局部符号 **langtype 为空**（就是「空类型槽」）。 */
+    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(
+                        builder,
+                        runtimec_string_view_from_c_string("/t/empty"),
+                        runtimec_string_view_make(NULL, 0U),
+                        &local_symbol) == RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_program_builder_add_symbol(
+                        builder,
+                        runtimec_string_view_from_c_string("/t/result"),
+                        runtimec_string_view_from_c_string("bool"),
+                        &target_symbol) == RUNTIMEC_STATUS_SUCCESS);
+    /* 写参给一条正常 bool 字面量，避免写侧成为失败原因。 */
+    {
+        uint8_t bool_wire[KVSPACE_XVALUE_HEAD_LEN + 1U] = {0};
+
+        bool_wire[0] = 1U;
+        bool_wire[KVSPACE_XVALUE_HEAD_LEN] = 1U;
+        RUNTIMEC_EXPECT(binrwir_program_builder_add_literal(
+                            builder,
+                            runtimec_bytes_view_make(bool_wire,
+                                                     sizeof(bool_wire)),
+                            runtimec_string_view_from_c_string("bool"),
+                            &write_literal) == RUNTIMEC_STATUS_SUCCESS);
+    }
+    RUNTIMEC_EXPECT(binrwir_argument_create(1U, BINRWIR_REFERENCE_LOCAL,
+                                            local_symbol, 0U,
+                                            &read_argument) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    RUNTIMEC_EXPECT(binrwir_argument_create(2U, BINRWIR_REFERENCE_LITERAL, 0U,
+                                            write_literal, &write_argument) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    memset(&request, 0, sizeof(request));
+    request.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_NONNULL;
+    request.source_logical_program_counter = 1U;
+    request.read_arguments.data = &read_argument;
+    request.read_arguments.count = 1U;
+    request.write_arguments.data = &write_argument;
+    request.write_arguments.count = 1U;
+    RUNTIMEC_EXPECT(binrwir_program_builder_add_instruction(
+                        builder, &request, &instruction_identifier) ==
+                    RUNTIMEC_STATUS_SUCCESS);
+    /* 参数类型空 + LOCAL 引用 ⇒ finalize 必须拒（空类型只对 None 字面量放行）。 */
+    RUNTIMEC_EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+                    RUNTIMEC_STATUS_INVALID);
+    (void)binrwir_program_builder_destroy(builder);
+}
+
 int main(void) {
     test_builder_creation_shape();
     test_builder_rejects_invalid_parameter();
@@ -1388,6 +1508,8 @@ int main(void) {
     test_symbol_pool_rejects_invalid_content();
     test_literal_pool_round_trip();
     test_literal_pool_rejects_invalid_content();
+    test_literal_empty_langtype_only_for_none();
+    test_empty_parameter_type_requires_none_literal();
     test_function_reference_round_trip();
     test_symbol_type_conflict_is_rejected();
     test_local_symbol_requires_type();

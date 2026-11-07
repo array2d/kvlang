@@ -11,7 +11,6 @@
 #include "vmkv/rwir_manifest.h"
 
 #define VMKV_PARAMETER_TYPE_UNION_SEPARATOR '|'
-#define VMKV_PARAMETER_TYPE_MAP_SEPARATOR "·"
 
 typedef struct vmkv_parameter_kind_name {
     const char *text;
@@ -44,20 +43,6 @@ static bool vmkv_parameter_text_equals(runtimec_string_view_t text,
            (size == 0U || memcmp(text.data, value, size) == 0);
 }
 
-/* 子串查找：只依赖 C11，不引入 memmem。 */
-static bool vmkv_parameter_contains(runtimec_string_view_t text,
-                                    const char *needle) {
-    const size_t needle_size = strlen(needle);
-    if (needle_size == 0U || needle_size > text.size) {
-        return false;
-    }
-    for (size_t offset = 0U; offset + needle_size <= text.size; ++offset) {
-        if (memcmp(text.data + offset, needle, needle_size) == 0) {
-            return true;
-        }
-    }
-    return false;
-}
 
 /* 基种类 → 标量类别的位；未知返回 0。 */
 static uint32_t vmkv_parameter_scalar_type_set(runtimec_string_view_t base) {
@@ -96,10 +81,10 @@ static vmkv_parameter_type_result_t vmkv_parameter_classify_shape(
     }
     const runtimec_string_view_t base = runtimec_string_view_make(
         langtype.data + base_offset, langtype.size - base_offset);
-    if (base.data[0] == '[' || base.data[0] == '/' ||
+    /* map 形态（首字符 `'`）不是标量基种类：与 `[`/`/`/并集同列，返回 INVALID。 */
+    if (base.data[0] == '[' || base.data[0] == '/' || base.data[0] == '\'' ||
         memchr(base.data, VMKV_PARAMETER_TYPE_UNION_SEPARATOR, base.size) !=
-            NULL ||
-        vmkv_parameter_contains(base, VMKV_PARAMETER_TYPE_MAP_SEPARATOR)) {
+            NULL) {
         return VMKV_PARAMETER_TYPE_RESULT_INVALID;
     }
     const uint32_t base_type_set = vmkv_parameter_scalar_type_set(base);
@@ -148,7 +133,17 @@ vmkv_parameter_type_result_t vmkv_parameter_type_classify(
         *output_type_set = VMKV_RWIR_TYPE_SET_POINTER;
         return VMKV_PARAMETER_TYPE_RESULT_SINGLE;
     }
-    if (vmkv_parameter_contains(langtype, VMKV_PARAMETER_TYPE_MAP_SEPARATOR)) {
+    /*
+     * **map 类型：首字符是单引号**（issue #631 文法 `'<formatter>'<value>`）。
+     *
+     * 旧判据是「整串含 `·`」（`K·V`），改名后类型串里的 `·` 已彻底消除，
+     * 那个判据恒假 ⇒ map 落不进 `map·new` 的写掩码（bit 15 STRING_KEY_MAP）
+     * ⇒ `code=26 result type is outside the capability mask`。
+     *
+     * 与 layout 的 `kvkind::is_map_langtype` **同一个语义**：只答「是不是 map 形态」，
+     * 不答「合不合法」（合法性由 `contract/langtype` 的 form 校验）。
+     */
+    if (langtype.data[0] == '\'') {
         *output_type_set = VMKV_RWIR_TYPE_SET_STRING_KEY_MAP;
         return VMKV_PARAMETER_TYPE_RESULT_SINGLE;
     }

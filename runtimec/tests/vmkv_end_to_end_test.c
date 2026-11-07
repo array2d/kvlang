@@ -533,11 +533,11 @@ static void stage_three_tutorial_smoke(test_environment_t *environment) {
     static const char source[] =
         "rwir ext·probe(*int64 $v)\n"
         "rwfunc test() -> () {\n"
-        "\tt0 = time·now()\n"
+        "\tt0:time = time·now()\n"
         "\tprintln(\"hello kvlang\")\n"
-        "\tt1 = time·now()\n"
-        "\tdelta = time·sub(t1, t0)\n"
-        "\tns = time/duration·as_nanos(delta)\n"
+        "\tt1:time = time·now()\n"
+        "\tdelta:time/duration = time·sub(t1, t0)\n"
+        "\tns:int64 = time/duration·as_nanos(delta)\n"
         "\tprintln(\"__bench_ns:\", ns)\n"
         "\text·probe(ns)\n"
         "}\n";

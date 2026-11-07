@@ -53,8 +53,20 @@ extern "C" {
  *
  * 与 `handler_call.h` 的码段分开：0x4B00 段归文本层。编号只增不改。
  */
-/* 创建型算子的栈缓冲尺寸：与 container/scatter 的既有约定同量级。 */
-#define VMBIN_HANDLER_CREATE_BUFFER_CAPACITY 512U
+/*
+ * 创建型算子的栈缓冲尺寸（**字节**）。
+ *
+ * 与 `string_text.h` 的 `STRING_TEXT_CODEPOINT_CAPACITY`（1024 码点）必须对得上：
+ * 那一条限的是**码点数**，这一条限的是**字节数**，两者是同一件事的两个单位。
+ * 只改一边会得到一个说谎的上限——实测过：把码点上限提到 1024 而字节缓冲还是
+ * 512，130 个码点（520 字节）照样在编码那一步失败，报的却是另一条诊断。
+ *
+ * 1024 码点 × UTF-8 最宽 4 字节 = 4096。取 4KB 栈，与
+ * `CONTAINER_NEW_BODY_CAPACITY`（8192）同量级。
+ *
+ * **这是受理上限，不是内存不足**：超出按具名失败返回，不截断、不降级。
+ */
+#define VMBIN_HANDLER_CREATE_BUFFER_CAPACITY 4096U
 #define VMBIN_HANDLER_CREATE_KEY_CAPACITY 512U
 
 typedef enum vmbin_handler_call_text_diagnostic {

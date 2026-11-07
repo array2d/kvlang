@@ -7,7 +7,7 @@
 //   20
 rwfunc test() -> () {
 	compact:[3]int64 = [10, 20, 30]
-	scatter:[int64]·int64 = {10, 20, 30}
+	scatter:'[int64]'int64 = {10, 20, 30}
 	println(compact[1])
 	println(scatter·[1])
 }

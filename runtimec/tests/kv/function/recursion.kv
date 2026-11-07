@@ -7,15 +7,15 @@ rwfunc fib(*int64 $n) -> (*int64 $r) {
 	if (*n <= 1) {
 		*n -> *r
 	} else {
-		a = *n - 1
-		b = *n - 2
-		fib(a) -> x
-		fib(b) -> y
+		a:int64 = *n - 1
+		b:int64 = *n - 2
+		fib(a) -> x:int64
+		fib(b) -> y:int64
 		x + y -> *r
 	}
 }
 
 rwfunc test() -> () {
-	fib(10) -> v
+	fib(10) -> v:int64
 	println(v)
 }

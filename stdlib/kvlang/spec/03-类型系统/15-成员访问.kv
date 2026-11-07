@@ -33,6 +33,11 @@ kvlang 指针）一律 TypeError。
 非 kvlang 指针的 base，其成员键 = `解析(base)·name`；解析帧感知：裸名 → `帧根/base`，
 `/` 开头 → 直通。
 
+**base 的值本身是路径时，成员键沿该路径展开**：当 base 的**值 body 以 `/` 开头**且声明类型是
+structref（`/lib/<Name>`）或 `[]char/*` 时，`base·name` 解析为 `<base 的 body>·name`，而不是
+`<帧根>/<base 名>·name`。这条与「base 是容器」并列：容器 base 的成员在容器自己的子键上，
+路径 base 的成员在该路径的子键上。
+
 **base 必须是容器**（struct 实例 / `map` / index）或**路径串**（`[]char/*` 的值即父路径本身）：
 compact 数组与标量两者都不是，用 `·` 访问报 TypeError（compact 数组用
 `[]` 下标，见 [[数组形态]]）。这条在解引用之后判定——`(*p)·[0]` 里 base 是 `p` 指向的 compact 数组，

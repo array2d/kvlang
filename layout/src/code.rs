@@ -11,6 +11,7 @@
 //! printlib: 反向——严格读 /lib/<pkg> 子树重建 AST（签名读参数定义键 .[0,±k]、体读线性槽+‥labels），
 //!       不读 .src、不依赖签名行 [0,x] 静态槽。printstack: /vthread/<vid> 活动栈渲染（只读）。
 
+use crate::scanner::Pos;
 use std::collections::{HashMap, HashSet};
 
 use super::ast::{
@@ -56,7 +57,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
         write_struct_decl(kv, decl)?;
     }
     for a in &checked.funcs {
-        write_func(kv, a, &local_funcs, &checked.structs, &checked.sigs)?;
+        write_func(kv, a, &local_funcs, &checked.structs)?;
         if a.is_init {
             inits.push(init_fn_name(&a.pkg));
         }
@@ -65,7 +66,7 @@ pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
         write_rwir_decl(kv, decl)?;
     }
     if let Some(a) = &checked.top_init {
-        write_func(kv, a, &local_funcs, &checked.structs, &checked.sigs)?;
+        write_func(kv, a, &local_funcs, &checked.structs)?;
         inits.push(init_fn_name(""));
     }
     Ok(inits)
@@ -90,9 +91,6 @@ pub struct AnalyzedFunc {
 pub struct CheckedFile {
     file: ast::File,
     structs: lower::StructTable,
-    /// 文件级签名表：写指令槽时用来取**被调方形参类型**（`None` 作实参时的
-    /// 上下文类型只能从这里得到）。
-    sigs: lower::SigTable,
     funcs: Vec<AnalyzedFunc>,
     top_init: Option<AnalyzedFunc>,
 }
@@ -219,7 +217,6 @@ fn analyze_file(src: &str) -> Result<CheckedFile, String> {
     Ok(CheckedFile {
         file,
         structs,
-        sigs,
         funcs,
         top_init,
     })
@@ -234,6 +231,10 @@ fn analyze_func(
 ) -> Result<AnalyzedFunc, String> {
     // Annotate call-site return types from `sigs` before lowering.
     let mut src = func.clone();
+    /* 用户注解必须在 `annotate_call_returns` **之前**采：那个函数把调用返回类型
+     * 填进 `write_types`，之后「用户写的」与「自动补的」在数据上分不开，
+     * `t0 = time·now()` 这类就整类逃过「必须声明类型」的检查。 */
+    let annotated = lower::declared_annotated_names(&src);
     lower::annotate_call_returns(&mut src, sigs);
     // 形状校验必须在 lower **之前**：`flatten_expr` 会把 `f([1,2,3,4])` 的实参
     // 物化成临时槽，此后容器字面量不复存在，形状再也比不了。
@@ -244,8 +245,14 @@ fn analyze_func(
     // `lower::declared_langtypes_by_origin` 的注释（形参优先，等价性条件）。
     let declared = lower::declared_langtypes_by_origin(&fn_);
     let type_sets = lower::infer_type_sets(&fn_, structs);
+    /*
+     * **#632 的 layout 侧落点**：给路径串 base 的动态成员写补位置槽类型
+     * （取写入值的静态类型）。必须在 `validate_writes` **之前**——那条校验会
+     * 因为位置槽没有类型而报「需要显式类型注解」。
+     */
+    lower::annotate_position_slot_types(&mut fn_, &type_map);
     let mut diags = std::mem::take(&mut shape_diags);
-    diags.extend(lower::validate_writes(&fn_, &type_map, structs, sigs));
+    diags.extend(lower::validate_writes(&fn_, &type_map, structs, sigs, &annotated));
     /* 推断必须在 specialize 之前算一次，且只算一次：specialize 只改 e.op 的字形
      * （`+` → `add`）与 `operator`/`operand_kind`，不改赋值来源与类型，所以两处
      * 结果相同；在它之后重算既多余，又逼着 `exact_kind` 同时认两种 op 形态。
@@ -931,6 +938,7 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
         arrow_left: is_fill || inst.write_types.iter().any(|t| !t.is_empty()),
         operator: false,
         operand_kind: String::new(),
+            pos: Pos::default(),
     }
 }
 
@@ -971,7 +979,6 @@ pub fn write_func(
     a: &AnalyzedFunc,
     local_funcs: &HashSet<String>,
     structs: &lower::StructTable,
-    sigs: &lower::SigTable,
 ) -> Result<(), String> {
     let pkg = a.pkg.as_str();
     let fn_ = &a.func;
@@ -1088,7 +1095,6 @@ pub fn write_func(
             &source_langtypes,
             stable,
             local_funcs,
-            sigs,
         )
         .map_err(werr)?;
     }
@@ -2005,7 +2011,6 @@ fn write_linear_inst(
     source_langtypes: &lower::SourceLangtypes,
     stable: &HashMap<String, String>,
     local_funcs: &HashSet<String>,
-    sigs: &lower::SigTable,
 ) -> Result<(), String> {
     let (opcode, mut reads) = s.flat();
     // Already validated by `check_jumps`; still return `Result` to avoid panic paths.
@@ -2021,27 +2026,23 @@ fn write_linear_inst(
         _ => {}
     }
     /*
-     * `None` 操作数的槽 langtype = **该位置上下文要求的类型**。
+     * `None` 操作数**不需要类型**——它就是「空 body + 空 langtype」。
      *
-     * 为什么必须有类型：wire 仍是长度 0 的短内联头（表示是 None），但编码器要
-     * 按 langtype 把操作数归进类别表才能选出算子；空 langtype 在任何算子下都选
-     * 不出来。类型不在这层补，就只能在 vmkv 里从邻居猜——那是在看不到源码的层
-     * 做类型推断，等于给主干长分支。
+     * 申请这个操作数是什么类型、该走哪个算子，由「它是 None」这一个事实决定：
+     * 编码器在 `None` 出现且另一侧不是引用时选 `nonnull`/`nonnull·not`，另一侧
+     * 是引用时仍走 `ptreq`。类型不参与选择，所以这里也不必再推一个出来。
      *
-     * 三种上下文（spec `01-词法/07` 与 `03-类型系统/16-ptr`）：
-     *   比较：取另一侧的类型，且必须是引用（`*T`）——opcode 保持 `==`/`!=`，
-     *         由编码层的特化规则按「两侧都是指针」改选到 `ptreq`/`ptreq·not`
-     *         （`rwir_alias_table.def` 的两条 SPECIALIZATION 记录）。**不在 layout
-     *         改 opcode**：那会在编码层之上再造一套算子选择。
-     *   赋值/声明初始化：取写槽的声明类型；
-     *   调用实参：取被调方形参类型。
-     * 三种都给不出具体类型时在 **layout** 期报错，不许漏到编码器。
+     * 曾经这里推了整整三种上下文（比较取另一侧、赋值取写槽、实参取形参），
+     * 并把结果写进 None 的槽 langtype。那是错的：槽 langtype 会进值的 attr 区，
+     * 于是 None 被改写成「空 body + `int64`」——模型里不存在的值，编码器的
+     * None 判据因此永不成立，判空静默走数值 `eq`。详见 None 落槽处的注释。
+     *
+     * 保留的只有**校验**：比较的另一侧必须能判空（`lower::is_none_comparable`，
+     * 任意单一类型、EXTENSION 除外）。这条是错误判据，不是类型推断。
      */
     let none_index = reads.iter().position(|operand| operand == "None");
-    let mut none_type: Option<String> = None;
     if let Some(index) = none_index {
-        let comparison = opcode == "==" || opcode == "!=";
-        let resolved = if comparison {
+        if opcode == "==" || opcode == "!=" {
             let other = reads
                 .get(if index == 0 { 1 } else { 0 })
                 .ok_or_else(|| format!("{opcode}: None 比较缺少另一侧操作数"))?;
@@ -2060,55 +2061,16 @@ fn write_linear_inst(
                     "{opcode}: 无法判定空引用比较的类型——另一侧 `{other}` 没有具体类型"
                 ));
             }
-            /* 判据只有一份：`lower::is_none_comparable`（指针 `*T` 与 structref
-             * `/lib/X`）。这里不能写「以 `*` 开头」——`(*node)·left` 的成员读结果
+            /* 判据只有一份：`lower::is_none_comparable`（任意单一类型，EXTENSION 除外）。
+             * 这里不能写「以 `*` 开头」——`(*node)·left` 的成员读结果
              * 是值形态的 `/lib/TNode`（`*` 是传递方式，已被剥），按 `*` 判会把
              * 一条合法的判空挡在 layout 期。 */
             if !lower::is_none_comparable(&other_type) {
-                /*
-                 * **能力缺口，不是缺陷**，所以带固定前缀 `[capability:nonnull]`。
-                 *
-                 * spec 明说「存在性判定本应对任意类型成立」（`03-类型系统/16-ptr`），
-                 * 当前只支持指针与 structref，因为非指针判空需要 `nonnull` /
-                 * `nonnull·not` 能力行——尚未实现（三条前置：一元特化机制、head 的
-                 * ptr 位过 ABI、catalog 的「任意单一类型」位）。
-                 *
-                 * 前缀是给 **runner 分类**用的：`kv_runner` 把「layout 失败且错误串含
-                 * `[capability:`」计 **blocked**（有名字的能力缺口），其余 layout
-                 * 失败仍是 **fail**——默认 fail、按前缀白名单放行。
-                 *
-                 * **只给这一条加前缀**：其余诊断都是真错误，不能被算成缺口。
-                 */
                 return Err(format!(
-                    "[capability:nonnull] {opcode}: 空引用判定的另一侧不是引用类型（`{other}` 的类型是 `{other_type}`）"
+                    "{opcode}: 无法与 None 比较——另一侧 `{other}` 的类型 `{other_type}` 不在判空能力面内"
                 ));
             }
-            other_type
-        } else if let Some(sig) = sigs.get(&opcode) {
-            let parameter = sig.params.get(index).ok_or_else(|| {
-                format!("{opcode}: None 实参位置 {index} 超出台数形参表")
-            })?;
-            if parameter.ty.is_empty() || parameter.ty.contains('|') {
-                return Err(format!(
-                    "{opcode}: 无法判定 None 实参的类型——形参 `{}` 没有具体类型",
-                    parameter.name
-                ));
-            }
-            parameter.ty.trim_start_matches(['*', '@']).to_string()
-        } else if s.writes.len() == 1 {
-            let declared_type =
-                write_slot_type(s, 0, &s.writes[0], param_langtype, source_langtypes, declared, declared_source, type_sets, structs, stable);
-            if declared_type.is_empty() || declared_type.contains('|') {
-                return Err(format!(
-                    "{} -> {}: 无法判定 None 的类型——写槽没有具体声明类型",
-                    opcode, s.writes[0]
-                ));
-            }
-            declared_type
-        } else {
-            return Err(format!("{opcode}: 无法判定 None 操作数的上下文类型"));
-        };
-        none_type = Some(resolved);
+        }
     }
 
     let target_char = if s.writes.len() == 1
@@ -2142,10 +2104,64 @@ fn write_linear_inst(
             continue;
         }
         if Some(j) == none_index {
-            /* wire 恒是 None 头；只有槽 langtype 由上下文决定。 */
+            /*
+             * **None 就按 None 存：空 body + 空 langtype。**
+             *
+             * 曾经这里写的是「槽 langtype 由上下文决定」（把另一侧的类型填进去）。
+             * 那是错的，而且错得很隐蔽：槽写到 kvspace 后 langtype 会进**值的
+             * attr 区**，于是 `new_none()` 被改写成「空 body + `int64`」——一个
+             * 模型里根本不存在的值：不是 None（有 langtype），也不是空引用
+             * （没有 `*` 前缀）。
+             *
+             * 后果实测（2026-11-06）：编码器的 None 判据（body 空 + langtype 空）
+             * 永远不成立 ⇒ `x == None` 归一化到 `nonnull·not` 从未触发，仍走
+             * 数值 `eq`，把 None 当零值比较，最后以写目标宽度不符（`0x4A03`）
+             * 收场——报错现场与真实成因毫无关系。
+             *
+             * 选择算子这件事由「这个操作数是 None」这一个事实决定，与另一侧的
+             * 类型无关；给 None 编一个类型，等于用一个假值绕过架构约束，后面
+             * 每个读方都得记住这个谎（p3）。
+             */
+            /*
+             * 槽 langtype 取决于**另一侧是不是引用**，这是两条不同的判空语义：
+             *
+             *   另一侧是引用（`*T` / `/lib/X`）⇒ None 槽**必须带该引用类型**。
+             *     空引用的定义就是「有类型的空」：wire 上 `*T` + 空 body。编码器
+             *     据此把两侧识别成指针判空，选 `ptreq`/`ptreq·not`。
+             *     给它空 langtype 会让它变成**无类型 None**，`ptreq` 无从识别——
+             *     实测会以 `program builder rejected a literal` 收场
+             *     （`add_literal` 要求 langtype 非空）。
+             *
+             *   另一侧不是引用 ⇒ None 槽**必须为空**。「这个位置有没有值」与另一个
+             *     操作数是什么类型无关；给 None 编一个类型，等于用一个假值绕过
+             *     架构约束（p3）——曾经就是这么写的，后果是编码器的 None 判据
+             *     永不成立、判空静默走数值 `eq`。
+             */
             let wire = ffi::new_none()?;
-            let context_type = none_type.clone().unwrap_or_default();
-            pairs.push((format!("{prefix}/[{n},-{}]", j + 1), context_type, wire));
+            let other_index = if j == 0 { 1 } else { 0 };
+            let other_type = reads
+                .get(other_index)
+                .map(|other| {
+                    read_slot_type(
+                        other,
+                        param_langtype,
+                        source_langtypes,
+                        declared,
+                        declared_source,
+                        type_sets,
+                        structs,
+                        stable,
+                    )
+                })
+                .unwrap_or_default();
+            let slot_type = if lower::is_none_comparable(&other_type)
+                && (other_type.starts_with('*') || other_type.starts_with('/'))
+            {
+                other_type
+            } else {
+                String::new()
+            };
+            pairs.push((format!("{prefix}/[{n},-{}]", j + 1), slot_type, wire));
             continue;
         }
         let ty = read_slot_type(
@@ -2661,7 +2677,7 @@ mod tests {
     #[test]
     fn format_preserves_lib() {
         roundtrip("lib http {\n\trwfunc get(*[]char/utf32 $url) -> (*[]char/utf32 $resp) {\n\t\thttp·call(\"GET\", \"\", *url, \"\") -> *resp\n\t}\n}\n");
-        roundtrip("lib byteseek {\nlib session {\nlib s1 {\nrwfunc main() -> () {\n3 + 4 -> s\nprintln(s)\n}\n}\n}\n}\nmain()\n");
+        roundtrip("lib byteseek {\nlib session {\nlib s1 {\nrwfunc main() -> () {\ns:int64 = 3 + 4\nprintln(s)\n}\n}\n}\n}\nmain()\n");
     }
 
     #[test]
@@ -2670,8 +2686,8 @@ mod tests {
         assert!(vet("lib t {\nrwfunc main() -> () {\nnull -> x\n}\n}\n").is_err());
         assert!(vet("lib t {\nrwfunc main() -> () {\nprintln(null)\n}\n}\n").is_err());
         // None、字符串 "null"、含 null 的路径不受影响。
-        assert!(vet("lib t {\nrwfunc main() -> () {\nNone -> x\n}\n}\n").is_ok());
-        assert!(vet("lib t {\nrwfunc main() -> () {\n\"null\" -> x\n}\n}\n").is_ok());
+        assert!(vet("lib t {\nrwfunc main() -> () {\nx:*int64 = None\n}\n}\n").is_ok());
+        assert!(vet("lib t {\nrwfunc main() -> () {\nx:[]char/utf32 = \"null\"\n}\n}\n").is_ok());
     }
 
     #[test]
@@ -2691,7 +2707,7 @@ mod tests {
 
         compile(
             &mut kv,
-            "lib a {\nlib b {\nrwfunc f() -> (int64 $r) {\n1 -> r\n}\n}\n}\n",
+            "lib a {\nlib b {\nrwfunc f() -> (int64 $r) {\n*r = 1\n}\n}\n}\n",
         )
         .unwrap();
         let dir = kv.get_one("/lib/a/b·f/");
@@ -2713,7 +2729,7 @@ mod tests {
         // 同 lib a 下再 layout 另一嵌套 lib c，验证 b·f 未被整库删除（增量合并）
         compile(
             &mut kv,
-            "lib a {\nlib c {\nrwfunc g() -> (int64 $g) {\n2 -> r\n}\n}\n}\n",
+            "lib a {\nlib c {\nrwfunc g() -> (int64 $g) {\n*g = 2\n}\n}\n}\n",
         )
         .unwrap();
         assert_eq!(
@@ -2759,7 +2775,7 @@ mod tests {
             kvkind::new_defrwir(1, 0, false).unwrap(),
         )])
         .unwrap();
-        compile(&mut kv, "rwfunc caller() -> () {\ncallee(1) -> y\nprintln(y)\n}\nrwfunc callee(int64 $x) -> (int64 $r) {\nx -> r\n}\n").unwrap();
+        compile(&mut kv, "rwfunc caller() -> () {\ny:int64 = callee(1)\nprintln(y)\n}\nrwfunc callee(int64 $x) -> (int64 $r) {\nx -> *r\n}\n").unwrap();
         assert_eq!(
             kvkind::kind(&kv.get_one("/lib/caller/[1,0]"), &kv.langtype_of("/lib/caller/[1,0]")),
             "rwfunc"
@@ -2776,14 +2792,14 @@ mod tests {
             kvkind::counts(&kv.get_one("/lib/caller/[2,0]")),
             (1, 0, false)
         );
-        compile(&mut kv, "rwfunc later() -> () {\ncallee(1) -> y\n}\n").unwrap();
+        compile(&mut kv, "rwfunc later() -> () {\ny:int64 = callee(1)\n}\n").unwrap();
         assert_eq!(
             kvkind::kind(&kv.get_one("/lib/later/[1,0]"), &kv.langtype_of("/lib/later/[1,0]")),
             "rwfunc"
         );
         compile(
             &mut kv,
-            "rwfunc absolute() -> () {\n/lib/callee(1) -> y\n}\n",
+            "rwfunc absolute() -> () {\ny:int64 = /lib/callee(1)\n}\n",
         )
         .unwrap();
         assert_eq!(
@@ -2867,7 +2883,7 @@ mod tests {
         .unwrap();
         compile(
             &mut kv,
-            "lib t {\nrwfunc main() -> () {\nfoo.bar(\"x\") -> y\nbaz(\"z\") -> w\n}\n}\n",
+            "lib t {\nrwfunc main() -> () {\ny:int64 = foo.bar(\"x\")\nw:int64 = baz(\"z\")\n}\n}\n",
         )
         .unwrap();
         assert_eq!(
@@ -2939,7 +2955,7 @@ mod tests {
         init_dirs(&mut kv).unwrap();
         compile(
             &mut kv,
-            "lib t {\nrwfunc main() -> () {\n1 -> x\ninner: {\n2 -> x\n}\n3 -> x\n}\n}\n",
+            "lib t {\nrwfunc main() -> () {\nx:int64 = 1\ninner: {\nx = 2\n}\nx = 3\n}\n}\n",
         )
         .unwrap();
         let mut returns = Vec::new();

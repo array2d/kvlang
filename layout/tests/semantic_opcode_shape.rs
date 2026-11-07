@@ -42,7 +42,7 @@ fn dsn(tag: &str) -> String {
 
 fn slot_text(kv: &mut Kv, key: &str) -> String {
     let v = kv.get_one(key);
-    let b = kvkind::body(&v, &kvkind::head(&v));
+    let b = kvkind::body(&v);
     String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 

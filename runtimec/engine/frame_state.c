@@ -187,7 +187,21 @@ runtimec_status_t runtimec_frame_state_open(
     size_t binding_capacity, runtimec_frame_state_t **output_state,
     runtimec_frame_state_result_t *output_result, runtimec_error_t *error) {
     ptrdiff_t ordinal;
-    runtimec_frame_state_t *state;
+    /*
+     * **初始化为 NULL，不是「兜底」。**
+     *
+     * 每条控制流都写了 `state`：`ordinal < 0` 时经 `&state` 由
+     * `runtimec_frame_state_insert` 在**唯一成功出口**写入，`ordinal >= 0` 时
+     * 直接取 `table->entries[ordinal]`；`insert` 失败则在本行之前 return。
+     *
+     * 但 `insert` 是另一个翻译单元里的 `static` 函数，`-O2` 的跨函数数据流
+     * 追不到「它的成功路径一定写 `*output_state`」，于是 `-Werror=
+     * maybe-uninitialized` 在 `state->function_path` 处误报——**Debug（-O0）
+     * 不报、Release（-O2）报**，正是这条误报的形态。
+     *
+     * 补初值让编译器的保守假设成立，**不改控制流、不加失败分支**。
+     */
+    runtimec_frame_state_t *state = NULL;
     runtimec_status_t status;
 
     if (output_state != NULL) {

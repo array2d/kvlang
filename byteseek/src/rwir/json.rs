@@ -21,8 +21,8 @@ pub fn to(eng: &Engine, pc: &str) -> KvResult {
 
 fn ptr_target(eng: &Engine, path: &str) -> String {
     let xv = eng.get_xvalue(path);
-    if !xv.is_empty() && xh_is_ptr(&xv) {
-        let t = String::from_utf8_lossy(xh_body_slice(&xv)).into_owned();
+    if !xv.is_empty() && value_is_ptr(&xv) {
+        let t = String::from_utf8_lossy(value_body(&xv)).into_owned();
         if !t.is_empty() {
             return t;
         }
@@ -162,7 +162,7 @@ fn parse_xvalue(eng: &Engine, path: &str, data: &[u8]) -> (String, Vec<u8>, usiz
     }
     let kx = crate::ffi::langtype_of(eng.kv, path);
     let (dims, kind) = parse_langtype(&kx);
-    let raw = xh_body_slice(data).to_vec();
+    let raw = value_body(data).to_vec();
     // Use dims product only to detect arrays; actual element count is bounded by body length.
     let arr_len = dims
         .iter()
@@ -267,26 +267,23 @@ fn value_to_xvalue(v: &Value) -> Vec<u8> {
     match v {
         Value::Number(n) => {
             if let Some(i) = n.as_i64() {
-                with_langtype(&xvalue_to_wire("int64", &i.to_le_bytes(), &[]), "int64")
+                xvalue_to_wire("int64", &i.to_le_bytes(), &[])
             } else {
-                with_langtype(
-                    &xvalue_to_wire("float64", &n.as_f64().unwrap_or(0.0).to_le_bytes(), &[]),
-                    "float64",
-                )
+                xvalue_to_wire("float64", &n.as_f64().unwrap_or(0.0).to_le_bytes(), &[])
             }
         }
-        Value::Bool(b) => with_langtype(&xvalue_to_wire("bool", &[*b as u8], &[]), "bool"),
+        Value::Bool(b) => xvalue_to_wire("bool", &[*b as u8], &[]),
         Value::String(s) => new_char_byte(s.as_bytes()),
         _ => Vec::new(),
     }
 }
 
 fn mk_obj_value() -> Vec<u8> {
-    with_langtype(&xvalue_to_wire(OBJECT_TYPE, &[], &[]), OBJECT_TYPE)
+    xvalue_to_wire(OBJECT_TYPE, &[], &[])
 }
 
 fn mk_map_value() -> Vec<u8> {
-    with_langtype(&xvalue_to_wire(ARRAY_TYPE, &[], &[]), ARRAY_TYPE)
+    xvalue_to_wire(ARRAY_TYPE, &[], &[])
 }
 
 fn parse_langtype(kx: &str) -> (Vec<i32>, String) {
@@ -317,10 +314,7 @@ fn new_char_byte(bytes: &[u8]) -> Vec<u8> {
         .collect();
     let raw: Vec<u8> = utf32.iter().flat_map(|v| v.to_le_bytes()).collect();
     let dims = [utf32.len() as i32];
-    with_langtype(
-        &xvalue_to_wire("char/utf32", &raw, &dims),
-        &full_langtype("char/utf32", &dims),
-    )
+    xvalue_to_wire("char/utf32", &raw, &dims)
 }
 
 #[cfg(test)]
@@ -335,7 +329,7 @@ mod tests {
         }
         let d = [vals.len() as i32];
         let ds: &[i32] = if vals.len() > 1 { &d } else { &[] };
-        with_langtype(&xvalue_to_wire("int64", &raw, ds), &full_langtype("int64", ds))
+        xvalue_to_wire("int64", &raw, ds)
     }
 
     fn test_engine() -> Engine {
@@ -391,7 +385,7 @@ mod tests {
     fn struct_and_local_container_to_json() {
         let eng = test_engine();
         // Struct instance: root langtype is `/lib/Profile` (no `·`), fields live under `path·field`.
-        let prof_wire = with_langtype(&xvalue_to_wire("/lib/Profile", &[], &[]), "/lib/Profile");
+        let prof_wire = xvalue_to_wire("/lib/Profile", &[], &[]);
         eng.set_xvalue("/vthread/1/[1]/profile", &prof_wire).unwrap();
         eng.set_xvalue("/vthread/1/[1]/profile·name", &new_char_byte(b"alice"))
             .unwrap();
@@ -409,12 +403,12 @@ mod tests {
     #[test]
     fn short_body_vs_langtype_dims() {
         let eng = test_engine();
-        let one = |lt: &str| with_langtype(&xvalue_to_wire("int64", &7i64.to_le_bytes(), &[]), lt);
-        eng.set_xvalue("/short", &one("[1000]int64")).unwrap();
+        let one = |dims: &[i32]| xvalue_to_wire("int64", &7i64.to_le_bytes(), dims);
+        eng.set_xvalue("/short", &one(&[1000])).unwrap();
         assert_eq!(read_value(&eng, "/short").to_string(), "[7]");
-        eng.set_xvalue("/huge", &one("[2147483647,2147483647,2147483647]int64")).unwrap();
+        eng.set_xvalue("/huge", &one(&[2147483647, 2147483647, 2147483647])).unwrap();
         assert_eq!(read_value(&eng, "/huge").to_string(), "[7]");
-        let b = with_langtype(&xvalue_to_wire("bool", &[1], &[]), "[64]bool");
+        let b = xvalue_to_wire("bool", &[1], &[64]);
         eng.set_xvalue("/flags", &b).unwrap();
         assert_eq!(read_value(&eng, "/flags").to_string(), "[true]");
         // Empty body or trailing partial element.

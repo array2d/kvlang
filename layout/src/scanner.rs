@@ -4,7 +4,7 @@ use std::fmt;
 
 use super::symbol;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Pos {
     pub line: i32, // 1-based
     pub col: i32,  // 1-based
@@ -418,7 +418,16 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             if !closed {
                 diags.push(lex_error(p, "unterminated string literal"));
             }
-            let quote = if c == b'"' { b'"' } else { 0 };
+            /*
+             * **`'` 与 `"` 各自保留**（issue #631）。两者都是字符串定界符，
+             * 走同一条 `scan_quoted` 路径；旧代码把单引号串标成 `quote = 0`，
+             * 与普通标识符无法区分——那是**丢失了「这里是字符串」这个事实**，
+             * 不是「它本来不是字符串」。
+             *
+             * 谁需要区分两者？只有**类型位置**：`'K'V` 里的 `'K'` 是 formatter，
+             * 而表达式位置的 `'hi'` 仍是普通字符串。位置决定含义，与 `·` 同一条原则。
+             */
+            let quote = c;
             tokens.push(Token {
                 kind: Kind::Literal,
                 value: val,

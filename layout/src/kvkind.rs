@@ -39,10 +39,37 @@ pub fn is_none(data: &[u8]) -> bool {
 /// **map langtype 无形状段**：`{keylt}·{valt}` 里 `·` 之前的方括号是键类型（`[int64]`、
 /// `[float64,float64]`），不是维度——与 `[2]float64`（数组形状）截然不同，故整串即基 kind。
 /// 非 map 串也只把**纯数字/空/?**的方括号当形状（见 [[map容器]]）。
+/// 这是不是 map 类型（`'<formatter>'<value>`，issue #631）。
+///
+/// **唯一判据**：首字符是单引号。改名前靠「整串含 `·`」判，那个判据在
+/// 新形式下恒为 false（map 里不再有 `·`），于是 map 会落到 UNRECOGNIZED。
+///
+/// 所有判「是不是 map」的地方都调本函数，**不许各写一次 `starts_with('\'')`**
+/// ——那和旧时代「每处各判 `·`」是同一个病。
+pub fn is_map_langtype(kx: &str) -> bool {
+    kx.starts_with('\'')
+}
+
 pub fn parse_langtype(kx: &str) -> (Vec<i32>, String) {
-    if kx.contains(super::keytree::MEMBER_SEP) {
-        return (Vec::new(), kx.to_string());
-    }
+    /*
+     * **证明没有漏网**：走到这里就不该是 map 类型。
+     * 调用方必须先问 `is_map_langtype`；若这条断言在跑语料时触发，
+     * 说明有消费点绕过了判据——先修那条路，不要删断言。
+     */
+    debug_assert!(
+        !is_map_langtype(kx),
+        "parse_langtype received a map langtype {kx:?}; the caller must ask is_map_langtype first"
+    );
+    /*
+     * **旧的 `contains("·")` 分支已删除，不是改成判 `'`。**
+     *
+     * 它原来的作用是「map 类型无形状段，整串当 kind」。新判据在**更前面**
+     * （调用方先问 `is_map_langtype`）就把它拦下，`parse_langtype` 根本看不到
+     * map 类型的串——保留任何形式都是死代码。
+     *
+     * 若真有漏网，会以「`'` 开头落到下面的分支」响亮失败（既不是 `[` 开头、
+     * 也不匹配任何标量），不会静默。
+     */
     if kx.starts_with('[') {
         match kx.find(']') {
             Some(end) => {
@@ -366,4 +393,88 @@ pub fn rwir_sig(data: &[u8]) -> String {
     let text = &b[5.min(b.len())..];
     let end = text.iter().position(|&x| x == 0).unwrap_or(text.len());
     String::from_utf8_lossy(&text[..end]).into_owned()
+}
+
+#[cfg(test)]
+mod map_langtype_tests {
+    use super::{is_map_langtype, parse_langtype};
+
+    /*
+     * 用例来自 `workspace/622/coding2/map-type-syntax-cases.md`（唯一输入源）。
+     * C 侧 `runtimec/tests/langtype_test.c` 用**同一份清单**断言，
+     * 两边的判定结果必须逐条相同。
+     */
+
+    #[test]
+    fn legal_map_types_are_map() {
+        /* #1–#8：合法 map 类型。 */
+        for text in [
+            "'int64'int64",                    // #1 标量 formatter
+            "'[]char/utf8'int64",              // #2 字符串 formatter（utf8）
+            "'[]char/utf32'int64",             // #3 字符串 formatter（utf32）
+            "'[int64]'int64",                  // #4 一元元组
+            "'[float64,float64]'[]char/utf32", // #5 二元元组
+            "'[int32,int32]'int64",            // #6 二元元组
+            "'[int64]·[]char/utf8'int64",      // #7 两段 key
+            "'bool'int64",                     // #8 bool formatter
+        ] {
+            assert!(is_map_langtype(text), "expected map: {text}");
+        }
+    }
+
+    #[test]
+    fn non_map_types_are_not_map() {
+        /* #15–#16：非 map，走普通类型解析。 */
+        for text in ["[]char/utf8", "[2]float64", "int64", "char/utf32"] {
+            assert!(!is_map_langtype(text), "expected non-map: {text}");
+        }
+    }
+
+    #[test]
+    fn illegal_map_spellings_are_recognized_as_map_but_rejected_downstream() {
+        /*
+         * #9–#14：非法写法。`is_map_langtype` 只看首字符，所以 `'` 开头的
+         * 都判为 map——**合法性校验属于后续解析**，不是本判据的职责。
+         * 这里钉住的是「判据不自作主张」：它答「是不是 map 形态」，不答「合不合法」。
+         */
+        for text in [
+            "''int64",           // #9 空 formatter
+            "''int64'int64",     // #10 嵌套（本轮不支持）
+            "'int64'",           // #11 缺 value
+            "'int64",            // #12 未闭合
+            "'foo'int64",        // #14 未知 formatter
+        ] {
+            assert!(
+                is_map_langtype(text),
+                "starts with quote, so it is map-shaped: {text}"
+            );
+        }
+        /* #13 `int64'int64` 缺开头引号 ⇒ 不是 map 形态。 */
+        assert!(!is_map_langtype("int64'int64"));
+    }
+
+    #[test]
+    fn utf8_and_utf32_formatters_yield_the_same_access_key() {
+        /*
+         * 用例 #2/#3 的核心断言：**formatter 描述的是被格式化值的编码，
+         * 输出恒是路径文本**。`'[]char/utf8'` 与 `'[]char/utf32'` 产出的 key
+         * 完全相同——差别只在键值在 body 里怎么存，不在路径形态。
+         *
+         * 本层只断言「两者都被判为 map」（路径文本的产出在下游）；C 侧断言
+         * 同一件事。两侧都断言，是为了防止任一侧把编码带进路径。
+         */
+        assert!(is_map_langtype("'[]char/utf8'int64"));
+        assert!(is_map_langtype("'[]char/utf32'int64"));
+    }
+
+    #[test]
+    fn parse_langtype_never_receives_a_map_type() {
+        /*
+         * 非 map 串照常解析：`[2]float64` 得形状 `[2]`，base 是 `float64`。
+         * map 串不该走到这里（`debug_assert` 守着），这里只验非 map 的路径没坏。
+         */
+        let (dims, base) = parse_langtype("[2]float64");
+        assert_eq!(dims, vec![2]);
+        assert_eq!(base, "float64");
+    }
 }

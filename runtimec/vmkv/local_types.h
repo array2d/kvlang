@@ -39,6 +39,11 @@ bool vmkv_local_types_find(const vmkv_local_types_t *local_types,
                            runtimec_string_view_t name,
                            runtimec_string_view_t *output_langtype);
 
+bool vmkv_local_types_find(const vmkv_local_types_t *local_types,
+                           runtimec_string_view_t name,
+                           runtimec_string_view_t *output_langtype);
+
+
 #ifdef __cplusplus
 }
 #endif

@@ -28,6 +28,7 @@ pub fn parse_code(src: &str) -> Result<(ast::File, Vec<Diagnostic>), String> {
         ptr_params: Vec::new(),
         value_params: Vec::new(),
         flow: FlowCtx::default(),
+        position_slot_counter: 0,
     };
     let f = p.parse_file();
     for d in &mut p.errors {
@@ -66,6 +67,14 @@ struct Parser {
     value_params: Vec<String>,
     // Per-function control-flow context, validated at function end.
     flow: FlowCtx,
+    /*
+     * 动态键展开产生的**位置槽**计数器（`_p1`、`_p2`…）。
+     *
+     * 与 lowering 的 `LabelGen::tmp`（`_1`、`_2`…）**分开**：两者在不同阶段自增，
+     * 共用前缀就会撞名，而撞名不报错、只是静默写同一个槽。前缀不同是唯一
+     * 能保证不撞的判据；`_p` 表意 pointer。
+     */
+    position_slot_counter: u32,
 }
 
 /// Per-function control-flow state: loop depth (`break`/`continue`), block labels, and
@@ -273,6 +282,21 @@ impl Parser {
     fn skip_newlines(&mut self) {
         while self.peek().kind == Kind::Newline {
             self.advance();
+        }
+    }
+
+    /// 当前在 `Colon` 之前时，回答「冒号之后跳过换行与注释，第一个有意义的 token
+    /// 是什么 kind」。用于块标签判据：只有 `{` 才是标签体。
+    ///
+    /// **只读**：不改 `self.pos`，调用方后面照常解析。
+    fn next_statement_token_after_colon(&self) -> Kind {
+        let mut offset: isize = 2; /* 0 = name, 1 = colon */
+        loop {
+            let token = self.peek_at(offset);
+            match token.kind {
+                Kind::Newline | Kind::Comment => offset += 1,
+                _ => return token.kind,
+            }
         }
     }
 
@@ -740,6 +764,21 @@ impl Parser {
                 }
                 // `$name` 是参数声明的名字标记，不属于类型：遇到就收尾，留给调用方剥 `$`。
                 Kind::Ident | Kind::Literal if t.value.starts_with('$') => return sb,
+                /*
+                 * **类型位置的单引号串是 formatter**（issue #631）：
+                 * `'[int64,int64]'[]char/utf8` 里的 `'[int64,int64]'`。
+                 * 引号必须拼回去——lexer 已经把它切成一个 Literal token，
+                 * 剥掉引号就再也分不清「这是 formatter」还是「这是裸类型名」。
+                 *
+                 * 表达式位置的同名 token 仍是普通字符串：**位置决定含义**
+                 * （与 `·` 的两义处理同一条原则）。
+                 */
+                Kind::Literal if t.quote == b'\'' => {
+                    sb.push('\'');
+                    sb.push_str(&t.value);
+                    sb.push('\'');
+                    self.advance();
+                }
                 Kind::Ident | Kind::Literal => {
                     sb.push_str(&t.value);
                     self.advance();
@@ -1287,17 +1326,27 @@ impl Parser {
     /// 解析一条语句，返回**一或 N 条** Stmt（多赋值展开为多条指令，其余语句恒 1 条）。
     /// 空 Vec = 解析不出语句（调用方据此结束块 / break）。
     fn parse_stmt(&mut self) -> Vec<Stmt> {
-        // 块标签检测（优先级最高）。排除类型注解写槽：`x:Type`（Ident）、`x:[…]`（LBrack）、
-        // `x:/lib/Name`（structref langtype，以 / 起头的路径 Literal）。
-        let t2 = self.peek_at(2);
-        let t2_structref = t2.kind == Kind::Literal && t2.value.starts_with('/');
-        if self.peek_at(1).kind == Kind::Colon
-            && t2.kind != Kind::Ident
-            && t2.kind != Kind::LBrack
-            && !t2_structref
-        {
-            // `x: = …` 是空 kindexp 标注（不是标签）：只允许出现在签名槽。
-            if t2.kind == Kind::Arrow && t2.value == "=" {
+        /*
+         * 块标签检测（优先级最高）。
+         *
+         * **判据是文法位置：`name : {` ——冒号后（跳过换行/注释）是 `{` 才是块标签。**
+         * 这正是 `parse_block_label` 自己的要求（它本来就 `expect(Kind::LBrace)`），
+         * 所以「判成标签但解析不了」不可能发生。
+         *
+         * 早先这里用**白名单排除法**：`peek_at(2).kind` 必须是 `Ident` / `LBrack` /
+         * `/` 开头的 Literal 之一，否则当标签。那按 **token 种类枚举**，
+         * 于是 `m:'int64'int64` 的 `'int64'`（引号 Literal，值不以 `/` 开头）
+         * 三条都不满足 ⇒ 整行被吃成块标签，后面的类型解析根本收不到它。
+         *
+         * **不枚举类型形态**：`Ident`、`LBrack`、`Literal('/…')`、`Literal('…')`、
+         * 将来任何新形态，全都自然落进「类型标注」。加一种类型文法不必回来改这里。
+         */
+        if self.peek_at(1).kind == Kind::Colon {
+            if self.next_statement_token_after_colon() == Kind::LBrace {
+                return vec![self.parse_block_label()];
+            }
+            /* `x: = …` 是空 kindexp 标注（不是标签）：只允许出现在签名槽。 */
+            if self.peek_at(2).kind == Kind::Arrow && self.peek_at(2).value == "=" {
                 self.errors.push(Diagnostic {
                     pos: self.peek().pos,
                     message: "empty kindexp is only allowed in signature slots (`name:`); \
@@ -1314,7 +1363,6 @@ impl Parser {
                 }
                 return Vec::new();
             }
-            return vec![self.parse_block_label()];
         }
         match self.peek().kind {
             Kind::If => vec![self.parse_if()],
@@ -1573,6 +1621,12 @@ impl Parser {
         let start_pos = self.peek().pos;
         let mut inst = Instruction::default();
         let mut multi: Vec<Instruction> = Vec::new();
+        /*
+         * desugar 为**追加**产生的指令（动态键的 `resolveptr`）。
+         * 与 `multi` 分开：`multi` 是「这条源码语句本来就多条」的展开，
+         * 合用一个变量会让 `out` 的构造丢掉 `inst`（见下方注释）。
+         */
+        let mut expanded: Vec<Instruction> = Vec::new();
 
         match self.find_top_level_arrow() {
             Some(v) if v == "=" => {
@@ -1589,7 +1643,7 @@ impl Parser {
                     self.dispatch_struct_literal(&mut inst);
                     self.lower_array_fill(&mut inst);
                     self.desugar_subscript_write(&mut inst);
-                    self.desugar_member_write(&mut inst);
+                    self.desugar_member_write(&mut inst, &mut expanded);
                 }
             }
             Some(_) => {
@@ -1604,7 +1658,7 @@ impl Parser {
                     inst.write_types = wtypes;
                     self.dispatch_struct_literal(&mut inst);
                     self.desugar_subscript_write(&mut inst);
-                    self.desugar_member_write(&mut inst);
+                    self.desugar_member_write(&mut inst, &mut expanded);
                 }
             }
             None => {
@@ -1624,7 +1678,14 @@ impl Parser {
         }
         self.eat(Kind::Newline);
 
+        /*
+         * `multi` 与 `expanded` 是**两件事**，不能合用：合用一个变量时
+         * `out = if multi.is_empty() { vec![inst] } else { multi }` 会在 desugar
+         * 往它 push 之后把 `inst` 整个丢掉——实测写侧只剩 `*_p1`、位置指令消失。
+         */
         let mut out = if multi.is_empty() { vec![inst] } else { multi };
+        /* desugar 的追加指令接在**其后**：位置在前、写在后（spec §3.1 的顺序）。 */
+        out.append(&mut expanded);
         // 逐条检查：先 mem::take 移出以避开 &mut self 与 &inst 的借用冲突。
         for k in 0..out.len() {
             let i = std::mem::take(&mut out[k]);
@@ -1638,6 +1699,16 @@ impl Parser {
                 }
             }
             out[k] = i;
+        }
+        /*
+         * 源码位置统一在这里落：`0:0` 表示「这条不是用户写的那一行」，
+         * 留给 layout 合成指令继续用默认值。诊断要指路就必须有这一跳——
+         * 1900 处迁移靠 `error: 0:0:` 只能 grep 变量名撞运气。
+         */
+        for inst in &mut out {
+            if inst.pos.line == 0 {
+                inst.pos = start_pos;
+            }
         }
         out.retain(|i| i.expr.is_some() || !i.writes.is_empty());
         out
@@ -1695,14 +1766,25 @@ impl Parser {
                 arrow_left,
                 operator: false,
                 operand_kind: String::new(),
+            pos: Pos::default(),
             };
             self.dispatch_struct_literal(&mut i);
             self.lower_array_fill(&mut i);
             self.desugar_subscript_write(&mut i);
-            self.desugar_member_write(&mut i);
+            /* 动态键展开要多一条 `resolveptr`：先收在 `expanded` 里，
+             * 等 `i` push 之后按顺序接上（位置指令在前、写指令在后）。 */
+            let mut expanded: Vec<Instruction> = Vec::new();
+            self.desugar_member_write(&mut i, &mut expanded);
             out.push(i);
+            out.append(&mut expanded);
         }
         out
+    }
+
+    /// 生成一个位置槽名（`_p1`、`_p2`…）。见 `position_slot_counter` 的注释。
+    fn fresh_position_slot(&mut self) -> String {
+        self.position_slot_counter += 1;
+        format!("_p{}", self.position_slot_counter)
     }
 
     fn find_top_level_arrow(&self) -> Option<String> {
@@ -1742,6 +1824,8 @@ impl Parser {
         // 动态键（*k 的变量）。= 读语义：`base·seg… -> v` 即成员路径拷贝读。
         let mut chain_base: Option<Expr> = None;
         let mut chain_segs: Vec<Expr> = Vec::new();
+        /* 动态段（`·*k`）单独收集：它们要的是运行期值，不能拼进成员路径文本。 */
+        let mut dynamic_segments: Vec<Expr> = Vec::new();
         loop {
             // 后缀成员访问
             if self.peek().kind == Kind::Dot {
@@ -1780,7 +1864,7 @@ impl Parser {
                         if chain_base.is_none() {
                             chain_base = Some(left.clone());
                         }
-                        chain_segs.push(ast::leaf(&key));
+                        dynamic_segments.push(ast::leaf(&key));
                         continue;
                     }
                     // `·*<literal>` falls through as a static key (`≡ ·<literal>`); reject complex `·*(...)` keys.
@@ -1827,9 +1911,60 @@ impl Parser {
             // 成员链被打断（下标/中缀/循环尾）：flush 成单个成员路径读 `base·seg…`。
             // `base·seg…` 的读语义 = 成员路径拷贝读（runtime 拼路径读值），不再经 kvspace·get。
             if let Some(base) = chain_base.take() {
-                let mut args = vec![base];
-                args.append(&mut chain_segs);
-                left = ast::call(MEMBER_READ_OP, args);
+                if dynamic_segments.is_empty() {
+                    let mut args = vec![base];
+                    args.append(&mut chain_segs);
+                    left = ast::call(MEMBER_READ_OP, args);
+                } else {
+                    /* 动态段改写为 `resolveptr` 序列（spec 12-动态键 §3.1）。
+                     * 混合段（静态 + 动态）本轮具名拒绝。 */
+                    if !chain_segs.is_empty() {
+                        self.error_at(
+                            Pos { line: 0, col: 0 },
+                            "dynamic member key mixed with static segments: not supported this round"
+                                .to_string(),
+                        );
+                        return None;
+                    }
+                    /*
+                     * 每段一次 `resolveptr(base, 段)`，多段**迭代**（spec §3.2）。
+                     * 首轮必须带上第一段——曾经写成 `resolveptr(base)` 起手再迭代，
+                     * 单段情形就丢掉了那一段，产出一条只有一个读参的畸形指令
+                     * （实测 `[3] resolveptr(h)` 只有 `h`）。
+                     */
+                    let mut segments = std::mem::take(&mut dynamic_segments).into_iter();
+                    let mut position = match segments.next() {
+                        Some(first) => ast::call("kvspace/key·resolveptr", vec![base, first]),
+                        None => base,
+                    };
+                    for segment in segments {
+                        position =
+                            ast::call("kvspace/key·resolveptr", vec![position, segment]);
+                    }
+                    /*
+                     * **读侧还要解引用**（spec §一：「读同形：`newm := resolveptr(...)`，
+                     * 再 `*newm -> x`」）。`resolveptr` 给的是**位置**（Ptr），
+                     * 不包一层 `*` 的话调用方拿到的是指针值，`cur + 1` 就会报
+                     * 「add expects numeric operand, got *int64」。
+                     */
+                    /*
+                     * **防回归断言**：读侧展开的结果必须是一个 `*` 表达式。
+                     *
+                     * 它证明的是「layout 不会再退化成直接读指针槽」，**不是**
+                     * 「执行期能跟跳成功」——后者要 BinRWIR 的 `dereference` 位与
+                     * 值访问层配合，layout 碰不到（见 `map-type-syntax.md` §十五
+                     * 那条「一个错误的首字符污染整条判据链」的反面：
+                     * 这里断言的是**我们自己产出的形态**）。
+                     *
+                     * 写成 `debug_assert!` 而不是探针：Release 下自动消失，
+                     * 不需要人记得删。
+                     */
+                    left = ast::call(ast::DEREF_OP, vec![position]);
+                    debug_assert!(
+                        left.op == ast::DEREF_OP && left.args.len() == 1,
+                        "dynamic-key read must wrap its position in an explicit `*`"
+                    );
+                }
             }
             // 后缀索引
             if self.peek().kind == Kind::LBrack {
@@ -2984,7 +3119,14 @@ impl Parser {
         inst.write_types = Vec::new();
     }
 
-    fn desugar_member_write(&mut self, inst: &mut Instruction) {
+    /// 写槽脱糖。`outputs` 用于**一条写语句变两条指令**（动态键要先算位置再写）：
+    /// 追加的指令由调用方接在 `inst` 之后，`source_logical_program_counter`
+    /// 与 `inst` 相同——恢复/重放/诊断都按 pc 定位源码行。
+    fn desugar_member_write(
+        &mut self,
+        inst: &mut Instruction,
+        outputs: &mut Vec<Instruction>,
+    ) {
         if inst.writes.len() != 1 || !inst.writes[0].contains(keytree::MEMBER_SEP) {
             return;
         }
@@ -3071,6 +3213,93 @@ impl Parser {
             } else {
                 args.push(ast::str_lit(field));
             }
+        }
+        /*
+         * **动态写槽 `base·*k` 改写为 `resolveptr` + 显式解引用写**
+         * （spec `12-动态键` §3.1）。静态成员写保留原串——`=` 写由 runtime 拼
+         * 成员绝对路径；但动态段的 `*k` 是运行期值，**编码器明令拒绝**
+         * （`encoder.c` 的 `dynamic member key not representable`，那条拒绝保留，
+         * 它是最后一道断言，不是要放行的东西）。
+         *
+         *   `v -> base·*k`  ⇒  `p := resolveptr(base, k)`   （本条指令）
+         *                     `v -> *_p`                  （追加到 outputs）
+         *
+         * 两条指令的 pc 相同：恢复/重放/诊断都按 pc 定位源码行，分开编号会让
+         * 「停在哪一行」对不上源码。
+         */
+        if s.split(keytree::MEMBER_SEP)
+            .skip(1)
+            .any(|field| field.starts_with('*'))
+        {
+            /* 混合段（静态 + 动态）本轮具名拒绝，不顺手打开。 */
+            if s.split(keytree::MEMBER_SEP)
+                .skip(1)
+                .any(|field| !field.starts_with('*'))
+            {
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    warn: false,
+                    info: false,
+                    message: format!(
+                        "dynamic member write mixed with static segments ({s}): not supported this round"
+                    ),
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+                return;
+            }
+            let value = match inst.expr.take() {
+                Some(e) => e,
+                None => return,
+            };
+            let mut position = ast::leaf(&base);
+            for field in s.split(keytree::MEMBER_SEP).skip(1) {
+                position = ast::call(
+                    "kvspace/key·resolveptr",
+                    vec![position, ast::leaf(&field[1..])],
+                );
+            }
+            /*
+             * 位置槽的名字用 `_p<N>`，**不复用 lowering 的 `_N`**。
+             *
+             * lowering 阶段（`LabelGen::tmp`）生成 `_1`、`_2`… 并按出现顺序自增；
+             * parser 阶段还没有那个计数器，造一个同前缀的槽会与它撞名——而撞名
+             * 不会报错，只会让两条指令写同一个槽（静默错值）。
+             * `_p` 前缀与 lowering 的 `_` 空间不相交，且表意（pointer）。
+             * 计数器放在 `FlowCtx` 之外的文件级 `Cell` 里递增，保证同一函数内唯一。
+             */
+            let slot = self.fresh_position_slot();
+            inst.expr = Some(position);
+            inst.writes = vec![slot.clone()];
+            inst.write_types = Vec::new();
+            /* 追加：值 → 解引用写。 */
+            /*
+             * **判据（架构师裁决）**：「位置槽的读写操作数必须带 `*`」。
+             *
+             * 这里只断言 **layout 自己产出的文本**：`*_p1` 这类文本原样进指令槽，
+             * 不被任何归一化吃掉。真正的端到端保证（值访问层能解析它）在
+             * `12-动态键` 的用例里——layout 断言替代不了那一条。
+             *
+             * 写成断言而不是注释：这条规则此前只存在于我脑子里，于是「循环体内
+             * 动态写」一直在红而没人知道。
+             */
+            let deref_text = format!("*{slot}");
+            debug_assert!(
+                deref_text.starts_with('*') && deref_text.len() > 1,
+                "position slot must be referenced with an explicit `*`: {deref_text:?}"
+            );
+            outputs.push(Instruction {
+                comments: Vec::new(),
+                expr: Some(value),
+                writes: vec![deref_text],
+                write_types: Vec::new(),
+                arrow_left: inst.arrow_left,
+                operator: false,
+                operand_kind: String::new(),
+            pos: Pos::default(),
+            });
+            return;
         }
         // base.a.b = v 即成员写 `v -> base·a·b`：写槽保留完整成员串，`=` 写由 runtime
         // ResolveWriteSlot 拼成员绝对路径。不再经 kvspace·set（清理方案：set 死刑）。

@@ -10,10 +10,10 @@
 rwfunc test() -> () {
 	/tmp/kv_corpus/path_scalar:int64 = 0
 	42 -> /tmp/kv_corpus/path_scalar
-	/tmp/kv_corpus/path_scalar -> v
+	/tmp/kv_corpus/path_scalar -> v:int64
 	println(v)
-	/tmp/kv_corpus/nums:[int64]·int64 = {}
+	/tmp/kv_corpus/nums:'[int64]'int64 = {}
 	7 -> /tmp/kv_corpus/nums·[0]
-	/tmp/kv_corpus/nums·[0] -> w
+	/tmp/kv_corpus/nums·[0] -> w:int64
 	println(w)
 }

@@ -27,8 +27,26 @@
 extern "C" {
 #endif
 
-/* 一个字符串算子最多处理这么多个码点。 */
-#define STRING_TEXT_CODEPOINT_CAPACITY 128U
+/*
+ * 一个字符串算子最多处理这么多个码点。**全仓只有这一个字符串容量常量**——
+ * `string.c` 曾另有一个 `STRING_CODEPOINT_CAPACITY`，两处都写着「上限」而值不同，
+ * 改一处不生效（实测：把 `string.c` 那个从 128 改到 1024，拼接照样在 128 字处
+ * 失败，因为真正的截断点在 `string_text_t` 的 `codepoints[]` 数组与本文件的
+ * 编码缓冲里）。同义常量不许有两个。
+ *
+ * **1024 码点 = 4KB 的 `codepoints[]` 数组**。这是「本实现受理的上限」，
+ * 不是「内存够不够」：超出按具名失败返回，**不截断、不降级**——截断会产出一个
+ * head 自称合法、字符却少了的字符串，那比失败难查得多。
+ *
+ * 为什么不是 128：benchmark 的 `k_nucleotide` 用 65 字符的 base 累加 3 轮
+ * = 195 码点，128 会让它在第二轮就失败。
+ *
+ * 与之配套的**字节**上限是 `handler_call_text.h` 的
+ * `VMBIN_HANDLER_CREATE_BUFFER_CAPACITY`（4096 = 1024 × 4）——两个数必须对得上。
+ *
+ * **再往上就该换实现，不是继续加这个数**：让存储层分配，栈帧不随码点数增长。
+ */
+#define STRING_TEXT_CODEPOINT_CAPACITY 1024U
 #define STRING_TEXT_BYTES_CAPACITY \
     (STRING_TEXT_CODEPOINT_CAPACITY * RUNTIMEC_CHAR_CODEC_UTF8_MAX_BYTES)
 

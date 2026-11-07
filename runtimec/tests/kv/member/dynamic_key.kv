@@ -8,8 +8,8 @@
 //   10
 //   10
 rwfunc test() -> () {
-	m:[]char/utf8·int64 = {}
-	k = "a"
+	m:'[]char/utf8'int64 = {}
+	k:[]char/utf32 = "a"
 	10 -> m·*k
 	println(m·*k)
 	println(m·a)

@@ -13,6 +13,8 @@
  * 而错误的消息会把人引到错的地方修。
  */
 
+#include <stdio.h>
+
 #include "contract/langtype.h"
 
 #include <string.h>
@@ -128,22 +130,6 @@ static bool runtimec_langtype_tuple_matches(runtimec_string_view_t dimension) {
     return true;
 }
 
-/*
- * 整串是否含成员符 `·`（U+00B7，UTF-8 编码 `0xC2 0xB7`）。
- *
- * 含 `·` 的 langtype 是 **mapexpr**（`[]char/utf8·int64`），它的键侧与值侧是
- * 两个独立类型表达式，整串不是值类型。不写 `strchr`：它是多字节字符，按单字节
- * 找会把别的字符的尾字节认成它。
- */
-static bool runtimec_langtype_has_member_separator(runtimec_string_view_t text) {
-    for (size_t offset = 0U; offset + 1U < text.size; ++offset) {
-        if ((uint8_t)text.data[offset] == 0xC2U &&
-            (uint8_t)text.data[offset + 1U] == 0xB7U) {
-            return true;
-        }
-    }
-    return false;
-}
 
 runtimec_status_t runtimec_langtype_parse(runtimec_string_view_t text,
                                           runtimec_langtype_t *output) {
@@ -167,15 +153,93 @@ runtimec_status_t runtimec_langtype_parse(runtimec_string_view_t text,
      */
     output->form = RUNTIMEC_LANGTYPE_FORM_UNRECOGNIZED;
     /*
-     * `*`/`@` 前缀与 `/` 开头、含 `·` 的整串：**先判，不剥**。
+     * `*`/`@` 前缀与 `/` 开头：**先判，不剥**。
      *
      * 不剥 `*` 是失败封闭：剥掉后 `*int64` 会变成标量并被当作键放行，而它
      * 是**指针**——指针的键语义是「解引用后的目标」，不是「目标类型的字面量」。
      * 让它在 UNRECOGNIZED 处停下，比猜一个解引用规则安全。
+     *
+     * **含 `·` 的整串不在这条里**（旧版本曾把它并列在这里，是错的）：`·` 是
+     * 旧 map 的键值分隔符，issue #631 改成 `'K'V` 之后按 p5 不再接受。它的
+     * 处理在下面单独一段——**具名拒绝（INVALID）并指路新写法**，不是
+     * UNRECOGNIZED。UNRECOGNIZED 的含义是「认得出不是引用、只是不在本表」，
+     * 而旧语法连「是什么」都谈不上，两者不能混。
      */
-    if (text.data[0] == '*' || text.data[0] == '@' || text.data[0] == '/' ||
-        runtimec_langtype_has_member_separator(text)) {
+    /*
+     * **map 类型：首字符是单引号**（issue #631）。键侧是 formatter，
+     * 整串不是值类型，但它是一等 form——不是「认不出」。
+     *
+     * 新判据只需要看**首字符**：`'<formatter>'<value>` 里第一个 `'` 就定了，
+     * 不需要再扫整串找 `·`（那是旧 `K·V` 时代的做法）。
+     */
+    if (text.data[0] == '\'') {
+        /*
+         * **切分按单引号配对**（issue #631 的文法）：
+         *   第 1 个 `'` 是开头；
+         *   其后**必须恰好再出现一次 `'`**（闭引号），它是 formatter 的结束；
+         *   闭引号之后到串尾是**值侧** langtype，且不得再含 `'`（本轮不支持嵌套）。
+         *
+         * `base` 填**值侧**：按本头文件的约定「判值是什么种类的用 `base`」，
+         * map 的值侧才是「这个 map 的元素是什么」的答案。
+         */
+        const char *closing =
+            memchr(text.data + 1U, '\'', text.size - 1U);
+
+        if (closing == NULL) {
+            return RUNTIMEC_STATUS_INVALID; /* 引号未闭合 */
+        }
+        {
+            const size_t value_offset =
+                (size_t)(closing - text.data) + 1U;
+
+            if (value_offset >= text.size) {
+                return RUNTIMEC_STATUS_INVALID; /* `'K'` 缺值类型 */
+            }
+            if (memchr(text.data + value_offset, '\'',
+                       text.size - value_offset) != NULL) {
+                return RUNTIMEC_STATUS_INVALID; /* 嵌套 map：本轮不支持 */
+            }
+            output->form = RUNTIMEC_LANGTYPE_FORM_MAPPING;
+            output->dimension_count = 0;
+            output->base = runtimec_string_view_make(
+                text.data + value_offset, text.size - value_offset);
+        }
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    if (text.data[0] == '*' || text.data[0] == '@' || text.data[0] == '/') {
         return RUNTIMEC_STATUS_SUCCESS; /* UNRECOGNIZED */
+    }
+    /*
+     * **旧 map 语法 `[K]·V` 具名拒绝，不落进任何 form。**
+     *
+     * `·` 曾经是 map 的键值分隔符（`[]char/utf8·int64`）。issue #631 改成
+     * `'K'V` 之后，旧写法按 p5（不向后兼容）不再接受——但**必须指路**：
+     * 「不行」与「不行、而且该这么写」是两种可用性。
+     *
+     * 为什么不能让它落进 ARRAY：`[]char/utf8·int64` 剥掉 `[]` 之后 base 是
+     * `char/utf8·int64`，那看起来「有形状、有基种类」，会被判成 ARRAY 并报
+     * 「形状是值形态不是键形态」——**错误的原因与真实原因（旧语法）无关**。
+     *
+     * 判据是「类型位置出现 `·`」，不是「首字符是 `[`」：裸 mapexpr
+     * （`char/utf8·int64`）同样要走这条。
+     */
+    {
+        size_t scan = 0U;
+        bool has_member_separator = false;
+
+        while (scan + 1U < text.size) {
+            /* `·` 是 U+00B7，UTF-8 两字节 `0xC2 0xB7`。按单字节找会误命中别的
+             * 字符的尾字节，所以必须比完整序列。 */
+            if ((uint8_t)text.data[scan] == 0xC2U &&
+                (uint8_t)text.data[scan + 1U] == 0xB7U) {
+                has_member_separator = true;
+                break;
+            }
+            ++scan;
+        }
+        if (has_member_separator) {
+            return RUNTIMEC_STATUS_INVALID;
+        }
     }
     while (offset < text.size && text.data[offset] == '[') {
         const char *closing =

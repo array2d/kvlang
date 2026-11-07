@@ -8,6 +8,6 @@
 //   h中
 rwfunc test() -> () {
 	s:[]char/utf8 = "hi"
-	t = string·set(s, 1, "中")
+	t:char/utf32 = string·set(s, 1, "中")
 	println(t)
 }

@@ -55,6 +55,7 @@ static int binrwir_argument_index_list_is_invalid(const uint32_t *indices,
     return 0;
 }
 
+
 /* 具体类型：每个参数恰好一个非空 langtype，出现并集分隔符即 union，拒绝。 */
 runtimec_status_t binrwir_signature_validate_parameter_type(
     runtimec_string_view_t parameter_type) {
@@ -66,19 +67,6 @@ runtimec_status_t binrwir_signature_validate_parameter_type(
         return RUNTIMEC_STATUS_INVALID;
     }
     return RUNTIMEC_STATUS_SUCCESS;
-}
-
-static int binrwir_parameter_types_are_invalid(
-    const runtimec_string_view_t *types, size_t count) {
-    size_t type_ordinal;
-
-    for (type_ordinal = 0U; type_ordinal < count; ++type_ordinal) {
-        if (binrwir_signature_validate_parameter_type(types[type_ordinal]) !=
-            RUNTIMEC_STATUS_SUCCESS) {
-            return 1;
-        }
-    }
-    return 0;
 }
 
 /* 别名规则：两侧 parameter index 必须落在对应方向列表内（即该方向确有这个参数），
@@ -128,8 +116,15 @@ static int binrwir_signature_shape_is_invalid(
            (signature->alias_rule_count != 0U && signature->alias_rules == NULL);
 }
 
-runtimec_status_t
-binrwir_signature_validate(const binrwir_signature_view_t *signature) {
+/*
+ * 参数类型校验的**共用主体**：空类型是否放行由回调决定。
+ *
+ * 两份对外入口（`binrwir_signature_validate` 与 `_permitting_empty_types`）都走
+ * 这里，规则本身只有一份；差别只在「空类型算不算合法」这一个谓词上。
+ */
+static runtimec_status_t binrwir_signature_validate_with(
+    const binrwir_signature_view_t *signature, void *context,
+    bool (*empty_type_is_legal)(void *context, int is_write, size_t ordinal)) {
     if (signature == NULL || binrwir_signature_shape_is_invalid(signature)) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -138,17 +133,53 @@ binrwir_signature_validate(const binrwir_signature_view_t *signature) {
             signature->read_parameter_count) ||
         binrwir_argument_index_list_is_invalid(
             signature->write_parameter_argument_indices,
-            signature->write_parameter_count) ||
-        binrwir_parameter_types_are_invalid(signature->read_parameter_types,
-                                            signature->read_parameter_count) ||
-        binrwir_parameter_types_are_invalid(signature->write_parameter_types,
-                                            signature->write_parameter_count) ||
-        binrwir_alias_rules_are_invalid(
+            signature->write_parameter_count)) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    for (int is_write = 0; is_write <= 1; ++is_write) {
+        const runtimec_string_view_t *types =
+            is_write != 0 ? signature->write_parameter_types
+                          : signature->read_parameter_types;
+        const size_t count = is_write != 0 ? signature->write_parameter_count
+                                           : signature->read_parameter_count;
+
+        for (size_t ordinal = 0U; ordinal < count; ++ordinal) {
+            if (binrwir_signature_validate_parameter_type(types[ordinal]) ==
+                RUNTIMEC_STATUS_SUCCESS) {
+                continue;
+            }
+            /*
+             * 走到这里只剩两种：空类型、或含并集分隔符。**只有空类型**可以被
+             * 回调放行；并集永远拒（它不是「没有类型」，是「类型太多」）。
+             */
+            if (types[ordinal].size != 0U || empty_type_is_legal == NULL ||
+                !empty_type_is_legal(context, is_write, ordinal)) {
+                return RUNTIMEC_STATUS_INVALID;
+            }
+        }
+    }
+    if (binrwir_alias_rules_are_invalid(
             signature->read_parameter_count, signature->write_parameter_count,
             signature->alias_rules, signature->alias_rule_count)) {
         return RUNTIMEC_STATUS_INVALID;
     }
     return RUNTIMEC_STATUS_SUCCESS;
+}
+
+runtimec_status_t
+binrwir_signature_validate(const binrwir_signature_view_t *signature) {
+    return binrwir_signature_validate_with(signature, NULL, NULL);
+}
+
+runtimec_status_t
+binrwir_signature_validate_permitting_empty_types(
+    const binrwir_signature_view_t *signature, void *context,
+    bool (*empty_type_is_legal)(void *context, int is_write, size_t ordinal)) {
+    if (empty_type_is_legal == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    return binrwir_signature_validate_with(signature, context,
+                                           empty_type_is_legal);
 }
 
 runtimec_status_t binrwir_signature_get_alias_policy(
@@ -181,6 +212,7 @@ runtimec_status_t binrwir_signature_get_alias_policy(
             return RUNTIMEC_STATUS_SUCCESS;
         }
     }
-    /* 未声明的 (read, write) 关系不得被当作不重叠；签名本身合法，只是不提供该答案。 */
+
+/* 未声明的 (read, write) 关系不得被当作不重叠；签名本身合法，只是不提供该答案。 */
     return RUNTIMEC_STATUS_UNSUPPORTED;
 }

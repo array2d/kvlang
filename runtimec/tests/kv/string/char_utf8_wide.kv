@@ -5,11 +5,11 @@
 //   h
 //   中文
 rwfunc test() -> () {
-	x = "hi"
-	a = string·char(x, 0)
+	x:[]char/utf32 = "hi"
+	a:char/utf32 = string·char(x, 0)
 	println(a)
 
-	y = "中文"
-	b = string·slice(y, 0, 2)
+	y:[]char/utf32 = "中文"
+	b:char/utf32 = string·slice(y, 0, 2)
 	println(b)
 }

@@ -14,6 +14,8 @@
 
 #include "vmbin/handlers/host.h"
 
+#include "contract/char_codec.h"
+#include "contract/langtype.h"
 #include "contract/diagnostic_band.h"
 
 #include <stdio.h>
@@ -33,6 +35,11 @@
 #include "vmbin/handlers/handler_call.h"
 #include "vmbin/value_access.h"
 #include "vmbin/vthread_status.h"
+
+/* 成员分隔符 `·`（U+00B7）的 UTF-8 编码。**唯一定义点**：成员键拼接只有
+ * `key·resolveptr` 一处，散落魔数会让「`·` 有几个字节」变成多处口径。 */
+#define RUNTIMEC_HOST_MEMBER_SEPARATOR "\xC2\xB7"
+#define RUNTIMEC_HOST_MEMBER_SEPARATOR_LENGTH 2U
 
 /* 与 shm 后端的 key 上限一致：后端拒绝长度 >= 1024 的 key（见 kvspace-c 的
  * kvspace.c 中该检查），所以这里取同一上限，不发明第二套。 */
@@ -1082,7 +1089,7 @@ static runtimec_status_t runtimec_host_vthread_pc(
  */
 static runtimec_status_t runtimec_host_build_pointer_wire(
     binrwir_execution_frame_t *frame,
-    const binrwir_instruction_view_t *instruction, const char *target,
+    const binrwir_argument_t *declared_source, const char *target,
     uint8_t **output_wire, uint32_t *output_wire_size,
     runtimec_error_t *error) {
     runtimec_string_view_t declared;
@@ -1095,8 +1102,16 @@ static runtimec_status_t runtimec_host_build_pointer_wire(
      * frame_path 与符号名，不做编码转换）——「值默认 utf32」只适用于值，
      * 指针 body 是目标 key 路径，永远 utf8（规范 `26-字符串编码` §一）。
      */
-    status = vmbin_value_access_langtype(
-        frame, &instruction->read_arguments.data[0], &declared, error);
+    /*
+     * **类型从哪一个参数取，由调用方给**：
+     *   `key·abs`      取**读参**——`&x` 的指针类型来自 x 自己；
+     *   `key·resolveptr` 取**写参**——位置是新造的，target kindexpr 只能由
+     *                    写槽声明给出（与 `newreshape` 的
+     *                    `container_replace_langtype` 同一条规矩）。
+     * 两处不能各写一份取类型的代码：剥 `*`/`@` 的规则必须只有一处。
+     */
+    status = vmbin_value_access_langtype(frame, declared_source, &declared,
+                                         error);
     if (status != RUNTIMEC_STATUS_SUCCESS || declared.size == 0U) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -1149,9 +1164,9 @@ static runtimec_status_t runtimec_host_address_of_wire(
                                   RUNTIMEC_HOST_DIAG_KEY_UNRESOLVED,
                                   source_program_counter);
     }
-    status = runtimec_host_build_pointer_wire(frame, instruction, target,
-                                              output_wire, output_wire_size,
-                                              error);
+    status = runtimec_host_build_pointer_wire(
+        frame, &instruction->read_arguments.data[0], target, output_wire,
+        output_wire_size, error);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         return RUNTIMEC_STATUS_SUCCESS;
     }
@@ -1200,6 +1215,315 @@ static runtimec_status_t runtimec_host_key_address_of(
         free(wire);
         return created;
     }
+}
+
+/* 定义在下方（`key·tostr` 一节）：键文本失败的统一出口，两个算子共用。 */
+static runtimec_status_t runtimec_host_key_tostr_fail(
+    binrwir_execution_exit_t *output_exit, runtimec_status_t status,
+    int64_t diagnostic, size_t required_length,
+    uint32_t source_program_counter);
+
+/*
+ * `kvspace/key·resolveptr(base, keyvalue) -> Ptr`：由 base 与运行期键值算出目标位置。
+ *
+ * spec `05-runtime语义/12-动态键` §二/§3.3。与 `key·abs` 并列：`abs` 取**已有**位置
+ * （`&x` 的快捷形式），`resolveptr` 由 base + 键值**拼出**新位置。两者产出都是 Ptr
+ * （langtype 以 `*` 开头，body = 目标绝对 key 路径），读写都只能再走显式 `*`。
+ *
+ * **不判目标是否存在**：位置不是值。C 的 `&arr[i]` 对未初始化元素也合法；存在性在
+ * 解引用那一步判。提前判会让 `v -> base·*k` 的首次写永远不成立（spec §一）。
+ */
+
+/*
+ * `kvspace/key·resolveptr(base, keyvalue) -> Ptr`：base + 运行期键值 → 目标位置。
+ *
+ * spec `05-runtime语义/12-动态键` §二/§3.3。与 `key·abs` 并列：`abs` 取**已有**
+ * 位置，`resolveptr` 由 base + 键值**拼出**新位置。两者产出同为 Ptr。
+ *
+ * **不判目标是否存在**：位置不是值（C 的 `&arr[i]` 对未初始化元素也合法）。
+ *
+ * 拆成四个小函数，每个只答一件事——合起来 232 行会过不了
+ * `check_handler_size` 的 30 行上限，也难以单独审查：
+ *   `_base_path`   base 四态 → 父路径
+ *   `_text`        键值 → 键文本（`member_key_text` 的唯一入口）
+ *   `_join`        父路径 + `·` + 键文本
+ *   `_write`       造 Ptr wire 并写进写槽
+ */
+
+/// 字符值转 utf8 路径（`char/utf32` / `char/ascii` 需转码；`char/utf8` 原样）。
+///
+/// **路径文本永远 utf8**，而 value 侧默认 utf32（`26-字符串编码` §一）——
+/// 不转码就按 utf32 的 body 判首字节，绝对路径 `/…` 会被判成相对。
+/// 编码判定走 `contract/langtype` 的 `base` 字段，不用 `form` 也不用前缀比较：
+/// `[7]char/utf32` 的 form 是 ARRAY、`char_encoding` 不自填（实测 enc=0）。
+static bool runtimec_host_path_to_utf8(runtimec_langtype_t parsed,
+                                       vmbin_value_location_t value,
+                                       char *output, size_t capacity,
+                                       size_t *output_length) {
+    const bool is_utf32 = parsed.base.size >= 10U &&
+                          memcmp(parsed.base.data, "char/utf32", 10U) == 0;
+    const bool is_ascii = parsed.base.size >= 10U &&
+                          memcmp(parsed.base.data, "char/ascii", 10U) == 0;
+
+    *output_length = 0U;
+    if (is_utf32) {
+        return runtimec_char_utf32_to_utf8(value.read_bytes, value.size, output,
+                                           capacity, output_length);
+    }
+    if (is_ascii) {
+        return runtimec_char_ascii_to_utf8(value.read_bytes, value.size, output,
+                                           capacity, output_length);
+    }
+    if (value.size >= capacity) {
+        return false;
+    }
+    if (value.size != 0U) {
+        memcpy(output, value.read_bytes, value.size);
+    }
+    *output_length = value.size;
+    return true;
+}
+
+/// base 的声明类型是不是字符值。判据看 **`base` 基种类**（剥掉形状段后的那一项）。
+static bool runtimec_host_base_is_character(runtimec_string_view_t langtype) {
+    runtimec_langtype_t parsed;
+
+    if (runtimec_langtype_parse(langtype, &parsed) != RUNTIMEC_STATUS_SUCCESS) {
+        return false;
+    }
+    return parsed.base.size >= (sizeof("char/") - 1U) &&
+           memcmp(parsed.base.data, "char/", sizeof("char/") - 1U) == 0;
+}
+
+/// base 的四态之一：把 base 解析成**父路径**文本。命中即止、顺序不可换。
+static runtimec_status_t runtimec_host_resolveptr_base_path(
+    binrwir_execution_frame_t *frame, const binrwir_argument_t *base,
+    char *base_path, size_t capacity, size_t *output_length,
+    binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
+    vmbin_value_location_t value;
+    runtimec_string_view_t declared;
+    runtimec_error_t error;
+
+    runtimec_error_reset(&error);
+    if (vmbin_value_access_locate_body(frame, base, &value, &error) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  RUNTIMEC_HOST_DIAG_OPERAND_INVALID,
+                                  source_program_counter);
+    }
+    if (vmbin_value_access_langtype(frame, base, &declared, &error) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        declared = runtimec_string_view_make(NULL, 0U);
+    }
+    /*
+     * ① Ptr：取 **target 路径**（body 文本），不是 Ptr 槽自己的 key。
+     *    这正是 `*p` 的语义；`key·abs(p)` 给的是 p 这个槽的地址，两者不能混。
+     * ②-a structref：**值即路径**，body 就是目标 key。
+     * ③ 字符串值：值必须是绝对路径，且要先转 utf8。
+     * ④ None：取物理路径。
+     * ②-b 其它容器：物理路径 = 该操作数自己的绝对 key（与 `key·abs` 同一个函数）。
+     */
+    if (declared.size != 0U && declared.data[0] == '*') {
+        *output_length = value.size;
+        if (*output_length >= capacity) {
+            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                      VMBIN_HANDLER_CALL_DIAG_KEY_TOO_LONG,
+                                      source_program_counter);
+        }
+        if (*output_length != 0U) {
+            memcpy(base_path, value.read_bytes, *output_length);
+        }
+    } else if (vmbin_value_access_langtype_is_structref(declared)) {
+        *output_length = value.size;
+        if (*output_length >= capacity) {
+            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                      VMBIN_HANDLER_CALL_DIAG_KEY_TOO_LONG,
+                                      source_program_counter);
+        }
+        if (*output_length != 0U) {
+            memcpy(base_path, value.read_bytes, *output_length);
+        }
+    } else if (runtimec_host_base_is_character(declared)) {
+        runtimec_langtype_t parsed;
+
+        if (runtimec_langtype_parse(declared, &parsed) !=
+                RUNTIMEC_STATUS_SUCCESS ||
+            !runtimec_host_path_to_utf8(parsed, value, base_path, capacity,
+                                        output_length)) {
+            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                      VMBIN_HANDLER_CALL_DIAG_MALFORMED_BODY,
+                                      source_program_counter);
+        }
+        /* 不退回槽 key：字符串的语义就是「值即路径」。 */
+        if (*output_length == 0U || base_path[0] != '/') {
+            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                      VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                                      source_program_counter);
+        }
+    } else if (vmbin_value_access_langtype_is_container(declared) &&
+               value.size != 0U && value.read_bytes != NULL &&
+               value.read_bytes[0] == '/') {
+        /*
+         * ── **容器 base：值即位置** ────────────────────────────────────────
+         *
+         * spec `15-成员访问.kv`：「base 的值本身是路径时，成员键沿该路径展开」。
+         * map 容器（`'[int64]'int64`）正属此类：它的值就是「容器在哪」。
+         *
+         * 走到这一支的典型形态是**容器别名**：`a -> b` 之后 `b` 的 body 存的是
+         * `a` 的绝对路径（见 `interpreter.c` 的引用分支）。`b·*k` 必须落在
+         * `a` 的子键上；拿 `b` 的物理 key 拼会得到 `<帧>/b·k`——一个从不存在的
+         * 位置（`binary_search` 的 `_7·7` 就是这么来的）。
+         *
+         * **两条判据缺一不可**：类型是容器（`is_container`，与值访问层同一个
+         * 判据），且 body 非空并以 `/` 开头（真的是一条绝对路径）。缺第二条时
+         * 普通空容器（`h:'[int64]'int64 = {}`，body 为空）会误取——那是
+         * `k_nucleotide` 的形态，必须继续走「取自己的 key」。
+         */
+        *output_length = value.size;
+        if (*output_length >= capacity) {
+            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                      VMBIN_HANDLER_CALL_DIAG_KEY_TOO_LONG,
+                                      source_program_counter);
+        }
+        memcpy(base_path, value.read_bytes, *output_length);
+    } else {
+        if (vmbin_value_access_argument_key(frame, base, base_path, capacity,
+                                            &error) != RUNTIMEC_STATUS_SUCCESS) {
+            return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                      VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                                      source_program_counter);
+        }
+        *output_length = strlen(base_path);
+    }
+    base_path[*output_length] = '\0';
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/// 键值 → 键文本。逐字铁律的唯一实现是 `member_key_text`，这里只做取参。
+static runtimec_status_t runtimec_host_resolveptr_key_text(
+    binrwir_execution_frame_t *frame, const binrwir_argument_t *key,
+    char *key_text, size_t capacity, size_t *output_length,
+    binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
+    runtimec_string_view_t langtype;
+    vmbin_value_location_t value;
+    runtimec_error_t error;
+    runtimec_status_t status;
+
+    runtimec_error_reset(&error);
+    status = vmbin_value_access_langtype(frame, key, &langtype, &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS || langtype.size == 0U) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_UNSUPPORTED,
+                                  VMBIN_HANDLER_CALL_DIAG_UNSUPPORTED_LANGTYPE,
+                                  source_program_counter);
+    }
+    status = vmbin_value_access_locate_body(frame, key, &value, &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(output_exit, status,
+                                  RUNTIMEC_HOST_DIAG_OPERAND_INVALID,
+                                  source_program_counter);
+    }
+    status = runtimec_member_key_text(
+        langtype, runtimec_bytes_view_make(value.read_bytes, value.size),
+        key_text, capacity, output_length, &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_key_tostr_fail(output_exit, status, error.code,
+                                            *output_length,
+                                            source_program_counter);
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/// `父路径` + `·` + `键文本`。分隔符只有一处定义（`RUNTIMEC_HOST_MEMBER_SEPARATOR`）。
+static runtimec_status_t runtimec_host_resolveptr_join(
+    const char *base_path, size_t base_length, const char *key_text,
+    size_t key_length, char *target, size_t capacity,
+    binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
+    if (base_length + RUNTIMEC_HOST_MEMBER_SEPARATOR_LENGTH + key_length + 1U >
+        capacity) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  VMBIN_HANDLER_CALL_DIAG_KEY_TOO_LONG,
+                                  source_program_counter);
+    }
+    memcpy(target, base_path, base_length);
+    memcpy(target + base_length, RUNTIMEC_HOST_MEMBER_SEPARATOR,
+           RUNTIMEC_HOST_MEMBER_SEPARATOR_LENGTH);
+    memcpy(target + base_length + RUNTIMEC_HOST_MEMBER_SEPARATOR_LENGTH,
+           key_text, key_length);
+    target[base_length + RUNTIMEC_HOST_MEMBER_SEPARATOR_LENGTH + key_length] =
+        '\0';
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/// 造 Ptr wire 并写进写槽（`resolveptr` 的收尾）。
+///
+/// 类型取**写参**声明：新位置没有读参类型可依（与 `key·abs` 取读参不同）。
+static runtimec_status_t runtimec_host_resolveptr_write(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, const char *target,
+    binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
+    uint8_t *wire = NULL;
+    uint32_t wire_size = 0U;
+    runtimec_error_t error;
+    runtimec_status_t status;
+
+    runtimec_error_reset(&error);
+    status = runtimec_host_build_pointer_wire(
+        frame, &instruction->write_arguments.data[0], target, &wire,
+        &wire_size, &error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return runtimec_host_fail(
+            output_exit,
+            status == RUNTIMEC_STATUS_ERROR ? RUNTIMEC_STATUS_ERROR
+                                            : RUNTIMEC_STATUS_INVALID,
+            status == RUNTIMEC_STATUS_ERROR
+                ? RUNTIMEC_HOST_DIAG_BACKEND_FAILED
+                : VMBIN_HANDLER_CALL_DIAG_UNSUPPORTED_LANGTYPE,
+            source_program_counter);
+    }
+    status = runtimec_host_write_pointer_wire(frame, instruction, wire,
+                                              (size_t)wire_size, output_exit);
+    free(wire);
+    return status;
+}
+
+static runtimec_status_t runtimec_host_key_resolveptr(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    const uint32_t source_program_counter =
+        instruction->source_logical_program_counter;
+    char base_path[RUNTIMEC_HOST_KEY_CAPACITY];
+    char key_text[VMBIN_HANDLER_KEY_TEXT_MAXIMUM + 1U];
+    char target[RUNTIMEC_HOST_KEY_CAPACITY];
+    runtimec_status_t status;
+    size_t base_length = 0U;
+    size_t key_length = 0U;
+
+    *output_exit = (binrwir_execution_exit_t){0};
+    if (instruction->read_arguments.count != 2U ||
+        instruction->write_arguments.count != 1U) {
+        return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_INVALID,
+                                  VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY,
+                                  source_program_counter);
+    }
+    status = runtimec_host_resolveptr_base_path(
+        frame, &instruction->read_arguments.data[0], base_path,
+        sizeof(base_path), &base_length, output_exit, source_program_counter);
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = runtimec_host_resolveptr_key_text(
+            frame, &instruction->read_arguments.data[1], key_text,
+            sizeof(key_text), &key_length, output_exit, source_program_counter);
+    }
+    if (status == RUNTIMEC_STATUS_SUCCESS) {
+        status = runtimec_host_resolveptr_join(
+            base_path, base_length, key_text, key_length, target,
+            sizeof(target), output_exit, source_program_counter);
+    }
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    return runtimec_host_resolveptr_write(frame, instruction, target,
+                                          output_exit, source_program_counter);
 }
 
 /*
@@ -1373,6 +1697,10 @@ static const binrwir_registry_entry_t runtimec_host_entry_table[] = {
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KEY_TOSTRING,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
      .handler = runtimec_host_key_tostr},
+    /* `key·resolveptr`：由 base + 键值算位置。不读写目标值，故不是 EFFECT。 */
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KEY_RESOLVE_POINTER,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = runtimec_host_key_resolveptr},
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_WATCH,
      .flags = BINRWIR_REGISTRY_FLAG_MAY_YIELD,
      .handler = runtimec_host_kvspace_watch},

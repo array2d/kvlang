@@ -1527,12 +1527,18 @@ static runtimec_status_t scalar_pointer_equality(
                            "scalar handler: ptreq expects two reads and one "
                            "write");
     }
-    status = vmbin_value_access_form(
+    /*
+     * **用不跟跳的取形入口**：`ptreq` 比较的是「两个指针是否指向同一目标」
+     * （matrix:66），要指针值本身的形态。
+     *
+     * 跟跳之后：① `h·*k != None` 判存在时，目标本就不存在，跟跳直接失败；
+     * ② 即使跳成功，拿到的是目标的形态而非指针的形态。
+     */
+    status = vmbin_value_access_form_unfollowed(
         frame, &instruction->read_arguments.data[0], &left_form, error);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = vmbin_value_access_form(
-            frame, &instruction->read_arguments.data[1], &right_form,
-            error);
+        status = vmbin_value_access_form_unfollowed(
+            frame, &instruction->read_arguments.data[1], &right_form, error);
     }
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
@@ -1663,6 +1669,124 @@ static runtimec_status_t scalar_handle_debugger(
 }
 
 /* 静态存储，进程级生命周期；调用方不得释放。 */
+/*
+ * `nonnull`（0x01A4）/ `nonnull·not`（0x01A5）—— 存在性判定。
+ *
+ * behavior-decision `none-criterion`（spec `03-类型系统/03-种类-代码与特殊值.kv`
+ * 「None 判据」）：`is_none(v)` 当且仅当 **body 为空 + wire 无 langtype + key 不是
+ * 目录**。所以 `nonnull(x)` 回答「x 这个位置有值吗」，不是「x 是不是零」。
+ *
+ * ── 与「零值」的关键区分（必须写进测试，不许含糊） ────────────────────
+ *
+ * 已物化的零值 local **存在**：`x:int64=0` 的 wire 带 langtype `int64`，
+ * `is_none` 第 2 条不成立 ⇒ `x == None` 为 **false**。
+ * 声明未写的局部同样由帧准备物化零值 ⇒ 也是 false。kvlang 的局部是**存储位置**，
+ * 「未写」不等于「不存在」——这与 C 的未初始化内存是两回事。
+ *
+ * ── 缺失成员：locate 失败即视为「无值」，不许把 0x4403 抛出去 ──────────
+ *
+ * `m·*k != None` 的 `m·*k` 可能是**从没写过的成员键**。普通读路径此时报
+ * `UNBOUND_SLOT`（`0x4403`）；但存在性判定问的正是「有没有」，把它当错误抛出去
+ * 等于让这条语义在最常见的场景下不可用。所以本算子自己接住 locate 失败：
+ * 判为「无值」⇒ `nonnull` false / `nonnull·not` true。
+ *
+ * **只影响这两个算子**：普通读缺失成员仍然失败，语义不变。
+ *
+ * ── 判据走值访问层，不自己扫字节 ──────────────────────────────────────
+ *
+ * 「是不是 None」用 `vmbin_value_access_form`（与 `ptreq` 同一入口）：它按
+ * ref + body 判定 Form，本实现不写偏移算术、不从 body 形状猜类型。
+ * 「有没有 langtype」由 `_langtype` 取——取不到就是无记录。两条同时成立即 None。
+ */
+static runtimec_status_t scalar_nonexistence(
+    binrwir_execution_frame_t *frame,
+    const binrwir_instruction_view_t *instruction, int invert,
+    runtimec_error_t *error) {
+    const binrwir_argument_t *operand;
+    runtimec_string_view_t langtype;
+    vmbin_value_location_t location;
+    uint8_t form = VMBIN_VALUE_ACCESS_FORM_VALUE;
+    uint8_t result;
+    runtimec_status_t status;
+
+    if (instruction->read_arguments.count != 1U ||
+        instruction->write_arguments.count != 1U) {
+        return scalar_fail(error, 35,
+                           "scalar handler: nonnull expects one read and one "
+                           "write");
+    }
+    operand = &instruction->read_arguments.data[0];
+    /*
+     * **缺失位置先接住**：locate 失败在这里不是错误，是「没有值」这个答案。
+     * 这是本算子与所有其它算子唯一不同的一处，且只对它成立。
+     */
+    status = vmbin_value_access_locate_body(frame, operand, &location, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        {
+            uint8_t missing = invert != 0 ? 1U : 0U;
+
+            return vmbin_value_access_write_body(
+                frame, &instruction->write_arguments.data[0],
+                runtimec_bytes_view_make(&missing, 1U), error);
+        }
+    }
+    /* 引用槽有值时也是「存在」——ptr 指向某处与「没有值」是两件事。 */
+    status = vmbin_value_access_form(frame, operand, &form, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return status;
+    }
+    if (form == VMBIN_VALUE_ACCESS_FORM_EXTENSION) {
+        /* @ext 的运行时语义本期不实现（spec 03-类型系统/03「扩展定位」），
+         * 存在性判定同样无从兑现——明确拒绝，不猜。 */
+        return scalar_fail(error, 36,
+                           "scalar handler: nonnull on @ext is undefined "
+                           "(extension semantics are not implemented)");
+    }
+    /*
+     * **取不到类型 ≠ 值是 None。**
+     *
+     * 这里踩过一次：`eq0 = x == None` 的 `eq0` 是**未声明类型的局部**，
+     * `_langtype` 对它失败（没有声明），我原先把这条失败当成「无值」直接写
+     * false/true——于是任何对无类型局部的判空都答「是 None」，而错误现场被
+     * 折成一条与成因无关的 `0x4A03`。
+     *
+     * 判据分开：**取不到类型是「答不出」**，必须具名失败；「有类型但 body 空」
+     * 才是 None（`is_none` 的三条里第 2 条问的是「wire 有没有 langtype 记录」，
+     * 不是「取类型这个操作成不成功」）。
+     */
+    status = vmbin_value_access_langtype(frame, operand, &langtype, error);
+    if (status != RUNTIMEC_STATUS_SUCCESS) {
+        return scalar_fail(error, 37,
+                           "scalar handler: nonnull cannot tell whether the "
+                           "operand is None — its declared type is unavailable");
+    }
+    /*
+     * `is_none` 三条：
+     *   body 为空（location.size == 0）
+     *   且 wire 无 langtype 记录（langtype.size == 0）
+     *   且 key 不是目录（这一条由「能作为值读到」隐含：目录不是值位置）
+     */
+    result = (location.size == 0U && langtype.size == 0U) ? 0U : 1U;
+    if (invert != 0) {
+        result = result != 0U ? 0U : 1U;
+    }
+    return vmbin_value_access_write_body(
+        frame, &instruction->write_arguments.data[0],
+        runtimec_bytes_view_make(&result, 1U), error);
+}
+
+/*
+ * 注册用的薄封装：主体是 `scalar_nonexistence`，注册表要的是函数地址。
+ *
+ * 用本文件已有的 `SCALAR_FORWARDING_HANDLER_WITH_ARGUMENT`（`ptreq`/`ptreq·not`
+ * 同一族就是这个形状），而不是手写两个只差 `invert` 常量的壳——那会让
+ * 「转发」这条规则出现第二次抄写。
+ */
+SCALAR_FORWARDING_HANDLER_WITH_ARGUMENT(scalar_handle_nonnull,
+                                        scalar_nonexistence, 0)
+SCALAR_FORWARDING_HANDLER_WITH_ARGUMENT(scalar_handle_nonnull_not,
+                                        scalar_nonexistence, 1)
+
 static const binrwir_registry_entry_t scalar_entries[] = {
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_MAX,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
@@ -1747,6 +1871,13 @@ static const binrwir_registry_entry_t scalar_entries[] = {
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_BOOLEAN_NOT_EQUAL,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
      .handler = scalar_handle_bool_neq},
+    /* `nonnull` / `nonnull·not`：存在性判定，一元 → bool。 */
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_NONNULL,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = scalar_handle_nonnull},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_NONNULL_NOT,
+     .flags = BINRWIR_REGISTRY_FLAG_NONE,
+     .handler = scalar_handle_nonnull_not},
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_POINTER_EQUAL,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
      .handler = scalar_handle_ptreq},

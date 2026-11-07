@@ -10,10 +10,13 @@
 
 #include "interpreter.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "contract/error.h"
 #include "core_operations.h"
+#include "frame_slot.h"
+#include "frame_target_key.h"
 #include "value_access.h"
 
 #define VMBIN_SCRATCH_INITIAL_CAPACITY 32U
@@ -77,12 +80,47 @@ static runtimec_status_t vmbin_interpreter_fail(
  * 判据：**同一份数据不许有两种解释**。细节已经在 error 里，抄第二份是冗余，
  * 而冗余的代价是命名空间被毁。
  */
+/*
+ * 失败出口：**已有内层诊断时保留成因，不许用兜底码盖掉**。
+ *
+ * 判据：诊断的「成因」由产生它的那一层负责，兜底只在没人负责时使用。
+ * 反例（实测）：`h·*k -> p:int64` 键不存在时，值访问层已经写了
+ *   `0x4406 None cannot be stored in a declared slot: …`
+ * 而本层随后用 `0x4107 INSTRUCTION_FAILED` 覆盖，`kvlangrun` 只打出兜底码——
+ * 人看到「指令执行失败」又要从头查一轮。k_nucleotide 在这上面绕过三轮。
+ *
+ * **「已有」按内容判，不按指针非空**：`runtimec_error_t` 是值结构，
+ * `detail_code == 0 && message.size == 0` 才是「没人写过」。
+ *
+ * **状态码照常传播**：保留消息不等于把失败当成功，`status` 原样返回。
+ *
+ * **不需要额外清空**：`vmbin_interpreter_step` 每步开头都会 reset
+ * `execution->error`，所以这里读到的一定是**本条指令**的诊断，不会捡到上一条
+ * 的陈旧值。
+ */
 static runtimec_status_t vmbin_interpreter_fail_with_error(
     vmbin_execution_t *execution,
     const binrwir_instruction_view_t *instruction, runtimec_status_t status,
     uint32_t default_detail_code, binrwir_execution_exit_t *output_exit) {
-    return vmbin_interpreter_fail(execution, instruction, status,
-                                  default_detail_code, output_exit);
+    const runtimec_error_t *inner = &execution->error;
+    const bool has_inner_diagnostic =
+        inner->code != 0 || inner->message.size != 0U;
+
+    if (!has_inner_diagnostic) {
+        return vmbin_interpreter_fail(execution, instruction, status,
+                                      default_detail_code, output_exit);
+    }
+    /*
+     * 保留成因：出口照常是 ERROR、`status` 照常是真实失败状态，
+     * 但 `detail_code` 用**内层那一位**——它才回答「为什么失败」。
+     */
+    vmbin_interpreter_error_exit(
+        output_exit, status, (uint32_t)(inner->code < 0 ? 0 : inner->code),
+        instruction->source_logical_program_counter);
+    /* 内层消息一并带出去：`kvlangrun` 与 runner 打印时优先用它。 */
+    output_exit->resume_logical_program_counter =
+        instruction->source_logical_program_counter;
+    return status;
 }
 
 /* 借出一个参数项的值体位置；读写信都从这里拿地址，不复制。 */
@@ -100,8 +138,14 @@ static runtimec_status_t vmbin_interpreter_fail_with_error(
 static runtimec_status_t vmbin_interpreter_locate(
     vmbin_execution_t *execution, const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location) {
-    return vmbin_value_access_locate_body(execution->frame, argument,
-                                          output_location, &execution->error);
+    /*
+     * **读语义**：这里只服务「把读参的值交给算术/跳转/copy 源」，
+     * 解引用到不存在的目标应得 None 而不是失败
+     * （`05-runtime语义/12-动态键.kv` §四）。
+     */
+    return vmbin_value_access_locate_body_read(execution->frame, argument,
+                                               output_location,
+                                               &execution->error);
 }
 
 /* 1/2/4/8 字节整数按主机字节序解成无符号值；其它宽度不是本阶段的值形状。 */
@@ -188,6 +232,83 @@ static void vmbin_interpreter_advance(vmbin_execution_t *execution,
     }
 }
 
+/*
+ * `copy` 该不该建立**结构引用别名**（而不是复制成员）。
+ *
+ * 三条判据都要成立，缺一退回字节拷贝：
+ *   1. 写槽声明类型是 structref；
+ *   2. 源声明类型是 structref；
+ *   3. 源的有效长度 == 0（它自己就是容器头）。
+ *
+ * 第 3 条不能省：源若已经是「持路径的引用值」（body 非空），字节拷贝本身就对，
+ * 再走引用分支会把路径当成容器 key 又拼一层。
+ */
+static bool vmbin_interpreter_copy_binds_reference(
+    vmbin_execution_t *execution,
+    const binrwir_instruction_view_t *instruction,
+    const binrwir_argument_t *read_argument) {
+    runtimec_string_view_t source_langtype = runtimec_string_view_make(NULL, 0U);
+    runtimec_string_view_t target_langtype = runtimec_string_view_make(NULL, 0U);
+    vmbin_value_location_t source_location;
+
+    if (vmbin_value_access_langtype(execution->frame, read_argument,
+                                    &source_langtype, NULL) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        vmbin_value_access_langtype(
+            execution->frame, &instruction->write_arguments.data[0],
+            &target_langtype, NULL) != RUNTIMEC_STATUS_SUCCESS) {
+        return false;
+    }
+    /*
+     * ── 判据：**目标**要引用，且**源**是一个容器 ────────────────────────
+     *
+     * 源的 `*` 前缀不能当判据：`(*cur) -> _5` 的源符号是 `*Node`，而 `locate`
+     * 已经跟了一跳、`source_location` 拿到的是**容器本身的空 body**——语义上
+     * 它此刻就是结构引用。拿 `*` 前缀否掉它，会让「先解引用再存局部」这条
+     * 完全走不到引用分支（实测第一版就是这样静默不生效）。
+     *
+     * **标的判据用 langtype，不用「body 为空」**：空 body 也是合法标量值的形态
+     * （空串），拿长度判会把空串误伤成容器。
+     *
+     * 两处都判 structref 会漏掉 map：`(*arr)·*mid` 里 `arr` 是
+     * `'[int64]'int64`（FORM_MAPPING），目标是同名 map——那条链路曾把容器的
+     * 空 body 当值拷贝过去，产物是一个「body 空、类型是 map」的副本，
+     * 随后 `resolveptr` 取它自己的物理路径，拼出 `_7·k`（从不存在的 key）。
+     * 所以源侧改判**容器**（map ∪ structref）。
+     */
+    if (!vmbin_value_access_langtype_is_container(target_langtype)) {
+        return false;
+    }
+    /*
+     * **源侧也要是容器**，否则不成立别名。
+     *
+     * 指针源（`*T`）不能走这支：它的值是「指向容器的 key」，跟目标要的「容器
+     * 引用」不是同一件事。`(*arr) -> _7` 的 `arr` 是 `*'[int64]'int64`，
+     * 若这里放行，`copy` 会把**指针的 body（目标 key 文本）**当成别名写进
+     * `_7`，而 `_7` 的声明是容器——下游按容器解析它就会拼出错的 key。
+     */
+    if (!vmbin_value_access_langtype_is_container(source_langtype)) {
+        return false;
+    }
+    /*
+     * 用 `locate`（**会跟 dereference**）而不是 `locate_body`：`(*cur) -> _5`
+     * 的读参带 `dereference = 1`，`_body` 版本不跟跳，拿到的是指针本身；
+     * 这里要判的是「跟跳之后源是不是容器」，所以必须是跟跳后的位置。
+     */
+    {
+        /* 这里的 error 只用来吞掉失败细节：判据是布尔，不是诊断通道。 */
+        runtimec_error_t ignored_error;
+
+        runtimec_error_reset(&ignored_error);
+        if (vmbin_value_access_locate(execution->frame, read_argument,
+                                      &source_location, &ignored_error) !=
+            RUNTIMEC_STATUS_SUCCESS) {
+            return false;
+        }
+    }
+    return !source_location.is_whole_wire && source_location.size == 0U;
+}
+
 static runtimec_status_t vmbin_interpreter_execute_copy(
     vmbin_execution_t *execution,
     const binrwir_instruction_view_t *instruction, uint32_t identifier,
@@ -208,6 +329,191 @@ static runtimec_status_t vmbin_interpreter_execute_copy(
         return vmbin_interpreter_fail_with_error(
             execution, instruction, status, VMBIN_INTERPRETER_DIAG_VALUE_ACCESS,
             output_exit);
+    }
+    /*
+     * ── structref 拷贝：建立**别名**，不复制成员 ────────────────────────────
+     *
+     * 判据三条同时成立才走引用分支，缺一退回普通字节拷贝（不猜）：
+     *   1. **写槽**声明类型是 structref（`/lib/<Name>`）——写进指针槽（`*T`）、
+     *      标量、数组都不是这条语义；
+     *   2. **源**的声明类型也是 structref；
+     *   3. 源的**有效长度 == 0**，即它本身是一个容器（`17-struct.kv`：实例是
+     *      空 body 的容器头）。源若已经是「持路径的引用值」，body 非空，走下面的
+     *      字节拷贝即可（长度相等，语义也正确）。
+     *
+     * 写入的内容是**源容器所在的 key 路径**，它从哪来：
+     *   - 读参带 `dereference` ⇒ `source.read_bytes` 是解引用前的指针值文本，
+     *     就是目标容器 key；但 `locate` 已经跟了一跳，所以这里重新取指针值；
+     *   - 否则用 `vmbin_value_access_argument_key`（LOCAL → 帧槽、STATIC → 绝对路径）。
+     *
+     * **整值写**，不是定宽 memcpy：路径长度与目标槽旧 body 长度基本不等。
+     */
+    if (vmbin_interpreter_copy_binds_reference(
+            execution, instruction,
+            &instruction->read_arguments.data[0])) {
+        char key_buffer[512];
+        const binrwir_argument_t *read_argument =
+            &instruction->read_arguments.data[0];
+        runtimec_status_t reference_status;
+
+        if (read_argument->dereference != 0U) {
+            /*
+             * 解引用读参：指针值本身就是目标 key。借 `locate` 的**不跟跳**版本
+             * 取它——这里要的是指针里的文本，不是它指向的值。
+             */
+            binrwir_argument_t plain = *read_argument;
+            vmbin_value_location_t pointer_value;
+
+            plain.dereference = 0U;
+            reference_status = vmbin_value_access_locate_body(
+                execution->frame, &plain, &pointer_value, &execution->error);
+            if (reference_status == RUNTIMEC_STATUS_SUCCESS &&
+                pointer_value.read_bytes != NULL && pointer_value.size != 0U &&
+                pointer_value.size + 1U <= sizeof(key_buffer)) {
+                memcpy(key_buffer, pointer_value.read_bytes,
+                       pointer_value.size);
+                key_buffer[pointer_value.size] = '\0';
+                reference_status = RUNTIMEC_STATUS_SUCCESS;
+            } else if (reference_status == RUNTIMEC_STATUS_SUCCESS) {
+                reference_status = RUNTIMEC_STATUS_INVALID;
+            }
+        } else if (read_argument->reference_kind ==
+                   BINRWIR_REFERENCE_PARAMETER_READ) {
+            /*
+             * 形参源：它的路径是**调用方那个 key**，记在绑定表里
+             * （`binding->caller_key`）——本帧拼 `<frame>/<名>` 拼出来的是形参槽
+             * 自己的地址，不是容器所在的位置。
+             *
+             * 这就是 `(*arr)·*mid` 里 `(*arr)` 那一跳：`arr` 是
+             * `*'[int64]'int64` 形参，`locate` 跟跳后拿到调用方的容器（空 body），
+             * 要建别名就得知道**容器在哪**，而那个位置只有绑定表的 caller_key 有。
+             */
+            const binrwir_frame_binding_t *binding = NULL;
+            uint16_t binding_slot = BINRWIR_FRAME_BINDING_SLOT_NONE;
+
+            if (execution->frame->bindings == NULL ||
+                vmbin_frame_slot_of_argument(execution->frame->program,
+                                             read_argument,
+                                             &binding_slot) !=
+                    RUNTIMEC_STATUS_SUCCESS ||
+                binrwir_frame_bindings_get(
+                    execution->frame->bindings, binding_slot,
+                    execution->frame->snapshot_generation, &binding) !=
+                    RUNTIMEC_STATUS_SUCCESS) {
+                reference_status = RUNTIMEC_STATUS_UNSUPPORTED;
+            } else {
+                const runtimec_key_view_t key =
+                    binding->caller_key.size != 0U ? binding->caller_key
+                                                   : binding->slot_key;
+
+                if (key.size == 0U || key.size + 1U > sizeof(key_buffer)) {
+                    reference_status = RUNTIMEC_STATUS_INVALID;
+                } else {
+                    memcpy(key_buffer, key.data, key.size);
+                    key_buffer[key.size] = '\0';
+                    reference_status = RUNTIMEC_STATUS_SUCCESS;
+                }
+            }
+        } else {
+            reference_status = vmbin_value_access_argument_key(
+                execution->frame, read_argument, key_buffer,
+                sizeof(key_buffer), &execution->error);
+        }
+        if (reference_status != RUNTIMEC_STATUS_SUCCESS) {
+            return vmbin_interpreter_fail_with_error(
+                execution, instruction, reference_status,
+                VMBIN_INTERPRETER_DIAG_VALUE_ACCESS, output_exit);
+        }
+        status = vmbin_value_access_write_whole_value(
+            execution->frame, &instruction->write_arguments.data[0],
+            runtimec_bytes_view_make(key_buffer, strlen(key_buffer)),
+            &execution->error);
+        if (status != RUNTIMEC_STATUS_SUCCESS) {
+            return vmbin_interpreter_fail_with_error(
+                execution, instruction, status,
+                VMBIN_INTERPRETER_DIAG_VALUE_ACCESS, output_exit);
+        }
+        vmbin_interpreter_advance(execution, identifier);
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    /*
+     * ── `None` 写进**非引用**的声明槽：具名失败 ─────────────────────────────
+     *
+     * 判据由两个事实合成，缺一不可：
+     *
+     * 1. **源是 `None`**——共享谓词 `vmbin_value_location_is_none`（空 body ∧
+     *    无 langtype 记录 ∧ 非目录键），与编码期 `binrwir_literal_is_none_value`
+     *    同一组 wire 事实。
+     * 2. **写槽的声明类型不是引用**——spec `03-类型系统/16-ptr`：「空引用的形态是
+     *    `*T` + 空 body」，所以 `p:*int64 = None` 是**合法**的空引用，不是
+     *    「None 落进有值的位置」。只看第 1 条会把整类指针判空拒掉。
+     *
+     * 为什么不能用「目标槽宽度」这类代理指标：`None -> s:[]char/utf32` 与
+     * `"" -> s:[]char/utf32` 的 body 都是 0 字节，只有 langtype 记录分得开；
+     * 而「定宽非零宽」又会把合法的空引用一起误伤。
+     *
+     * **事实未知（UNKNOWN）不许当成「不是 None」**：那是静默走错分支的来源。
+     * 未知就具名失败，指出是这条路径没给出事实。
+     */
+    {
+        vmbin_value_location_t probe;
+
+        const vmbin_value_fact_t none_fact =
+            vmbin_value_access_locate_body_read(
+                execution->frame, &instruction->read_arguments.data[0],
+                &probe, &execution->error) == RUNTIMEC_STATUS_SUCCESS
+                ? vmbin_value_location_is_none(&probe)
+                : VMBIN_VALUE_FACT_UNKNOWN;
+
+        if (none_fact == VMBIN_VALUE_FACT_UNKNOWN) {
+            runtimec_error_set(
+                &execution->error, RUNTIMEC_STATUS_INVALID,
+                RUNTIMEC_ERROR_DOMAIN_CONTRACT,
+                (int64_t)VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
+                runtimec_string_view_from_c_string(
+                    "cannot tell whether the copied value is None: its wire "
+                    "facts are unavailable on this path"),
+                RUNTIMEC_PROGRAM_COUNTER_NONE);
+            return vmbin_interpreter_fail_with_error(
+                execution, instruction, RUNTIMEC_STATUS_INVALID,
+                VMBIN_INTERPRETER_DIAG_VALUE_ACCESS, output_exit);
+        }
+        if (none_fact == VMBIN_VALUE_FACT_YES) {
+            /*
+             * 第 2 条：写槽声明类型是引用（`*T` 或 `/lib/…` structref）⇒
+             * `None` 就是空引用，**允许写入**。判据取写参的声明 langtype。
+             */
+            runtimec_string_view_t target_langtype =
+                runtimec_string_view_make(NULL, 0U);
+            runtimec_error_t ignored;
+
+            runtimec_error_reset(&ignored);
+            const bool target_known =
+                vmbin_value_access_langtype(
+                    execution->frame, &instruction->write_arguments.data[0],
+                    &target_langtype, &ignored) == RUNTIMEC_STATUS_SUCCESS &&
+                runtimec_string_view_is_valid(target_langtype) &&
+                target_langtype.size != 0U;
+            const bool target_is_reference =
+                target_known &&
+                (target_langtype.data[0] == '*' ||
+                 vmbin_value_access_langtype_is_structref(target_langtype));
+
+            if (!target_is_reference) {
+                runtimec_error_set(
+                    &execution->error, RUNTIMEC_STATUS_ERROR,
+                    RUNTIMEC_ERROR_DOMAIN_CONTRACT,
+                    (int64_t)VMBIN_VALUE_ACCESS_DIAG_SIZE_MISMATCH,
+                    runtimec_string_view_from_c_string(
+                        "None cannot be stored in a declared slot: the value has "
+                        "an empty body and no langtype; check existence first "
+                        "(`base·*key != None`)"),
+                    RUNTIMEC_PROGRAM_COUNTER_NONE);
+                return vmbin_interpreter_fail_with_error(
+                    execution, instruction, RUNTIMEC_STATUS_ERROR,
+                    VMBIN_INTERPRETER_DIAG_VALUE_ACCESS, output_exit);
+            }
+        }
     }
     status = vmbin_value_access_write_body(
         execution->frame, &instruction->write_arguments.data[0],
