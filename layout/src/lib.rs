@@ -7,6 +7,7 @@ pub mod ast;
 pub mod builtin;
 pub mod capi;
 pub mod code;
+pub mod crash_resume;
 pub mod ffi;
 pub mod keytree;
 pub mod kvkind;

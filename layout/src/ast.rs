@@ -72,6 +72,12 @@ pub struct Param {
     /// `**T`（指向指针的指针）也合法，只存一个字符会丢掉多余的 `*`。
     pub by_ref: String,
     pub has_ty: bool, // 源码是否写了冒号（区分「空 kindexp」与「缺注解」）
+    /// 写参修饰符：该参数**在同一指令内既读又写**（`add(*acc, x) -> *acc`）。
+    ///
+    /// 只允许出现在 rwfunc 的**写参**上；rwir 的能力行不加这一列。语义由 layout 的
+    /// 深度校验兑现（见 `lower::check_inplace_parameters`）：仅仅「读过又写过」不算，
+    /// 必须有**同一条指令**同时把它列进 reads 与 writes。
+    pub inplace: bool,
 }
 
 impl Param {

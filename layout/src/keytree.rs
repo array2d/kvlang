@@ -12,6 +12,11 @@ pub const SEG_LABELS: &str = "labels"; // /lib/<func>/‥labels/<name> → irseq
 /// 判据只能来自源码——`v -> name` 没有注解，`v: T -> name` 有——而 kvspace 里
 /// 的槽只存类型、不存「这类型是谁给的」，所以由 layout 显式落一份。
 pub const SEG_INFERRED: &str = "inferred";
+/// `/lib/<func>/‥crash_resume` → `ALWAYS_RESUMABLE` / `CONDITIONALLY_RESUMABLE:<起点>`
+/// / `NOT_RESUMABLE:<原因>`。由 `layout/src/crash_resume.rs` 判定，随 layout 产物外送。
+///
+/// 只给 dump 与驱动读，**不参与代码生成**。
+pub const SEG_CRASH_RESUME: &str = "crash_resume";
 pub const SRC_EXT: &str = ".src"; // 函数源码文件后缀
 
 pub const LIB_ROOT: &str = "/lib";

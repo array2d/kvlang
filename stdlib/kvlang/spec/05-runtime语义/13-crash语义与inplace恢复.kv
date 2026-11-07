@@ -1,0 +1,94 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/runtime语义/crash语义与inplace恢复 {
+	r####"# crash 语义与 inplace 恢复
+
+本章规定：**一条 rwir 在执行途中崩溃后，能否从某个确定位置重放而语义不变**。
+它是崩溃恢复（`‥pc` 落盘、vthread 重跑）的前提，也是驱动判定「这个 vthread 支不支持
+crash/resume」的唯一依据。
+
+## inplace 指令
+
+**inplace 指令**：写参与读参**可以别名**的 rwir——即能力表的 `alias policy = DECLARED`
+（see `read-write-alias`）。这类指令执行到一半时，读侧看到的值**可能已经被它自己改过**。
+
+本轮 9 条（由 `rwir_catalog.def` 的 `ALIAS_DECLARED` 行给出，**不在本文件逐一维护**）：
+
+```
+copy  compactarray·fill  compactarray·set  scatterarray·set
+scatterarray·append  string·set  xv·set  map·new  struct·new
+```
+
+## 三态恢复判定
+
+**不得用布尔糊成两态**——三态对驱动的要求不同：
+
+| 态 | 判据 | 驱动怎么做 |
+|---|---|---|
+| `ALWAYS_RESUMABLE` | 函数内**没有** inplace 指令 | 崩在哪条就从哪条重放，与 stop/resume 等价 |
+| `CONDITIONALLY_RESUMABLE` | 有 inplace，但每一处都能**上溯**到一条非 inplace 的 rwir | 从该 inplace 指令的**重放起点**重跑 |
+| `NOT_RESUMABLE` | 上溯到达**已被修改的全局路径** | 该 vthread 不支持 crash/resume，必须整体重来或拒绝 |
+
+### 非 inplace：从指令本身重放
+
+崩溃点就是这条指令的 pc，重放它即可——它没有读过自己写的值，重跑一遍得到同一结果。
+
+### inplace：必须上溯到重放起点
+
+沿该指令**所有读参**上溯，找**最近一条写过该读参**的 rwir：
+
+- 那条是非 inplace ⇒ **它是重放起点**（`CONDITIONALLY_RESUMABLE`）；
+- 那条也是 inplace ⇒ 继续上溯。
+
+**只沿读参上溯，不沿写参**：写参是本条造成的影响，不是它的来源。
+
+## 上溯终止条件（必须显式）
+
+上溯只有四种终止，**没有隐含的第五种**：
+
+1. **命中一条非 inplace 指令** ⇒ 重放起点就是它；
+2. **到达函数入口**（没有更早的写者）⇒ 以函数入口为起点，整帧重放；
+3. **撞上已被修改的全局路径** ⇒ `NOT_RESUMABLE`；
+4. **成环且环内全是 inplace** ⇒ `NOT_RESUMABLE`（没有可锚定的起点）。
+
+### 自环不是「已修改的全局路径」
+
+`a = a + 1` 里 `a` 既是读参也是写参——这是**局部槽的自环**，不是全局路径：
+
+- 它**不触发第 3 条**，因为 `a` 不是绝对 key、也不跨帧可见；
+- 它要**记录循环边界**（上溯路径里出现重复下标即边界）；
+- 结论仍是「可上溯」：它的读参 `a` 由更早的非 inplace 写入（如 `0 -> a`）锚定。
+
+**判据是「这个 key 是不是全局可见」，不是「它有没有被写过」。**
+
+## 全局路径的判定：静态保守
+
+**不为数据 key 加版本号**。判定「可能已被修改」用**静态上溯**：
+
+> 只要某个绝对 key / 跨帧可见路径**出现在该函数的写集里**，就按「可能已被修改」处理。
+
+这是**保守过近似**：宁可多拒（判 `NOT_RESUMABLE`），不许假绿（判可恢复却已改）。
+
+运行期版本号只在将来要「精确恢复」时再议，本章不做。
+
+## 与执行格式的关系
+
+本判定**只依赖静态数据流**，不依赖运行期状态：读参集、写参集、inplace 标记三者都来自
+编译产物。因此它可以在 layout 期完成，**不需要执行一次**。
+
+实现：`layout/src/crash_resume.rs`（三态 + 上溯），`INPLACE_OPERATORS` 是数据，
+由 `rwir_catalog.def` 的 `ALIAS_DECLARED` 行生成，测试期校验一致性。
+
+## 锚例
+
+- `ALWAYS_RESUMABLE`：只含 `add`/`mul` 等非 inplace 算子的函数；
+- `CONDITIONALLY_RESUMABLE`：`add 1,2 -> a` 后 `compactarray·set(a, 0, 7)`——
+  上溯 `set` 的读参 `a`，最近写过它的是那条 `add`，非 inplace ⇒ 锚定它；
+- `NOT_RESUMABLE`：`add 1,2 -> /tmp/g` 后 `compactarray·set(/tmp/g, 0, 7)`——
+  上溯撞上「写集里有 `/tmp/g`」⇒ 拒；
+  **注意**：这条要求 inplace 指令的**读参本身是绝对 key**。今天 layout 不接受
+  `/tmp/g[i] = v` 写法，所以**语料里没有该态的自然实例**（实测 178 个函数：
+  `ALWAYS` 57 / `CONDITIONALLY` 121 / `NOT` 0）；该态由 `layout/src/crash_resume.rs`
+  的单元测试构造指令流覆盖。**「函数写过全局」不等于 NOT**——判据是读参。
+- **自环不算雷**：`add 0,0 -> a` 后 `xv·set(a, …)` 读写都是局部 `a` ⇒ 判可恢复。
+	"#### -> /lib/kvlang/spec/runtime语义/crash语义与inplace恢复
+}
