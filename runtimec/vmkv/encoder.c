@@ -497,10 +497,10 @@ static bool vmkv_encoder_strip_library_prefix(runtimec_string_view_t *name) {
 }
 
 static runtimec_status_t vmkv_encoder_register_symbol(
-    binrwir_program_builder_t *builder, runtimec_string_view_t name,
+    binrwir_binfunc_builder_t *builder, runtimec_string_view_t name,
     runtimec_string_view_t langtype, uint16_t *output_symbol_index,
     runtimec_program_counter_t logical_program_counter, runtimec_error_t *error) {
-    const runtimec_status_t status = binrwir_program_builder_add_symbol(
+    const runtimec_status_t status = binrwir_binfunc_builder_add_symbol(
         builder, name, langtype, output_symbol_index);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         return status;
@@ -516,7 +516,7 @@ static runtimec_status_t vmkv_encoder_register_symbol(
  * 路径文本同时登记进符号池：vmbin 阶段按 key 访问，slot 就是符号下标。
  */
 static runtimec_status_t vmkv_encode_static_argument_into(
-    const vmkv_encode_request_t *request, binrwir_program_builder_t *builder,
+    const vmkv_encode_request_t *request, binrwir_binfunc_builder_t *builder,
     const vmkv_rwir_argument_view_t *source_argument,
     uint32_t argument_index, binrwir_argument_t *output_argument,
     runtimec_error_t *error) {
@@ -646,7 +646,7 @@ static runtimec_status_t vmkv_encoder_dynamic_member_fail(
 }
 
 static runtimec_status_t vmkv_encoder_map_argument(
-    const vmkv_encode_request_t *request, binrwir_program_builder_t *builder,
+    const vmkv_encode_request_t *request, binrwir_binfunc_builder_t *builder,
     const vmkv_local_types_t *local_types, vmkv_encode_function_t *function,
     const vmkv_rwir_argument_view_t *source_argument, bool function_target,
     binrwir_argument_t *output, runtimec_program_counter_t logical_program_counter,
@@ -691,7 +691,7 @@ static runtimec_status_t vmkv_encoder_map_argument(
     }
     if (source_argument->literal.bytes.data != NULL) {
         uint32_t literal_index = BINRWIR_LITERAL_INDEX_NONE;
-        status = binrwir_program_builder_add_literal(
+        status = binrwir_binfunc_builder_add_literal(
             builder, source_argument->literal.bytes,
             source_argument->literal.langtype, &literal_index);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -816,7 +816,7 @@ static runtimec_status_t vmkv_encoder_map_argument(
 
 /* 公开入口：读参语义（key 必须已存在）。写参走 `_into(..., true)`。 */
 runtimec_status_t vmkv_encode_static_argument(
-    const vmkv_encode_request_t *request, binrwir_program_builder_t *builder,
+    const vmkv_encode_request_t *request, binrwir_binfunc_builder_t *builder,
     const vmkv_rwir_argument_view_t *source_argument,
     uint32_t argument_index, binrwir_argument_t *output_argument,
     runtimec_error_t *error) {
@@ -1111,7 +1111,7 @@ static int vmkv_encoder_temp_output_identifier(runtimec_string_view_t name,
  */
 static runtimec_status_t vmkv_encoder_encode_temporary_output(
     vmkv_encoder_t *encoder, const vmkv_encode_request_t *request,
-    binrwir_program_builder_t *builder, const vmkv_local_types_t *local_types,
+    binrwir_binfunc_builder_t *builder, const vmkv_local_types_t *local_types,
     vmkv_encode_function_t *function,
     const vmkv_rwir_instruction_view_t *source_instruction,
     binrwir_operation_identifier_t operation_identifier,
@@ -1142,7 +1142,7 @@ static runtimec_status_t vmkv_encoder_encode_temporary_output(
         if (source_argument->literal.bytes.data != NULL) {
             uint32_t literal_index = BINRWIR_LITERAL_INDEX_NONE;
 
-            status = binrwir_program_builder_add_literal(
+            status = binrwir_binfunc_builder_add_literal(
                 builder, source_argument->literal.bytes,
                 source_argument->literal.langtype, &literal_index);
             if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -1320,7 +1320,7 @@ static bool vmkv_encoder_side_rejects_pointer(
 
 runtimec_status_t vmkv_encode_instruction(
     vmkv_encoder_t *encoder, const vmkv_encode_request_t *request,
-    binrwir_program_builder_t *builder,
+    binrwir_binfunc_builder_t *builder,
     const vmkv_local_types_t *local_types, vmkv_encode_function_t *function,
     const vmkv_rwir_instruction_view_t *source_instruction,
     vmkv_canonical_instruction_t *output_instruction,
@@ -1800,7 +1800,7 @@ static bool vmkv_encoder_source_revision_equals(
 
 /* 函数形参登记成 Program 签名：读参 0..nr-1，写参 nr..nr+nw-1。 */
 static runtimec_status_t vmkv_encoder_register_parameters(
-    binrwir_program_builder_t *builder,
+    binrwir_binfunc_builder_t *builder,
     const vmkv_function_source_t *source, runtimec_error_t *error) {
     for (uint32_t ordinal = 0U; ordinal < source->read_parameter_count;
          ++ordinal) {
@@ -1821,7 +1821,7 @@ static runtimec_status_t vmkv_encoder_register_parameters(
                 RUNTIMEC_PROGRAM_COUNTER_NONE);
         }
         uint32_t parameter_index = BINRWIR_ARGUMENT_INDEX_NONE;
-        const runtimec_status_t status = binrwir_program_builder_add_parameter(
+        const runtimec_status_t status = binrwir_binfunc_builder_add_parameter(
             builder, BINRWIR_PARAMETER_DIRECTION_READ, ordinal, declared,
             &parameter_index);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -1847,7 +1847,7 @@ static runtimec_status_t vmkv_encoder_register_parameters(
                 RUNTIMEC_PROGRAM_COUNTER_NONE);
         }
         uint32_t parameter_index = BINRWIR_ARGUMENT_INDEX_NONE;
-        const runtimec_status_t status = binrwir_program_builder_add_parameter(
+        const runtimec_status_t status = binrwir_binfunc_builder_add_parameter(
             builder, BINRWIR_PARAMETER_DIRECTION_WRITE,
             source->read_parameter_count + ordinal, declared,
             &parameter_index);
@@ -1860,7 +1860,7 @@ static runtimec_status_t vmkv_encoder_register_parameters(
 
 runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
                               const vmkv_encode_request_t *request,
-                              binrwir_program_t **output_program,
+                              binrwir_binfunc_t **output_program,
                               runtimec_error_t *error) {
     if (output_program != NULL) {
         *output_program = NULL;
@@ -1897,7 +1897,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
         .next_operand_argument_index = function->read_parameter_count +
                                        function->write_parameter_count,
     };
-    const binrwir_program_identity_t identity = {
+    const binrwir_binfunc_identity_t identity = {
         .snapshot_generation = snapshot.source_revision.generation,
         .program_generation = VMKV_ENCODER_PROGRAM_GENERATION,
         .schema_version = snapshot.source_revision.schema_version,
@@ -1906,8 +1906,8 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
         .canonical_encoding_revision =
             VMKV_ENCODER_CANONICAL_ENCODING_REVISION,
     };
-    binrwir_program_builder_t *builder = NULL;
-    status = binrwir_program_builder_create(&encoder->allocator, &identity,
+    binrwir_binfunc_builder_t *builder = NULL;
+    status = binrwir_binfunc_builder_create(&encoder->allocator, &identity,
                                             &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         vmkv_source_close_function(function);
@@ -1960,7 +1960,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
             .write_arguments = canonical.write_arguments,
         };
         uint32_t instruction_identifier = BINRWIR_IDENTIFIER_NONE;
-        status = binrwir_program_builder_add_instruction(
+        status = binrwir_binfunc_builder_add_instruction(
             builder, &build_request, &instruction_identifier);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             status = vmkv_encoder_fail(
@@ -1978,7 +1978,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
          ordinal < encoder->alias_rule_count;
          ++ordinal) {
         uint32_t alias_rule_identifier = BINRWIR_IDENTIFIER_NONE;
-        status = binrwir_program_builder_add_alias_rule(
+        status = binrwir_binfunc_builder_add_alias_rule(
             builder, &encoder->alias_rules[ordinal], &alias_rule_identifier);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             status = vmkv_encoder_fail(
@@ -1988,7 +1988,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
         }
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             status = vmkv_encoder_fail(
                 error, status, VMKV_ENCODER_DIAG_PROGRAM_REJECTED,
@@ -1996,7 +1996,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
                 RUNTIMEC_PROGRAM_COUNTER_NONE);
         }
     }
-    binrwir_program_builder_destroy(builder);
+    binrwir_binfunc_builder_destroy(builder);
     vmkv_source_close_function(function);
     return status;
 }

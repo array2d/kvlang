@@ -15,7 +15,7 @@
 
 #include "contract/status.h"
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -26,7 +26,7 @@ extern "C" {
 
 typedef runtimec_status_t (*binrwir_jit_machine_code_function_t)(
     void *execution_state,
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     binrwir_execution_exit_t *exit);
 
 typedef struct binrwir_jit_execution_interface_t {

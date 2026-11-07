@@ -32,7 +32,7 @@
 #include <unistd.h>
 
 #include "binrwir/format.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/allocator.h"
 #include "contract/error.h"
 #include "contract/snapshot.h"
@@ -259,17 +259,17 @@ static int list_functions(void *handle, char names[][NAME_CAPACITY]) {
 }
 
 static bool append_operation_legend(dump_context_t *context,
-                                    const binrwir_program_t *program,
+                                    const binrwir_binfunc_t *program,
                                     runtimec_bytes_buffer_t *buffer) {
-    binrwir_program_view_t view;
-    if (binrwir_program_get_view(program, &view) != RUNTIMEC_STATUS_SUCCESS) {
+    binrwir_binfunc_view_t view;
+    if (binrwir_binfunc_get_view(program, &view) != RUNTIMEC_STATUS_SUCCESS) {
         return false;
     }
     binrwir_operation_identifier_t identifiers[1024];
     size_t identifier_count = 0U;
     for (size_t ordinal = 0U; ordinal < view.instruction_count; ++ordinal) {
         binrwir_instruction_view_t instruction;
-        if (binrwir_program_get_instruction(program, (uint32_t)ordinal,
+        if (binrwir_binfunc_get_instruction(program, (uint32_t)ordinal,
                                             &instruction) !=
             RUNTIMEC_STATUS_SUCCESS) {
             return false;
@@ -433,7 +433,7 @@ static bool encode_function(dump_context_t *context,
         .function_path = runtimec_string_view_from_c_string(function_path),
         .expected_snapshot = snapshot,
     };
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     status = vmkv_encode(encoder, &request, &program, &error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         copy_text(stage, STAGE_CAPACITY, "encode");
@@ -448,18 +448,18 @@ static bool encode_function(dump_context_t *context,
     const runtimec_string_view_t function_name =
         runtimec_string_view_make(function_path, strlen(function_path));
     /* 解析器传 NULL：名字一解析成功，格式化就只打名字、不打 opid。 */
-    status = binrwir_program_format(program, function_name, NULL, NULL,
+    status = binrwir_binfunc_format(program, function_name, NULL, NULL,
                                     binrwir_format_buffer_sink,
                                     &sink_context);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         copy_text(stage, STAGE_CAPACITY, "print");
-        copy_text(reason, REASON_CAPACITY, "binrwir_program_format failed");
-        (void)binrwir_program_destroy(program);
+        copy_text(reason, REASON_CAPACITY, "binrwir_binfunc_format failed");
+        (void)binrwir_binfunc_destroy(program);
         (void)vmkv_encoder_destroy(encoder);
         return false;
     }
     const bool legend = append_operation_legend(context, program, buffer);
-    (void)binrwir_program_destroy(program);
+    (void)binrwir_binfunc_destroy(program);
     (void)vmkv_encoder_destroy(encoder);
     if (!legend) {
         copy_text(stage, STAGE_CAPACITY, "print");

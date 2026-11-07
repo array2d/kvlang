@@ -9,9 +9,9 @@
 
 #include "binrwir/argument.h"
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir/signature.h"
 #include "contract/kvspace_access.h"
 #include "kvspace/xvalue_head.h"
@@ -55,7 +55,7 @@ _Static_assert(sizeof(binrwir_instruction_t) == 2U,
                "BinRWIR instruction heads must contain only a 16-bit opid");
 _Static_assert(offsetof(binrwir_instruction_t, operation_identifier) == 0U,
                "BinRWIR opid offset changed");
-_Static_assert(sizeof(binrwir_program_identity_t) == 32U,
+_Static_assert(sizeof(binrwir_binfunc_identity_t) == 32U,
                "program identities must remain thirty-two bytes");
 _Static_assert(sizeof(binrwir_execution_exit_t) == 24U,
                "structured exits must contain only control state");

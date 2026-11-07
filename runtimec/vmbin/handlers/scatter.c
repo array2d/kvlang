@@ -20,7 +20,7 @@
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
 #include "contract/error.h"
@@ -56,7 +56,7 @@ static runtimec_status_t scatter_member_key(const char *base, int64_t coordinate
  * 两步缺一不可：只写 marker 则 `ListLen` 数不到成员；只建目录则 base 没有类型。
  * **失败即置 `exit` 并返回 false**。
  */
-static bool scatter_container_empty(const binrwir_execution_frame_t *frame,
+static bool scatter_container_empty(const binrwir_binvthread_frame_t *frame,
                                     const char *base,
                                     binrwir_execution_exit_t *output_exit) {
     char directory[SCATTER_KEY_CAPACITY + 2U];
@@ -105,7 +105,7 @@ static bool scatter_container_empty(const binrwir_execution_frame_t *frame,
  * 只做 1 的话 `kvspaceListLen` 数不到任何成员（`len` 恒 0）；只做 2 的话 base 上
  * 就没有类型。**两步都必须成功**，否则整体失败。**成功不写哨兵，失败只写 `exit`**。
  */
-static void scatter_container_create(const binrwir_execution_frame_t *frame,
+static void scatter_container_create(const binrwir_binvthread_frame_t *frame,
                                      const binrwir_instruction_view_t *instruction,
                                      binrwir_execution_exit_t *output_exit) {
     runtimec_string_view_t declared;
@@ -178,7 +178,7 @@ static void scatter_container_create(const binrwir_execution_frame_t *frame,
 }
 
 /* 逻辑函数：一句话——建一个空散列容器。 */
-static inline void scatter_new_build(const binrwir_execution_frame_t *frame,
+static inline void scatter_new_build(const binrwir_binvthread_frame_t *frame,
                                      const binrwir_instruction_view_t *instruction,
                                      binrwir_execution_exit_t *output_exit) {
     scatter_container_create(frame, instruction, output_exit);
@@ -198,7 +198,7 @@ VMBIN_HANDLER_SCATTER_CREATE(scatter_new_handler, scatter_new_build)
  * 偏移算术**。
  */
 static runtimec_status_t scatter_whole_wire(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t *output,
     runtimec_error_t *error) {
     vmbin_value_location_t location;
@@ -245,7 +245,7 @@ static runtimec_status_t scatter_whole_wire(
  *
  * 失败即置 `exit` 并返回 false——调用方 `return`。
  */
-static bool scatter_base_key(const binrwir_execution_frame_t *frame,
+static bool scatter_base_key(const binrwir_binvthread_frame_t *frame,
                              const binrwir_argument_t *argument, char *buffer,
                              size_t capacity,
                              binrwir_execution_exit_t *output_exit) {
@@ -264,7 +264,7 @@ static bool scatter_base_key(const binrwir_execution_frame_t *frame,
  * 七处重复的第二步。
  */
 static runtimec_status_t scatter_member_coordinate(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, size_t ordinal,
     int64_t *output_coordinate, binrwir_execution_exit_t *output_exit) {
     vmbin_value_location_t position;
@@ -294,7 +294,7 @@ static runtimec_status_t scatter_member_coordinate(
  * 把一个成员从源坐标搬到目标坐标：**整条 wire 原样搬**，不重新编码。
  * 源成员缺失时跳过（洞不是元素）。**失败即置 `exit` 并返回 false**。
  */
-static bool scatter_member_copy(const binrwir_execution_frame_t *frame,
+static bool scatter_member_copy(const binrwir_binvthread_frame_t *frame,
                                 const char *source_base, int64_t source_coordinate,
                                 const char *target_base,
                                 int64_t target_coordinate, char *source_member,
@@ -338,7 +338,7 @@ static bool scatter_member_copy(const binrwir_execution_frame_t *frame,
  * 读坐标 `i` 下的成员。**成员缺失（不是 0 长度，而是根本没有这个键）即失败**——
  * 洞不是元素。**成功才写结果，失败只写 `exit`**。
  */
-static void scatter_member_read(const binrwir_execution_frame_t *frame,
+static void scatter_member_read(const binrwir_binvthread_frame_t *frame,
                                 const binrwir_instruction_view_t *instruction,
                                 uint8_t *output, size_t output_capacity,
                                 binrwir_execution_exit_t *output_exit) {
@@ -392,7 +392,7 @@ static void scatter_member_read(const binrwir_execution_frame_t *frame,
 }
 
 /* 逻辑函数：一句话——读出坐标 i 下的成员。 */
-static inline void scatter_at_build(const binrwir_execution_frame_t *frame,
+static inline void scatter_at_build(const binrwir_binvthread_frame_t *frame,
                                     const binrwir_instruction_view_t *instruction,
                                     uint8_t *output, size_t output_capacity,
                                     binrwir_execution_exit_t *output_exit) {
@@ -406,7 +406,7 @@ static inline void scatter_at_build(const binrwir_execution_frame_t *frame,
  *
  * **成功不写哨兵，失败只写 `exit`**。
  */
-static void scatter_member_write(const binrwir_execution_frame_t *frame,
+static void scatter_member_write(const binrwir_binvthread_frame_t *frame,
                                  const char *member,
                                  const runtimec_bytes_view_t *value,
                                  binrwir_execution_exit_t *output_exit) {
@@ -425,7 +425,7 @@ static void scatter_member_write(const binrwir_execution_frame_t *frame,
  * 把一个读参的值写进容器的第 i 个成员。四步（取 base、取坐标、取 wire、写成员）
  * 合成一层——目的只有一个：**把值放到那个坐标上**。
  */
-static void scatter_store_at(const binrwir_execution_frame_t *frame,
+static void scatter_store_at(const binrwir_binvthread_frame_t *frame,
                              const binrwir_instruction_view_t *instruction,
                              binrwir_execution_exit_t *output_exit) {
     char base[SCATTER_KEY_CAPACITY];
@@ -454,7 +454,7 @@ static void scatter_store_at(const binrwir_execution_frame_t *frame,
 }
 
 /* 逻辑函数：一句话——把值写进坐标 i 那个成员键。 */
-static inline void scatter_set_build(const binrwir_execution_frame_t *frame,
+static inline void scatter_set_build(const binrwir_binvthread_frame_t *frame,
                                      const binrwir_instruction_view_t *instruction,
                                      binrwir_execution_exit_t *output_exit) {
     scatter_store_at(frame, instruction, output_exit);
@@ -473,7 +473,7 @@ static inline void scatter_set_build(const binrwir_execution_frame_t *frame,
  * `0..n-1`，`-1` 在域外。失败一律走 `exit` 且**不写 out**，所以调用方永远不会
  * 把「该从 0 开始」与「该报错」混为一谈。
  */
-static void scatter_largest_coordinate(const binrwir_execution_frame_t *frame,
+static void scatter_largest_coordinate(const binrwir_binvthread_frame_t *frame,
                                        const char *base, int64_t *output_largest,
                                        binrwir_execution_exit_t *output_exit) {
     char directory[SCATTER_KEY_CAPACITY + 2U];
@@ -517,7 +517,7 @@ static void scatter_largest_coordinate(const binrwir_execution_frame_t *frame,
  * 值的地址来自绑定表（shm 的 mmap 视图），而枚举会触碰后端，可能让之前的视图失效。
  * 先 locate 再枚举，等于拿一个不保证有效的地址去写。
  */
-static void scatter_append_value(const binrwir_execution_frame_t *frame,
+static void scatter_append_value(const binrwir_binvthread_frame_t *frame,
                                  const binrwir_instruction_view_t *instruction,
                                  binrwir_execution_exit_t *output_exit) {
     char base[SCATTER_KEY_CAPACITY];
@@ -549,7 +549,7 @@ static void scatter_append_value(const binrwir_execution_frame_t *frame,
 
 /* 逻辑函数：一句话——追加到最大坐标 + 1。 */
 static inline void scatter_append_build(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     scatter_append_value(frame, instruction, output_exit);
@@ -565,7 +565,7 @@ static inline void scatter_append_build(
  * 跨形态是**显式**转换：没有任何算子会隐式跨形态（spec 的铁律）。
  */
 static void scatter_expand_from_compact(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     runtimec_string_view_t source_langtype;
@@ -656,7 +656,7 @@ static void scatter_expand_from_compact(
 
 /* 逻辑函数：一句话——把 compact 数组展开成散列容器。 */
 static inline void scatter_newscatter_build(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     scatter_expand_from_compact(frame, instruction, output_exit);
@@ -674,7 +674,7 @@ static inline void scatter_newscatter_build(
  * 名字带方向：展开走 `scatter_expand_from_compact`，两者成员键构造规则相反。
  */
 static void scatter_pack_to_compact(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     char base[SCATTER_KEY_CAPACITY];
@@ -765,7 +765,7 @@ static void scatter_pack_to_compact(
 
 /* 逻辑函数：一句话——把散列容器压成连续 body。 */
 static inline void scatter_newcompact_build(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     scatter_pack_to_compact(frame, instruction, output_exit);
@@ -783,7 +783,7 @@ static inline void scatter_newcompact_build(
  * 目标必须先建成空容器（marker + 目录）再逐成员写——跨形态/跨容器的搬运都是
  * **新建**，不是同槽 patch。
  */
-static void scatter_slice_between(const binrwir_execution_frame_t *frame,
+static void scatter_slice_between(const binrwir_binvthread_frame_t *frame,
                                   const binrwir_instruction_view_t *instruction,
                                   binrwir_execution_exit_t *output_exit) {
     char source_base[SCATTER_KEY_CAPACITY];
@@ -841,7 +841,7 @@ static void scatter_slice_between(const binrwir_execution_frame_t *frame,
 
 /* 逻辑函数：一句话——把源的一段成员重排到目标容器。 */
 static inline void scatter_slice_build(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     scatter_slice_between(frame, instruction, output_exit);
@@ -882,7 +882,7 @@ static bool scatter_member_prefix(const char *base, char *buffer,
  * 散列容器的**实存成员数**（memindex 权威，不是坐标空间容量）。
  * **成功才写 `*out`，失败只写 `exit`**。
  */
-static void scatter_member_count(const binrwir_execution_frame_t *frame,
+static void scatter_member_count(const binrwir_binvthread_frame_t *frame,
                                  const binrwir_instruction_view_t *instruction,
                                  int64_t *out,
                                  binrwir_execution_exit_t *output_exit) {
@@ -908,7 +908,7 @@ static void scatter_member_count(const binrwir_execution_frame_t *frame,
 }
 
 /* 逻辑函数：一句话——数出容器有几个成员。 */
-static inline void scatter_length_build(const binrwir_execution_frame_t *frame,
+static inline void scatter_length_build(const binrwir_binvthread_frame_t *frame,
                                         const binrwir_instruction_view_t *instruction,
                                         int64_t *out,
                                         binrwir_execution_exit_t *output_exit) {

@@ -101,7 +101,7 @@ runtimec/
 │   ├── argument.*
 │   ├── signature.*
 │   ├── program.*
-│   ├── execution_frame.*
+│   ├── binvthread_frame.*
 │   ├── execution_exit.h
 │   └── execution_plan.*
 ├── binrwir_compiler/                  # BinRWIR 编译、优化与目标判定唯一所有者

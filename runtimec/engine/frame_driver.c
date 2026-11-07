@@ -15,10 +15,10 @@
 #include <string.h>
 
 
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/frame_bindings.h"
 #include "binrwir/instruction.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "engine/execution_window.h"
 
 
@@ -173,7 +173,7 @@ frame_driver_outcome_t frame_driver_execute(
     *out_exit = result.execution_exit;
     /* 本帧实际执行的 Program。递归时每帧不同，所以**从结果里取**，
      * 不能存在驱动里当全局——那就是「一个函数只有一个活动帧」的错误假设。 */
-    const binrwir_program_t *frame_program = result.program;
+    const binrwir_binfunc_t *frame_program = result.program;
     switch (result.execution_exit.kind) {
     case BINRWIR_EXECUTION_EXIT_DONE:
         return FRAME_DRIVER_OUTCOME_DONE;
@@ -195,10 +195,10 @@ frame_driver_outcome_t frame_driver_execute(
             runtimec_string_view_make(NULL, 0U);
         runtimec_string_view_t callee_langtype =
             runtimec_string_view_make(NULL, 0U);
-        /* `binrwir_program_get_symbol` 返回 **runtimec_status_t**，不是 bool。
+        /* `binrwir_binfunc_get_symbol` 返回 **runtimec_status_t**，不是 bool。
          * 写成 `!get_symbol(...)` 会把 SUCCESS(0) 取反成 true，于是每次解析都
          * 判失败——两套返回值语义混用，而且不报错，只是走错分支。 */
-        if (binrwir_program_get_symbol(
+        if (binrwir_binfunc_get_symbol(
                 frame_program,
                 (uint16_t)result.execution_exit.target_identifier,
                 &callee_name, &callee_langtype) != RUNTIMEC_STATUS_SUCCESS ||
@@ -240,11 +240,11 @@ frame_driver_outcome_t frame_driver_execute(
         uint32_t call_instruction_identifier = 0U;
         binrwir_instruction_view_t call_instruction;
         memset(&call_instruction, 0, sizeof(call_instruction));
-        if (binrwir_program_find_instruction(
+        if (binrwir_binfunc_find_instruction(
                 frame_program,
                 result.execution_exit.logical_program_counter,
                 &call_instruction_identifier) != RUNTIMEC_STATUS_SUCCESS ||
-            binrwir_program_get_instruction(frame_program,
+            binrwir_binfunc_get_instruction(frame_program,
                                             call_instruction_identifier,
                                             &call_instruction) !=
                 RUNTIMEC_STATUS_SUCCESS) {
@@ -329,7 +329,7 @@ frame_driver_outcome_t frame_driver_execute(
                 runtimec_bytes_view_t wire;
                 runtimec_string_view_t literal_langtype;
                 memset(&wire, 0, sizeof(wire));
-                if (binrwir_program_get_literal(frame_program,
+                if (binrwir_binfunc_get_literal(frame_program,
                                                 argument->payload, &wire,
                                                 &literal_langtype) !=
                     RUNTIMEC_STATUS_SUCCESS) {
@@ -353,7 +353,7 @@ frame_driver_outcome_t frame_driver_execute(
                     runtimec_string_view_make(NULL, 0U);
                 runtimec_string_view_t local_langtype =
                     runtimec_string_view_make(NULL, 0U);
-                if (binrwir_program_get_symbol(frame_program,
+                if (binrwir_binfunc_get_symbol(frame_program,
                                                (uint16_t)argument->slot,
                                                &local_name, &local_langtype) !=
                         RUNTIMEC_STATUS_SUCCESS ||
@@ -463,8 +463,8 @@ frame_driver_outcome_t frame_driver_execute(
                 runtimec_string_view_t parameter_type =
                     runtimec_string_view_make(NULL, 0U);
                 {
-                    binrwir_program_view_t view;
-                    if (binrwir_program_get_view(frame_program, &view) !=
+                    binrwir_binfunc_view_t view;
+                    if (binrwir_binfunc_get_view(frame_program, &view) !=
                             RUNTIMEC_STATUS_SUCCESS ||
                         (size_t)argument->slot >=
                             view.signature.write_parameter_count) {
@@ -500,7 +500,7 @@ frame_driver_outcome_t frame_driver_execute(
                 runtimec_string_view_make(NULL, 0U);
             runtimec_string_view_t local_langtype =
                 runtimec_string_view_make(NULL, 0U);
-            if (binrwir_program_get_symbol(frame_program,
+            if (binrwir_binfunc_get_symbol(frame_program,
                                            (uint16_t)argument->slot,
                                            &local_name, &local_langtype) !=
                     RUNTIMEC_STATUS_SUCCESS ||

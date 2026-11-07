@@ -22,10 +22,10 @@
 #define VMBIN_SCRATCH_INITIAL_CAPACITY 32U
 
 typedef struct vmbin_execution {
-    const binrwir_program_t *program;
+    const binrwir_binfunc_t *program;
     const binrwir_registry_t *builtin_registry;
     vmbin_profile_t *profile;
-    binrwir_execution_frame_t *frame;
+    binrwir_binvthread_frame_t *frame;
     size_t instruction_count;
     /* 只装本层写下的错误分类；不保留任何值字节。 */
     runtimec_error_t error;
@@ -210,7 +210,7 @@ static runtimec_status_t vmbin_interpreter_resolve_target(
                            RUNTIMEC_PROGRAM_COUNTER_NONE);
         return RUNTIMEC_STATUS_INVALID;
     }
-    status = binrwir_program_find_instruction(
+    status = binrwir_binfunc_find_instruction(
         execution->program, (uint32_t)target, output_instruction_identifier);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         runtimec_error_set(&execution->error, RUNTIMEC_STATUS_INVALID,
@@ -625,7 +625,7 @@ static runtimec_status_t vmbin_interpreter_execute_call(
     if (identifier + 1U < execution->instruction_count) {
         binrwir_instruction_view_t next_instruction;
 
-        if (binrwir_program_get_instruction(execution->program, identifier + 1U,
+        if (binrwir_binfunc_get_instruction(execution->program, identifier + 1U,
                                             &next_instruction) ==
             RUNTIMEC_STATUS_SUCCESS) {
             resume_program_counter =
@@ -746,7 +746,7 @@ static runtimec_status_t vmbin_interpreter_step(
 
     /* 每一步都从「没有侧出口」开始；只有 call/return/handoff/handler 才写它。 */
     *output_exit = (binrwir_execution_exit_t){0};
-    status = binrwir_program_get_instruction(execution->program, identifier,
+    status = binrwir_binfunc_get_instruction(execution->program, identifier,
                                              &instruction);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         *output_exit = (binrwir_execution_exit_t){0};
@@ -799,15 +799,15 @@ static runtimec_status_t vmbin_interpreter_step(
 }
 
 runtimec_status_t
-vmbin_execute(const binrwir_program_t *program,
+vmbin_execute(const binrwir_binfunc_t *program,
               const binrwir_execution_plan_t *execution_plan,
-              binrwir_execution_frame_t *frame,
+              binrwir_binvthread_frame_t *frame,
               const binrwir_registry_t *builtin_registry,
               void *kvspace_handle,
               vmbin_profile_t *profile,
               binrwir_execution_exit_t *output_exit) {
     vmbin_execution_t execution;
-    binrwir_program_view_t program_view;
+    binrwir_binfunc_view_t program_view;
     runtimec_status_t status;
 
     /* 执行计划是可删除的派生状态，phase 1 取指不依赖它。 */
@@ -821,9 +821,9 @@ vmbin_execute(const binrwir_program_t *program,
         output_exit == NULL || frame->program != program) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    status = binrwir_program_validate(program);
+    status = binrwir_binfunc_validate(program);
     if (status != RUNTIMEC_STATUS_SUCCESS ||
-        binrwir_program_get_view(program, &program_view) !=
+        binrwir_binfunc_get_view(program, &program_view) !=
             RUNTIMEC_STATUS_SUCCESS) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -888,7 +888,7 @@ vmbin_execute(const binrwir_program_t *program,
             output_exit->logical_program_counter;
         {
             binrwir_instruction_view_t failing_instruction;
-            if (binrwir_program_get_instruction(
+            if (binrwir_binfunc_get_instruction(
                     program, frame->logical_program_counter,
                     &failing_instruction) == RUNTIMEC_STATUS_SUCCESS) {
                 source_program_counter =

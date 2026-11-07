@@ -19,7 +19,7 @@
 #include <stdint.h>
 
 #include "contract/status.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir_compiler/jit/backend.h"
 
 #ifdef __cplusplus
@@ -41,11 +41,11 @@ typedef struct binrwir_jit_refusal_t {
 } binrwir_jit_refusal_t;
 
 typedef struct binrwir_jit_verified_program_t {
-    const binrwir_program_t *program;
+    const binrwir_binfunc_t *program;
 } binrwir_jit_verified_program_t;
 
 runtimec_status_t binrwir_jit_verify_program(
-    const binrwir_program_t *program,
+    const binrwir_binfunc_t *program,
     const binrwir_jit_target_t *target,
     binrwir_jit_verified_program_t *output_verified_program,
     binrwir_jit_refusal_t *refusal,

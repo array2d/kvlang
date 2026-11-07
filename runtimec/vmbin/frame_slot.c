@@ -9,14 +9,14 @@
 #include <string.h>
 
 static runtimec_status_t vmbin_frame_slot_counts(
-    const binrwir_program_t *program, size_t *output_read_count,
+    const binrwir_binfunc_t *program, size_t *output_read_count,
     size_t *output_write_count) {
-    binrwir_program_view_t view;
+    binrwir_binfunc_view_t view;
 
     *output_read_count = 0U;
     *output_write_count = 0U;
     if (program == NULL ||
-        binrwir_program_get_view(program, &view) != RUNTIMEC_STATUS_SUCCESS) {
+        binrwir_binfunc_get_view(program, &view) != RUNTIMEC_STATUS_SUCCESS) {
         return RUNTIMEC_STATUS_INVALID;
     }
     *output_read_count = view.signature.read_parameter_count;
@@ -24,7 +24,7 @@ static runtimec_status_t vmbin_frame_slot_counts(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t vmbin_frame_slot_capacity(const binrwir_program_t *program,
+runtimec_status_t vmbin_frame_slot_capacity(const binrwir_binfunc_t *program,
                                             size_t *output_capacity) {
     size_t read_count = 0U;
     size_t write_count = 0U;
@@ -42,7 +42,7 @@ runtimec_status_t vmbin_frame_slot_capacity(const binrwir_program_t *program,
         return status;
     }
     /* 局部符号排在两个参数区之后，容量必须把它们算进去，否则一绑就越界。 */
-    if (binrwir_program_get_symbol_count(program, &symbol_count) !=
+    if (binrwir_binfunc_get_symbol_count(program, &symbol_count) !=
             RUNTIMEC_STATUS_SUCCESS ||
         read_count > UINT16_MAX ||
         write_count > (size_t)UINT16_MAX - read_count ||
@@ -54,7 +54,7 @@ runtimec_status_t vmbin_frame_slot_capacity(const binrwir_program_t *program,
 }
 
 runtimec_status_t vmbin_frame_slot_of_parameter(
-    const binrwir_program_t *program, binrwir_parameter_direction_t direction,
+    const binrwir_binfunc_t *program, binrwir_parameter_direction_t direction,
     uint32_t parameter_index, uint16_t *output_slot) {
     size_t read_count = 0U;
     size_t write_count = 0U;
@@ -92,7 +92,7 @@ runtimec_status_t vmbin_frame_slot_of_parameter(
 }
 
 runtimec_status_t vmbin_frame_slot_of_local_symbol(
-    const binrwir_program_t *program, uint16_t symbol_index,
+    const binrwir_binfunc_t *program, uint16_t symbol_index,
     uint16_t *output_slot) {
     size_t read_count = 0U;
     size_t write_count = 0U;
@@ -118,7 +118,7 @@ runtimec_status_t vmbin_frame_slot_of_local_symbol(
 }
 
 runtimec_status_t vmbin_frame_slot_of_argument(
-    const binrwir_program_t *program, const binrwir_argument_t *argument,
+    const binrwir_binfunc_t *program, const binrwir_argument_t *argument,
     uint16_t *output_slot) {
     size_t read_count = 0U;
     size_t write_count = 0U;

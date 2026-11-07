@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/frame_bindings.h"
 
 static int failures;
@@ -245,34 +245,34 @@ static void test_invalidate_and_rebind(void) {
                     RUNTIMEC_STATUS_SUCCESS);
 }
 
-static void test_execution_frame_holds_bindings(void) {
+static void test_binvthread_frame_holds_bindings(void) {
     runtimec_allocator_t allocator = test_allocator();
     binrwir_frame_bindings_t *bindings = NULL;
-    binrwir_execution_frame_t frame;
-    const binrwir_program_t *program = (const binrwir_program_t *)(uintptr_t)1U;
+    binrwir_binvthread_frame_t frame;
+    const binrwir_binfunc_t *program = (const binrwir_binfunc_t *)(uintptr_t)1U;
 
     RUNTIMEC_EXPECT(binrwir_frame_bindings_create(&allocator, 2U, &bindings) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
-    RUNTIMEC_EXPECT(binrwir_execution_frame_initialize(&frame, program, NULL,
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_initialize(&frame, program, NULL,
                                                        5U, 6U, 11U) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(frame.bindings == NULL);
     RUNTIMEC_EXPECT(frame.logical_program_counter == 11U);
-    RUNTIMEC_EXPECT(frame.flags == BINRWIR_EXECUTION_FRAME_FLAG_INITIALIZED);
+    RUNTIMEC_EXPECT(frame.flags == BINRWIR_BINVTHREAD_FRAME_FLAG_INITIALIZED);
 
     /* 调用入口写入绑定表指针；Frame 只借用，不拥有。 */
     frame.bindings = bindings;
-    RUNTIMEC_EXPECT(binrwir_execution_frame_initialize(&frame, NULL, NULL, 5U,
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_initialize(&frame, NULL, NULL, 5U,
                                                        6U, 11U) ==
                     RUNTIMEC_STATUS_INVALID);
     RUNTIMEC_EXPECT(frame.bindings == NULL);
 
-    RUNTIMEC_EXPECT(binrwir_execution_frame_initialize(&frame, program, NULL,
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_initialize(&frame, program, NULL,
                                                        5U, 6U, 11U) ==
                     RUNTIMEC_STATUS_SUCCESS);
     frame.bindings = bindings;
-    RUNTIMEC_EXPECT(binrwir_execution_frame_destroy(&frame) ==
+    RUNTIMEC_EXPECT(binrwir_binvthread_frame_destroy(&frame) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(frame.bindings == NULL);
     RUNTIMEC_EXPECT(frame.program == NULL);
@@ -399,7 +399,7 @@ int main(void) {
     test_bind_and_get();
     test_bind_rejects_invalid_content();
     test_invalidate_and_rebind();
-    test_execution_frame_holds_bindings();
+    test_binvthread_frame_holds_bindings();
     test_keys_are_owned();
     if (failures != 0) {
         fprintf(stderr, "binrwir_frame_bindings_test: %d failure(s)\n", failures);

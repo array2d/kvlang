@@ -13,8 +13,8 @@
 #include <stdint.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
-#include "binrwir/program.h"
+#include "binrwir/binvthread_frame.h"
+#include "binrwir/binfunc.h"
 #include "contract/allocator.h"
 #include "contract/status.h"
 
@@ -29,20 +29,20 @@ typedef struct vmbin_call_request {
 } vmbin_call_request_t;
 
 runtimec_status_t vmbin_call_control_create(
-    const binrwir_execution_frame_t *caller,
-    const binrwir_program_t *callee,
+    const binrwir_binvthread_frame_t *caller,
+    const binrwir_binfunc_t *callee,
     const vmbin_call_request_t *request,
     const runtimec_allocator_t *allocator,
     vmbin_call_control_t **output_control);
 runtimec_status_t vmbin_call_control_destroy(vmbin_call_control_t *control);
 runtimec_status_t vmbin_call_enter(
-    binrwir_execution_frame_t *caller,
-    binrwir_execution_frame_t *callee,
+    binrwir_binvthread_frame_t *caller,
+    binrwir_binvthread_frame_t *callee,
     const vmbin_call_control_t *control,
     binrwir_execution_exit_t *output_exit);
 /* 返回：释放绑定表并把被调帧还原成「没进过调用」的状态，帧可再次进入。 */
 runtimec_status_t vmbin_call_return(
-    binrwir_execution_frame_t *caller, binrwir_execution_frame_t *callee,
+    binrwir_binvthread_frame_t *caller, binrwir_binvthread_frame_t *callee,
     const vmbin_call_control_t *control,
     binrwir_execution_exit_t *output_exit);
 

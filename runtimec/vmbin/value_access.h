@@ -18,7 +18,7 @@
 
 #include "binrwir/argument.h"
 #include "contract/diagnostic_band.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "contract/error.h"
 #include "contract/kvspace_access.h"
 #include "contract/status.h"
@@ -129,7 +129,7 @@ vmbin_value_fact_t vmbin_value_location_is_none(
  * false`）。写位置不可用（字面量/内联绑定）时 write_bytes 为 NULL。
  */
 runtimec_status_t vmbin_value_access_locate(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error);
 
@@ -138,7 +138,7 @@ runtimec_status_t vmbin_value_access_locate(
  * 并把 output->size 置成所需字节数，调用方扩容后重试。
  */
 runtimec_status_t vmbin_value_access_read(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_buffer_t *output,
     runtimec_error_t *error);
 
@@ -147,7 +147,7 @@ runtimec_status_t vmbin_value_access_read(
  * 一律 INVALID。只有全部字节写完之后才返回 SUCCESS。
  */
 runtimec_status_t vmbin_value_access_write(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
     runtimec_error_t *error);
 
@@ -166,7 +166,7 @@ runtimec_status_t vmbin_value_access_write(
  * 据此失败封闭，而不是当成「不约束」继续走。
  */
 runtimec_status_t vmbin_value_access_langtype(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument,
     runtimec_string_view_t *output_langtype, runtimec_error_t *error);
 
@@ -207,7 +207,7 @@ bool vmbin_value_access_langtype_is_container(runtimec_string_view_t langtype);
  * 长度基本不等，走定宽路径必然失败。
  */
 runtimec_status_t vmbin_value_access_write_whole_value(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t body,
     runtimec_error_t *error);
 
@@ -241,7 +241,7 @@ typedef enum vmbin_value_access_form {
  * ——**不猜**。读到就返回 SUCCESS，output_reference 是那三个已知取值之一。
  */
 runtimec_status_t vmbin_value_access_form(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, uint8_t *output_form,
     runtimec_error_t *error);
 
@@ -253,7 +253,7 @@ runtimec_status_t vmbin_value_access_form(
  * 也会把「指针 vs None」错判成「值 vs None」。
  */
 runtimec_status_t vmbin_value_access_form_unfollowed(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, uint8_t *output_form,
     runtimec_error_t *error);
 
@@ -278,7 +278,7 @@ runtimec_status_t vmbin_value_access_form_unfollowed(
  * 这一条，它只改变「读出来的是哪一段」。
  */
 runtimec_status_t vmbin_value_access_locate_body(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error);
 
@@ -295,7 +295,7 @@ runtimec_status_t vmbin_value_access_locate_body(
  * **普通绝对 key 的读不经这里放宽**：它不走解引用分支，仍具名失败。
  */
 runtimec_status_t vmbin_value_access_locate_body_read(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error);
 
@@ -312,7 +312,7 @@ runtimec_status_t vmbin_value_access_locate_body_read(
  * `write_new_value` 创建。**读方向仍用 `_locate_body`，绝不创建**。
  */
 runtimec_status_t vmbin_value_access_locate_write(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument,
     vmbin_value_location_t *output_location, runtimec_error_t *error);
 /*
@@ -335,11 +335,11 @@ runtimec_status_t vmbin_value_access_locate_write(
  * 别在这里加「先检查一下再执行」：检查与执行之间还会有变化，静态保证是假保证。
  */
 runtimec_status_t vmbin_value_access_read_body(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_buffer_t *output,
     runtimec_error_t *error);
 runtimec_status_t vmbin_value_access_write_body(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_bytes_view_t value,
     runtimec_error_t *error);
 
@@ -358,7 +358,7 @@ runtimec_status_t vmbin_value_access_write_body(
  * 释放自己的缓冲。
  */
 runtimec_status_t vmbin_value_access_bind_write_target(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, runtimec_key_view_t target_key,
     runtimec_error_t *error);
 

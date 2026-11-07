@@ -24,7 +24,7 @@
 #include <time.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
 #include "vmbin/handlers/handler_call.h"
@@ -45,7 +45,7 @@ static inline void time_clock_nanoseconds(int64_t *out) {
 
 /* 「把一个 int64 纳秒写进一个尚未物化的写槽」——创建型只有这一处写法。 */
 static inline runtimec_status_t write_nanoseconds(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, int64_t nanoseconds,
     binrwir_execution_exit_t *output_exit) {
     return vmbin_handler_write_new_value(
@@ -54,7 +54,7 @@ static inline runtimec_status_t write_nanoseconds(
 }
 
 /* `time·now()`：无读参；写参是**尚未物化**的槽，走创建型写法。 */
-static inline void time_now_logic(binrwir_execution_frame_t *frame,
+static inline void time_now_logic(binrwir_binvthread_frame_t *frame,
                                   const binrwir_instruction_view_t *instruction,
                                   const vmbin_value_location_t *read,
                                   size_t read_count,

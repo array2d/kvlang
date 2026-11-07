@@ -22,9 +22,9 @@
 #include <kvspace/kvspace.h>
 #include <kvspace/xvalue_head.h>
 
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/frame_bindings.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir/specialize.h"
 #include "binrwir_compiler/compiler.h"
 #include "binrwir_compiler/jit/executor.h"
@@ -168,7 +168,7 @@ static runtimec_program_counter_t runtimec_execution_window_make_program_counter
 static runtimec_status_t runtimec_execution_window_materialize_parameter_pointer(
     runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
     const runtimec_execution_window_request_t *request,
-    const binrwir_program_t *program, const runtimec_string_view_t *parameter_type,
+    const binrwir_binfunc_t *program, const runtimec_string_view_t *parameter_type,
     uint32_t ordinal, const runtimec_string_view_t *caller_key,
     runtimec_execution_window_diagnostic_t *output_detail,
     runtimec_error_t *error) {
@@ -409,10 +409,10 @@ static runtimec_status_t runtimec_execution_window_materialize_argument(
  */
 static runtimec_status_t runtimec_execution_window_bind_parameters(
     runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
-    const binrwir_program_t *program, const runtimec_execution_window_request_t *request,
+    const binrwir_binfunc_t *program, const runtimec_execution_window_request_t *request,
     binrwir_frame_bindings_t *bindings, uint64_t *output_generation,
     runtimec_execution_window_diagnostic_t *output_detail, runtimec_error_t *error) {
-    binrwir_program_view_t program_view;
+    binrwir_binfunc_view_t program_view;
     size_t read_count;
     size_t write_count;
     size_t ordinal;
@@ -445,7 +445,7 @@ static runtimec_status_t runtimec_execution_window_bind_parameters(
      * 先记快照世代；有实参时下面会被解析到的世代覆盖（并校验一致）。
      */
     *output_generation = snapshot->source_revision.generation;
-    if (binrwir_program_get_view(program, &program_view) !=
+    if (binrwir_binfunc_get_view(program, &program_view) !=
         RUNTIMEC_STATUS_SUCCESS) {
         *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED;
         return RUNTIMEC_STATUS_INVALID;
@@ -689,22 +689,22 @@ static runtimec_status_t runtimec_execution_window_commit_checkpoint(
  */
 static runtimec_status_t runtimec_execution_window_materialize_locals(
     runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
-    const binrwir_program_t *program,
+    const binrwir_binfunc_t *program,
     const runtimec_execution_window_request_t *request,
     binrwir_frame_bindings_t *bindings, size_t binding_capacity,
     uint64_t *generation_in_out,
     runtimec_execution_window_diagnostic_t *output_detail,
     runtimec_error_t *error) {
-    binrwir_program_view_t program_view;
+    binrwir_binfunc_view_t program_view;
     size_t symbol_count = 0U;
     bool *is_local = NULL;
     size_t instruction_ordinal;
     size_t symbol_ordinal;
     runtimec_status_t status;
 
-    if (binrwir_program_get_view(program, &program_view) !=
+    if (binrwir_binfunc_get_view(program, &program_view) !=
             RUNTIMEC_STATUS_SUCCESS ||
-        binrwir_program_get_symbol_count(program, &symbol_count) !=
+        binrwir_binfunc_get_symbol_count(program, &symbol_count) !=
             RUNTIMEC_STATUS_SUCCESS) {
         *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_FRAME_FAILED;
         return RUNTIMEC_STATUS_INVALID;
@@ -744,7 +744,7 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
         binrwir_argument_span_t spans[2];
         size_t span_ordinal;
 
-        if (binrwir_program_get_instruction(program,
+        if (binrwir_binfunc_get_instruction(program,
                                             (uint32_t)instruction_ordinal,
                                             &instruction) !=
             RUNTIMEC_STATUS_SUCCESS) {
@@ -784,7 +784,7 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
         if (!is_local[symbol_ordinal]) {
             continue;
         }
-        if (binrwir_program_get_symbol(program, (uint16_t)symbol_ordinal, &name,
+        if (binrwir_binfunc_get_symbol(program, (uint16_t)symbol_ordinal, &name,
                                        &langtype) != RUNTIMEC_STATUS_SUCCESS ||
             name.size == 0U) {
             (void)runtimec_allocator_deallocate(
@@ -927,14 +927,14 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
 
 /*
  * 起始位置换算：调用方给的是 source logical program counter（layout 的 irseq），
- * 执行游标是稠密的指令标识符，两者唯一的映射就是 binrwir_program_find_instruction。
+ * 执行游标是稠密的指令标识符，两者唯一的映射就是 binrwir_binfunc_find_instruction。
  */
 static runtimec_status_t runtimec_execution_window_find_instruction(
-    const binrwir_program_t *program, uint32_t source_program_counter,
+    const binrwir_binfunc_t *program, uint32_t source_program_counter,
     uint32_t *output_instruction_identifier,
     runtimec_execution_window_diagnostic_t *output_detail) {
     *output_instruction_identifier = BINRWIR_IDENTIFIER_NONE;
-    if (binrwir_program_find_instruction(program, source_program_counter,
+    if (binrwir_binfunc_find_instruction(program, source_program_counter,
                                          output_instruction_identifier) !=
             RUNTIMEC_STATUS_SUCCESS ||
         *output_instruction_identifier == BINRWIR_IDENTIFIER_NONE) {
@@ -953,7 +953,7 @@ static runtimec_status_t runtimec_execution_window_compile_and_insert(
     runtimec_compilation_repository_lease_t *output_lease,
     runtimec_execution_window_diagnostic_t *output_detail, runtimec_error_t *error) {
     vmkv_encode_request_t encode_request;
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     binrwir_compilation_t *compilation = NULL;
     runtimec_status_t status;
 
@@ -983,18 +983,18 @@ static runtimec_status_t runtimec_execution_window_compile_and_insert(
      * 这样日志能直接说出死在特化而不是编码。
      */
     {
-        binrwir_program_t *specialized = NULL;
+        binrwir_binfunc_t *specialized = NULL;
 
-        status = binrwir_program_specialize(program, &host->allocator,
+        status = binrwir_binfunc_specialize(program, &host->allocator,
                                             &specialized, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
-            (void)binrwir_program_destroy(program);
+            (void)binrwir_binfunc_destroy(program);
             *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_SPECIALIZE_FAILED;
             return status;
         }
         /* 特化产新 Program，旧的那份由本层销毁——它是 `vmkv_encode` 给的，
          * 还没交给编译器，所有权仍在这里。 */
-        (void)binrwir_program_destroy(program);
+        (void)binrwir_binfunc_destroy(program);
         program = specialized;
     }
     /* 编译器接管 program：成败都由它处置，route 不再销毁。 */
@@ -1028,13 +1028,13 @@ runtimec_status_t runtimec_execution_window_execute(
     runtimec_compilation_repository_lookup_result_t lookup_result =
         RUNTIMEC_COMPILATION_REPOSITORY_LOOKUP_INVALID;
     binrwir_compilation_view_t compilation_view;
-    binrwir_program_view_t program_view;
+    binrwir_binfunc_view_t program_view;
     runtimec_frame_state_table_t *frame_state_table = NULL;
     runtimec_frame_state_t *frame_state = NULL;
     runtimec_frame_state_result_t frame_state_result = RUNTIMEC_FRAME_STATE_INVALID;
     bool frame_state_opened = false;
     binrwir_frame_bindings_t *bindings = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binvthread_frame_t frame;
     binrwir_execution_exit_t execution_exit;
     runtimec_execution_window_diagnostic_t detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_INVALID_REQUEST;
     uint64_t binding_generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
@@ -1196,7 +1196,7 @@ runtimec_status_t runtimec_execution_window_execute(
         goto release_lease;
     }
     output_result->program = compilation_view.canonical_program;
-    if (binrwir_program_get_view(compilation_view.canonical_program,
+    if (binrwir_binfunc_get_view(compilation_view.canonical_program,
                                  &program_view) != RUNTIMEC_STATUS_SUCCESS ||
         vmbin_frame_slot_capacity(compilation_view.canonical_program,
                                   &binding_capacity) !=
@@ -1313,7 +1313,7 @@ runtimec_status_t runtimec_execution_window_execute(
             "source program counter is not an instruction of this program");
         goto release_frame_state;
     }
-    if (binrwir_execution_frame_initialize(
+    if (binrwir_binvthread_frame_initialize(
             &frame, compilation_view.canonical_program, NULL, binding_generation,
             program_view.identity.program_generation,
             instruction_identifier) != RUNTIMEC_STATUS_SUCCESS) {
@@ -1527,7 +1527,7 @@ runtimec_status_t runtimec_execution_window_execute(
 
 release_frame:
     if (frame_ready) {
-        (void)binrwir_execution_frame_destroy(&frame);
+        (void)binrwir_binvthread_frame_destroy(&frame);
     }
 release_frame_state:
     /*

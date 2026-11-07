@@ -14,7 +14,7 @@
  *   - **元组不命中就保留原 opid**，不拒绝整条 Program（见下）。
  */
 
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/allocator.h"
 #include "contract/error.h"
 #include "contract/status.h"
@@ -62,9 +62,9 @@ extern "C" {
  * 符号池、字面量池、签名参数、别名规则**按原序搬运**，不重排：重排会要求改写
  * 所有 `PARAMETER_*` 引用的 slot，引入一整类新 bug，而没有任何收益。
  */
-runtimec_status_t binrwir_program_specialize(
-    const binrwir_program_t *program, const runtimec_allocator_t *allocator,
-    binrwir_program_t **output_program, runtimec_error_t *error);
+runtimec_status_t binrwir_binfunc_specialize(
+    const binrwir_binfunc_t *program, const runtimec_allocator_t *allocator,
+    binrwir_binfunc_t **output_program, runtimec_error_t *error);
 
 #ifdef __cplusplus
 }

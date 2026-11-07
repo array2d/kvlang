@@ -6,7 +6,7 @@
  * 作用：从 VMKV 已经地址化的 canonical BinRWIR Program 派生 execution plan，
  *       并在启用时于同一编译阶段尝试生成 JIT 机器码。输出是统一的 opaque
  *       compilation。
- * 联系：唯一内容输入是带非零 argaddr 的 binrwir_program_t；编译阶段一次性
+ * 联系：唯一内容输入是带非零 argaddr 的 binrwir_binfunc_t；编译阶段一次性
  *       选择 VMBIN 或 JIT。
  * 约束：不读取 RWIR 或 kvspace，不解析 key，不缓存 V.body，不执行 Program；
  *       通用 plan 不重复编码 instruction、地址或寄存器状态。
@@ -19,7 +19,7 @@
 #include <stdint.h>
 
 #include "binrwir/execution_plan.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir_compiler/jit/backend.h"
 #include "binrwir_compiler/jit/code.h"
 #include "contract/allocator.h"
@@ -60,7 +60,7 @@ typedef struct binrwir_compiler_configuration_t {
  */
 typedef struct binrwir_compilation_view_t {
     binrwir_execution_target_t execution_target;
-    const binrwir_program_t *canonical_program;
+    const binrwir_binfunc_t *canonical_program;
     const binrwir_execution_plan_t *execution_plan;
     const binrwir_jit_code_t *binrwir_jit_code;
 } binrwir_compilation_view_t;
@@ -90,7 +90,7 @@ runtimec_status_t binrwir_compiler_get_revision(
  * 还给你」那种不对称契约，那正是 double free 的来源。
  */
 runtimec_status_t binrwir_compiler_compile(
-    binrwir_compiler_t *compiler, binrwir_program_t *program,
+    binrwir_compiler_t *compiler, binrwir_binfunc_t *program,
     binrwir_compilation_t **output_compilation, runtimec_error_t *error);
 
 runtimec_status_t binrwir_compilation_get_view(

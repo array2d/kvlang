@@ -35,7 +35,7 @@
 #include "binrwir/argument.h"
 #include "binrwir/execution_exit.h"
 #include "binrwir/instruction.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir/signature.h"
 #include "binrwir_compiler/compiler.h"
 #include "contract/checkpoint.h"
@@ -247,7 +247,7 @@ static bool test_store_body_length(test_context_t *test, const char *key,
 
 /* 一个值：值头声明当前长度，值体在存储内可直接读写。 */
 static runtimec_status_t test_program_add_instruction(
-    binrwir_program_builder_t *builder,
+    binrwir_binfunc_builder_t *builder,
     binrwir_operation_identifier_t operation_identifier,
     uint32_t source_logical_program_counter, const binrwir_argument_t *read,
     size_t read_count, const binrwir_argument_t *write, size_t write_count) {
@@ -260,7 +260,7 @@ static runtimec_status_t test_program_add_instruction(
     request.read_arguments.count = read_count;
     request.write_arguments.data = write;
     request.write_arguments.count = write_count;
-    return binrwir_program_builder_add_instruction(builder, &request,
+    return binrwir_binfunc_builder_add_instruction(builder, &request,
                                                    &instruction_identifier);
 }
 
@@ -271,9 +271,9 @@ static runtimec_status_t test_program_add_instruction(
  */
 static runtimec_status_t test_program_build_zero_argument(
     const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
-    binrwir_program_t **output_program) {
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
     binrwir_argument_t arguments[1];
     uint16_t symbol_index = 0U;
     runtimec_status_t status;
@@ -288,14 +288,14 @@ static runtimec_status_t test_program_build_zero_argument(
         BINRWIR_BINARY_INTERFACE_GENERATION;
     identity.canonical_encoding_revision = canonical_encoding_revision;
 
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
     /* 无参数；一条 RETURN，source pc 取 1。 */
     if (binrwir_argument_create(0U, BINRWIR_REFERENCE_FUNCTION, 0U, 0U,
                                 &arguments[0]) != RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         return RUNTIMEC_STATUS_INVALID;
     }
     (void)symbol_index;
@@ -310,13 +310,13 @@ static runtimec_status_t test_program_build_zero_argument(
         request.read_arguments.count = 0U;
         request.write_arguments.data = NULL;
         request.write_arguments.count = 0U;
-        status = binrwir_program_builder_add_instruction(builder, &request,
+        status = binrwir_binfunc_builder_add_instruction(builder, &request,
                                                          &identifier);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
@@ -333,9 +333,9 @@ static runtimec_status_t test_program_build_zero_argument(
  */
 static runtimec_status_t test_program_build_local_round_trip(
     const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
-    binrwir_program_t **output_program) {
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
     binrwir_argument_t literal_argument;
     binrwir_argument_t source_argument;
     binrwir_argument_t target_argument;
@@ -375,19 +375,19 @@ static runtimec_status_t test_program_build_local_round_trip(
         BINRWIR_BINARY_INTERFACE_GENERATION;
     identity.canonical_encoding_revision = canonical_encoding_revision;
 
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
-    if (binrwir_program_builder_add_symbol(
+    if (binrwir_binfunc_builder_add_symbol(
             builder, runtimec_string_view_from_c_string("x"),
             runtimec_string_view_from_c_string("int64"),
             &source_symbol) != RUNTIMEC_STATUS_SUCCESS ||
-        binrwir_program_builder_add_symbol(
+        binrwir_binfunc_builder_add_symbol(
             builder, runtimec_string_view_from_c_string("y"),
             runtimec_string_view_from_c_string("int64"),
             &target_symbol) != RUNTIMEC_STATUS_SUCCESS ||
-        binrwir_program_builder_add_literal(
+        binrwir_binfunc_builder_add_literal(
             builder, runtimec_bytes_view_make(literal_wire, sizeof(literal_wire)),
             runtimec_string_view_from_c_string("int64"),
             &literal_index) != RUNTIMEC_STATUS_SUCCESS ||
@@ -398,7 +398,7 @@ static runtimec_status_t test_program_build_local_round_trip(
                                 &source_argument) != RUNTIMEC_STATUS_SUCCESS ||
         binrwir_argument_create(2U, BINRWIR_REFERENCE_LOCAL, target_symbol, 0U,
                                 &target_argument) != RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         return RUNTIMEC_STATUS_INVALID;
     }
     /* 7 -> x */
@@ -406,7 +406,7 @@ static runtimec_status_t test_program_build_local_round_trip(
                                      TEST_FIRST_SOURCE_COUNTER,
                                      &literal_argument, 1U, &source_argument,
                                      1U) != RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         return RUNTIMEC_STATUS_INVALID;
     }
     /* x -> y */
@@ -414,7 +414,7 @@ static runtimec_status_t test_program_build_local_round_trip(
                                      TEST_FIRST_SOURCE_COUNTER + 1U,
                                      &source_argument, 1U, &target_argument,
                                      1U) != RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         return RUNTIMEC_STATUS_INVALID;
     }
     /*
@@ -429,11 +429,11 @@ static runtimec_status_t test_program_build_local_round_trip(
     if (test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_RETURN,
                                      TEST_FIRST_SOURCE_COUNTER + 2U, NULL, 0U,
                                      NULL, 0U) != RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         return RUNTIMEC_STATUS_INVALID;
     }
-    status = binrwir_program_builder_finalize(builder, output_program);
-    (void)binrwir_program_builder_destroy(builder);
+    status = binrwir_binfunc_builder_finalize(builder, output_program);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
@@ -443,9 +443,9 @@ static runtimec_status_t test_program_build_local_round_trip(
  */
 static runtimec_status_t test_program_build_with_locals(
     const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
-    binrwir_program_t **output_program) {
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
     binrwir_argument_t counter_argument;
     binrwir_argument_t flag_argument;
     uint16_t counter_symbol = BINRWIR_SYMBOL_INDEX_NONE;
@@ -462,15 +462,15 @@ static runtimec_status_t test_program_build_with_locals(
         BINRWIR_BINARY_INTERFACE_GENERATION;
     identity.canonical_encoding_revision = canonical_encoding_revision;
 
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
-    if (binrwir_program_builder_add_symbol(
+    if (binrwir_binfunc_builder_add_symbol(
             builder, runtimec_string_view_from_c_string("x"),
             runtimec_string_view_from_c_string("int64"),
             &counter_symbol) != RUNTIMEC_STATUS_SUCCESS ||
-        binrwir_program_builder_add_symbol(
+        binrwir_binfunc_builder_add_symbol(
             builder, runtimec_string_view_from_c_string("flag"),
             runtimec_string_view_from_c_string("bool"), &flag_symbol) !=
             RUNTIMEC_STATUS_SUCCESS ||
@@ -478,7 +478,7 @@ static runtimec_status_t test_program_build_with_locals(
                                 &counter_argument) != RUNTIMEC_STATUS_SUCCESS ||
         binrwir_argument_create(1U, BINRWIR_REFERENCE_LOCAL, flag_symbol, 0U,
                                 &flag_argument) != RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         return RUNTIMEC_STATUS_INVALID;
     }
     {
@@ -495,22 +495,22 @@ static runtimec_status_t test_program_build_with_locals(
         request.read_arguments.count = 2U;
         request.write_arguments.data = NULL;
         request.write_arguments.count = 0U;
-        status = binrwir_program_builder_add_instruction(builder, &request,
+        status = binrwir_binfunc_builder_add_instruction(builder, &request,
                                                          &identifier);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
 /* 建一份带一个读参、一个写参、一个函数名符号的 builder 骨架。 */
 static runtimec_status_t test_program_begin(
     const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
-    binrwir_program_builder_t **output_builder, binrwir_argument_t *arguments) {
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_builder_t **output_builder, binrwir_argument_t *arguments) {
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
     uint32_t parameter_index = 0U;
     uint16_t symbol_index = 0U;
     runtimec_status_t status;
@@ -525,22 +525,22 @@ static runtimec_status_t test_program_begin(
         BINRWIR_BINARY_INTERFACE_GENERATION;
     identity.canonical_encoding_revision = canonical_encoding_revision;
 
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
-    status = binrwir_program_builder_add_parameter(
+    status = binrwir_binfunc_builder_add_parameter(
         builder, BINRWIR_PARAMETER_DIRECTION_READ, 0U,
         runtimec_string_view_from_c_string("int64"), &parameter_index);
     if (status == RUNTIMEC_STATUS_SUCCESS &&
-        binrwir_program_builder_add_parameter(
+        binrwir_binfunc_builder_add_parameter(
             builder, BINRWIR_PARAMETER_DIRECTION_WRITE, 1U,
             runtimec_string_view_from_c_string("int64"), &parameter_index) !=
             RUNTIMEC_STATUS_SUCCESS) {
         status = RUNTIMEC_STATUS_INVALID;
     }
     if (status == RUNTIMEC_STATUS_SUCCESS &&
-        binrwir_program_builder_add_symbol(
+        binrwir_binfunc_builder_add_symbol(
             builder, runtimec_string_view_from_c_string("g"),
             runtimec_string_view_make(NULL, 0U), &symbol_index) !=
             RUNTIMEC_STATUS_SUCCESS) {
@@ -556,7 +556,7 @@ static runtimec_status_t test_program_begin(
         status = RUNTIMEC_STATUS_INVALID;
     }
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         return status;
     }
     *output_builder = builder;
@@ -571,8 +571,8 @@ static runtimec_status_t test_program_begin(
  */
 static runtimec_status_t test_program_build_call(
     const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
-    binrwir_program_t **output_program) {
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_builder_t *builder = NULL;
     binrwir_argument_t arguments[3];
     runtimec_status_t status;
 
@@ -595,9 +595,9 @@ static runtimec_status_t test_program_build_call(
             TEST_RESUME_SOURCE_COUNTER, &arguments[0], 1U, &arguments[1], 1U);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
@@ -608,8 +608,8 @@ static runtimec_status_t test_program_build_call(
  */
 static runtimec_status_t test_program_build_done(
     const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
-    binrwir_program_t **output_program) {
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_builder_t *builder = NULL;
     binrwir_argument_t arguments[3];
     runtimec_status_t status;
 
@@ -627,9 +627,9 @@ static runtimec_status_t test_program_build_done(
             TEST_RETURN_SOURCE_COUNTER, NULL, 0U, NULL, 0U);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
@@ -642,9 +642,9 @@ static runtimec_status_t test_program_build_done(
  */
 static runtimec_status_t test_program_build_handoff(
     const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
-    uint32_t source_program_counter, binrwir_program_t **output_program) {
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
+    uint32_t source_program_counter, binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
     runtimec_status_t status;
 
     *output_program = NULL;
@@ -658,7 +658,7 @@ static runtimec_status_t test_program_build_handoff(
     identity.canonical_encoding_revision = canonical_encoding_revision;
     /* **零参数**：窗口要求 `argument_count == 读参+写参`，所以 HANDOFF 程序的
      * 签名必须为空，用例才能传 `arguments = NULL`。 */
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         /* FOREIGN 是结构标记：零读参零写参，只带 source pc。 */
         status = test_program_add_instruction(
@@ -666,9 +666,9 @@ static runtimec_status_t test_program_build_handoff(
             NULL, 0U, NULL, 0U);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
@@ -750,7 +750,7 @@ static runtimec_status_t test_repository_key_build(
 static runtimec_status_t test_compile_and_insert(
     const runtimec_session_runtime_components_t *components,
     const char *target, uint32_t canonical_encoding_revision,
-    binrwir_program_t *program, runtimec_error_t *error) {
+    binrwir_binfunc_t *program, runtimec_error_t *error) {
     runtimec_compilation_repository_key_t key;
     runtimec_compilation_repository_lease_t lease;
     binrwir_compilation_t *compilation = NULL;
@@ -786,7 +786,7 @@ int main(void) {
     runtimec_session_t *session = NULL;
     runtimec_session_runtime_components_t components;
     runtimec_error_t error;
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     runtimec_argument_description_t arguments[2];
     runtimec_execution_window_request_t request;
     runtimec_execution_window_result_t result;

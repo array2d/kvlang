@@ -31,7 +31,7 @@
 #include <kvspace/kvspace.h>
 
 #include "binrwir/instruction.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir/signature.h"
 #include "contract/kvspace_access.h"
 #include "contract/snapshot.h"
@@ -373,8 +373,8 @@ static void test_canonical_copy(test_canonical_t *target,
 
 /* canonical 指令的符号池与字面量池下标需要一个 builder 才能分配。 */
 static bool make_builder(const runtimec_kvspace_access_t *host,
-                         binrwir_program_builder_t **output_builder) {
-    const binrwir_program_identity_t identity = {
+                         binrwir_binfunc_builder_t **output_builder) {
+    const binrwir_binfunc_identity_t identity = {
         .snapshot_generation = 11U,
         .program_generation = 1U,
         .schema_version = 1U,
@@ -383,7 +383,7 @@ static bool make_builder(const runtimec_kvspace_access_t *host,
             BINRWIR_BINARY_INTERFACE_GENERATION,
         .canonical_encoding_revision = 1U,
     };
-    return binrwir_program_builder_create(&host->allocator, &identity,
+    return binrwir_binfunc_builder_create(&host->allocator, &identity,
                                           output_builder) ==
            RUNTIMEC_STATUS_SUCCESS;
 }
@@ -397,7 +397,7 @@ static runtimec_status_t encode_instruction_at(
     /* 非形参引用的 argidx 从形参区间之后开始，与 vmkv_encode 同一规则。 */
     function.next_operand_argument_index = function.read_parameter_count +
                                            function.write_parameter_count;
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_builder_t *builder = NULL;
     if (!make_builder(request->kvspace_access, &builder)) {
         return RUNTIMEC_STATUS_OUT_OF_MEMORY;
     }
@@ -414,7 +414,7 @@ static runtimec_status_t encode_instruction_at(
     status = vmkv_local_types_collect(source, request->kvspace_access->allocator,
                                       &local_types, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        binrwir_program_builder_destroy(builder);
+        binrwir_binfunc_builder_destroy(builder);
         vmkv_source_close_function(source);
         return status;
     }
@@ -444,7 +444,7 @@ static runtimec_status_t encode_instruction_at(
     }
     vmkv_local_types_destroy(local_types,
                              request->kvspace_access->allocator);
-    binrwir_program_builder_destroy(builder);
+    binrwir_binfunc_builder_destroy(builder);
     vmkv_source_close_function(source);
     return status;
 }
@@ -603,7 +603,7 @@ static void test_union_parameter_is_rejected(void) {
                                     &error) == RUNTIMEC_STATUS_UNSUPPORTED);
     EXPECT(error.code == 24);
     EXPECT(instruction.instruction.read_arguments.data == NULL);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
            RUNTIMEC_STATUS_UNSUPPORTED);
     EXPECT(program == NULL);
@@ -687,12 +687,12 @@ static void test_alias_policy_becomes_signature_rule(void) {
     EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
 
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &copy_request, &program, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     if (program != NULL) {
-        binrwir_program_view_t view;
-        EXPECT(binrwir_program_get_view(program, &view) ==
+        binrwir_binfunc_view_t view;
+        EXPECT(binrwir_binfunc_get_view(program, &view) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(view.signature.alias_rule_count == 1U);
         binrwir_alias_policy_t policy = BINRWIR_ALIAS_POLICY_INVALID;
@@ -700,15 +700,15 @@ static void test_alias_policy_becomes_signature_rule(void) {
                                                   &policy) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(policy == BINRWIR_ALIAS_MAY_ALIAS);
-        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
 
     program = NULL;
     EXPECT(vmkv_encode(encoder, &add_request, &program, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     if (program != NULL) {
-        binrwir_program_view_t view;
-        EXPECT(binrwir_program_get_view(program, &view) ==
+        binrwir_binfunc_view_t view;
+        EXPECT(binrwir_binfunc_get_view(program, &view) ==
                RUNTIMEC_STATUS_SUCCESS);
         /* forbidden：不产生规则，也不猜成 NO_ALIAS。 */
         EXPECT(view.signature.alias_rule_count == 0U);
@@ -717,7 +717,7 @@ static void test_alias_policy_becomes_signature_rule(void) {
                                                   &policy) ==
                RUNTIMEC_STATUS_UNSUPPORTED);
         EXPECT(policy == BINRWIR_ALIAS_POLICY_INVALID);
-        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
     (void)runtimec_kvspace_access_destroy(host, &host_error);
@@ -964,20 +964,20 @@ static void test_static_path_derives_body_address(void) {
     /* STATIC 的 slot 是符号池下标：vmbin 按 key 访问的依据。 */
     EXPECT(instruction.arguments[1].slot == 0U);
 
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     if (program != NULL) {
-        EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_validate(program) == RUNTIMEC_STATUS_SUCCESS);
         runtimec_string_view_t symbol = runtimec_string_view_make(NULL, 0U);
         runtimec_string_view_t symbol_type = runtimec_string_view_make(NULL, 0U);
-        EXPECT(binrwir_program_get_symbol(program, instruction.arguments[1].slot,
+        EXPECT(binrwir_binfunc_get_symbol(program, instruction.arguments[1].slot,
                                           &symbol, &symbol_type) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(view_equals(symbol, "/v/x"));
         /* STATIC 登记的是目标路径与目标值类型，不是局部槽。 */
         EXPECT(view_equals(symbol_type, "int64"));
-        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
     (void)runtimec_kvspace_access_destroy(host, &host_error);
@@ -1030,20 +1030,20 @@ static void test_named_frame_slot_becomes_local_symbol(void) {
      * （vmkv_encode 里该计数器跨整份 Program 递增）。 */
     EXPECT(instruction.arguments[0].argument_index == 3U);
 
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     if (program != NULL) {
-        EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_validate(program) == RUNTIMEC_STATUS_SUCCESS);
         runtimec_string_view_t symbol = runtimec_string_view_make(NULL, 0U);
         runtimec_string_view_t symbol_type = runtimec_string_view_make(NULL, 0U);
-        EXPECT(binrwir_program_get_symbol(program, instruction.arguments[0].slot,
+        EXPECT(binrwir_binfunc_get_symbol(program, instruction.arguments[0].slot,
                                           &symbol, &symbol_type) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(view_equals(symbol, "temporary"));
         /* 局部符号带类型：route 靠它决定槽的长度。 */
         EXPECT(view_equals(symbol_type, "int64"));
-        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
     (void)runtimec_kvspace_access_destroy(host, &host_error);
@@ -1080,7 +1080,7 @@ static void test_framed_slot_expression_is_unsupported(void) {
     runtimec_error_reset(&error);
     EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
            RUNTIMEC_STATUS_UNSUPPORTED);
     EXPECT(program == NULL);
@@ -1137,20 +1137,20 @@ static void test_unknown_operation_becomes_foreign(void) {
     EXPECT(instruction.instruction.logical_program_counter == 1U);
 
     /* 整份 Program 里它仍是一条合法指令，且 Program 校验通过。 */
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     if (program != NULL) {
-        EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_validate(program) == RUNTIMEC_STATUS_SUCCESS);
         binrwir_instruction_view_t view;
-        EXPECT(binrwir_program_get_instruction(program, 0U, &view) ==
+        EXPECT(binrwir_binfunc_get_instruction(program, 0U, &view) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(view.instruction->operation_identifier ==
                BINRWIR_OPERATION_IDENTIFIER_FOREIGN);
         EXPECT(view.source_logical_program_counter == 1U);
         EXPECT(view.read_arguments.count == 0U);
         EXPECT(view.write_arguments.count == 0U);
-        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
     (void)runtimec_kvspace_access_destroy(host, &host_error);
@@ -1191,7 +1191,7 @@ static void test_missing_source_program_counter_fails_in_reader(void) {
     runtimec_error_reset(&error);
     EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
            RUNTIMEC_STATUS_ERROR);
     /* 8 = vmkv/source 的 MISSING_OPCODE：洞在读层就被挡住。 */
@@ -1225,15 +1225,15 @@ static void test_program_encoding_matches_canonical_instruction(void) {
     runtimec_error_reset(&error);
     EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     const runtimec_status_t status = vmkv_encode(encoder, &request, &program,
                                                  &error);
     EXPECT(status == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(program != NULL);
     if (program != NULL) {
-        EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
-        binrwir_program_view_t view;
-        EXPECT(binrwir_program_get_view(program, &view) ==
+        EXPECT(binrwir_binfunc_validate(program) == RUNTIMEC_STATUS_SUCCESS);
+        binrwir_binfunc_view_t view;
+        EXPECT(binrwir_binfunc_get_view(program, &view) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(view.instruction_count == 1U);
         EXPECT(view.signature.read_parameter_count == 2U);
@@ -1245,13 +1245,13 @@ static void test_program_encoding_matches_canonical_instruction(void) {
         EXPECT(view_equals(view.signature.read_parameter_types[1], "float64"));
         EXPECT(view_equals(view.signature.write_parameter_types[0], "float64"));
         binrwir_instruction_view_t instruction;
-        EXPECT(binrwir_program_get_instruction(program, 0U, &instruction) ==
+        EXPECT(binrwir_binfunc_get_instruction(program, 0U, &instruction) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(instruction.instruction->operation_identifier == 0x0002U);
         EXPECT(instruction.source_logical_program_counter == 1U);
         EXPECT(instruction.read_arguments.count == 2U);
         EXPECT(instruction.write_arguments.count == 1U);
-        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
     (void)runtimec_kvspace_access_destroy(host, &host_error);
@@ -1282,7 +1282,7 @@ static void test_stale_snapshot_is_rejected(void) {
     runtimec_error_reset(&error);
     EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
            RUNTIMEC_STATUS_INVALID);
     EXPECT(program == NULL);
@@ -1334,13 +1334,13 @@ static void test_symbol_pool_normalization_remaps_every_reference(void) {
     runtimec_error_reset(&error);
     EXPECT(vmkv_encoder_create(host->allocator, &encoder, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     if (program != NULL) {
-        EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_validate(program) == RUNTIMEC_STATUS_SUCCESS);
         binrwir_instruction_view_t instruction;
-        EXPECT(binrwir_program_get_instruction(program, 1U, &instruction) ==
+        EXPECT(binrwir_binfunc_get_instruction(program, 1U, &instruction) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(instruction.read_arguments.count == 2U);
         EXPECT(instruction.read_arguments.data[0].reference_kind ==
@@ -1351,15 +1351,15 @@ static void test_symbol_pool_normalization_remaps_every_reference(void) {
         runtimec_string_view_t static_symbol = runtimec_string_view_make(NULL, 0U);
         runtimec_string_view_t local_type = runtimec_string_view_make(NULL, 0U);
         runtimec_string_view_t static_type = runtimec_string_view_make(NULL, 0U);
-        EXPECT(binrwir_program_get_symbol(
+        EXPECT(binrwir_binfunc_get_symbol(
                    program, instruction.read_arguments.data[0].slot,
                    &local_symbol, &local_type) == RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(binrwir_program_get_symbol(
+        EXPECT(binrwir_binfunc_get_symbol(
                    program, instruction.read_arguments.data[1].slot,
                    &static_symbol, &static_type) == RUNTIMEC_STATUS_SUCCESS);
         EXPECT(view_equals(local_symbol, "a"));
         EXPECT(view_equals(static_symbol, "/v/x"));
-        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
     (void)runtimec_kvspace_access_destroy(host, &host_error);
@@ -1414,18 +1414,18 @@ static void test_call_target_becomes_function_symbol(void) {
     EXPECT(instruction.arguments[0].payload == 0U);
     EXPECT(instruction.arguments[1].reference_kind == BINRWIR_REFERENCE_LITERAL);
 
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     EXPECT(vmkv_encode(encoder, &request, &program, &error) ==
            RUNTIMEC_STATUS_SUCCESS);
     if (program != NULL) {
-        EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_validate(program) == RUNTIMEC_STATUS_SUCCESS);
         runtimec_string_view_t symbol = runtimec_string_view_make(NULL, 0U);
         runtimec_string_view_t symbol_type = runtimec_string_view_make(NULL, 0U);
-        EXPECT(binrwir_program_get_symbol(program, instruction.arguments[0].slot,
+        EXPECT(binrwir_binfunc_get_symbol(program, instruction.arguments[0].slot,
                                           &symbol, &symbol_type) ==
                RUNTIMEC_STATUS_SUCCESS);
         EXPECT(view_equals(symbol, "add1"));
-        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
     EXPECT(vmkv_encoder_destroy(encoder) == RUNTIMEC_STATUS_SUCCESS);
     (void)runtimec_kvspace_access_destroy(host, &host_error);

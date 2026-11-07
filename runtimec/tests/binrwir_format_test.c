@@ -14,7 +14,7 @@
 #include <string.h>
 
 #include "binrwir/format.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 
 static int failures;
 
@@ -119,9 +119,9 @@ static runtimec_string_view_t text_view(const char *text) {
 
 static runtimec_status_t test_program_build(
     const runtimec_allocator_t *allocator, const test_program_source_t *source,
-    binrwir_program_t **output_program) {
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
     uint16_t symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
     uint32_t identifier = BINRWIR_IDENTIFIER_NONE;
     size_t ordinal;
@@ -136,7 +136,7 @@ static runtimec_status_t test_program_build(
     identity.binrwir_binary_interface_generation =
         BINRWIR_BINARY_INTERFACE_GENERATION;
     identity.canonical_encoding_revision = 1U;
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -145,7 +145,7 @@ static runtimec_status_t test_program_build(
          ++ordinal) {
         uint32_t parameter_index = BINRWIR_ARGUMENT_INDEX_NONE;
 
-        status = binrwir_program_builder_add_parameter(
+        status = binrwir_binfunc_builder_add_parameter(
             builder, source->parameters[ordinal].direction,
             source->parameters[ordinal].argument_index,
             text_view(source->parameters[ordinal].type_name), &parameter_index);
@@ -158,7 +158,7 @@ static runtimec_status_t test_program_build(
                 ? text_view(source->symbol_types[ordinal])
                 : runtimec_string_view_make(NULL, 0U);
 
-        status = binrwir_program_builder_add_symbol(
+        status = binrwir_binfunc_builder_add_symbol(
             builder, text_view(source->symbols[ordinal]), symbol_type,
             &symbol_index);
     }
@@ -167,7 +167,7 @@ static runtimec_status_t test_program_build(
          ++ordinal) {
         uint32_t literal_index = BINRWIR_LITERAL_INDEX_NONE;
 
-        status = binrwir_program_builder_add_literal(
+        status = binrwir_binfunc_builder_add_literal(
             builder,
             runtimec_bytes_view_make(source->literal_bytes[ordinal],
                                      source->literal_sizes[ordinal]),
@@ -187,13 +187,13 @@ static runtimec_status_t test_program_build(
         request.read_arguments.count = instruction->read_count;
         request.write_arguments.data = instruction->writes;
         request.write_arguments.count = instruction->write_count;
-        status = binrwir_program_builder_add_instruction(builder, &request,
+        status = binrwir_binfunc_builder_add_instruction(builder, &request,
                                                          &identifier);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
@@ -248,12 +248,12 @@ static bool test_resolve_operation(
 }
 
 /* 格式化到一个新分配的字符串；调用方负责 free。 */
-static char *test_format(const binrwir_program_t *program,
+static char *test_format(const binrwir_binfunc_t *program,
                          const char *function_name,
                          binrwir_operation_name_function resolve) {
     test_sink_t sink = {NULL, 0U, 0U};
 
-    if (binrwir_program_format(program, text_view(function_name), resolve, NULL,
+    if (binrwir_binfunc_format(program, text_view(function_name), resolve, NULL,
                                test_sink_append, &sink) !=
         RUNTIMEC_STATUS_SUCCESS) {
         free(sink.text);
@@ -284,7 +284,7 @@ static char *test_format(const binrwir_program_t *program,
 static void test_format_matches_derived_golden(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     binrwir_argument_t arguments[6];
     test_instruction_t instructions[6];
     test_parameter_t parameters[2];
@@ -417,7 +417,7 @@ static void test_format_matches_derived_golden(void) {
         }
         free(formatted);
     }
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -426,7 +426,7 @@ static void test_format_matches_derived_golden(void) {
 static void test_format_is_repeatable(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     binrwir_argument_t arguments[2];
     test_instruction_t instruction;
     test_program_source_t source;
@@ -463,7 +463,7 @@ static void test_format_is_repeatable(void) {
     }
     free(first);
     free(second);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -472,7 +472,7 @@ static void test_format_is_repeatable(void) {
 static void test_format_without_resolver_prints_opids(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     test_instruction_t instruction;
     test_program_source_t source;
     char *formatted = NULL;
@@ -502,7 +502,7 @@ static void test_format_without_resolver_prints_opids(void) {
         }
         free(formatted);
     }
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -511,7 +511,7 @@ static void test_format_without_resolver_prints_opids(void) {
 static void test_buffer_sink_matches_accumulation(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     test_instruction_t instruction;
     test_program_source_t source;
     binrwir_format_buffer_sink_context_t sink_context;
@@ -529,7 +529,7 @@ static void test_buffer_sink_matches_accumulation(void) {
                     RUNTIMEC_STATUS_SUCCESS);
     sink_context.allocator = allocator;
     sink_context.buffer = &buffer;
-    RUNTIMEC_EXPECT(binrwir_program_format(program, text_view("buf"),
+    RUNTIMEC_EXPECT(binrwir_binfunc_format(program, text_view("buf"),
                                            test_resolve_operation, NULL,
                                            binrwir_format_buffer_sink,
                                            &sink_context) ==
@@ -545,7 +545,7 @@ static void test_buffer_sink_matches_accumulation(void) {
         (void)test_deallocate(&counters, buffer.data, buffer.capacity,
                               _Alignof(uint8_t));
     }
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -563,7 +563,7 @@ static void test_buffer_sink_matches_accumulation(void) {
 static void test_symbol_registration_order_is_normalized(bool reversed) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     binrwir_argument_t local_argument;
     binrwir_argument_t static_argument;
     test_instruction_t instruction;
@@ -650,7 +650,7 @@ static void test_symbol_registration_order_is_normalized(bool reversed) {
         }
         free(formatted);
     }
-    RUNTIMEC_EXPECT(binrwir_program_destroy(program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }
@@ -659,7 +659,7 @@ static void test_symbol_registration_order_is_normalized(bool reversed) {
  * 两种登记顺序必须产出**同一份文本**——这条比「各自等于 golden」更强：
  * 它直接断言重排的结果与登记顺序无关，而不是靠两份 golden 恰好相同。
  *
- * 注意它与 Program 校验的分工：`binrwir_program_validate` 要求池**严格字典升序**，
+ * 注意它与 Program 校验的分工：`binrwir_binfunc_validate` 要求池**严格字典升序**，
  * 所以「重排没做」会先被 validate 挡成 INVALID，而不会走到打印。也就是说这条用例
  * 守的是**重排 + 重映射这一对动作的正确性**（下标变了、引用关系没变），不是
  * 「有没有重排」——后者由 validate 守。反向控制时两者会同时红，这是预期的。
@@ -667,8 +667,8 @@ static void test_symbol_registration_order_is_normalized(bool reversed) {
 static void test_registration_order_does_not_change_output(void) {
     test_allocator_context_t counters = {0U};
     runtimec_allocator_t allocator = test_allocator(&counters);
-    binrwir_program_t *forward_program = NULL;
-    binrwir_program_t *reverse_program = NULL;
+    binrwir_binfunc_t *forward_program = NULL;
+    binrwir_binfunc_t *reverse_program = NULL;
     char *forward_text = NULL;
     char *reverse_text = NULL;
     size_t ordinal;
@@ -685,7 +685,7 @@ static void test_registration_order_does_not_change_output(void) {
         test_program_source_t source;
         uint16_t local_slot = 1U;
         uint16_t static_slot = ordinal == 0U ? 0U : 2U;
-        binrwir_program_t **program =
+        binrwir_binfunc_t **program =
             ordinal == 0U ? &forward_program : &reverse_program;
         char **formatted = ordinal == 0U ? &forward_text : &reverse_text;
 
@@ -738,9 +738,9 @@ static void test_registration_order_does_not_change_output(void) {
     }
     free(forward_text);
     free(reverse_text);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(forward_program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(forward_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_destroy(reverse_program) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_destroy(reverse_program) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(counters.live_allocations == 0U);
 }

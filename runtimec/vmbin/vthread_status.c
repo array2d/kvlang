@@ -12,7 +12,7 @@
 #include "kvspace/kvspace.h"
 
 runtimec_status_t runtimec_vthread_status_handle(
-    const binrwir_execution_frame_t *frame, void **output_handle) {
+    const binrwir_binvthread_frame_t *frame, void **output_handle) {
     if (output_handle != NULL) {
         *output_handle = NULL;
     }

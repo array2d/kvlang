@@ -26,9 +26,9 @@
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir/registry.h"
 #include "contract/allocator.h"
 #include "contract/status.h"
@@ -70,7 +70,7 @@ static void test_deallocate(void *context, void *allocation, size_t size,
 
 /* ① 写 ERROR 出口并带精确 detail_code，返回非 SUCCESS。 */
 static runtimec_status_t test_precise_handler(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     (void)frame;
@@ -84,7 +84,7 @@ static runtimec_status_t test_precise_handler(
 
 /* ② 只回状态、不写出口：分派层必须兜底成 DIAG_HANDLER_FAILED。 */
 static runtimec_status_t test_bare_handler(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     (void)frame;
@@ -100,7 +100,7 @@ static runtimec_status_t test_bare_handler(
  * 成功原样拷贝，下游看到 `status=0 detail=0`——「失败却报成功码」。
  */
 static runtimec_status_t test_contradictory_handler(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     (void)frame;
@@ -113,9 +113,9 @@ static runtimec_status_t test_contradictory_handler(
 
 static runtimec_status_t test_build_program(const runtimec_allocator_t *allocator,
                                             binrwir_operation_identifier_t opid,
-                                            binrwir_program_t **output_program) {
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
+                                            binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
     binrwir_argument_t argument;
     binrwir_instruction_build_request_t request;
     uint32_t identifier = BINRWIR_IDENTIFIER_NONE;
@@ -126,7 +126,7 @@ static runtimec_status_t test_build_program(const runtimec_allocator_t *allocato
     identity.program_generation = 1U;
     identity.binrwir_binary_interface_generation =
         BINRWIR_BINARY_INTERFACE_GENERATION;
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -146,18 +146,18 @@ static runtimec_status_t test_build_program(const runtimec_allocator_t *allocato
         head.layout = KVSPACE_XVALUE_LAYOUT_LENGTH;
         memcpy(wire, &head, KVSPACE_XVALUE_HEAD_LEN);
         memcpy(wire + KVSPACE_XVALUE_HEAD_LEN, &body_value, sizeof(body_value));
-        status = binrwir_program_builder_add_literal(
+        status = binrwir_binfunc_builder_add_literal(
             builder, runtimec_bytes_view_make(wire, sizeof(wire)),
             runtimec_string_view_from_c_string("int64"), &literal_index);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
-            (void)binrwir_program_builder_destroy(builder);
+            (void)binrwir_binfunc_builder_destroy(builder);
             return status;
         }
         status = binrwir_argument_create(0U, BINRWIR_REFERENCE_LITERAL, 0U,
                                          literal_index, &argument);
     }
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
         return status;
     }
     memset(&request, 0, sizeof(request));
@@ -165,12 +165,12 @@ static runtimec_status_t test_build_program(const runtimec_allocator_t *allocato
     request.operation_identifier = opid;
     request.read_arguments.data = &argument;
     request.read_arguments.count = 1U;
-    status = binrwir_program_builder_add_instruction(builder, &request,
+    status = binrwir_binfunc_builder_add_instruction(builder, &request,
                                                      &identifier);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
@@ -178,10 +178,10 @@ static void test_case(const runtimec_allocator_t *allocator,
                       binrwir_operation_identifier_t opid,
                       binrwir_registry_handler_t handler,
                       test_expectation_t expectation) {
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     binrwir_registry_t registry;
     binrwir_frame_bindings_t *bindings = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binvthread_frame_t frame;
     binrwir_execution_exit_t exit_state;
     binrwir_registry_entry_t entry;
     binrwir_frame_bindings_t *created = NULL;
@@ -203,7 +203,7 @@ static void test_case(const runtimec_allocator_t *allocator,
     EXPECT(binrwir_frame_bindings_create(allocator, 4U, &created) ==
            RUNTIMEC_STATUS_SUCCESS);
     bindings = created;
-    EXPECT(binrwir_execution_frame_initialize(&frame, program, NULL, 1U, 1U,
+    EXPECT(binrwir_binvthread_frame_initialize(&frame, program, NULL, 1U, 1U,
                                               0U) == RUNTIMEC_STATUS_SUCCESS);
     frame.bindings = bindings;
 
@@ -241,8 +241,8 @@ static void test_case(const runtimec_allocator_t *allocator,
     }
 
     EXPECT(binrwir_frame_bindings_destroy(bindings) == RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(binrwir_execution_frame_destroy(&frame) == RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(binrwir_binvthread_frame_destroy(&frame) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
 }
 
 int main(void) {

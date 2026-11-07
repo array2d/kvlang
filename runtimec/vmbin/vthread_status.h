@@ -15,7 +15,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "contract/error.h"
 #include "contract/status.h"
 #include "contract/view.h"
@@ -57,7 +57,7 @@ extern "C" {
  * 「没有能力」，不是「参数错了」；调用方据此失败封闭，不要与 INVALID 混用。
  */
 runtimec_status_t runtimec_vthread_status_handle(
-    const binrwir_execution_frame_t *frame, void **output_handle);
+    const binrwir_binvthread_frame_t *frame, void **output_handle);
 
 /*
  * 由帧路径拼出系统变量键。

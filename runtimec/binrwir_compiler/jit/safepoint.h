@@ -18,7 +18,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir_compiler/jit/register_allocation.h"
 #include "contract/allocator.h"
 #include "contract/status.h"
@@ -93,14 +93,14 @@ runtimec_status_t binrwir_jit_safepoint_commit_completed_state(
     uint32_t completed_logical_program_counter,
     uint32_t next_logical_program_counter,
     void *execution_state,
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     runtimec_error_t *error);
 runtimec_status_t binrwir_jit_safepoint_discard_incomplete_state(
     const binrwir_jit_safepoint_plan_t *plan,
     binrwir_jit_safepoint_boundary_t boundary,
     uint32_t current_logical_program_counter,
     void *execution_state,
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     runtimec_error_t *error);
 runtimec_status_t binrwir_jit_safepoint_plan_destroy(
     binrwir_jit_safepoint_plan_t *plan);

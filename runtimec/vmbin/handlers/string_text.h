@@ -17,7 +17,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "contract/char_codec.h"
 #include "contract/error.h"
 #include "contract/status.h"
@@ -58,7 +58,7 @@ typedef struct string_text {
 
 /* 一个参数项 → 解码后的码点序列（声明类型决定编码）。 */
 runtimec_status_t string_text_decode_argument(
-    const binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
+    const binrwir_binvthread_frame_t *frame, const binrwir_argument_t *argument,
     string_text_t *output, runtimec_error_t *error);
 
 /*

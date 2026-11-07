@@ -26,7 +26,7 @@ struct binrwir_compilation_t {
     runtimec_allocator_t allocator;
     binrwir_compilation_view_t view;
     /* compilation 独占的两份派生对象：Program 副本与 execution plan。 */
-    binrwir_program_t *canonical_program;
+    binrwir_binfunc_t *canonical_program;
     binrwir_execution_plan_t *execution_plan;
 };
 
@@ -132,7 +132,7 @@ runtimec_status_t binrwir_compiler_get_revision(
 }
 
 runtimec_status_t binrwir_compiler_compile(
-    binrwir_compiler_t *compiler, binrwir_program_t *program,
+    binrwir_compiler_t *compiler, binrwir_binfunc_t *program,
     binrwir_compilation_t **output_compilation, runtimec_error_t *error) {
     binrwir_execution_plan_t *execution_plan = NULL;
     binrwir_compilation_t *compilation = NULL;
@@ -151,19 +151,19 @@ runtimec_status_t binrwir_compiler_compile(
     }
     if (compiler == NULL || output_compilation == NULL) {
         runtimec_error_reset(&ignored);
-        (void)binrwir_program_destroy(program);
+        (void)binrwir_binfunc_destroy(program);
         return binrwir_compiler_fail(error, RUNTIMEC_STATUS_INVALID, 2,
                                      "compiler or output slot is missing");
     }
-    if (binrwir_program_validate(program) != RUNTIMEC_STATUS_SUCCESS) {
+    if (binrwir_binfunc_validate(program) != RUNTIMEC_STATUS_SUCCESS) {
         runtimec_error_reset(&ignored);
-        (void)binrwir_program_destroy(program);
+        (void)binrwir_binfunc_destroy(program);
         return binrwir_compiler_fail(error, RUNTIMEC_STATUS_INVALID, 3,
                                      "canonical program is not valid");
     }
     if (compiler->plan_generation == UINT64_MAX) {
         runtimec_error_reset(&ignored);
-        (void)binrwir_program_destroy(program);
+        (void)binrwir_binfunc_destroy(program);
         return binrwir_compiler_fail(error, RUNTIMEC_STATUS_INVALID, 4,
                                      "plan generation is exhausted");
     }
@@ -173,7 +173,7 @@ runtimec_status_t binrwir_compiler_compile(
         compiler->compiler_revision, &execution_plan, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         runtimec_error_reset(&ignored);
-        (void)binrwir_program_destroy(program);
+        (void)binrwir_binfunc_destroy(program);
         /*
          * 兜底：下游若已填过 error 就保留它（那条消息更接近根因），
          * 没填就补一条——绝不让失败只剩一个状态码。
@@ -196,7 +196,7 @@ runtimec_status_t binrwir_compiler_compile(
     if (compilation == NULL) {
         (void)binrwir_execution_plan_destroy(execution_plan);
         runtimec_error_reset(&ignored);
-        (void)binrwir_program_destroy(program);
+        (void)binrwir_binfunc_destroy(program);
         return binrwir_compiler_fail(error, RUNTIMEC_STATUS_OUT_OF_MEMORY, 5,
                                      "compilation allocation failed");
     }
@@ -248,7 +248,7 @@ runtimec_status_t binrwir_compilation_destroy(
         }
     }
     if (compilation->canonical_program != NULL) {
-        status = binrwir_program_destroy(compilation->canonical_program);
+        status = binrwir_binfunc_destroy(compilation->canonical_program);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return status;
         }

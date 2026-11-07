@@ -1485,7 +1485,7 @@ def render_specialization_table(rows: list[Row]) -> str:
         " * 作用：特化查找表的唯一定义。常量与计数在 operation_identifiers.h。",
         " * 约束：由 tools/architecture/generate_rwir_catalog.py 生成并校验；",
         " *       条数必须等于 BINRWIR_SPECIALIZATION_TABLE_COUNT。",
-        " * 缺行处置：`binrwir_program_specialize` 查不到本表的 (base opid, 元组串)",
+        " * 缺行处置：`binrwir_binfunc_specialize` 查不到本表的 (base opid, 元组串)",
         " *       时**整份 Program 拒绝**，error.code = 3（NO_SPECIALIZATION_ROW）。",
         " *       补行要改上游：specification/rwir_catalog.def 的能力行掩码，再由本",
         " *       脚本重新生成——**不要手改本文件，也不要给 handler 加回落**。",

@@ -17,7 +17,7 @@
 
 #include "binrwir/argument.h"
 #include "binrwir/frame_bindings.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/status.h"
 
 #ifdef __cplusplus
@@ -25,18 +25,18 @@ extern "C" {
 #endif
 
 /* 帧里最多需要的绑定槽数：读参 + 写参（局部槽由调用入口另行扩容）。 */
-runtimec_status_t vmbin_frame_slot_capacity(const binrwir_program_t *program,
+runtimec_status_t vmbin_frame_slot_capacity(const binrwir_binfunc_t *program,
                                             size_t *output_capacity);
 
 /* 参数项 → 绑定槽号；非帧槽引用的 kind（LITERAL / STATIC / FUNCTION）返回
  * INVALID，它们不占绑定表。 */
 runtimec_status_t vmbin_frame_slot_of_argument(
-    const binrwir_program_t *program, const binrwir_argument_t *argument,
+    const binrwir_binfunc_t *program, const binrwir_argument_t *argument,
     uint16_t *output_slot);
 
 /* 形参的直接换算：读参见 j，写参见 nr + j。callee 侧绑定时用。 */
 runtimec_status_t vmbin_frame_slot_of_parameter(
-    const binrwir_program_t *program, binrwir_parameter_direction_t direction,
+    const binrwir_binfunc_t *program, binrwir_parameter_direction_t direction,
     uint32_t parameter_index, uint16_t *output_slot);
 
 /*
@@ -47,7 +47,7 @@ runtimec_status_t vmbin_frame_slot_of_parameter(
  * 「同一个事实两处实现」。收进来，让全仓只有这一处算槽号。
  */
 runtimec_status_t vmbin_frame_slot_of_local_symbol(
-    const binrwir_program_t *program, uint16_t symbol_index,
+    const binrwir_binfunc_t *program, uint16_t symbol_index,
     uint16_t *output_slot);
 
 #ifdef __cplusplus

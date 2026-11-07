@@ -22,7 +22,7 @@
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "contract/char_codec.h"
 #include "contract/error.h"
@@ -43,7 +43,7 @@
  * 所以这里只填不扩。长度不符由 value_access 的等长契约拒绝——扩长度是存储层的事。
  */
 static void scalar_character_store_utf8(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, const uint8_t *bytes,
     size_t size, binrwir_execution_exit_t *output_exit) {
     vmbin_value_location_t location;
@@ -81,7 +81,7 @@ static void scalar_character_store_utf8(
  * 每个编码组合一条 handler 是因为**解码器要在编译期定**：`string_text_decode_utf8`
  * 与 `_ascii` 的调用点由特化 opid 决定，运行期没有 `if (是哪种编码)`。
  */
-void runtimec_scalar_concat(binrwir_execution_frame_t *frame,
+void runtimec_scalar_concat(binrwir_binvthread_frame_t *frame,
                             const binrwir_instruction_view_t *instruction,
                             string_text_decode_function_t decode_left,
                             string_text_decode_function_t decode_right,
@@ -142,7 +142,7 @@ void runtimec_scalar_concat(binrwir_execution_frame_t *frame,
  * 与 concat 的差别只在结尾：结果定长 bool，直接写一个字节，不碰存储层。
  */
 void runtimec_scalar_character_equal(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     string_text_decode_function_t decode_left,
     string_text_decode_function_t decode_right, bool invert,
@@ -205,7 +205,7 @@ void runtimec_scalar_character_equal(
  * 源是 char 的情形（跨编码字符转换）走另一条：先解码成码点、再按目标编码重编。
  */
 void runtimec_scalar_value_to_character(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, uint32_t code_point,
     runtimec_character_encoding_t target_encoding,
     binrwir_execution_exit_t *output_exit) {
@@ -285,7 +285,7 @@ bool runtimec_scalar_character_code_point(const uint8_t *bytes, size_t size,
  * 单字符要求**恰好一个码点**：空 body 或多码点都是畸形载荷，不取第一个。
  */
 void runtimec_scalar_character_to_value(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     string_text_decode_function_t decode_source,
     runtimec_character_encoding_t target_encoding,
@@ -320,7 +320,7 @@ void runtimec_scalar_character_to_value(
  * 目标回绕。这与其他整数 cast 的判据同源，不另立规则。
  */
 void runtimec_scalar_character_to_number(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     string_text_decode_function_t decode_source, uint32_t target_width,
     bool target_signed, bool target_is_float,

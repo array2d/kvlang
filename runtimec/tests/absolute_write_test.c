@@ -36,9 +36,9 @@
 #include <unistd.h>
 
 #include "binrwir/argument.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/frame_bindings.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/error.h"
 #include "contract/kvspace_access.h"
 #include "contract/snapshot.h"
@@ -342,13 +342,13 @@ static void test_write_creates_missing_key(const char *kvspace_path) {
         return;
     }
 
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
     binrwir_argument_t write_argument;
     binrwir_instruction_build_request_t request;
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     binrwir_frame_bindings_t *created_bindings = NULL;
-    binrwir_execution_frame_t frame;
+    binrwir_binvthread_frame_t frame;
     uint16_t symbol_index = 0U;
     uint32_t identifier = BINRWIR_IDENTIFIER_NONE;
     const int64_t value = 42;
@@ -358,9 +358,9 @@ static void test_write_creates_missing_key(const char *kvspace_path) {
     identity.program_generation = 1U;
     identity.binrwir_binary_interface_generation =
         BINRWIR_BINARY_INTERFACE_GENERATION;
-    EXPECT(binrwir_program_builder_create(&allocator, &identity, &builder) ==
+    EXPECT(binrwir_binfunc_builder_create(&allocator, &identity, &builder) ==
            RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(binrwir_program_builder_add_symbol(
+    EXPECT(binrwir_binfunc_builder_add_symbol(
                builder,
                runtimec_string_view_from_c_string("/abs_created"),
                runtimec_string_view_from_c_string("int64"),
@@ -374,14 +374,14 @@ static void test_write_creates_missing_key(const char *kvspace_path) {
     request.operation_identifier = UINT32_C(0x7F11);
     request.write_arguments.data = &write_argument;
     request.write_arguments.count = 1U;
-    EXPECT(binrwir_program_builder_add_instruction(builder, &request,
+    EXPECT(binrwir_binfunc_builder_add_instruction(builder, &request,
                                                    &identifier) ==
            RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+    EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
            RUNTIMEC_STATUS_SUCCESS);
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
 
-    EXPECT(binrwir_execution_frame_initialize(&frame, program, NULL, 1U, 1U,
+    EXPECT(binrwir_binvthread_frame_initialize(&frame, program, NULL, 1U, 1U,
                                               0U) == RUNTIMEC_STATUS_SUCCESS);
     EXPECT(binrwir_frame_bindings_create(&allocator, 4U, &created_bindings) ==
            RUNTIMEC_STATUS_SUCCESS);
@@ -448,8 +448,8 @@ static void test_write_creates_missing_key(const char *kvspace_path) {
 
     EXPECT(binrwir_frame_bindings_destroy(created_bindings) ==
            RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(binrwir_execution_frame_destroy(&frame) == RUNTIMEC_STATUS_SUCCESS);
-    EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(binrwir_binvthread_frame_destroy(&frame) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     (void)runtimec_kvspace_access_destroy(access, &error);
     kvspaceClose(handle);
 }

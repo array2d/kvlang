@@ -344,7 +344,7 @@ static bool encode_and_report(test_environment_t *environment,
         .function_path = runtimec_string_view_from_c_string(function_path),
         .expected_snapshot = snapshot,
     };
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     const runtimec_status_t status =
         vmkv_encode(encoder, &request, &program, &error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -355,10 +355,10 @@ static bool encode_and_report(test_environment_t *environment,
         vmkv_encoder_destroy(encoder);
         return false;
     }
-    EXPECT(binrwir_program_validate(program) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(binrwir_binfunc_validate(program) == RUNTIMEC_STATUS_SUCCESS);
 
-    binrwir_program_view_t view;
-    EXPECT(binrwir_program_get_view(program, &view) == RUNTIMEC_STATUS_SUCCESS);
+    binrwir_binfunc_view_t view;
+    EXPECT(binrwir_binfunc_get_view(program, &view) == RUNTIMEC_STATUS_SUCCESS);
     size_t foreign_count = 0U;
     printf("  program %s: %zu instruction(s), %zu read / %zu write param(s)\n",
            function_path, view.instruction_count,
@@ -366,7 +366,7 @@ static bool encode_and_report(test_environment_t *environment,
            view.signature.write_parameter_count);
     for (size_t ordinal = 0U; ordinal < view.instruction_count; ++ordinal) {
         binrwir_instruction_view_t instruction;
-        if (binrwir_program_get_instruction(program, (uint32_t)ordinal,
+        if (binrwir_binfunc_get_instruction(program, (uint32_t)ordinal,
                                             &instruction) !=
             RUNTIMEC_STATUS_SUCCESS) {
             EXPECT(false);
@@ -411,7 +411,7 @@ static bool encode_and_report(test_environment_t *environment,
     }
     *output_count = view.instruction_count;
     *output_foreign_count = foreign_count;
-    binrwir_program_destroy(program);
+    binrwir_binfunc_destroy(program);
     vmkv_encoder_destroy(encoder);
     return true;
 }

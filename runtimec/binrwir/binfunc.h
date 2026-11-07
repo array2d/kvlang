@@ -1,5 +1,5 @@
-#ifndef BINRWIR_PROGRAM_H
-#define BINRWIR_PROGRAM_H
+#ifndef BINRWIR_BINFUNC_H
+#define BINRWIR_BINFUNC_H
 
 /*
  * 组件：binrwir/program
@@ -36,68 +36,68 @@ extern "C" {
 #define BINRWIR_SYMBOL_INDEX_NONE UINT16_MAX
 #define BINRWIR_LITERAL_INDEX_NONE UINT32_MAX
 
-typedef struct binrwir_program_identity {
+typedef struct binrwir_binfunc_identity {
     uint64_t snapshot_generation;
     uint64_t program_generation;
     uint32_t schema_version;
     uint32_t rwir_manifest_version;
     uint32_t binrwir_binary_interface_generation;
     uint32_t canonical_encoding_revision;
-} binrwir_program_identity_t;
+} binrwir_binfunc_identity_t;
 
-typedef struct binrwir_program binrwir_program_t;
-typedef struct binrwir_program_builder binrwir_program_builder_t;
+typedef struct binrwir_binfunc binrwir_binfunc_t;
+typedef struct binrwir_binfunc_builder binrwir_binfunc_builder_t;
 
-typedef struct binrwir_program_view {
-    binrwir_program_identity_t identity;
+typedef struct binrwir_binfunc_view {
+    binrwir_binfunc_identity_t identity;
     binrwir_signature_view_t signature;
     /* 逐条内容只能经 get_instruction 取得，私有 framing 不对外暴露。 */
     size_t instruction_count;
-} binrwir_program_view_t;
+} binrwir_binfunc_view_t;
 
 /*
  * 只读查询。Program 由 finalize 产出后不再变化，因此调用方对同一个 Program 只需
  * 调用一次 validate；get_view 与 get_instruction 只做 O(1) 范围检查后借出指针，
  * 不在每次查询里重复全量校验。
  */
-runtimec_status_t binrwir_program_get_identity(
-    const binrwir_program_t *program,
-    binrwir_program_identity_t *output_identity);
+runtimec_status_t binrwir_binfunc_get_identity(
+    const binrwir_binfunc_t *program,
+    binrwir_binfunc_identity_t *output_identity);
 /* 全量校验：identity、参数类型、别名规则、每条 instruction 的参数绑定。 */
-runtimec_status_t binrwir_program_validate(const binrwir_program_t *program);
-runtimec_status_t binrwir_program_get_view(const binrwir_program_t *program,
-                                           binrwir_program_view_t *output_view);
-runtimec_status_t binrwir_program_get_instruction(
-    const binrwir_program_t *program, uint32_t instruction_identifier,
+runtimec_status_t binrwir_binfunc_validate(const binrwir_binfunc_t *program);
+runtimec_status_t binrwir_binfunc_get_view(const binrwir_binfunc_t *program,
+                                           binrwir_binfunc_view_t *output_view);
+runtimec_status_t binrwir_binfunc_get_instruction(
+    const binrwir_binfunc_t *program, uint32_t instruction_identifier,
     binrwir_instruction_view_t *output_instruction);
 /*
  * 按 source logical program counter 找指令标识符。goto / br 的跳转目标是 source
  * pc（layout 的 irseq），恢复时持久化的也是 source pc，而执行游标是稠密标识符；
  * 两个空间之间的唯一映射就是这里。找不到返回 INVALID。
  */
-runtimec_status_t binrwir_program_find_instruction(
-    const binrwir_program_t *program, uint32_t source_logical_program_counter,
+runtimec_status_t binrwir_binfunc_find_instruction(
+    const binrwir_binfunc_t *program, uint32_t source_logical_program_counter,
     uint32_t *output_instruction_identifier);
 /* 符号池规模：调用入口要在建绑定表前知道有多少个局部符号要留槽。 */
-runtimec_status_t binrwir_program_get_symbol_count(
-    const binrwir_program_t *program, size_t *output_symbol_count);
+runtimec_status_t binrwir_binfunc_get_symbol_count(
+    const binrwir_binfunc_t *program, size_t *output_symbol_count);
 /*
  * 符号池只读借出：LOCAL / FUNCTION / STATIC 参数项的 slot 就是这个下标。
  * 名字与语言类型一起给出——创建槽的调用入口两样都要。
  */
-runtimec_status_t binrwir_program_get_symbol(
-    const binrwir_program_t *program, uint16_t symbol_index,
+runtimec_status_t binrwir_binfunc_get_symbol(
+    const binrwir_binfunc_t *program, uint16_t symbol_index,
     runtimec_string_view_t *output_name,
     runtimec_string_view_t *output_langtype);
 /* 字面量池规模：需要整池搬运（例如编译期深拷贝 Program）时必须先知道它。 */
-runtimec_status_t binrwir_program_get_literal_count(
-    const binrwir_program_t *program, size_t *output_literal_count);
+runtimec_status_t binrwir_binfunc_get_literal_count(
+    const binrwir_binfunc_t *program, size_t *output_literal_count);
 /* 字面量池只读借出：LITERAL 参数项的 payload 就是这个下标。 */
-runtimec_status_t binrwir_program_get_literal(
-    const binrwir_program_t *program, uint32_t literal_index,
+runtimec_status_t binrwir_binfunc_get_literal(
+    const binrwir_binfunc_t *program, uint32_t literal_index,
     runtimec_bytes_view_t *output_wire_bytes,
     runtimec_string_view_t *output_langtype);
-runtimec_status_t binrwir_program_destroy(binrwir_program_t *program);
+runtimec_status_t binrwir_binfunc_destroy(binrwir_binfunc_t *program);
 
 /*
  * 符号名是否含**成员分隔符** `·`（U+00B7，UTF-8 完整两字节 `0xC2 0xB7`）。
@@ -129,14 +129,14 @@ bool binrwir_symbol_name_is_member(runtimec_string_view_t name);
  * finalize 都返回 INVALID；reset 回到空的可写状态并保留已分配容量；destroy 只释放
  * builder 自身存储，不影响已经产出的 Program。
  */
-runtimec_status_t binrwir_program_builder_create(
+runtimec_status_t binrwir_binfunc_builder_create(
     const runtimec_allocator_t *allocator,
-    const binrwir_program_identity_t *identity,
-    binrwir_program_builder_t **output_builder);
+    const binrwir_binfunc_identity_t *identity,
+    binrwir_binfunc_builder_t **output_builder);
 runtimec_status_t
-binrwir_program_builder_reset(binrwir_program_builder_t *builder);
-runtimec_status_t binrwir_program_builder_destroy(
-    binrwir_program_builder_t *builder);
+binrwir_binfunc_builder_reset(binrwir_binfunc_builder_t *builder);
+runtimec_status_t binrwir_binfunc_builder_destroy(
+    binrwir_binfunc_builder_t *builder);
 
 /*
  * 登记签名参数。output_parameter_index 是该参数在所属方向内的序号，也就是
@@ -144,14 +144,14 @@ runtimec_status_t binrwir_program_builder_destroy(
  * 具体 langtype：非空、非 union，判据只有 binrwir_signature_validate_parameter_type
  * 一处。同一方向内 argidx 不得重复，该规则由 finalize 的签名校验统一裁定。
  */
-runtimec_status_t binrwir_program_builder_add_parameter(
-    binrwir_program_builder_t *builder, binrwir_parameter_direction_t direction,
+runtimec_status_t binrwir_binfunc_builder_add_parameter(
+    binrwir_binfunc_builder_t *builder, binrwir_parameter_direction_t direction,
     uint32_t argument_index, runtimec_string_view_t parameter_type,
     uint32_t *output_parameter_index);
 
 /* 登记一条别名规则；字段合法性同样复用 signature 的判据。 */
-runtimec_status_t binrwir_program_builder_add_alias_rule(
-    binrwir_program_builder_t *builder, const binrwir_alias_rule_t *rule,
+runtimec_status_t binrwir_binfunc_builder_add_alias_rule(
+    binrwir_binfunc_builder_t *builder, const binrwir_alias_rule_t *rule,
     uint32_t *output_alias_rule_identifier);
 
 /*
@@ -173,8 +173,8 @@ runtimec_status_t binrwir_program_builder_add_alias_rule(
  * 才可复用）；而 add_symbol 返回的下标只在 builder 内有效——拿到直接填进参数项，
  * 不要在 finalize 之后还拿它跟 Program 里的 slot 比对。
  */
-runtimec_status_t binrwir_program_builder_add_symbol(
-    binrwir_program_builder_t *builder, runtimec_string_view_t name,
+runtimec_status_t binrwir_binfunc_builder_add_symbol(
+    binrwir_binfunc_builder_t *builder, runtimec_string_view_t name,
     runtimec_string_view_t langtype, uint16_t *output_symbol_index);
 
 /*
@@ -186,8 +186,8 @@ runtimec_status_t binrwir_program_builder_add_symbol(
  * `wire_bytes` 是否恰好是一条 **None 值**：head 自洽 + 空 body + 空 attr。
  *
  * **这是「空 langtype 是否合法」的唯一判据**，三个调用点共用：
- *   `binrwir_program_builder_add_literal`（字面量登记）、
- *   `binrwir_program_validate`（Program 完整性）、
+ *   `binrwir_binfunc_builder_add_literal`（字面量登记）、
+ *   `binrwir_binfunc_validate`（Program 完整性）、
  *   `binrwir_signature_validate` 的空类型分支（经参数项交叉）。
  *
  * None 的定义见 spec `03-类型系统/03-种类-代码与特殊值.kv`「None 判据」：
@@ -198,24 +198,24 @@ runtimec_status_t binrwir_program_builder_add_symbol(
  */
 bool binrwir_literal_is_none_value(runtimec_bytes_view_t wire_bytes);
 
-runtimec_status_t binrwir_program_builder_add_literal(
-    binrwir_program_builder_t *builder, runtimec_bytes_view_t wire_bytes,
+runtimec_status_t binrwir_binfunc_builder_add_literal(
+    binrwir_binfunc_builder_t *builder, runtimec_bytes_view_t wire_bytes,
     runtimec_string_view_t langtype, uint32_t *output_literal_index);
 
 /*
  * 登记一条 instruction。参数 span 按 binrwir_argument_validate 校验并被复制进
  * Program 参数池；request 的读区、写区在池内相邻存放，顺序不变。
  */
-runtimec_status_t binrwir_program_builder_add_instruction(
-    binrwir_program_builder_t *builder,
+runtimec_status_t binrwir_binfunc_builder_add_instruction(
+    binrwir_binfunc_builder_t *builder,
     const binrwir_instruction_build_request_t *request,
     uint32_t *output_instruction_identifier);
 
 /* 产出不可变 Program 并定稿 builder；Program 与 builder 各自独立销毁。 */
-runtimec_status_t binrwir_program_builder_finalize(
-    binrwir_program_builder_t *builder, binrwir_program_t **output_program);
+runtimec_status_t binrwir_binfunc_builder_finalize(
+    binrwir_binfunc_builder_t *builder, binrwir_binfunc_t **output_program);
 
-_Static_assert(sizeof(binrwir_program_identity_t) == 32U,
+_Static_assert(sizeof(binrwir_binfunc_identity_t) == 32U,
                "binrwir program identity must remain 32 bytes");
 
 #ifdef __cplusplus

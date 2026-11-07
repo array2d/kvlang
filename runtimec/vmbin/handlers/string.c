@@ -23,7 +23,7 @@
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
 #include "contract/char_codec.h"
@@ -237,7 +237,7 @@ static void string_concat_of(const string_text_t *left,
  * 顺序串起来——**不重新判断任何一件事**。
  */
 static runtimec_status_t string_concat_pipeline(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     runtimec_string_concat_result_t *output, binrwir_execution_exit_t *output_exit) {
     runtimec_string_view_t left_langtype;
@@ -303,7 +303,7 @@ static runtimec_status_t string_concat_pipeline(
  */
 /* 逻辑主体：arity → 共同编码 → 解码 → 拼接编码 → 写回。 */
 static inline runtimec_status_t string_concat_execute(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     runtimec_string_concat_result_t result;
@@ -317,7 +317,7 @@ static inline runtimec_status_t string_concat_execute(
  * 独立；薄封装只在**本文件**定义一次，注册表里因此只有一份地址。
  */
 static runtimec_status_t string_concat_handler(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return string_concat_execute(frame, instruction, output_exit);

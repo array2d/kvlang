@@ -38,19 +38,19 @@
     } while (0)
 
 typedef runtimec_status_t (*binrwir_compile_function_t)(
-    binrwir_compiler_t *, binrwir_program_t *,
+    binrwir_compiler_t *, binrwir_binfunc_t *,
     binrwir_compilation_t **, runtimec_error_t *);
 typedef runtimec_status_t (*binrwir_compiler_revision_function_t)(
     const binrwir_compiler_t *, uint32_t *);
 typedef runtimec_status_t (*binrwir_build_execution_plan_function_t)(
-    const runtimec_allocator_t *, const binrwir_program_t *, uint64_t,
+    const runtimec_allocator_t *, const binrwir_binfunc_t *, uint64_t,
     uint32_t, binrwir_execution_plan_t **, runtimec_error_t *);
 typedef runtimec_status_t (*binrwir_jit_compile_function_t)(
-    binrwir_jit_compiler_t *, const binrwir_program_t *,
+    binrwir_jit_compiler_t *, const binrwir_binfunc_t *,
     const binrwir_execution_plan_t *,
     binrwir_jit_compilation_result_t *, runtimec_error_t *);
 typedef runtimec_status_t (*binrwir_jit_execute_function_t)(
-    const binrwir_jit_code_t *, binrwir_execution_frame_t *,
+    const binrwir_jit_code_t *, binrwir_binvthread_frame_t *,
     binrwir_execution_exit_t *, runtimec_error_t *);
 typedef runtimec_status_t (*binrwir_jit_register_allocation_create_function_t)(
     const binrwir_jit_verified_program_t *, const binrwir_execution_plan_t *,
@@ -65,11 +65,11 @@ typedef runtimec_status_t (*binrwir_jit_safepoint_plan_create_function_t)(
 typedef runtimec_status_t (*binrwir_jit_safepoint_commit_function_t)(
     const binrwir_jit_safepoint_plan_t *,
     binrwir_jit_safepoint_boundary_t, uint32_t, uint32_t, void *,
-    binrwir_execution_frame_t *, runtimec_error_t *);
+    binrwir_binvthread_frame_t *, runtimec_error_t *);
 typedef runtimec_status_t (*binrwir_jit_safepoint_discard_function_t)(
     const binrwir_jit_safepoint_plan_t *,
     binrwir_jit_safepoint_boundary_t, uint32_t, void *,
-    binrwir_execution_frame_t *, runtimec_error_t *);
+    binrwir_binvthread_frame_t *, runtimec_error_t *);
 typedef runtimec_status_t (*vmkv_encoder_revision_function_t)(
     const vmkv_encoder_t *, uint32_t *);
 
@@ -285,7 +285,7 @@ static void test_vmkv_xvalue_address_encoding(void) {
         .expected_snapshot = snapshot,
     };
     /* STATIC 的 slot 现在是符号池下标，登记需要一个 builder。 */
-    const binrwir_program_identity_t identity = {
+    const binrwir_binfunc_identity_t identity = {
         .snapshot_generation = 1U,
         .program_generation = 1U,
         .schema_version = 1U,
@@ -299,8 +299,8 @@ static void test_vmkv_xvalue_address_encoding(void) {
         .allocate = test_allocate_working,
         .deallocate = test_deallocate,
     };
-    binrwir_program_builder_t *builder = NULL;
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(
+    binrwir_binfunc_builder_t *builder = NULL;
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(
                         &builder_allocator, &identity, &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
 
@@ -328,9 +328,9 @@ static void test_vmkv_xvalue_address_encoding(void) {
     }
 
     /* 每次调用前重建 builder：符号池是累积的，复用会让 slot 断言漂移。 */
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
-    RUNTIMEC_EXPECT(binrwir_program_builder_create(
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(
                         &builder_allocator, &identity, &builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     dynamic_argument.key_addressability = VMKV_KEY_ADDRESSABILITY_DYNAMIC;
@@ -356,9 +356,9 @@ static void test_vmkv_xvalue_address_encoding(void) {
             .key = RUNTIMEC_KEY_VIEW_LITERAL("/missing"),
             .key_addressability = VMKV_KEY_ADDRESSABILITY_STATIC,
         };
-        RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+        RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                         RUNTIMEC_STATUS_SUCCESS);
-        RUNTIMEC_EXPECT(binrwir_program_builder_create(
+        RUNTIMEC_EXPECT(binrwir_binfunc_builder_create(
                             &builder_allocator, &identity, &builder) ==
                         RUNTIMEC_STATUS_SUCCESS);
         encoded_argument = (binrwir_argument_t){
@@ -385,7 +385,7 @@ static void test_vmkv_xvalue_address_encoding(void) {
      * 纯函数性质，已由 `runtimec.contracts` 的单元断言覆盖，不在这里重复。
      */
 
-    RUNTIMEC_EXPECT(binrwir_program_builder_destroy(builder) ==
+    RUNTIMEC_EXPECT(binrwir_binfunc_builder_destroy(builder) ==
                     RUNTIMEC_STATUS_SUCCESS);
     RUNTIMEC_EXPECT(runtimec_kvspace_access_destroy(access, &host_error) ==
                     RUNTIMEC_STATUS_SUCCESS);
@@ -480,7 +480,7 @@ static void test_compilation_shapes(void) {
     };
     binrwir_compilation_view_t view = {
         .execution_target = BINRWIR_EXECUTION_TARGET_JIT,
-        .canonical_program = (const binrwir_program_t *)(uintptr_t)1U,
+        .canonical_program = (const binrwir_binfunc_t *)(uintptr_t)1U,
         .execution_plan = (const binrwir_execution_plan_t *)(uintptr_t)1U,
         .binrwir_jit_code = (const binrwir_jit_code_t *)(uintptr_t)1U,
     };
@@ -539,7 +539,7 @@ static void test_jit_register_and_safepoint_failure_shapes(void) {
     binrwir_jit_execution_interface_t execution_interface = {
         .binary_interface_major_version = UINT16_MAX,
     };
-    binrwir_execution_frame_t frame = {
+    binrwir_binvthread_frame_t frame = {
         .logical_program_counter = 11U,
     };
 
@@ -629,8 +629,8 @@ static void counting_deallocate(void *context, void *allocation, size_t size,
 
 /* 一条无操作数的 COPY 指令就足够：编译只看 Program 形状，不看语义。 */
 static runtimec_status_t build_program(const runtimec_allocator_t *allocator,
-                                       binrwir_program_t **output_program) {
-    binrwir_program_identity_t identity = {
+                                       binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_identity_t identity = {
         .snapshot_generation = 1U,
         .program_generation = 1U,
         .schema_version = 1U,
@@ -639,7 +639,7 @@ static runtimec_status_t build_program(const runtimec_allocator_t *allocator,
             BINRWIR_BINARY_INTERFACE_GENERATION,
         .canonical_encoding_revision = 1U,
     };
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_builder_t *builder = NULL;
     binrwir_instruction_build_request_t instruction = {
         .source_logical_program_counter = 1U,
         .operation_identifier = 1U,
@@ -650,15 +650,15 @@ static runtimec_status_t build_program(const runtimec_allocator_t *allocator,
     runtimec_status_t status;
 
     *output_program = NULL;
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_add_instruction(
+        status = binrwir_binfunc_builder_add_instruction(
             builder, &instruction, &instruction_identifier);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
@@ -683,7 +683,7 @@ static void test_program_ownership(void) {
         .jit_target = {0},
     };
     binrwir_compiler_t *compiler = NULL;
-    binrwir_program_t *program = NULL;
+    binrwir_binfunc_t *program = NULL;
     binrwir_compilation_t *compilation = NULL;
     binrwir_compilation_view_t view;
 

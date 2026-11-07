@@ -15,7 +15,7 @@
 #include <stdint.h>
 
 #include "contract/status.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -78,7 +78,7 @@ typedef struct binrwir_execution_plan binrwir_execution_plan_t;
 
 typedef struct binrwir_execution_plan_view {
     binrwir_execution_plan_identity_t identity;
-    const binrwir_program_t *program;
+    const binrwir_binfunc_t *program;
     const binrwir_type_specialization_t *type_specializations;
     size_t type_specialization_count;
     const binrwir_dispatch_fusion_t *dispatch_fusions;

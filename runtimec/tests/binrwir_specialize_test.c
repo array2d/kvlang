@@ -16,7 +16,7 @@
 
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "binrwir/specialize.h"
 #include "contract/allocator.h"
 #include "contract/status.h"
@@ -52,9 +52,9 @@ static void test_deallocate(void *context, void *allocation, size_t size,
 static runtimec_status_t test_build_add_program(
     const runtimec_allocator_t *allocator, const char *left_type,
     const char *right_type, const char *result_type,
-    binrwir_program_t **output_program) {
-    binrwir_program_identity_t identity;
-    binrwir_program_builder_t *builder = NULL;
+    binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
     binrwir_argument_t arguments[3];
     binrwir_instruction_build_request_t request;
     uint16_t left_symbol = BINRWIR_SYMBOL_INDEX_NONE;
@@ -68,20 +68,20 @@ static runtimec_status_t test_build_add_program(
     identity.program_generation = 1U;
     identity.binrwir_binary_interface_generation =
         BINRWIR_BINARY_INTERFACE_GENERATION;
-    status = binrwir_program_builder_create(allocator, &identity, &builder);
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
-    status = binrwir_program_builder_add_symbol(
+    status = binrwir_binfunc_builder_add_symbol(
         builder, runtimec_string_view_from_c_string("a"),
         runtimec_string_view_from_c_string(left_type), &left_symbol);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_add_symbol(
+        status = binrwir_binfunc_builder_add_symbol(
             builder, runtimec_string_view_from_c_string("b"),
             runtimec_string_view_from_c_string(right_type), &right_symbol);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_add_symbol(
+        status = binrwir_binfunc_builder_add_symbol(
             builder, runtimec_string_view_from_c_string("r"),
             runtimec_string_view_from_c_string(result_type), &result_symbol);
     }
@@ -105,22 +105,22 @@ static runtimec_status_t test_build_add_program(
         request.read_arguments.count = 2U;
         request.write_arguments.data = &arguments[2];
         request.write_arguments.count = 1U;
-        status = binrwir_program_builder_add_instruction(builder, &request,
+        status = binrwir_binfunc_builder_add_instruction(builder, &request,
                                                          &identifier);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = binrwir_program_builder_finalize(builder, output_program);
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
     }
-    (void)binrwir_program_builder_destroy(builder);
+    (void)binrwir_binfunc_builder_destroy(builder);
     return status;
 }
 
 /* 特化后第一条指令的 opid。 */
 static binrwir_operation_identifier_t test_first_opid(
-    const binrwir_program_t *program) {
+    const binrwir_binfunc_t *program) {
     binrwir_instruction_view_t instruction;
 
-    if (binrwir_program_get_instruction(program, 0U, &instruction) !=
+    if (binrwir_binfunc_get_instruction(program, 0U, &instruction) !=
         RUNTIMEC_STATUS_SUCCESS) {
         return BINRWIR_OPERATION_IDENTIFIER_NONE;
     }
@@ -133,9 +133,9 @@ int main(void) {
 
     /* ① 同型命中：add(int64,int64,int64) → 特化 opid ≠ 0x0002。 */
     {
-        binrwir_program_t *program = NULL;
-        binrwir_program_t *specialized = NULL;
-        binrwir_program_t *twice = NULL;
+        binrwir_binfunc_t *program = NULL;
+        binrwir_binfunc_t *specialized = NULL;
+        binrwir_binfunc_t *twice = NULL;
         binrwir_operation_identifier_t before;
         binrwir_operation_identifier_t after;
 
@@ -143,47 +143,47 @@ int main(void) {
                                       &program) == RUNTIMEC_STATUS_SUCCESS);
         before = test_first_opid(program);
         EXPECT(before == BINRWIR_OPERATION_IDENTIFIER_ADD);
-        EXPECT(binrwir_program_specialize(program, &allocator, &specialized,
+        EXPECT(binrwir_binfunc_specialize(program, &allocator, &specialized,
                                           &error) == RUNTIMEC_STATUS_SUCCESS);
         after = test_first_opid(specialized);
         EXPECT(after != before);
         EXPECT(after >= BINRWIR_SPECIALIZED_BASE);
 
         /* ② 幂等：对已特化的 Program 再特化一次，opid 不变。 */
-        EXPECT(binrwir_program_specialize(specialized, &allocator, &twice,
+        EXPECT(binrwir_binfunc_specialize(specialized, &allocator, &twice,
                                           &error) == RUNTIMEC_STATUS_SUCCESS);
         EXPECT(test_first_opid(twice) == after);
 
-        EXPECT(binrwir_program_destroy(twice) == RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(binrwir_program_destroy(specialized) == RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(twice) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(specialized) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
 
     /* ③ 不同宽度：add(int32,int32,int32) 与 int64 的特化 opid 不同。 */
     {
-        binrwir_program_t *wide = NULL;
-        binrwir_program_t *narrow = NULL;
-        binrwir_program_t *wide_specialized = NULL;
-        binrwir_program_t *narrow_specialized = NULL;
+        binrwir_binfunc_t *wide = NULL;
+        binrwir_binfunc_t *narrow = NULL;
+        binrwir_binfunc_t *wide_specialized = NULL;
+        binrwir_binfunc_t *narrow_specialized = NULL;
 
         EXPECT(test_build_add_program(&allocator, "int64", "int64", "int64",
                                       &wide) == RUNTIMEC_STATUS_SUCCESS);
         EXPECT(test_build_add_program(&allocator, "int32", "int32", "int32",
                                       &narrow) == RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(binrwir_program_specialize(wide, &allocator, &wide_specialized,
+        EXPECT(binrwir_binfunc_specialize(wide, &allocator, &wide_specialized,
                                           &error) == RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(binrwir_program_specialize(narrow, &allocator,
+        EXPECT(binrwir_binfunc_specialize(narrow, &allocator,
                                           &narrow_specialized,
                                           &error) == RUNTIMEC_STATUS_SUCCESS);
         EXPECT(test_first_opid(wide_specialized) !=
                test_first_opid(narrow_specialized));
 
-        EXPECT(binrwir_program_destroy(narrow_specialized) ==
+        EXPECT(binrwir_binfunc_destroy(narrow_specialized) ==
                RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(binrwir_program_destroy(wide_specialized) ==
+        EXPECT(binrwir_binfunc_destroy(wide_specialized) ==
                RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(binrwir_program_destroy(narrow) == RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(binrwir_program_destroy(wide) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(narrow) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(wide) == RUNTIMEC_STATUS_SUCCESS);
     }
 
     /*
@@ -204,8 +204,8 @@ int main(void) {
      * （NUMERIC_COMPATIBLE 允许同符号跨宽度），表里有它。
      */
     {
-        binrwir_program_t *program = NULL;
-        binrwir_program_t *specialized = NULL;
+        binrwir_binfunc_t *program = NULL;
+        binrwir_binfunc_t *specialized = NULL;
 
         EXPECT(test_build_add_program(&allocator, "int32", "uint32", "int32",
                                       &program) == RUNTIMEC_STATUS_SUCCESS);
@@ -214,19 +214,19 @@ int main(void) {
          * 拒绝时 `specialized` 必须是 NULL——「失败还留一个半成品」比失败更糟：
          * 调用方若按返回值之外的路子用它，就拿到一份没特化完的 Program。
          */
-        EXPECT(binrwir_program_specialize(program, &allocator, &specialized,
+        EXPECT(binrwir_binfunc_specialize(program, &allocator, &specialized,
                                           &error) == RUNTIMEC_STATUS_INVALID);
         EXPECT(specialized == NULL);
         EXPECT(error.code == 3); /* BINRWIR_SPECIALIZE_DIAG_NO_SPECIALIZATION_ROW */
-        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
 
     /* ⑤ 单组合算子（copy）：特化前后 opid 不变。 */
     {
-        binrwir_program_identity_t identity;
-        binrwir_program_builder_t *builder = NULL;
-        binrwir_program_t *program = NULL;
-        binrwir_program_t *specialized = NULL;
+        binrwir_binfunc_identity_t identity;
+        binrwir_binfunc_builder_t *builder = NULL;
+        binrwir_binfunc_t *program = NULL;
+        binrwir_binfunc_t *specialized = NULL;
         binrwir_argument_t literal_argument;
         binrwir_instruction_build_request_t request;
         uint8_t wire[KVSPACE_XVALUE_HEAD_LEN + 8U];
@@ -245,9 +245,9 @@ int main(void) {
         identity.program_generation = 1U;
         identity.binrwir_binary_interface_generation =
             BINRWIR_BINARY_INTERFACE_GENERATION;
-        EXPECT(binrwir_program_builder_create(&allocator, &identity, &builder) ==
+        EXPECT(binrwir_binfunc_builder_create(&allocator, &identity, &builder) ==
                RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(binrwir_program_builder_add_literal(
+        EXPECT(binrwir_binfunc_builder_add_literal(
                    builder, runtimec_bytes_view_make(wire, sizeof(wire)),
                    runtimec_string_view_from_c_string("int64"),
                    &literal_index) == RUNTIMEC_STATUS_SUCCESS);
@@ -261,18 +261,18 @@ int main(void) {
         request.read_arguments.count = 1U;
         request.write_arguments.data = &literal_argument;
         request.write_arguments.count = 1U;
-        EXPECT(binrwir_program_builder_add_instruction(builder, &request,
+        EXPECT(binrwir_binfunc_builder_add_instruction(builder, &request,
                                                        &identifier) ==
                RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(binrwir_program_builder_finalize(builder, &program) ==
+        EXPECT(binrwir_binfunc_builder_finalize(builder, &program) ==
                RUNTIMEC_STATUS_SUCCESS);
-        (void)binrwir_program_builder_destroy(builder);
+        (void)binrwir_binfunc_builder_destroy(builder);
 
-        EXPECT(binrwir_program_specialize(program, &allocator, &specialized,
+        EXPECT(binrwir_binfunc_specialize(program, &allocator, &specialized,
                                           &error) == RUNTIMEC_STATUS_SUCCESS);
         EXPECT(test_first_opid(specialized) == BINRWIR_OPERATION_IDENTIFIER_COPY);
-        EXPECT(binrwir_program_destroy(specialized) == RUNTIMEC_STATUS_SUCCESS);
-        EXPECT(binrwir_program_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(specialized) == RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(binrwir_binfunc_destroy(program) == RUNTIMEC_STATUS_SUCCESS);
     }
 
     if (failures != 0) {

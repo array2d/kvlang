@@ -24,10 +24,10 @@
 #include <time.h>
 
 #include "binrwir/execution_exit.h"
-#include "binrwir/execution_frame.h"
+#include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
-#include "binrwir/program.h"
+#include "binrwir/binfunc.h"
 #include "contract/member_key_text.h"
 #include "contract/status.h"
 #include "kvspace/kvspace.h"
@@ -64,7 +64,7 @@
  * 待补（后续独立能力）：动态 key 的引用解析。落地前本函数保持失败封闭。
  */
 static runtimec_status_t runtimec_host_static_key(
-    const binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
+    const binrwir_binvthread_frame_t *frame, const binrwir_argument_t *argument,
     char *buffer, size_t capacity) {
     runtimec_string_view_t name;
     runtimec_string_view_t langtype;
@@ -72,7 +72,7 @@ static runtimec_status_t runtimec_host_static_key(
     if (argument->reference_kind != BINRWIR_REFERENCE_STATIC) {
         return RUNTIMEC_STATUS_UNSUPPORTED;
     }
-    if (binrwir_program_get_symbol(frame->program, (uint16_t)argument->slot,
+    if (binrwir_binfunc_get_symbol(frame->program, (uint16_t)argument->slot,
                                    &name, &langtype) !=
             RUNTIMEC_STATUS_SUCCESS ||
         name.size == 0U || name.size >= capacity) {
@@ -138,7 +138,7 @@ static runtimec_status_t runtimec_host_fail(
  * 失败即置 `exit` 并返回 false，**不写任何输出参数**。
  */
 static bool runtimec_host_prepare_call(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit, size_t expected_reads,
     void **output_handle, char keys[][RUNTIMEC_HOST_KEY_CAPACITY]) {
@@ -193,7 +193,7 @@ static runtimec_status_t runtimec_host_finish_call(
  * 一句话目的：**把一个读参读成一个数**。
  */
 static bool runtimec_host_read_uint64(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, uint64_t *output_value,
     binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
     vmbin_value_location_t location;
@@ -217,7 +217,7 @@ static bool runtimec_host_read_uint64(
  * 一句话目的：**把一个数落到写参上**。
  */
 static runtimec_status_t runtimec_host_store_int64(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, int64_t value,
     binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
     runtimec_error_t error;
@@ -252,7 +252,7 @@ static runtimec_status_t runtimec_host_store_int64(
  * 超时不是错误：ABI 返回 0 且 out=NULL，写参保持原样。
  */
 static runtimec_status_t runtimec_host_kvspace_watch(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
@@ -328,7 +328,7 @@ static uint64_t runtimec_host_random_u64(void) {
 /* `random·uint64()`：无读参，结果写写参 1。 */
 /* `random·u64()`：满 64 位随机数。 */
 static runtimec_status_t runtimec_host_random_unsigned_64(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
@@ -347,7 +347,7 @@ static runtimec_status_t runtimec_host_random_unsigned_64(
 /* `random·int63()`：取 64 位随机数的高 63 位，保证非负（旧实现 `>> 1`）。 */
 /* `random·int63()`：取 64 位随机数的高 63 位，保证非负（旧实现 `>> 1`）。 */
 static runtimec_status_t runtimec_host_random_signed_63(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
@@ -369,7 +369,7 @@ static runtimec_status_t runtimec_host_random_signed_63(
  */
 /* `random·intn(bound) -> n`：`[0, bound)` 半开区间；bound 为 0 时返回 0。 */
 static runtimec_status_t runtimec_host_random_below(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
@@ -408,7 +408,7 @@ static runtimec_status_t runtimec_host_random_below(
  * 是「当前帧的状态槽」，不是调用方给的路径。
  */
 static runtimec_status_t runtimec_host_vthread_setstatus(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
@@ -459,7 +459,7 @@ static runtimec_status_t runtimec_host_vthread_setstatus(
  */
 /* `vthread·sleep(nanoseconds)`：非正值立即返回，不睡。 */
 static runtimec_status_t runtimec_host_vthread_sleep(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
@@ -497,7 +497,7 @@ static runtimec_status_t runtimec_host_vthread_sleep(
  * 返回 UNSUPPORTED 并带明确诊断，不假装成功、不返回半成品。
  */
 static runtimec_status_t runtimec_host_vthread_not_implemented(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     (void)frame;
@@ -521,7 +521,7 @@ static runtimec_status_t runtimec_host_vthread_not_implemented(
 /* 单路径操作：读参 1 是路径，无写参。 */
 /* 单路径操作：读参 1 是路径，无写参。 */
 static runtimec_status_t runtimec_host_single_path_operation(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit,
     int (*operation)(void *handle, const char *path, char *error,
@@ -552,7 +552,7 @@ static runtimec_status_t runtimec_host_single_path_operation(
  * `cpdir` 也为 1（dst 是写目标）——三者的写参语义相同，差别只在中段是否回写值。
  */
 static runtimec_status_t runtimec_host_copy_operation(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit,
     int (*operation)(void *handle, const char *source,
@@ -600,21 +600,21 @@ static int runtimec_host_delete_one(void *handle, const char *path, char *error,
 
 /* 三个单路径算子的薄壳：ABI 的函数指针类型各不相同，只能各写一层。 */
 static runtimec_status_t runtimec_host_kvspace_delete(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_host_single_path_operation(frame, instruction, output_exit,
                                                runtimec_host_delete_one);
 }
 static runtimec_status_t runtimec_host_kvspace_delete_tree(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_host_single_path_operation(frame, instruction, output_exit,
                                                kvspaceDelTree);
 }
 static runtimec_status_t runtimec_host_kvspace_delete_extension_index(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_host_single_path_operation(frame, instruction, output_exit,
@@ -622,21 +622,21 @@ static runtimec_status_t runtimec_host_kvspace_delete_extension_index(
 }
 
 static runtimec_status_t runtimec_host_kvspace_copy(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_host_copy_operation(frame, instruction, output_exit,
                                             kvspaceCp);
 }
 static runtimec_status_t runtimec_host_kvspace_copy_directory(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_host_copy_operation(frame, instruction, output_exit,
                                             kvspaceCpTree);
 }
 static runtimec_status_t runtimec_host_kvspace_copy_list(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_host_copy_operation(frame, instruction, output_exit,
@@ -646,7 +646,7 @@ static runtimec_status_t runtimec_host_kvspace_copy_list(
 /* `kvspace·mkindex(path, capacity)`：路径 + 容量，无写参。 */
 /* `kvspace·mkindex(path, capacity)`：路径 + 容量，调 ABI。 */
 static runtimec_status_t runtimec_host_kvspace_make_index(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
@@ -680,7 +680,7 @@ static runtimec_status_t runtimec_host_kvspace_make_index(
  * 两读参零写参。
  */
 static runtimec_status_t runtimec_host_kvspace_extension_index(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     char keys[2][RUNTIMEC_HOST_KEY_CAPACITY];
@@ -706,7 +706,7 @@ static runtimec_status_t runtimec_host_kvspace_extension_index(
  */
 /* `kvspace·listlen(path) -> n`：前缀下直接子项数，枚举失败按 0（与旧实现一致）。 */
 static runtimec_status_t runtimec_host_kvspace_list_length(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
@@ -735,7 +735,7 @@ static runtimec_status_t runtimec_host_kvspace_list_length(
  * 这里同样不写结果槽——写空字符串会把「没有这一项」变成「这一项是空名」。
  */
 static runtimec_status_t runtimec_host_kvspace_list_at(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
@@ -803,7 +803,7 @@ static runtimec_status_t runtimec_host_kvspace_list_at(
  * 两个动作缺一不可：写存储、绑槽。只写不绑 → 后续读该槽 `UNBOUND_SLOT`。
  */
 static runtimec_status_t runtimec_host_write_pointer_wire(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, const uint8_t *wire,
     size_t wire_size, binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
@@ -977,7 +977,7 @@ static runtimec_status_t runtimec_host_vthread_stack_from_path(
 
 /* 两个结果的写准备：result0 = vid，result1 = `[2]int32 [stackid, s0]`。 */
 static runtimec_status_t runtimec_host_vthread_write_results(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, int32_t vthread_identifier,
     int32_t stack_identifier, binrwir_execution_exit_t *output_exit,
     uint32_t source_program_counter) {
@@ -1010,7 +1010,7 @@ static runtimec_status_t runtimec_host_vthread_write_results(
 
 /* 读两个位置分量：0 读参、2 写参，且帧路径必须存在。 */
 static runtimec_status_t runtimec_host_vthread_pc_precondition(
-    const binrwir_execution_frame_t *frame,
+    const binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit,
     uint32_t source_program_counter) {
@@ -1030,7 +1030,7 @@ static runtimec_status_t runtimec_host_vthread_pc_precondition(
 }
 
 static runtimec_status_t runtimec_host_vthread_pc(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
@@ -1088,7 +1088,7 @@ static runtimec_status_t runtimec_host_vthread_pc(
  * 而「类型怎么取、前缀怎么剥」是另一件事，两者的失败出口也不同。
  */
 static runtimec_status_t runtimec_host_build_pointer_wire(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *declared_source, const char *target,
     uint8_t **output_wire, uint32_t *output_wire_size,
     runtimec_error_t *error) {
@@ -1142,7 +1142,7 @@ static runtimec_status_t runtimec_host_build_pointer_wire(
  * 的诊断码上分开了。
  */
 static runtimec_status_t runtimec_host_address_of_wire(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, char *target,
     size_t target_capacity, uint8_t **output_wire, uint32_t *output_wire_size,
     runtimec_error_t *error, binrwir_execution_exit_t *output_exit) {
@@ -1180,7 +1180,7 @@ static runtimec_status_t runtimec_host_address_of_wire(
 }
 
 static runtimec_status_t runtimec_host_key_address_of(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     char target[RUNTIMEC_HOST_KEY_CAPACITY];
@@ -1297,7 +1297,7 @@ static bool runtimec_host_base_is_character(runtimec_string_view_t langtype) {
 
 /// base 的四态之一：把 base 解析成**父路径**文本。命中即止、顺序不可换。
 static runtimec_status_t runtimec_host_resolveptr_base_path(
-    binrwir_execution_frame_t *frame, const binrwir_argument_t *base,
+    binrwir_binvthread_frame_t *frame, const binrwir_argument_t *base,
     char *base_path, size_t capacity, size_t *output_length,
     binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
     vmbin_value_location_t value;
@@ -1401,7 +1401,7 @@ static runtimec_status_t runtimec_host_resolveptr_base_path(
 
 /// 键值 → 键文本。逐字铁律的唯一实现是 `member_key_text`，这里只做取参。
 static runtimec_status_t runtimec_host_resolveptr_key_text(
-    binrwir_execution_frame_t *frame, const binrwir_argument_t *key,
+    binrwir_binvthread_frame_t *frame, const binrwir_argument_t *key,
     char *key_text, size_t capacity, size_t *output_length,
     binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
     runtimec_string_view_t langtype;
@@ -1458,7 +1458,7 @@ static runtimec_status_t runtimec_host_resolveptr_join(
 ///
 /// 类型取**写参**声明：新位置没有读参类型可依（与 `key·abs` 取读参不同）。
 static runtimec_status_t runtimec_host_resolveptr_write(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, const char *target,
     binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
     uint8_t *wire = NULL;
@@ -1487,7 +1487,7 @@ static runtimec_status_t runtimec_host_resolveptr_write(
 }
 
 static runtimec_status_t runtimec_host_key_resolveptr(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
@@ -1587,7 +1587,7 @@ static vmbin_handler_call_diagnostic_t runtimec_host_key_tostr_diagnostic(
  *   定位失败   ⇒ `OPERAND_INVALID`（host 段 `0x4605`）——这才是真的拿不到值。
  */
 static runtimec_status_t runtimec_host_key_tostr_operand(
-    binrwir_execution_frame_t *frame, const binrwir_argument_t *argument,
+    binrwir_binvthread_frame_t *frame, const binrwir_argument_t *argument,
     runtimec_string_view_t *output_langtype, vmbin_value_location_t *output_value,
     binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
     runtimec_error_t error;
@@ -1644,7 +1644,7 @@ static runtimec_status_t runtimec_host_key_tostr_fail(
 }
 
 static runtimec_status_t runtimec_host_key_tostr(
-    binrwir_execution_frame_t *frame,
+    binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     const uint32_t source_program_counter =
