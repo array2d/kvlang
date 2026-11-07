@@ -10,16 +10,16 @@
 //   err= oops
 // run_capture 把 code/out/err 三个结果一并带回调用方；
 // 捕获句柄的类型是 @[]uint8（外部世界引用的字节流），不是"不约束"
-rwfunc run_capture(*[int64]·[]char/utf32 $args,
-		*[int64]·[]char/utf32 $envs) -> (*uint8 $code,
+rwfunc run_capture(*'[int64]'[]char/utf32 $args,
+		*'[int64]'[]char/utf32 $envs) -> (*uint8 $code,
 		@[]uint8 $out, @[]uint8 $err) {
 	networld/proc·exec(*args, *envs) -> *code, *out, *err
 }
 
 rwfunc test() -> () {
-	noenv:[int64]·[]char/utf32 = {}
-	a:[int64]·[]char/utf32 = {"sh", "-c", "echo hi; echo oops 1>&2"}
-	run_capture(a, noenv) -> (code, out, err)
+	noenv:'[int64]'[]char/utf32 = {}
+	a:'[int64]'[]char/utf32 = {"sh", "-c", "echo hi; echo oops 1>&2"}
+	run_capture(a, noenv) -> (code:uint8, out:@[]uint8, err:@[]uint8)
 	println("code=", code)
 	println("out=", out)
 	println("err=", err)

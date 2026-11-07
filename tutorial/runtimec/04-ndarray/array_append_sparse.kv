@@ -6,9 +6,9 @@
 //   7
 rwfunc test() -> () {
 	a:[]int64 = [1, 2, 3]
-	b = scatterarray·newscatter(a)
+	b:'[int64]'int64 = scatterarray·newscatter(a)
 	b·[5] = 9
 	scatterarray·append(b, 7) -> b
-	b·[6] -> v
+	b·[6] -> v:int64
 	println(v)
 }

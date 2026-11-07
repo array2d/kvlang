@@ -8,13 +8,13 @@
 //   0
 rwfunc move_zeroes() -> () {
 	a:[]int64 = [0, 1, 0, 3, 12]
-	n = compactarray·numel(a)
-	0 -> w
-	0 -> i
+	n:int64 = compactarray·numel(a)
+	0 -> w:int64
+	0 -> i:int64
 	while (i < n) {
-		a[i] -> x
-		nz = x != 0
-		nz_m = x ≠ 0
+		a[i] -> x:int64
+		nz:bool = x != 0
+		nz_m:bool = x ≠ 0
 
 		if (nz) {
 			a[w] = x
@@ -28,7 +28,7 @@ rwfunc move_zeroes() -> () {
 	}
 	0 -> i
 	while (i < n) {
-		a[i] -> v
+		a[i] -> v:int64
 		println(v)
 		i = i + 1
 	}

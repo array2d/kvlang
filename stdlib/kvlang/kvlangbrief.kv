@@ -9,7 +9,7 @@ lib kvlang {
 `rwfunc main() -> () { ... }`（不要 `main()` 调用、不要 `lib` 块、不要 markdown 围栏），
 最终结果用 `println(...)` 打印。下面语法以示例为准，不要套用其它语言直觉。
 
-## 0. 十条铁律（最影响正确率，先背下来）
+## 0. 十一条铁律（最影响正确率，先背下来）
 
 1. 乘用 `×`、除用 `÷`。`*` 不是乘（是取址/指针位），`/` 不是除（是路径/注释）。
 2. 没有 `int`/`float`/`char` 简写：数值写 `int64`/`float64` 等定宽；字符串恒 `[]char/utf32`；异构记录用 `{k=v}` 或 `struct`。
@@ -17,16 +17,17 @@ lib kvlang {
 4. 每条指令一行最清晰；`;` 与换行等价（`a = 1; b = 2` 合法）。
 5. 注释是 `//` 行注释、`/* */` 块注释；没有 `#` 注释。
 6. 字符串只有 `"…"`（转义）和 `r"…"` / `r#"…"#`（原始）；没有 `"""` 三引号、没有反引号。
-7. 写参初值是 `None` 不是 0：累加前先 `0 -> acc`，否则 `None + x` 报错。
-8. 数组要带 `[]` 前缀：`a:[]int64 = [1,2,3]`；写成 `a:int64 = [..]` 会报错。空容器必须标类型（`d:[]char/utf32·int64 = {}`）。
+7. 写参初值是 `None` 不是 0：累加前先 `0 -> acc:int64`，否则 `None + x` 报错。
+8. 数组要带 `[]` 前缀：`a:[]int64 = [1,2,3]`；写成 `a:int64 = [..]` 会报错。空容器必须标类型（`d:'[]char/utf32'int64 = {}`）。
 9. `+` 只允许同类：字符+字符=拼接，数值+数值=相加；`"标签" + 数字` 会 TypeError。带标签打印用 `println("answer =", n)` 多参数（自动空格）。
-10. 函数没有返回值，结果通过写参传出：`rwfunc f(*int64 $x) -> (*int64 $r) { *x + 1 -> *r }`；调用 `f(3) -> y`。
+10. 函数没有返回值，结果通过写参传出：`rwfunc f(*int64 $x) -> (*int64 $r) { *x + 1 -> *r }`；调用 `f(3) -> y:int64`。
+11. **局部变量首次写必须声明类型**：`x:int64 = 5`、`0 -> i:int64`、`foo() -> r:int64`。未声明类型直接拒载；`_`（显式丢弃）与 `for (x in a)` 的循环变量除外。
 
 ## 1. 骨架与常见任务
 
 ```kv
 rwfunc main() -> () {
-    3 + 4 -> s
+    3 + 4 -> s:int64
     println(s)              // 7
 }
 ```
@@ -34,26 +35,26 @@ rwfunc main() -> () {
 ```kv
 rwfunc main() -> () {
     // 字符串
-    s = "hello"
-    string·len(s) -> n
+    s:[]char/utf32 = "hello"
+    string·len(s) -> n:int64
     println(n)              // 5
 
     // 数组求和
     a:[]int64 = [1,2,3,4]
-    0 -> acc
-    0 -> i
+    0 -> acc:int64
+    0 -> i:int64
     while (i < compactarray·numel(a)) {
-        compactarray·at(a, i) -> e
+        compactarray·at(a, i) -> e:int64
         acc + e -> acc
         i + 1 -> i
     }
     println(acc)            // 10
 
     // map 读写
-    d:[]char/utf32·int64 = {}
+    d:'[]char/utf32'int64 = {}
     d·a = 10
     d·b = 20
-    d·*"a" -> x
+    d·*"a" -> x:int64
     println(x)              // 10
 }
 ```
@@ -64,11 +65,11 @@ rwfunc main() -> () {
 其它：`bool`、`char/utf8` `char/utf32` `char/ascii`、`stringkeymap`、`index`、`struct`、`time`、`time/duration`；不约束用空 kindexp（`name:`）。
 
 ```kv
-float64(3) -> f          // 3.0
-int64(3.9) -> i          // 3（向零截断）
-int64("42") -> n         // 42
-bool(1) -> b             // true
-char/utf32(x) -> s       // 字符串编码转换（如 char/utf8 → char/utf32）
+float64(3) -> f:float64          // 3.0
+int64(3.9) -> i:int64            // 3（向零截断）
+int64("42") -> n:int64           // 42
+bool(1) -> b:bool                // true
+char/utf32(x) -> s:[]char/utf32  // 字符串编码转换（如 char/utf8 → char/utf32）
 ```
 
 `string·formatint(n, base)` / `string·formatuint(n, base)` 整数按进制转字符串；
@@ -87,15 +88,15 @@ char/utf32(x) -> s       // 字符串编码转换（如 char/utf8 → char/utf32
 ## 4. 字符串（恒 `[]char/utf32`）
 
 ```kv
-s = "hello"
-string·len(s) -> n           // 5
-string·char(s, 1) -> c       // "e"（单字符字符串）
-string·ord(s, 0) -> o        // 104（码点）
-string·cmp("a","b") -> c     // 相等返回 0
-string·find(s, "ll") -> i    // 2；找不到 -1
-string·slice(s, 0, 2) -> p   // "he"
-s + "!" -> t                 // 拼接（同类才可）
-s[1] -> x                    // "e"；越界返回 ""
+s:[]char/utf32 = "hello"
+string·len(s) -> n:int64           // 5
+string·char(s, 1) -> c:[]char/utf32 // "e"（单字符字符串）
+string·ord(s, 0) -> o:int64         // 104（码点）
+string·cmp("a","b") -> c2:int64     // 相等返回 0
+string·find(s, "ll") -> i:int64     // 2；找不到 -1
+string·slice(s, 0, 2) -> p:[]char/utf32 // "he"
+s + "!" -> t:[]char/utf32           // 拼接（同类才可）
+s[1] -> x:[]char/utf32              // "e"；越界返回 ""
 s[1] = "X"                   // 替换单字符，s 变 "hXllo"
 ```
 
@@ -103,14 +104,14 @@ s[1] = "X"                   // 替换单字符，s 变 "hXllo"
 
 ```kv
 a:[]int64 = [7,2,9,4]
-compactarray·numel(a) -> n     // 4（元素数）
-compactarray·dim(a) -> d       // 1（维数）
-compactarray·shape(a) -> sh    // 各轴长度
-compactarray·at(a, 2) -> e          // 9（越界报错）
-tmp = compactarray·copy(a); compactarray·set(tmp, 1, 99) -> tmp  // 值语义先 copy 再同槽 set
-a[0] -> head              // 7
-compactarray·langtype(a) -> lt      // "[4]int64"
-compactarray·bodylen(a) -> bl       // 32（body 字节数）
+compactarray·numel(a) -> n:int64        // 4（元素数）
+compactarray·dim(a) -> d:int64          // 1（维数）
+compactarray·shape(a) -> sh:[]int64     // 各轴长度
+compactarray·at(a, 2) -> e:int64        // 9（越界报错）
+tmp:[]int64 = compactarray·copy(a); compactarray·set(tmp, 1, 99) -> tmp  // 值语义先 copy 再同槽 set
+a[0] -> head:int64                      // 7
+compactarray·langtype(a) -> lt:[]char/utf32 // "[4]int64"
+compactarray·bodylen(a) -> bl:int64     // 32（body 字节数）
 ```
 
 遍历用 `while + compactarray·numel + compactarray·at`。多维 `[2,3]int64` 也是 compact ndarray。
@@ -120,22 +121,23 @@ compactarray·bodylen(a) -> bl       // 32（body 字节数）
 ## 6. 容器：stringkeymap / map / struct（成员一律用 `·`，绝不用 `[]`）
 
 ```kv
-d:[]char/utf32·int64 = {}    // 空 stringkeymap 必须标类型
+d:'[]char/utf32'int64 = {}    // 空 stringkeymap 必须标类型
 d·a = 10                      // 静态成员写
 d·b = 20
-d·*"a" -> x           // 读（缺失返回 None）
-k = "a"
-d·*k -> v                     // 动态键读
-30 -> d·*"c"       // 动态键写
+d·*"a" -> x:int64             // 读（缺失为 None；读进声明槽前先判存在）
+k:[]char/utf32 = "a"
+d·*k -> v:int64               // 动态键读
+30 -> d·*"c"                  // 动态键写
 
-m = map·new()                 // stringkeymap
+m:'[]char/utf32'int64 = {}    // stringkeymap
 m·k = 5
 
-m2:[int64]·int64 = {}         // 整型键 map（键落字符串）
+m2:'[int64]'int64 = {}         // 整型键 map（键落字符串）
 7 -> m2·*0
 
-r = {name="kv", ver=1}        // struct 字面量（异构记录）
-r·name -> n
+struct Rec { name:[]char/utf32="" ver:int64=0 }
+r:Rec = {name="kv" ver=1}     // 匿名异构记录必须带类型；复用类型用 struct
+r·name -> n:[]char/utf32
 5 -> r·ver                    // struct 成员可写
 ```
 
@@ -170,7 +172,7 @@ lib mylib {
     rwfunc add(*int64 $a, *int64 $b) -> (*int64 $c) { *a + *b -> *c }
 }
 rwfunc main() -> () {
-    mylib·add(3,4) -> s
+    mylib·add(3,4) -> s:int64
     println(s)           // 7
 }
 ```
@@ -208,11 +210,11 @@ rwfunc main() -> () {
 - 字符串↔字节：`compactarray·newreinterpret("s","[]uint8")` 或 `compactarray·newreinterpret(raw,"[]char/utf8")`。
 
 ```kv
-noenv = map·new()
-a = {"sh", "-c", "echo hi; echo oops 1>&2"}
-networld/proc·exec(a, noenv) -> code, out, err
+noenv:'[]char/utf32'[]char/utf32 = {}
+a:'[int64]'[]char/utf32 = {"sh", "-c", "echo hi; echo oops 1>&2"}
+networld/proc·exec(a, noenv) -> (code:uint8, out:[]char/utf32, err:[]char/utf32)
 println(code, out, err)
-networld/fs·write("/tmp/x.txt", compactarray·newreinterpret("hi", "[]uint8")) -> n
+networld/fs·write("/tmp/x.txt", compactarray·newreinterpret("hi", "[]uint8")) -> n:int64
 ```
 
 ### KV 树（kvspace·*）

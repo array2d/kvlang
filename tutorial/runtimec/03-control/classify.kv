@@ -24,7 +24,7 @@ rwfunc classify(*int64 $score) -> (*[]char/utf32 $grade) {
 
 rwfunc test() -> () {
 
-	ans = classify(85)
+	ans:[]char/utf32 = classify(85)
 	println("grade =", ans)
 	/last_grade = ans
 }

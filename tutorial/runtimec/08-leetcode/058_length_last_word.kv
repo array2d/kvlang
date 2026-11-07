@@ -3,12 +3,12 @@
 // 期望输出:
 //   5
 rwfunc last_word_len(*[]char/utf32 $s) -> () {
-	n = string·len(*s)
-	n - 1 -> i
-	count = 0
+	n:int64 = string·len(*s)
+	n - 1 -> i:int64
+	count:int64 = 0
 	while (i >= 0) {
-		c = string·char(*s, i)
-		c == " " -> sp
+		c:char/utf32 = string·char(*s, i)
+		c == " " -> sp:bool
 
 		if (sp) {
 			i = -1

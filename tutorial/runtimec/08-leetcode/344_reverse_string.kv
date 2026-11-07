@@ -9,21 +9,21 @@
 rwfunc reverse_str() -> () {
 	// char 值数组: "hello" → ASCII [104, 101, 108, 108, 111]
 	a:[]int64 = [104, 101, 108, 108, 111]
-	n = compactarray·numel(a)
-	l = 0
-	n - 1 -> r
+	n:int64 = compactarray·numel(a)
+	l:int64 = 0
+	n - 1 -> r:int64
 	while (l < r) {
-		tl = a[l]
-		tr = a[r]
+		tl:int64 = a[l]
+		tr:int64 = a[r]
 		a[l] = tr
 		a[r] = tl
 		l + 1 -> l
 		r = r - 1
 	}
-	i = 0
+	i:int64 = 0
 	while (i < n) {
-		a[i] -> c
-		string·char("abcdefghijklmnopqrstuvwxyz", c - 97) -> s
+		a[i] -> c:int64
+		string·char("abcdefghijklmnopqrstuvwxyz", c - 97) -> s:char/utf32
 		println(s)
 		i = i + 1
 	}

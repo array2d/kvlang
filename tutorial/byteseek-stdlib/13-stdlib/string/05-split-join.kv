@@ -7,19 +7,19 @@
 //   lines a/b/c
 //   fields a/b/c
 rwfunc test() -> () {
-	p:[int64]·[]char/utf32 = {}
-	string·split("a,b,c", ",") -> (p, np)
+	p:'[int64]'[]char/utf32 = {}
+	string·split("a,b,c", ",") -> (p, np:int64)
 	println("split", string·join(p, "-"))
-	q:[int64]·[]char/utf32 = {}
-	string·split("abc", "") -> (q, nq)
+	q:'[int64]'[]char/utf32 = {}
+	string·split("abc", "") -> (q, nq:int64)
 	println("split-empty", string·join(q, "|"))
-	s2:[int64]·[]char/utf32 = {}
-	string·splitn("a,b,c", ",", 2) -> (s2, ns)
+	s2:'[int64]'[]char/utf32 = {}
+	string·splitn("a,b,c", ",", 2) -> (s2, ns:int64)
 	println("splitn", string·join(s2, "/"))
-	l:[int64]·[]char/utf32 = {}
-	string·lines("a\nb\r\nc\n") -> (l, nl)
+	l:'[int64]'[]char/utf32 = {}
+	string·lines("a\nb\r\nc\n") -> (l, nl:int64)
 	println("lines", string·join(l, "/"))
-	f:[int64]·[]char/utf32 = {}
-	string·fields("  a  b\tc ") -> (f, nf)
+	f:'[int64]'[]char/utf32 = {}
+	string·fields("  a  b\tc ") -> (f, nf:int64)
 	println("fields", string·join(f, "/"))
 }

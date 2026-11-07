@@ -15,6 +15,6 @@ rwfunc print_sum(*[]int64 $a) -> (*int64 $total) {
 
 rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30]
-	print_sum(a) -> total
+	print_sum(a) -> total:int64
 	println("sum =", total)
 }

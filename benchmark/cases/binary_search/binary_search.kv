@@ -2,14 +2,14 @@
 // 建 arr[i]=i，对 0..N-1 逐个二分，累加命中下标；N 由 __SCALE__ 占位（勿改逻辑）
 // 期望输出（N=32 时）:
 //   bsearch: found = 32 sum = 496
-rwfunc bsearch(*[int64]·int64 $arr, *int64 $n, *int64 $target) -> (*int64 $idx) {
-	0 -> lo
-	*n - 1 -> hi
+rwfunc bsearch(*'[int64]'int64 $arr, *int64 $n, *int64 $target) -> (*int64 $idx) {
+	0 -> lo:int64
+	*n - 1 -> hi:int64
 	-1 -> *idx
 	while (lo <= hi) {
-		lo + hi -> s
-		s ÷ 2 -> mid
-		(*arr)·*mid -> mv
+		lo + hi -> s:int64
+		s ÷ 2 -> mid:int64
+		(*arr)·*mid -> mv:int64
 		if (mv == *target) {
 			mid -> *idx
 			hi + 1 -> lo
@@ -22,29 +22,29 @@ rwfunc bsearch(*[int64]·int64 $arr, *int64 $n, *int64 $target) -> (*int64 $idx)
 }
 
 rwfunc test() -> () {
-	__SCALE__ -> n
-	arr:[int64]·int64 = {}
-	0 -> i
+	__SCALE__ -> n:int64
+	arr:'[int64]'int64 = {}
+	0 -> i:int64
 	while (i < n) {
 		i -> arr·*i
 		i + 1 -> i
 	}
-	t0 = time·now()
-	0 -> sum
-	0 -> found
-	0 -> q
+	t0:time = time·now()
+	0 -> sum:int64
+	0 -> found:int64
+	0 -> q:int64
 	while (q < n) {
-		bsearch(arr, n, q) -> idx
+		bsearch(arr, n, q) -> idx:int64
 		if (idx != -1) {
 			found + 1 -> found
 			sum + idx -> sum
 		}
 		q + 1 -> q
 	}
-	t1 = time·now()
+	t1:time = time·now()
 	println("bsearch: found =", found, "sum =", sum)
-	delta = time·sub(t1, t0)
-	ns = time/duration·as_nanos(delta)
+	delta:time/duration = time·sub(t1, t0)
+	ns:int64 = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: N=__SCALE__")
 }

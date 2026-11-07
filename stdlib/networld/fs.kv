@@ -17,51 +17,51 @@ lib networld/fs {
 		networld/fs·size(*p) -> *sz
 		"" -> *t
 		if (*sz > 0) {
-			networld/fs·isutf8(*p) -> valid
+			networld/fs·isutf8(*p) -> valid:bool
 			if (valid) {
-				networld/fs·read(*p, 0, *sz) -> raw
-				compactarray·newreinterpret(raw, "[]char/utf8") -> u8
+				networld/fs·read(*p, 0, *sz) -> raw:[]uint8
+				compactarray·newreinterpret(raw, "[]char/utf8") -> u8:[]char/utf8
 				char/utf32(u8) -> *t
 			}
 		}
 	}
 	// writetext(p, t) -> n：文本按 UTF-8 覆盖写盘，返回字节数（失败 -1）
 	rwfunc writetext(*[]char/utf32 $p, *[]char/utf32 $t) -> (*int64 $n) {
-		char/utf8(*t) -> u8
-		compactarray·newreinterpret(u8, "[]uint8") -> bytes
+		char/utf8(*t) -> u8:[]char/utf8
+		compactarray·newreinterpret(u8, "[]uint8") -> bytes:[]uint8
 		networld/fs·write(*p, bytes) -> *n
 	}
 	// appendtext(p, t) -> n：文本按 UTF-8 追加到文件末尾，返回追加字节数（失败 -1）
 	rwfunc appendtext(*[]char/utf32 $p, *[]char/utf32 $t) -> (*int64 $n) {
-		char/utf8(*t) -> u8
-		compactarray·newreinterpret(u8, "[]uint8") -> bytes
+		char/utf8(*t) -> u8:[]char/utf8
+		compactarray·newreinterpret(u8, "[]uint8") -> bytes:[]uint8
 		networld/fs·append(*p, bytes) -> *n
 	}
 	// copyfile(src, dst) -> n：字节级整文件拷贝，返回写入字节数（源不存在/失败 -1）
 	rwfunc copyfile(*[]char/utf32 $src, *[]char/utf32 $dst) -> (*int64 $n) {
-		networld/fs·size(*src) -> sz
+		networld/fs·size(*src) -> sz:int64
 		if (sz < 0) {
 			-1 -> *n
 		} else {
-			networld/fs·read(*src, 0, sz) -> raw
+			networld/fs·read(*src, 0, sz) -> raw:[]uint8
 			networld/fs·write(*dst, raw) -> *n
 		}
 	}
 	// basename(p) -> name：路径末段（剥除末尾连续 '/'；无 '/' 原样；全 '/' 返 "/"）
 	rwfunc basename(*[]char/utf32 $p) -> (*[]char/utf32 $name) {
-		hi = string·len(*p)
+		hi:int64 = string·len(*p)
 		if (hi == 0) {
 			"" -> *name
 		} else {
 			while (hi > 1) {
-				string·char(*p, hi - 1) -> c
+				string·char(*p, hi - 1) -> c:char/utf32
 				if (string·cmp(c, "/") != 0) {
 					break
 				}
 				hi = hi - 1
 			}
-			string·slice(*p, 0, hi) -> trimmed
-			string·rfind(trimmed, "/") -> idx
+			string·slice(*p, 0, hi) -> trimmed:[]char/utf32
+			string·rfind(trimmed, "/") -> idx:int64
 			if (idx < 0) {
 				trimmed -> *name
 			} else {
@@ -75,19 +75,19 @@ lib networld/fs {
 	}
 	// dirname(p) -> dir：路径父目录（剥除末尾连续 '/' 后取最后一个 '/' 之前；无 '/' 返 "."；根返 "/"）
 	rwfunc dirname(*[]char/utf32 $p) -> (*[]char/utf32 $dir) {
-		hi = string·len(*p)
+		hi:int64 = string·len(*p)
 		if (hi == 0) {
 			"." -> *dir
 		} else {
 			while (hi > 1) {
-				string·char(*p, hi - 1) -> c
+				string·char(*p, hi - 1) -> c:char/utf32
 				if (string·cmp(c, "/") != 0) {
 					break
 				}
 				hi = hi - 1
 			}
-			string·slice(*p, 0, hi) -> trimmed
-			string·rfind(trimmed, "/") -> idx
+			string·slice(*p, 0, hi) -> trimmed:[]char/utf32
+			string·rfind(trimmed, "/") -> idx:int64
 			if (idx < 0) {
 				"." -> *dir
 			} else {
@@ -101,9 +101,9 @@ lib networld/fs {
 	}
 	// ext(p) -> e：文件扩展名（含前导 '.'，如 ".kv"；无 '.' 或末段以单 '.' 开头无后续 '.' 返 ""）
 	rwfunc ext(*[]char/utf32 $p) -> (*[]char/utf32 $e) {
-		networld/fs·basename(*p) -> base
-		bl = string·len(base)
-		string·rfind(base, ".") -> idx
+		networld/fs·basename(*p) -> base:[]char/utf32
+		bl:int64 = string·len(base)
+		string·rfind(base, ".") -> idx:int64
 		if (idx <= 0) {
 			"" -> *e
 		} else {
@@ -118,8 +118,8 @@ lib networld/fs {
 			if (string·empty(*b)) {
 				*a -> *p
 			} else {
-				string·trimsuffix(*a, "/") -> a2
-				string·trimprefix(*b, "/") -> b2
+				string·trimsuffix(*a, "/") -> a2:[]char/utf32
+				string·trimprefix(*b, "/") -> b2:[]char/utf32
 				if (string·empty(a2)) {
 					"/" + b2 -> *p
 				} else {
@@ -130,16 +130,16 @@ lib networld/fs {
 	}
 	// match(name, pat) -> b：名字段通配匹配（* 任意串、? 单字符，其余按字面）
 	rwfunc match(*[]char/utf32 $name, *[]char/utf32 $pat) -> (*bool $b) {
-		nn = string·len(*name)
-		pn = string·len(*pat)
+		nn:int64 = string·len(*name)
+		pn:int64 = string·len(*pat)
 		if (pn == 0) {
 			*b = nn == 0
 		} else {
-			string·slice(*pat, 1, pn) -> ptail
+			string·slice(*pat, 1, pn) -> ptail:[]char/utf32
 			if (string·startswith(*pat, "*")) {
 				networld/fs·match(*name, ptail) -> *b
 				if (!*b && nn > 0) {
-					string·slice(*name, 1, nn) -> ntail
+					string·slice(*name, 1, nn) -> ntail:[]char/utf32
 					networld/fs·match(ntail, *pat) -> *b
 				}
 			} else {
@@ -150,8 +150,8 @@ lib networld/fs {
 					if (string·startswith(*pat, "?")) {
 						networld/fs·match(ntail, ptail) -> *b
 					} else {
-						string·slice(*name, 0, 1) -> nc
-						string·slice(*pat, 0, 1) -> pc
+						string·slice(*name, 0, 1) -> nc:char/utf32
+						string·slice(*pat, 0, 1) -> pc:char/utf32
 						if (string·cmp(nc, pc) == 0) {
 							networld/fs·match(ntail, ptail) -> *b
 						} else {
@@ -166,37 +166,37 @@ lib networld/fs {
 	// 仅最后一段可含 *?，其前目录须为字面路径，如 "/tmp/*.kv"、"src/*.c"。
 	rwfunc glob(*[]char/utf32 $pat) -> (*[]char/utf32 $paths) {
 		"" -> *paths
-		ln = string·len(*pat)
-		cut = -1
-		i = 0
+		ln:int64 = string·len(*pat)
+		cut:int64 = -1
+		i:int64 = 0
 		while (i < ln) {
-			string·slice(*pat, i, i + 1) -> c
+			string·slice(*pat, i, i + 1) -> c:char/utf32
 			if (string·cmp(c, "/") == 0) {
 				cut = i
 			}
 			i = i + 1
 		}
 		if (cut < 0) {
-			"." -> dir
-			*pat -> np
+			"." -> dir:[]char/utf32
+			*pat -> np:[]char/utf32
 		} else {
 			string·slice(*pat, 0, cut) -> dir
 			string·slice(*pat, cut + 1, ln) -> np
 		}
-		dir -> scan
+		dir -> scan:[]char/utf32
 		if (string·len(dir) == 0) {
 			"/" -> scan
 		}
-		networld/fs·list(scan) -> ns
-		kvspace·listlen(ns) -> nc
+		networld/fs·list(scan) -> ns:'[int64]'[]char/utf32
+		kvspace·listlen(ns) -> nc:int64
 		i = 0
 		while (i < nc) {
-			kvspace·listat(ns, i) -> k
-			ns·*k -> nm
-			networld/fs·match(nm, np) -> ok
+			kvspace·listat(ns, i) -> k:char/utf8
+			ns·*k -> nm:[]char/utf32
+			networld/fs·match(nm, np) -> ok:bool
 			if (ok) {
-				string·concat(dir, "/") -> d
-				string·concat(d, nm) -> cp
+				string·concat(dir, "/") -> d:[]char/utf32
+				string·concat(d, nm) -> cp:[]char/utf32
 				string·concat(*paths, cp) -> *paths
 				string·concat(*paths, "\n") -> *paths
 			}
@@ -207,25 +207,25 @@ lib networld/fs {
 	rwfunc scan(*[]char/utf32 $text, *[]char/utf32 $path,
 	            *[]char/utf32 $pat) -> (*[]char/utf32 $hits) {
 		"" -> *hits
-		ln = string·len(*text)
-		pos = 0
-		no = 0
+		ln:int64 = string·len(*text)
+		pos:int64 = 0
+		no:int64 = 0
 		while (pos < ln) {
-			string·slice(*text, pos, ln) -> rest
-			string·find(rest, "\n") -> e
+			string·slice(*text, pos, ln) -> rest:[]char/utf32
+			string·find(rest, "\n") -> e:int64
 			no = no + 1
 			if (e == -1) {
-				string·slice(*text, pos, ln) -> line
+				string·slice(*text, pos, ln) -> line:[]char/utf32
 				pos = ln
 			} else {
 				string·slice(*text, pos, pos + e) -> line
 				pos = pos + e + 1
 			}
-			string·find(line, *pat) -> h
+			string·find(line, *pat) -> h:int64
 			if (h != -1) {
 				string·concat(*hits, *path) -> *hits
 				string·concat(*hits, ":") -> *hits
-				string·formatint(no, 10) -> sn
+				string·formatint(no, 10) -> sn:char/utf32
 				string·concat(*hits, sn) -> *hits
 				string·concat(*hits, ":") -> *hits
 				string·concat(*hits, line) -> *hits
@@ -238,25 +238,25 @@ lib networld/fs {
 	rwfunc grep(*[]char/utf32 $pat, *[]char/utf32 $path,
 	            *[]char/utf32 $glob) -> (*[]char/utf32 $hits) {
 		"" -> *hits
-		networld/fs·list(*path) -> ns
-		kvspace·listlen(ns) -> nc
+		networld/fs·list(*path) -> ns:'[int64]'[]char/utf32
+		kvspace·listlen(ns) -> nc:int64
 		if (nc == 0) {
-			networld/fs·readtext(*path) -> (t, sz)
+			networld/fs·readtext(*path) -> (t:[]char/utf32, sz:int64)
 			if (sz > 0) {
-				networld/fs·scan(t, *path, *pat) -> h
+				networld/fs·scan(t, *path, *pat) -> h:[]char/utf32
 				string·concat(*hits, h) -> *hits
 			}
 		} else {
-			gl = string·len(*glob)
-			i = 0
+			gl:int64 = string·len(*glob)
+			i:int64 = 0
 			while (i < nc) {
-				kvspace·listat(ns, i) -> k
-				ns·*k -> nm
-				networld/fs·match(nm, *glob) -> ok
+				kvspace·listat(ns, i) -> k:char/utf8
+				ns·*k -> nm:[]char/utf32
+				networld/fs·match(nm, *glob) -> ok:bool
 				if (gl == 0 || ok) {
-					string·concat(*path, "/") -> d
-					string·concat(d, nm) -> cp
-					networld/fs·readtext(cp) -> (t, sz)
+					string·concat(*path, "/") -> d:[]char/utf32
+					string·concat(d, nm) -> cp:[]char/utf32
+					networld/fs·readtext(cp) -> (t:[]char/utf32, sz:int64)
 					if (sz > 0) {
 						networld/fs·scan(t, cp, *pat) -> h
 						string·concat(*hits, h) -> *hits

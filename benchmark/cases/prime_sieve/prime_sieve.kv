@@ -6,14 +6,14 @@
 //   total primes up to 100 = 25
 rwfunc prime_sieve(*int64 $limit) -> () {
 	println("primes up to", *limit)
-	count = 0
-	2 -> n
+	count:int64 = 0
+	2 -> n:int64
 	while (n <= *limit) {
-		is_prime = true
-		d = 2
+		is_prime:bool = true
+		d:int64 = 2
 		while (d < n) {
-			n % d -> rem
-			divisible = rem == 0
+			n % d -> rem:int64
+			divisible:bool = rem == 0
 			if (divisible) {
 				is_prime = false
 				break
@@ -25,17 +25,17 @@ rwfunc prime_sieve(*int64 $limit) -> () {
 			println("  prime:", n)
 			count = count + 1
 		}
-		n + 1 -> n
+		n + 1 -> n:int64
 	}
 	println("total primes up to", *limit, "=", count)
 }
 
 rwfunc test() -> () {
-	t0 = time·now()
+	t0:time = time·now()
 	prime_sieve(__SCALE__)
-	t1 = time·now()
-	delta = time·sub(t1, t0)
-	ns = time/duration·as_nanos(delta)
+	t1:time = time·now()
+	delta:time/duration = time·sub(t1, t0)
+	ns:int64 = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: N=__SCALE__")
 }

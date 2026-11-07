@@ -3,11 +3,11 @@
 // 期望输出:
 //   8
 rwfunc climb(*int64 $n) -> () {
-	a = 1
-	1 -> b
-	i = 2
+	a:int64 = 1
+	1 -> b:int64
+	i:int64 = 2
 	while (i <= *n) {
-		c = a + b
+		c:int64 = a + b
 		b -> a
 		b = c
 		i = i + 1

@@ -4,8 +4,8 @@
 rwfunc f3() -> (*[]int64 $a, *int64 $s) {
 	println((*a)[0])
 	debugger()          // 在此暂停
-	(*a)[0] -> v0
-	(*a)[1] -> v1
+	(*a)[0] -> v0:int64
+	(*a)[1] -> v1:int64
 	v0 + v1 -> *s        // 30 + 40 = 70
 }
 
@@ -19,6 +19,6 @@ rwfunc f1() -> (*int64 $s) {
 }
 
 rwfunc test() -> () {
-	f1() -> r
+	f1() -> r:int64
 	println(r)            // 70
 }

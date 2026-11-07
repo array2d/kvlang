@@ -3,23 +3,23 @@
 // 期望输出:
 //   1
 rwfunc is_happy(*int64 $n) -> (*int64 $result) {
-	*n -> nv
-	0 -> slow
-	fast = nv
-	found = 0
+	*n -> nv:int64
+	0 -> slow:int64
+	fast:int64 = nv
+	found:int64 = 0
 	while (found == 0) {
-		nv -> x
-		s = 0
+		nv -> x:int64
+		s:int64 = 0
 		while (x > 0) {
-			d = x % 10
-			d × d -> d2
-			d × d -> d2_m
+			d:int64 = x % 10
+			d × d -> d2:int64
+			d × d -> d2_m:int64
 			s = s + d2
 			x = x ÷ 10
-			x_m = x ÷ 10
+			x_m:int64 = x ÷ 10
 		}
 		s -> nv
-		done = nv == 1
+		done:bool = nv == 1
 
 		if (done) {
 			found = 1
@@ -30,6 +30,6 @@ rwfunc is_happy(*int64 $n) -> (*int64 $result) {
 
 rwfunc test() -> () {
 
-	r = is_happy(19)
+	r:int64 = is_happy(19)
 	println(r)
 }

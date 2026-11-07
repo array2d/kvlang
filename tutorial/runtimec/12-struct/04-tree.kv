@@ -13,17 +13,17 @@ struct TNode {
 
 rwfunc inorder(*TNode $node) -> () {
 	if (node != None) {
-		(*node)·left -> l
+		(*node)·left -> l:*/lib/TNode
 		inorder(l)
-		(*node)·val -> v
+		(*node)·val -> v:int64
 		println(v)
-		(*node)·right -> r
+		(*node)·right -> r:*/lib/TNode
 		inorder(r)
 	}
 }
 
 rwfunc test() -> () {
-	/tree:[int64]·TNode = {}
+	/tree:'[int64]'TNode = {}
 	/tree·1:TNode = {val=5}
 	/tree·2:TNode = {val=3}
 	/tree·3:TNode = {val=8}

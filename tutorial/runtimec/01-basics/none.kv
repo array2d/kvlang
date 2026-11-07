@@ -9,6 +9,6 @@ rwfunc test() -> () {
   x -> y       // x 未赋值 → None，y ← None
   println(y)     // None → 输出空行
   println("after")
-  42 -> x      // 显式赋值
+  42 -> x:int64  // 显式赋值
   println(x)
 }

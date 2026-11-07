@@ -22,14 +22,14 @@ rwfunc replace_at(*[]char/utf32 $s, *int64 $i,*[]char/utf32 $ch) -> (*[]char/utf
 }
 
 rwfunc test() -> () {
-	s = "hello"
+	s:[]char/utf32 = "hello"
 	println(s[1])
 	replace_at(s, 0, "H") -> s
 	println(s)
 
-	t = "kv" + "lang"
+	t:[]char/utf32 = "kv" + "lang"
 	println(t)
-	s + " " + t -> w
+	s + " " + t -> w:[]char/utf32
 	println(w)
 	println(string·len(w))
 
@@ -38,7 +38,7 @@ rwfunc test() -> () {
 	println(string·find(w, "kv"))
 	println(string·find(w, "zz"))
 
-	c = w[3]
+	c:char/utf32 = w[3]
 	println(c)
 	println(string·ord(c))
 }

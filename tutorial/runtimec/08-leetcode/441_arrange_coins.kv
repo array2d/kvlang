@@ -3,20 +3,20 @@
 // 期望输出:
 //   2
 rwfunc arrange(*int64 $n) -> () {
-	lo = 1
-	*n -> hi
-	ans = 0
+	lo:int64 = 1
+	*n -> hi:int64
+	ans:int64 = 0
 	while (lo <= hi) {
-		s = lo + hi
-		s ÷ 2 -> mid
-		s ÷ 2 -> mid_m
-		m2 = mid × mid
-		m2_m = mid × mid
-		total = m2 + mid
-		total ÷ 2 -> t
-		total ÷ 2 -> t_m
-		ok = t <= *n
-		ok_m = t ≤ *n
+		s:int64 = lo + hi
+		s ÷ 2 -> mid:int64
+		s ÷ 2 -> mid_m:int64
+		m2:int64 = mid × mid
+		m2_m:int64 = mid × mid
+		total:int64 = m2 + mid
+		total ÷ 2 -> t:int64
+		total ÷ 2 -> t_m:int64
+		ok:bool = t <= *n
+		ok_m:bool = t ≤ *n
 
 		if (ok) {
 			ans = mid

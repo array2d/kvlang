@@ -35,53 +35,53 @@
 //   9007199254740993
 //   false
 rwfunc test() -> () {
-	a = 2 + 3
+	a:int64 = 2 + 3
 	println(a)
-	b = 2 + 3.5
+	b:float64 = 2 + 3.5
 	println(b)
-	1.5 × 2 -> c
-	1.5 × 2 -> c_m
+	1.5 × 2 -> c:float64
+	1.5 × 2 -> c_m:float64
 	println(c_m)
 	println(c)
 
-	q = 7 ÷ 2
-	q_m = 7 ÷ 2
+	q:int64 = 7 ÷ 2
+	q_m:int64 = 7 ÷ 2
 	println(q_m)
 	println(q)
-	-9 ÷ 2 -> qz
-	-9 ÷ 2 -> qz_m
+	-9 ÷ 2 -> qz:int64
+	-9 ÷ 2 -> qz_m:int64
 	println(qz_m)
 	println(qz)
-	fq = 7.0 ÷ 2
-	fq_m = 7.0 ÷ 2
+	fq:float64 = 7.0 ÷ 2
+	fq_m:float64 = 7.0 ÷ 2
 	println(fq_m)
 	println(fq)
-	r = 7 % 3
+	r:int64 = 7 % 3
 	println(r)
 
-	ti = int64(3.99)
+	ti:int64 = int64(3.99)
 	println(ti)
-	float64(7) -> tf
+	float64(7) -> tf:float64
 	println(tf)
 
-	sci = 1e3
+	sci:float64 = 1e3
 	println(sci)
-	small = 2.5e-2
+	small:float64 = 2.5e-2
 	println(small)
 
-	0.1 + 0.2 -> sum
+	0.1 + 0.2 -> sum:float64
 	println(sum)
 
-	eq = 3 == 3.0
+	eq:bool = 3 == 3.0
 	println(eq)
 
-	big = 9223372036854775807
+	big:int64 = 9223372036854775807
 	println(big)
 
-	big - 1 -> bm
+	big - 1 -> bm:int64
 	println(bm)
-	precise = 9007199254740993 + 0
+	precise:int64 = 9007199254740993 + 0
 	println(precise)
-	same = big == 9223372036854775806
+	same:bool = big == 9223372036854775806
 	println(same)
 }

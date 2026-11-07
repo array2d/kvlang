@@ -10,10 +10,10 @@ struct Node {
 
 rwfunc has_cycle(*Node $head) -> (*int64 $result) {
 	0 -> *result
-	slow = head
-	fast = head
+	slow:*/lib/Node = head
+	fast:*/lib/Node = head
 	while (fast != None) {
-		(*fast)·next -> n1
+		(*fast)·next -> n1:*/lib/Node
 		if (n1 == None) {
 			fast = None
 		} else {
@@ -34,13 +34,13 @@ rwfunc test() -> () {
 	c1·next = &c2
 	c2·next = &c3
 	c3·next = &c1
-	&c1 -> h1
-	has_cycle(h1) -> r1
+	&c1 -> h1:*/lib/Node
+	has_cycle(h1) -> r1:int64
 	println(r1)
 
 	d2:Node = {val=2}
 	d1:Node = {val=1 next=&d2}
-	&d1 -> h2
-	has_cycle(h2) -> r2
+	&d1 -> h2:*/lib/Node
+	has_cycle(h2) -> r2:int64
 	println(r2)
 }

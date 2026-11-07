@@ -15,7 +15,7 @@
 rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30, 40]
 	println("last:", xv·last(a))
-	r = xv·reverse(a)
+	r:[]int64 = xv·reverse(a)
 	println("rev:", r[0], r[1], r[2], r[3])
 	println("find 30:", xv·find(a, 30))
 	println("find 99:", xv·find(a, 99))
@@ -25,8 +25,8 @@ rwfunc test() -> () {
 	println("sum:", xv·sum(a))
 	println("min:", xv·min(a))
 	println("max:", xv·max(a))
-	m = compactarray·newreshape([1, 2, 3, 4], 2, 2)
-	fl = xv·flatten(m)
+	m:[4]int64 = compactarray·newreshape([1, 2, 3, 4], 2, 2)
+	fl:[]int64 = xv·flatten(m)
 	println("flat len:", compactarray·numel(fl))
 	println("flat[3]:", fl[3])
 }

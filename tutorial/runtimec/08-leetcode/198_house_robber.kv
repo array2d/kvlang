@@ -4,30 +4,30 @@
 //   4
 rwfunc rob() -> () {
 	[1, 2, 3, 1] -> a:[]int64
-	n = compactarray·numel(a)
-	one = n == 1
-	n == 2 -> two
+	n:int64 = compactarray·numel(a)
+	one:bool = n == 1
+	n == 2 -> two:bool
 
 	if (one) {
-		ans = a[0]
+		ans:int64 = a[0]
 		println(ans)
 	} else {
-		p1 = a[0]
-		a[1] -> p2
-		bigger = p1 > p2
+		p1:int64 = a[0]
+		a[1] -> p2:int64
+		bigger:bool = p1 > p2
 
 		if (bigger) {
 			p2 = p1
 		}
 
-		2 -> i
+		2 -> i:int64
 		while (i < n) {
-			cur = a[i]
-			take = p1 + cur
-			take > p2 -> better
+			cur:int64 = a[i]
+			take:int64 = p1 + cur
+			take > p2 -> better:bool
 
 			if (better) {
-				tmp = take
+				tmp:int64 = take
 			} else {
 				tmp = p2
 			}

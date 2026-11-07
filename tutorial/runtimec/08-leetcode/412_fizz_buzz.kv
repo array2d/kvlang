@@ -6,13 +6,13 @@
 //   Fizz
 rwfunc fizzbuzz(*int64 $n) -> () {
 	[1, 2, 3, 4, 5] -> a:[]int64
-	i = 1
+	i:int64 = 1
 	while (i <= *n) {
-		m3 = i % 3
-		i % 5 -> m5
-		d3 = m3 == 0
-		d5 = m5 == 0
-		d3 && d5 -> fb
+		m3:int64 = i % 3
+		i % 5 -> m5:int64
+		d3:bool = m3 == 0
+		d5:bool = m5 == 0
+		d3 && d5 -> fb:bool
 
 		if (fb) {
 			println("FizzBuzz")

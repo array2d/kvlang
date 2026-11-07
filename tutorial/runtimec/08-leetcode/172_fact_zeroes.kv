@@ -3,11 +3,11 @@
 // 期望输出:
 //   1
 rwfunc trailing(*int64 $n) -> () {
-	*n -> nv
-	0 -> count
+	*n -> nv:int64
+	0 -> count:int64
 	while (nv >= 5) {
 		nv = nv ÷ 5
-		nv_m = nv ÷ 5
+		nv_m:int64 = nv ÷ 5
 		count = count + nv
 	}
 	println(count)

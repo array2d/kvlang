@@ -5,14 +5,14 @@
 //   k = 5
 rwfunc remove_dupes() -> (*int64 $k) {
     a:[]int64 = [0, 0, 1, 1, 1, 2, 2, 3, 3, 4]
-    compactarray·numel(a) -> n
+    compactarray·numel(a) -> n:int64
     *k = 1
-    i = 1
+    i:int64 = 1
     while (i < n) {
-        a[i] -> cur
-        pi = *k - 1
-        prev = a[pi]
-        cur == prev -> same
+        a[i] -> cur:int64
+        pi:int64 = *k - 1
+        prev:int64 = a[pi]
+        cur == prev -> same:bool
 
         if (same) {
             i = i + 1
@@ -26,7 +26,7 @@ rwfunc remove_dupes() -> (*int64 $k) {
 
 rwfunc test() -> () {
 
-	remove_dupes() -> k
+	remove_dupes() -> k:int64
 	println("k =", k)
 	remove_dupes() -> k
 	println("k =", k)

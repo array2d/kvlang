@@ -3,17 +3,17 @@
 // 期望输出:
 //   2
 rwfunc my_sqrt(*int64 $x) -> () {
-	lo = 0
-	hi = *x
-	0 -> ans
+	lo:int64 = 0
+	hi:int64 = *x
+	0 -> ans:int64
 	while (lo <= hi) {
-		s = lo + hi
-		mid = s ÷ 2
-		mid_m = s ÷ 2
-		mid × mid -> sq
-		mid × mid -> sq_m
-		ok = sq <= *x
-		ok_m = sq ≤ *x
+		s:int64 = lo + hi
+		mid:int64 = s ÷ 2
+		mid_m:int64 = s ÷ 2
+		mid × mid -> sq:int64
+		mid × mid -> sq_m:int64
+		ok:bool = sq <= *x
+		ok_m:bool = sq ≤ *x
 
 		if (ok) {
 			ans = mid

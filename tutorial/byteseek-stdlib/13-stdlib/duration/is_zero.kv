@@ -3,10 +3,10 @@
 //   true
 //   false
 rwfunc test() -> () {
-	time/duration·nanos(0) -> z
-	time/duration·is_zero(z) -> r
+	time/duration·nanos(0) -> z:time/duration
+	time/duration·is_zero(z) -> r:bool
 	println(r)
-	time/duration·seconds(1) -> one
-	time/duration·is_zero(one) -> r2
+	time/duration·seconds(1) -> one:time/duration
+	time/duration·is_zero(one) -> r2:bool
 	println(r2)
 }

@@ -12,8 +12,8 @@ rwfunc own() -> (*int64 $t) {
     *t + 100 -> *t
 }
 rwfunc test() -> () {
-    3 -> v
-    inc(v) -> r
+    3 -> v:int64
+    inc(v) -> r:int64
     println("inc r=", r, " v=", v)
     bump() -> v
     println("bump v=", v)

@@ -8,34 +8,34 @@
 //   1211
 //   111221
 rwfunc next_seq(*int64 $src_len) -> (*int64 $dst_len) {
-	/tmp/s2:[int64]·int64 = {}
-	i = 0
-	di = 0
+	/tmp/s2:'[int64]'int64 = {}
+	i:int64 = 0
+	di:int64 = 0
 	while (i < *src_len) {
-		"/tmp/s"·*i -> cur
-		count = 1
-		j = i + 1
+		"/tmp/s"·*i -> cur:char/utf32
+		count:int64 = 1
+		j:int64 = i + 1
 		while (j < *src_len) {
-			"/tmp/s"·*j -> v
+			"/tmp/s"·*j -> v:char/utf32
 			if (v == cur) { count + 1 -> count ; j + 1 -> j }
 			else { *src_len -> j }
 		}
 			count -> "/tmp/s2"·*di
-			di + 1 -> di1
+			di + 1 -> di1:int64
 			cur -> "/tmp/s2"·*di1
 		di + 2 -> di
-		i + count -> i
+		i + count -> i:int64
 	}
 	di -> *dst_len
 }
 
 rwfunc print_seq_len(*int64 $seq_len) -> () {
-	i = 0
+	i:int64 = 0
 	while (i < *seq_len) {
-		"/tmp/s"·*i -> cnt
-		i + 1 -> i1
-		"/tmp/s"·*i1 -> val
-		k = 0
+		"/tmp/s"·*i -> cnt:char/utf32
+		i + 1 -> i1:int64
+		"/tmp/s"·*i1 -> val:char/utf32
+		k:int64 = 0
 		while (k < cnt) {
 			print(val)
 			k + 1 -> k
@@ -55,7 +55,7 @@ rwfunc copy_from_s2_to_s(*int64 $s2_len) -> () {
 }
 
 rwfunc count_and_say(*int64 $N) -> () {
-	/tmp/s:[int64]·int64 = {}
+	/tmp/s:'[int64]'int64 = {}
 	1 -> "/tmp/s"·*0
 	1 -> "/tmp/s"·*1
 	cur_len = 2

@@ -6,21 +6,21 @@
 // 用整数数组模拟字符串，1='a', 2='b', etc.
 rwfunc is_pal() -> () {
 	s:[]int64 = [1, 2, 1]
-	compactarray·numel(s) -> n
-	l = 0
-	r = n - 1
-	1 -> ok
+	compactarray·numel(s) -> n:int64
+	l:int64 = 0
+	r:int64 = n - 1
+	1 -> ok:int64
 	while (l < r) {
-		lc = s[l]
-		rc = s[r]
-		lc == rc -> match
+		lc:int64 = s[l]
+		rc:int64 = s[r]
+		lc == rc -> match:bool
 
 		if (match) {
-			l = l + 1
-			r = r - 1
+			l:int64 = l + 1
+			r:int64 = r - 1
 		} else {
-			0 -> ok
-			l = n
+			0 -> ok:int64
+			l:int64 = n
 		}
 	}
 	println(ok)
@@ -28,14 +28,14 @@ rwfunc is_pal() -> () {
 
 rwfunc not_pal() -> () {
 	s:[]int64 = [1, 2]
-	compactarray·numel(s) -> n
-	l = 0
-	r = n - 1
-	1 -> ok
+	compactarray·numel(s) -> n:int64
+	l:int64 = 0
+	r:int64 = n - 1
+	1 -> ok:int64
 	while (l < r) {
-		lc = s[l]
-		rc = s[r]
-		lc == rc -> match
+		lc:int64 = s[l]
+		rc:int64 = s[r]
+		lc == rc -> match:bool
 
 		if (match) {
 			l = l + 1

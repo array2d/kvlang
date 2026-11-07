@@ -4,21 +4,21 @@
 //   321
 //   -321
 rwfunc reverse(*int64 $x) -> (*int64 $result) {
-	neg = *x < 0
-	*x -> n
+	neg:bool = *x < 0
+	*x -> n:int64
 
 	if (neg) {
 		n = -*x
 	}
 
-	rev = 0
+	rev:int64 = 0
 	while (n > 0) {
-		rev × 10 -> r
-		rev × 10 -> r_m
-		d = n % 10
+		rev × 10 -> r:int64
+		rev × 10 -> r_m:int64
+		d:int64 = n % 10
 		rev = r + d
 		n ÷ 10 -> n
-		n ÷ 10 -> n_m
+		n ÷ 10 -> n_m:int64
 	}
 
 	if (neg) {
@@ -30,8 +30,8 @@ rwfunc reverse(*int64 $x) -> (*int64 $result) {
 
 rwfunc test() -> () {
 
-	reverse(123) -> r1
+	reverse(123) -> r1:int64
 	println(r1)
-	r2 = reverse(-123)
+	r2:int64 = reverse(-123)
 	println(r2)
 }

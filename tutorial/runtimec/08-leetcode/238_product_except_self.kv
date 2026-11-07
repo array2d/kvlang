@@ -8,34 +8,34 @@
 //   6
 rwfunc product() -> () {
 	a:[]int64 = [1, 2, 3, 4]
-	compactarray·numel(a) -> n
-	prefix = 1
-	suffix = 1
+	compactarray·numel(a) -> n:int64
+	prefix:int64 = 1
+	suffix:int64 = 1
 	// build prefix products into result
 	[1, 1, 1, 1] -> result:[]int64
-	i = 0
+	i:int64 = 0
 	while (i < n) {
 		result[i] = prefix
-		x = a[i]
+		x:int64 = a[i]
 		prefix × x -> prefix
-		prefix × x -> prefix_m
+		prefix × x -> prefix_m:int64
 		i = i + 1
 	}
 	// multiply by suffix products
-	j = n - 1
+	j:int64 = n - 1
 	while (j >= 0) {
-		result[j] -> rv
-		newv = suffix × rv
-		newv_m = suffix × rv
+		result[j] -> rv:int64
+		newv:int64 = suffix × rv
+		newv_m:int64 = suffix × rv
 		result[j] = newv
-		y = a[j]
+		y:int64 = a[j]
 		suffix × y -> suffix
-		suffix × y -> suffix_m
+		suffix × y -> suffix_m:int64
 		j = j - 1
 	}
-	k = 0
+	k:int64 = 0
 	while (k < n) {
-		result[k] -> v
+		result[k] -> v:int64
 		println(v)
 		k = k + 1
 	}

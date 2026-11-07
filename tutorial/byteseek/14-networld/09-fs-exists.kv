@@ -10,16 +10,16 @@ rwfunc file_exists(*[]char/utf32 $p) -> (*bool $b) {
 }
 
 rwfunc test() -> () {
-	p = "/tmp/kvlang_fs_exists.txt"
-	noenv:[int64]·[]char/utf32 = {}
-	rm:[int64]·[]char/utf32 = {"rm", "-f", "/tmp/kvlang_fs_exists.txt"}
-	networld/proc·exec(rm, noenv) -> rc
-	file_exists(p) -> b0
+	p:[]char/utf32 = "/tmp/kvlang_fs_exists.txt"
+	noenv:'[int64]'[]char/utf32 = {}
+	rm:'[int64]'[]char/utf32 = {"rm", "-f", "/tmp/kvlang_fs_exists.txt"}
+	networld/proc·exec(rm, noenv) -> rc:uint8
+	file_exists(p) -> b0:bool
 	println("before=", b0)
-	networld/fs·write(p, compactarray·newreinterpret("x", "[]uint8")) -> w
-	file_exists(p) -> b1
+	networld/fs·write(p, compactarray·newreinterpret("x", "[]uint8")) -> w:int64
+	file_exists(p) -> b1:bool
 	println("after_write=", b1)
-	networld/fs·del(p) -> dc
-	file_exists(p) -> b2
+	networld/fs·del(p) -> dc:int64
+	file_exists(p) -> b2:bool
 	println("after_del=", b2)
 }

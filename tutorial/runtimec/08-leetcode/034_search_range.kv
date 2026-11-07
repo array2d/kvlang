@@ -5,18 +5,18 @@
 //   [ 3 , 4 ]
 rwfunc search_range() -> () {
 	[5, 7, 7, 8, 8, 10] -> a:[]int64
-	n = compactarray·numel(a)
-	target = 8
+	n:int64 = compactarray·numel(a)
+	target:int64 = 8
 	// find left
-	0 -> lo
-	hi = n - 1
-	left = -1
+	0 -> lo:int64
+	hi:int64 = n - 1
+	left:int64 = -1
 	while (lo <= hi) {
-		lo + hi -> s
-		mid = s ÷ 2
-		mid_m = s ÷ 2
-		mv = a[mid]
-		mv < target -> lt
+		lo + hi -> s:int64
+		mid:int64 = s ÷ 2
+		mid_m:int64 = s ÷ 2
+		mv:int64 = a[mid]
+		mv < target -> lt:bool
 
 		if (lt) {
 			lo = mid + 1
@@ -26,15 +26,15 @@ rwfunc search_range() -> () {
 		}
 	}
 	// find right
-	lo2 = 0
-	hi2 = n - 1
-	-1 -> right
+	lo2:int64 = 0
+	hi2:int64 = n - 1
+	-1 -> right:int64
 	while (lo2 <= hi2) {
-		s2 = lo2 + hi2
-		mid2 = s2 ÷ 2
-		mid2_m = s2 ÷ 2
-		a[mid2] -> mv2
-		gt = mv2 > target
+		s2:int64 = lo2 + hi2
+		mid2:int64 = s2 ÷ 2
+		mid2_m:int64 = s2 ÷ 2
+		a[mid2] -> mv2:int64
+		gt:bool = mv2 > target
 
 		if (gt) {
 			hi2 = mid2 - 1

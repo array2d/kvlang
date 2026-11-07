@@ -4,22 +4,22 @@
 // 期望输出:
 //   [ 0 , 1 ]
 rwfunc two_sum(*[]int64 $nums, *int64 $target) -> () {
-	n = compactarray·numel(*nums)
-	i = 0
-	/tmp/two_sum:int64·int64 = {}
-	"/tmp/two_sum" -> h
+	n:int64 = compactarray·numel(*nums)
+	i:int64 = 0
+	/tmp/two_sum:'int64'int64 = {}
+	"/tmp/two_sum" -> h:[]char/utf32
 	while (i < n) {
-		x = (*nums)[i]
-		need = *target - x
-		h·*need != None -> exists
+		x:int64 = (*nums)[i]
+		need:int64 = *target - x
+		h·*need != None -> exists:bool
 
 		if (exists) {
-			h·*need -> j
+			h·*need -> j:char/utf32
 			k = j - 1
 			println("[", k, ",", i, "]")
 			n -> i
 		} else {
-			v = i + 1
+			v:int64 = i + 1
 			v -> h·*x
 			i + 1 -> i
 		}
@@ -32,7 +32,7 @@ rwfunc two_sum(*[]int64 $nums, *int64 $target) -> () {
 rwfunc two_sum2(*[]int64 $nums, *int64 $target) -> () {
 	n = compactarray·numel(*nums)
 	i = 0
-	/tmp/two_sum:int64·int64 = {}
+	/tmp/two_sum:'int64'int64 = {}
 	while (i < n) {
 		x = (*nums)[i]
 		need = *target - x

@@ -4,16 +4,16 @@
 //   1
 //   0
 rwfunc is_power(*int64 $n) -> (*int64 $r) {
-	result = 0
-	*n > 0 -> pos
+	result:int64 = 0
+	*n > 0 -> pos:bool
 
 	if (pos) {
-		t = 1
+		t:int64 = 1
 		while (t < *n) {
 			t = t × 2
-			t_m = t × 2
+			t_m:int64 = t × 2
 		}
-		t == *n -> eq
+		t == *n -> eq:bool
 
 		if (eq) {
 			result = 1
@@ -25,8 +25,8 @@ rwfunc is_power(*int64 $n) -> (*int64 $r) {
 
 rwfunc test() -> () {
 
-	is_power(16) -> r1
+	is_power(16) -> r1:int64
 	println(r1)
-	r2 = is_power(18)
+	r2:int64 = is_power(18)
 	println(r2)
 }

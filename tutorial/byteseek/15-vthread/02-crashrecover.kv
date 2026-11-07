@@ -12,20 +12,20 @@
 // run_steps 跑 limit 个带检查点的步骤：每步先落盘 step 再打印、
 // sleep 出中断窗口，返回完成步数
 rwfunc run_steps(*int64 $limit) -> (*int64 $final) {
-	0 -> i
+	0 -> i:int64
 	while (i < *limit) {
 		i + 1 -> i
 		i -> /crashtest/step
 		println("step", i)
-		noenv:[int64]·[]char/utf32 = {}
-		a:[int64]·[]char/utf32 = {"sleep", "0.2"}
-		networld/proc·exec(a, noenv) -> code
+		noenv:'[int64]'[]char/utf32 = {}
+		a:'[int64]'[]char/utf32 = {"sleep", "0.2"}
+		networld/proc·exec(a, noenv) -> code:uint8
 	}
 	i -> *final
 }
 
 rwfunc test() -> () {
-	run_steps(5) -> i
+	run_steps(5) -> i:int64
 	1 -> /crashtest/done
 	println("complete final=", i)
 }

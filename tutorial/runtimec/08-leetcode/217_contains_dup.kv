@@ -6,27 +6,27 @@
 //   false
 rwfunc has_dup() -> () {
 	a:[]int64 = [1, 2, 3, 1]
-	compactarray·numel(a) -> n
-	found = false
-	i = 0
+	compactarray·numel(a) -> n:int64
+	found:bool = false
+	i:int64 = 0
 	while (i < n) {
-		i + 1 -> j
+		i + 1 -> j:int64
 		while (j < n) {
-			x = a[i]
-			y = a[j]
-			x == y -> dup
+			x:int64 = a[i]
+			y:int64 = a[j]
+			x == y -> dup:bool
 
 			if (dup) {
-				found = true
-				i = n
-				n -> j
+				found:bool = true
+				i:int64 = n
+				n -> j:int64
 			} else {
-				j = j + 1
+				j:int64 = j + 1
 			}
 		}
-		i = i + 1
+		i:int64 = i + 1
 	}
-	found -> f
+	found -> f:bool
 
 	if (f) {
 		println("true")
@@ -37,15 +37,15 @@ rwfunc has_dup() -> () {
 
 rwfunc no_dup() -> () {
 	a:[]int64 = [1, 2, 3, 4]
-	n = compactarray·numel(a)
-	false -> found
-	i = 0
+	n:int64 = compactarray·numel(a)
+	false -> found:bool
+	i:int64 = 0
 	while (i < n) {
-		j = i + 1
+		j:int64 = i + 1
 		while (j < n) {
-			a[i] -> x
-			y = a[j]
-			dup = x == y
+			a[i] -> x:int64
+			y:int64 = a[j]
+			dup:bool = x == y
 
 			if (dup) {
 				true -> found
@@ -57,7 +57,7 @@ rwfunc no_dup() -> () {
 		}
 		i = i + 1
 	}
-	f = found
+	f:bool = found
 
 	if (f) {
 		println("true")

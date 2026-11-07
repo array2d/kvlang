@@ -16,10 +16,10 @@ lib math {
 	}
 
 	rwfunc gcd(*int64 $a, *int64 $b) -> (*int64 $r) {
-		x = abs(*a)
-		y = abs(*b)
+		x:int64 = abs(*a)
+		y:int64 = abs(*b)
 		while (y != 0) {
-			t = x % y
+			t:int64 = x % y
 			x = y
 			y = t
 		}
@@ -30,14 +30,14 @@ lib math {
 		if (*a == 0 || *b == 0) {
 			*r = 0
 		} else {
-			g = math·gcd(*a, *b)
+			g:int64 = math·gcd(*a, *b)
 			*r = abs(*a ÷ g × *b)
 		}
 	}
 
 	rwfunc factorial(*int64 $n) -> (*int64 $r) {
 		*r = 1
-		i = 2
+		i:int64 = 2
 		while (i <= *n) {
 			*r = *r × i
 			i = i + 1
@@ -63,12 +63,12 @@ lib math {
 	}
 
 	rwfunc deg2rad(*float64 $deg) -> (*float64 $rad) {
-		/lib/math·Pi -> pi
+		/lib/math·Pi -> pi:float64
 		*rad = *deg × pi ÷ 180.0
 	}
 
 	rwfunc rad2deg(*float64 $rad) -> (*float64 $deg) {
-		/lib/math·Pi -> pi
+		/lib/math·Pi -> pi:float64
 		*deg = *rad × 180.0 ÷ pi
 	}
 }

@@ -4,30 +4,30 @@
 //   1
 rwfunc third_max() -> () {
 	a:[]int64 = [2, 2, 3, 1]
-	compactarray·numel(a) -> n
+	compactarray·numel(a) -> n:int64
 	// track top 3
-	first = 0
-	second = 0
-	0 -> third
-	i = 0
+	first:int64 = 0
+	second:int64 = 0
+	0 -> third:int64
+	i:int64 = 0
 	while (i < n) {
-		x = a[i]
-		x > first -> gt1
+		x:int64 = a[i]
+		x > first -> gt1:bool
 
 		if (gt1) {
 			third = second
 			second = first
 			x -> first
 		} else {
-			lt1 = x < first
-			gt2 = x > second
+			lt1:bool = x < first
+			gt2:bool = x > second
 
 			if (lt1 && gt2) {
 				second -> third
 				second = x
 			} else {
-				lt2 = x < second
-				x > third -> gt3
+				lt2:bool = x < second
+				x > third -> gt3:bool
 
 				if (lt2 && gt3) {
 					third = x
@@ -37,12 +37,12 @@ rwfunc third_max() -> () {
 
 		i = i + 1
 	}
-	third > 0 -> ok
+	third > 0 -> ok:bool
 
 	if (ok) {
 		println(third)
 	} else {
-		ans = first
+		ans:int64 = first
 		println(ans)
 	}
 }

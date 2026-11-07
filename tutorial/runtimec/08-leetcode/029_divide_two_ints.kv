@@ -4,9 +4,9 @@
 //   3
 //   -2
 rwfunc divide(*int64 $dividend, *int64 $divisor) -> (*int64 $result) {
-	dend = *dividend
-	dsor = *divisor
-	neg = 0
+	dend:int64 = *dividend
+	dsor:int64 = *divisor
+	neg:int64 = 0
 	if (dend < 0) {
 		neg = 1 - neg
 		dend = 0 - dend
@@ -17,8 +17,8 @@ rwfunc divide(*int64 $dividend, *int64 $divisor) -> (*int64 $result) {
 	}
 	*result = 0
 	while (dend >= dsor) {
-		temp = dsor
-		multiple = 1
+		temp:int64 = dsor
+		multiple:int64 = 1
 		while (dend >= temp + temp) {
 			temp = temp + temp
 			multiple = multiple + multiple
@@ -30,8 +30,8 @@ rwfunc divide(*int64 $dividend, *int64 $divisor) -> (*int64 $result) {
 }
 
 rwfunc test() -> () {
-	r1 = divide(10, 3)
+	r1:int64 = divide(10, 3)
 	println(r1)
-	r2 = divide(7, -3)
+	r2:int64 = divide(7, -3)
 	println(r2)
 }

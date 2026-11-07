@@ -5,9 +5,9 @@
 //   5
 //   kvlang
 rwfunc test() -> () {
-	s = "hello"
+	s:[]char/utf32 = "hello"
 	println(s)
 	println(string·len(s))
-	t = "kv" + "lang"
+	t:[]char/utf32 = "kv" + "lang"
 	println(t)
 }

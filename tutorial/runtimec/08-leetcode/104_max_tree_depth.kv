@@ -11,21 +11,21 @@ struct TNode {
 rwfunc max_depth(*TNode $root) -> (*int64 $depth) {
 	if (root == None) { 0 -> *depth }
 	else {
-		ld = max_depth((*root)·left)
-		rd = max_depth((*root)·right)
+		ld:int64 = max_depth((*root)·left)
+		rd:int64 = max_depth((*root)·right)
 		if (ld > rd) { ld + 1 -> *depth }
 		else { *depth = rd + 1 }
 	}
 }
 
 rwfunc test() -> () {
-	t:[int64]·TNode = {}
+	t:'[int64]'TNode = {}
 	t·2:TNode = {val=9}
 	t·4:TNode = {val=15}
 	t·5:TNode = {val=7}
 	t·3:TNode = {val=20 left=&t·4 right=&t·5}
 	t·1:TNode = {val=3 left=&t·2 right=&t·3}
-	&t·1 -> root
-	d = max_depth(root)
+	&t·1 -> root:*'[int64]'/lib/TNode
+	d:int64 = max_depth(root)
 	println(d)
 }

@@ -3,34 +3,34 @@
 // 期望输出（N=100 时）:
 //   hash: hits = 100 sum = 4950
 rwfunc test() -> () {
-	__SCALE__ -> n
-	h:[int64]·int64 = {}
-	t0 = time·now()
-	0 -> i
+	__SCALE__ -> n:int64
+	h:'[int64]'int64 = {}
+	t0:time = time·now()
+	0 -> i:int64
 	while (i < n) {
-		i × 2654435761 -> k0
-		k0 % 100003 -> key
+		i × 2654435761 -> k0:int64
+		k0 % 100003 -> key:int64
 		i -> h·*key
 		i + 1 -> i
 	}
-	0 -> sum
-	0 -> hits
-	0 -> i
+	0 -> sum:int64
+	0 -> hits:int64
+	0 -> i:int64
 	while (i < n) {
-		i × 2654435761 -> k0
-		k0 % 100003 -> key
-		h·*key != None -> ex
+		i × 2654435761 -> k0:int64
+		k0 % 100003 -> key:int64
+		h·*key != None -> ex:bool
 		if (ex) {
 			hits + 1 -> hits
-			h·*key -> v
+			h·*key -> v:int64
 			sum + v -> sum
 		}
 		i + 1 -> i
 	}
-	t1 = time·now()
+	t1:time = time·now()
 	println("hash: hits =", hits, "sum =", sum)
-	delta = time·sub(t1, t0)
-	ns = time/duration·as_nanos(delta)
+	delta:time/duration = time·sub(t1, t0)
+	ns:int64 = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: N=__SCALE__")
 }

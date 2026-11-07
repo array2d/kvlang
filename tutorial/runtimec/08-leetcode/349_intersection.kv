@@ -4,20 +4,20 @@
 //   2
 rwfunc intersection() -> () {
 	a:[]int64 = [1, 2, 2, 1]
-	compactarray·numel(a) -> na
+	compactarray·numel(a) -> na:int64
 	b:[]int64 = [2, 2]
-	nb = compactarray·numel(b)
+	nb:int64 = compactarray·numel(b)
 	[0, 0] -> r:[]int64
-	idx = 0
-	count = 0
-	0 -> i
+	idx:int64 = 0
+	count:int64 = 0
+	0 -> i:int64
 	while (i < na) {
-		av = a[i]
-		j = 0
-		false -> found
+		av:int64 = a[i]
+		j:int64 = 0
+		false -> found:bool
 		while (j < nb) {
-			bv = b[j]
-			match = av == bv
+			bv:int64 = b[j]
+			match:bool = av == bv
 
 			if (match) {
 				true -> found
@@ -35,7 +35,7 @@ rwfunc intersection() -> () {
 
 		i = i + 1
 	}
-	r[0] -> v
+	r[0] -> v:int64
 	println(v)
 }
 

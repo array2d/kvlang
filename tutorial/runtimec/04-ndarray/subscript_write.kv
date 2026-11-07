@@ -9,7 +9,7 @@ rwfunc test() -> () {
 	99 -> a[0]
 	77 -> a[2]
 	println("a =", a[0], a[1], a[2])
-	m = compactarray·newreshape([1, 2, 3, 4], 2, 2)
+	m:[4]int64 = compactarray·newreshape([1, 2, 3, 4], 2, 2)
 	7 -> m[1, 0]
 	println("m[1,0] =", m[1, 0])
 	println("m[0,1] =", m[0, 1])

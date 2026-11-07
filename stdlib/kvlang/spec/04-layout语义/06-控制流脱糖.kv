@@ -10,8 +10,9 @@ lib kvlang/spec/layout语义/控制流脱糖 {
 - 容器源（struct / stringkeymap）——长度用 `kvspace·listlen`，取元素用 `kvspace·listat` + 普通 key 读。
 - compact 数组源——长度用 `compactarray·numel`，取元素用 `compactarray·at`。
 
-迭代源为裸标识符时原地遍历；为表达式（如数组字面量）时先物化到临时槽。迭代变量 `x` 是被写槽——`x` 命
-中读参名则拒绝（见 [[函数]] 读参只读）。
+迭代源为裸标识符时原地遍历；为表达式（如数组字面量）时先物化到临时槽。迭代变量由 `for` 语句绑定，
+不是用户写的局部写槽；不适用 [[函数]]「局部变量必须声明类型」的要求。`x` 命中读参名则拒绝
+（见 [[函数]] 读参只读）。
 
 ## layout 执行的其它降级
 

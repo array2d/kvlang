@@ -11,7 +11,7 @@ rwfunc greet() -> () {
 
 rwfunc test() -> () {
 	println("before call")
-	name = "greet"
+	name:[]char/utf32 = "greet"
 	vthread·call(name)
 	println("after call")
 }

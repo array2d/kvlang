@@ -17,20 +17,20 @@ rwfunc dfs() -> (**GNode $node) {
 	if (node != None) {
 		(*node)·seen -> s
 		if (!s) {
-			n = *node
+			n:*/lib/GNode = *node
 			true -> (*n)·seen
 			(*node)·val -> v
 			println(v)
-			(*node)·e0 -> a
+			(*node)·e0 -> a:*/lib/GNode
 			dfs() -> a
-			(*node)·e1 -> b
+			(*node)·e1 -> b:*/lib/GNode
 			dfs() -> b
 		}
 	}
 }
 
 rwfunc test() -> () {
-	/graph:[int64]·GNode = {}
+	/graph:'[int64]'GNode = {}
 	/graph·1:GNode = {val=1}
 	/graph·2:GNode = {val=2}
 	/graph·3:GNode = {val=3}

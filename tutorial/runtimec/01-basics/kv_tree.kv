@@ -17,22 +17,22 @@ rwfunc count_children(*[]char/utf32 $prefix) -> (*int64 $n) {
 }
 
 rwfunc test() -> () {
-	/tmp/kvt:int64·int64 = {}
+	/tmp/kvt:'int64'int64 = {}
 	42 -> /tmp/kvt·data
-	/tmp/kvt·data -> v
+	/tmp/kvt·data -> v:int64
 	println("v=", v)
-	has_field("/tmp/kvt", "data") -> h
+	has_field("/tmp/kvt", "data") -> h:bool
 	println("has_data=", h)
 	"/tmp/kvt"·*"data" -> x
 	println("x=", x)
 	kvspace·mkindex("/tmp/kvt/")
 	1 -> /tmp/kvt/a
 	2 -> /tmp/kvt/b
-	count_children("/tmp/kvt/") -> n
+	count_children("/tmp/kvt/") -> n:int64
 	println("n=", n)
-	compactarray·numel([10,20,30]) -> m
-	compactarray·dim([10,20,30]) -> d
+	compactarray·numel([10,20,30]) -> m:int64
+	compactarray·dim([10,20,30]) -> d:int64
 	println("numel=", m, "dim=", d)
-	compactarray·shape([10,20,30]) -> s
+	compactarray·shape([10,20,30]) -> s:[]int64
 	println("shape0=", s[0])
 }

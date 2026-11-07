@@ -13,16 +13,16 @@
 rwfunc rotate(*int64 $N) -> () {
 	mat:[]int64 = [1, 2, 3, 4, 5, 6, 7, 8, 9]
 	// transpose
-	i = 0
+	i:int64 = 0
 	while (i < *N) {
-		j = i + 1
+		j:int64 = i + 1
 		while (j < *N) {
-			ri = i × *N + j
-			ri_m = i × *N + j
-			rj = j × *N + i
-			rj_m = j × *N + i
-			mat[ri] -> t
-			mat[rj] -> u
+			ri:int64 = i × *N + j
+			ri_m:int64 = i × *N + j
+			rj:int64 = j × *N + i
+			rj_m:int64 = j × *N + i
+			mat[ri] -> t:int64
+			mat[rj] -> u:int64
 			mat[ri] = u
 			mat[rj] = t
 			j + 1 -> j
@@ -30,14 +30,14 @@ rwfunc rotate(*int64 $N) -> () {
 		i + 1 -> i
 	}
 	// reverse each row
-	r = 0
+	r:int64 = 0
 	while (r < *N) {
-		l = r × *N
-		l_m = r × *N
-		h = l + *N - 1
+		l:int64 = r × *N
+		l_m:int64 = r × *N
+		h:int64 = l + *N - 1
 		while (l < h) {
-			mat[l] -> v1
-			mat[h] -> v2
+			mat[l] -> v1:int64
+			mat[h] -> v2:int64
 			mat[l] = v2
 			mat[h] = v1
 			l + 1 -> l
@@ -46,13 +46,13 @@ rwfunc rotate(*int64 $N) -> () {
 		r + 1 -> r
 	}
 	// print
-	row = 0
+	row:int64 = 0
 	while (row < *N) {
-		col = 0
+		col:int64 = 0
 		while (col < *N) {
-			idx = row × *N + col
-			idx_m = row × *N + col
-			v = mat[idx]
+			idx:int64 = row × *N + col
+			idx_m:int64 = row × *N + col
+			v:int64 = mat[idx]
 			println(v)
 			col + 1 -> col
 		}

@@ -4,16 +4,16 @@
 //   (())
 //   ()()
 rwfunc generate() -> () {
-	total = 16
-	idx = 0
+	total:int64 = 16
+	idx:int64 = 0
 	while (idx < total) {
-		bal = 0
-		ok2 = 1
-		s = ""
-		pow = 8
+		bal:int64 = 0
+		ok2:int64 = 1
+		s:[]char/utf32 = ""
+		pow:int64 = 8
 		while (pow > 0) {
-			bit = (idx ÷ pow) % 2
-			bit_m = (idx ÷ pow) % 2
+			bit:int64 = (idx ÷ pow) % 2
+			bit_m:int64 = (idx ÷ pow) % 2
 			if (bit == 0) {
 				s + "(" -> s
 				bal + 1 -> bal
@@ -23,7 +23,7 @@ rwfunc generate() -> () {
 				if (bal < 0) { 0 -> ok2 ; 0 -> pow }
 			}
 			pow ÷ 2 -> pow
-			pow ÷ 2 -> pow_m
+			pow ÷ 2 -> pow_m:int64
 		}
 		if (bal == 0 && ok2 == 1 && string·len(s) == 4) { println(s) }
 		idx + 1 -> idx

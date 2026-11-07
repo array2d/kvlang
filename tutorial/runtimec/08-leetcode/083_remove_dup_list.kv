@@ -12,17 +12,17 @@ struct Node {
 }
 
 rwfunc dedup() -> (**Node $head) {
-	cur = *head
+	cur:*/lib/Node = *head
 	while (cur != None) {
-		(*cur)·next -> nxt
-		advance = true
+		(*cur)·next -> nxt:*/lib/Node
+		advance:bool = true
 
 		if (nxt != None) {
-			(*cur)·val -> v
-			(*nxt)·val -> nv
+			(*cur)·val -> v:int64
+			(*nxt)·val -> nv:int64
 
 			if (nv == v) {
-				(*nxt)·next -> nn
+				(*nxt)·next -> nn:*/lib/Node
 				nn -> (*cur)·next
 				false -> advance
 			}
@@ -34,9 +34,9 @@ rwfunc dedup() -> (**Node $head) {
 }
 
 rwfunc show(**Node $head) -> () {
-	p = *head
+	p:*/lib/Node = *head
 	while (p != None) {
-		(*p)·val -> v
+		(*p)·val -> v:int64
 		println(v)
 		(*p)·next -> p
 	}
@@ -46,7 +46,7 @@ rwfunc test() -> () {
 	e3:Node = {val=2}
 	e2:Node = {val=1 next=&e3}
 	e1:Node = {val=1 next=&e2}
-	&e1 -> eh
+	&e1 -> eh:*/lib/Node
 	dedup() -> eh
 	show(eh)
 
@@ -55,7 +55,7 @@ rwfunc test() -> () {
 	f3:Node = {val=2 next=&f4}
 	f2:Node = {val=1 next=&f3}
 	f1:Node = {val=1 next=&f2}
-	&f1 -> fh
+	&f1 -> fh:*/lib/Node
 	dedup() -> fh
 	show(fh)
 }

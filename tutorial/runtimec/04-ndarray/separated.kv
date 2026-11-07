@@ -9,13 +9,13 @@
 //   c[0] = 10
 rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30]       // 字面量初始化 → compact
-	b = scatterarray·newscatter(a)          // 显式 scatter：compact a → 散 key b（b·[0]..b·[2]）
-	kvspace·listlen(b) -> n1
+	b:'[int64]'int64 = scatterarray·newscatter(a)          // 显式 scatter：compact a → 散 key b（b·[0]..b·[2]）
+	kvspace·listlen(b) -> n1:int64
 	println("kvspace·listlen(b) =", n1)
 	println("b[0] =", b·[0])       // 散 key 元素访问 ·[i]
 	println("b[2] =", b·[2])
-	c = scatterarray·newcompact(b)          // 显式 compact：散 key b → compact c
-	compactarray·numel(c) -> n2
+	c:[]int64 = scatterarray·newcompact(b)          // 显式 compact：散 key b → compact c
+	compactarray·numel(c) -> n2:int64
 	println("compactarray·numel(c) =", n2)
 	println("c[0] =", c[0])        // compact 元素访问 [i]
 }

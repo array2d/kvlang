@@ -3,58 +3,58 @@
 // 期望输出:
 //   deep(6) = 49
 rwfunc deep(*int64 $n) -> (*int64 $r) {
-	x0 = *n + 0
-	x1 = x0 + 1
-	x2 = x1 + 1
-	x3 = x2 + 1
-	x4 = x3 + 1
-	x5 = x4 + 1
-	x6 = x5 + 1
-	x7 = x6 + 1
-	x8 = x7 + 1
-	x9 = x8 + 1
-	x10 = x9 + 1
-	x11 = x10 + 1
-	x12 = x11 + 1
-	x13 = x12 + 1
-	x14 = x13 + 1
-	x15 = x14 + 1
-	x16 = x15 + 1
-	x17 = x16 + 1
-	x18 = x17 + 1
-	x19 = x18 + 1
-	x20 = x19 + 1
-	x21 = x20 + 1
-	x22 = x21 + 1
-	x23 = x22 + 1
-	x24 = x23 + 1
-	x25 = x24 + 1
-	x26 = x25 + 1
-	x27 = x26 + 1
-	x28 = x27 + 1
-	x29 = x28 + 1
-	x30 = x29 + 1
-	x31 = x30 + 1
-	x32 = x31 + 1
-	x33 = x32 + 1
-	x34 = x33 + 1
-	x35 = x34 + 1
-	x36 = x35 + 1
-	x37 = x36 + 1
+	x0:int64 = *n + 0
+	x1:int64 = x0 + 1
+	x2:int64 = x1 + 1
+	x3:int64 = x2 + 1
+	x4:int64 = x3 + 1
+	x5:int64 = x4 + 1
+	x6:int64 = x5 + 1
+	x7:int64 = x6 + 1
+	x8:int64 = x7 + 1
+	x9:int64 = x8 + 1
+	x10:int64 = x9 + 1
+	x11:int64 = x10 + 1
+	x12:int64 = x11 + 1
+	x13:int64 = x12 + 1
+	x14:int64 = x13 + 1
+	x15:int64 = x14 + 1
+	x16:int64 = x15 + 1
+	x17:int64 = x16 + 1
+	x18:int64 = x17 + 1
+	x19:int64 = x18 + 1
+	x20:int64 = x19 + 1
+	x21:int64 = x20 + 1
+	x22:int64 = x21 + 1
+	x23:int64 = x22 + 1
+	x24:int64 = x23 + 1
+	x25:int64 = x24 + 1
+	x26:int64 = x25 + 1
+	x27:int64 = x26 + 1
+	x28:int64 = x27 + 1
+	x29:int64 = x28 + 1
+	x30:int64 = x29 + 1
+	x31:int64 = x30 + 1
+	x32:int64 = x31 + 1
+	x33:int64 = x32 + 1
+	x34:int64 = x33 + 1
+	x35:int64 = x34 + 1
+	x36:int64 = x35 + 1
+	x37:int64 = x36 + 1
 	if (*n > 0) {
-		deep(*n - 1) -> sub
+		deep(*n - 1) -> sub:int64
 	} else {
 		0 -> sub
 	}
-	y0 = sub + 0
-	y1 = sub + 1
-	y2 = sub + 2
-	y3 = sub + 3
-	y4 = sub + 4
+	y0:int64 = sub + 0
+	y1:int64 = sub + 1
+	y2:int64 = sub + 2
+	y3:int64 = sub + 3
+	y4:int64 = sub + 4
 	*r = y4 + *n
 }
 
 rwfunc test() -> () {
-	deep(6) -> v
+	deep(6) -> v:int64
 	println("deep(6) =", v)
 }

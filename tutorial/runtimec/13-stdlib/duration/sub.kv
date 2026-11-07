@@ -3,9 +3,9 @@
 // 期望输出:
 //   2
 rwfunc test() -> () {
-	time/duration·hours(5) -> a
-	time/duration·hours(3) -> b
-	time/duration·sub(a, b) -> c
-	time/duration·as_hours(c) -> n
+	time/duration·hours(5) -> a:time/duration
+	time/duration·hours(3) -> b:time/duration
+	time/duration·sub(a, b) -> c:time/duration
+	time/duration·as_hours(c) -> n:int64
 	println(n)
 }

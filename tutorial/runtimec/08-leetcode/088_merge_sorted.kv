@@ -10,21 +10,21 @@
 //   6
 rwfunc merge() -> () {
 	[1, 2, 3, 0, 0, 0] -> a:[]int64
-	m = 3
+	m:int64 = 3
 	b:[]int64 = [2, 5, 6]
-	3 -> n
-	i = m - 1
-	j = n - 1
-	m + n -> total
-	k = total - 1
+	3 -> n:int64
+	i:int64 = m - 1
+	j:int64 = n - 1
+	m + n -> total:int64
+	k:int64 = total - 1
 	while (j >= 0) {
-		i_ok = i >= 0
-		i_ok_m = i ≥ 0
+		i_ok:bool = i >= 0
+		i_ok_m:bool = i ≥ 0
 
 		if (i_ok) {
-			a[i] -> av
-			bv = b[j]
-			a_bigger = av > bv
+			a[i] -> av:int64
+			bv:int64 = b[j]
+			a_bigger:bool = av > bv
 
 			if (a_bigger) {
 				a[k] = av
@@ -34,16 +34,16 @@ rwfunc merge() -> () {
 				j = j - 1
 			}
 		} else {
-			bv2 = b[j]
+			bv2:int64 = b[j]
 			a[k] = bv2
 			j - 1 -> j
 		}
 
 		k = k - 1
 	}
-	x = 0
+	x:int64 = 0
 	while (x < 6) {
-		a[x] -> v
+		a[x] -> v:int64
 		println(v)
 		x = x + 1
 	}

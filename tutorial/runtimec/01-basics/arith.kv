@@ -10,36 +10,36 @@
 //   sqrt: 12.0
 //   sqrt(√): 12.0
 rwfunc test() -> () {
-	t0 = time·now()
-	10 + 3 -> add_r
+	t0:time = time·now()
+	10 + 3 -> add_r:int64
 	println("add:", add_r)
 
-	10 - 3 -> sub_r
+	10 - 3 -> sub_r:int64
 	println("sub:", sub_r)
 
-	mul_r = 10 × 3
+	mul_r:int64 = 10 × 3
 	println("mul:", mul_r)
-	mul_r2 = 10 × 3
+	mul_r2:int64 = 10 × 3
 	println("mul(×):", mul_r2)
 
-	10 ÷ 3 -> div_r
+	10 ÷ 3 -> div_r:int64
 	println("div:", div_r)
-	10 ÷ 3 -> div_r2
+	10 ÷ 3 -> div_r2:int64
 	println("div(÷):", div_r2)
 
-	10 % 3 -> mod_r
+	10 % 3 -> mod_r:int64
 	println("mod:", mod_r)
 
-	pow_r = pow(2, 5)
+	pow_r:float64 = pow(2, 5)
 	println("pow:", pow_r)
 
-	sqrt_r = sqrt(144)
+	sqrt_r:float64 = sqrt(144)
 	println("sqrt:", sqrt_r)
-	sqrt_r2 = √(144)
+	sqrt_r2:float64 = √(144)
 	println("sqrt(√):", sqrt_r2)
 
-	t1 = time·now()
-	delta = time·sub(t1, t0)
-	ns = time/duration·as_nanos(delta)
+	t1:time = time·now()
+	delta:time/duration = time·sub(t1, t0)
+	ns:int64 = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 }

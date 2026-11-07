@@ -6,15 +6,15 @@
 // 期望输出:
 //   hi
 //   oops
-rwfunc run_capture(*[int64]·[]char/utf32 $args,
-		*[int64]·[]char/utf32 $envs) -> (*uint8 $c, @[]char/utf32 $out,
+rwfunc run_capture(*'[int64]'[]char/utf32 $args,
+		*'[int64]'[]char/utf32 $envs) -> (*uint8 $c, @[]char/utf32 $out,
 		@[]char/utf32 $err) {
 	networld/proc·exec(*args, *envs) -> *c, *out, *err
 }
 rwfunc test() -> () {
-	noenv:[int64]·[]char/utf32 = {}
-	a:[int64]·[]char/utf32 = {"sh", "-c", "echo hi; echo oops 1>&2"}
-	run_capture(a, noenv) -> (c, out, err)
+	noenv:'[int64]'[]char/utf32 = {}
+	a:'[int64]'[]char/utf32 = {"sh", "-c", "echo hi; echo oops 1>&2"}
+	run_capture(a, noenv) -> (c:uint8, out:@[]char/utf32, err:@[]char/utf32)
 	println(out)
 	println(err)
 }

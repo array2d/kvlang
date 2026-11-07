@@ -4,21 +4,21 @@
 //   [ 0 , 1 ]
 //   [-1, -1]
 rwfunc two_sum(*[]int64 $nums, *int64 $target) -> () {
-	n = compactarray·numel(*nums)
-	found = 0
-	0 -> i
+	n:int64 = compactarray·numel(*nums)
+	found:int64 = 0
+	0 -> i:int64
 	while (i < n) {
-		j = 0
+		j:int64 = 0
 		while (j < n) {
-			sk = i == j
+			sk:bool = i == j
 
 			if (sk) {
 				j + 1 -> j
 			} else {
-				x = (*nums)[i]
-				y = (*nums)[j]
-				x + y -> s
-				hit = s == *target
+				x:int64 = (*nums)[i]
+				y:int64 = (*nums)[j]
+				x + y -> s:int64
+				hit:bool = s == *target
 
 				if (hit) {
 					println("[", i, ",", j, "]")
@@ -32,7 +32,7 @@ rwfunc two_sum(*[]int64 $nums, *int64 $target) -> () {
 		}
 		i + 1 -> i
 	}
-	nf = found == 0
+	nf:bool = found == 0
 
 	if (nf) {
 		println("[-1, -1]")

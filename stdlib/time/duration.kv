@@ -5,41 +5,41 @@
 
 lib time/duration {
 	rwfunc days(*int64 $n) -> (*time/duration $dur) {
-		*n × 24 -> h
+		*n × 24 -> h:int64
 		time/duration·hours(h) -> *dur
 	}
 	rwfunc as_days(*time/duration $d) -> (*int64 $n) {
-		time/duration·as_hours(*d) -> h
+		time/duration·as_hours(*d) -> h:int64
 		h ÷ 24 -> *n
 	}
 	rwfunc is_zero(*time/duration $d) -> (*bool $r) {
-		time/duration·as_nanos(*d) -> ns
+		time/duration·as_nanos(*d) -> ns:int64
 		ns == 0 -> *r
 	}
 	rwfunc is_neg(*time/duration $d) -> (*bool $r) {
-		time/duration·as_nanos(*d) -> ns
+		time/duration·as_nanos(*d) -> ns:int64
 		ns < 0 -> *r
 	}
 	rwfunc is_pos(*time/duration $d) -> (*bool $r) {
-		time/duration·as_nanos(*d) -> ns
+		time/duration·as_nanos(*d) -> ns:int64
 		ns > 0 -> *r
 	}
 	rwfunc abs(*time/duration $d) -> (*time/duration $r) {
-		time/duration·as_nanos(*d) -> ns
+		time/duration·as_nanos(*d) -> ns:int64
 		if (ns < 0) {
-			0 - ns -> pos
+			0 - ns -> pos:int64
 			time/duration·nanos(pos) -> *r
 		} else {
 			*d -> *r
 		}
 	}
 	rwfunc equal(*time/duration $d1, *time/duration $d2) -> (*bool $r) {
-		time/duration·before(*d1, *d2) -> b
-		time/duration·after(*d1, *d2) -> a
+		time/duration·before(*d1, *d2) -> b:bool
+		time/duration·after(*d1, *d2) -> a:bool
 		!b && !a -> *r
 	}
 	rwfunc max(*time/duration $d1, *time/duration $d2) -> (*time/duration $r) {
-		time/duration·after(*d1, *d2) -> a
+		time/duration·after(*d1, *d2) -> a:bool
 		if (a) {
 			*d1 -> *r
 		} else {
@@ -47,7 +47,7 @@ lib time/duration {
 		}
 	}
 	rwfunc min(*time/duration $d1, *time/duration $d2) -> (*time/duration $r) {
-		time/duration·before(*d1, *d2) -> b
+		time/duration·before(*d1, *d2) -> b:bool
 		if (b) {
 			*d1 -> *r
 		} else {
@@ -56,7 +56,7 @@ lib time/duration {
 	}
 	rwfunc clamp(*time/duration $d, *time/duration $lo,
 		*time/duration $hi) -> (*time/duration $r) {
-		time/duration·max(*d, *lo) -> t
+		time/duration·max(*d, *lo) -> t:time/duration
 		time/duration·min(t, *hi) -> *r
 	}
 }

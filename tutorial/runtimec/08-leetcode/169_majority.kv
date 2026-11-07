@@ -5,19 +5,19 @@
 //   3
 rwfunc majority() -> () {
 	a:[]int64 = [3, 2, 3]
-	compactarray·numel(a) -> n
-	candidate = a[0]
-	count = 1
-	1 -> i
+	compactarray·numel(a) -> n:int64
+	candidate:int64 = a[0]
+	count:int64 = 1
+	1 -> i:int64
 	while (i < n) {
-		x = a[i]
-		reset = count == 0
+		x:int64 = a[i]
+		reset:bool = count == 0
 
 		if (reset) {
 			x -> candidate
 			count = 1
 		} else {
-			match = x == candidate
+			match:bool = x == candidate
 
 			if (match) {
 				count + 1 -> count

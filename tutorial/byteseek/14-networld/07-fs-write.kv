@@ -19,17 +19,17 @@ rwfunc append_text(*[]char/utf32 $p, *[]char/utf32 $s) -> (*int64 $n) {
 // read_text 读回整个文件并还原为 []char/utf32 字符串，同时带回字节大小
 rwfunc read_text(*[]char/utf32 $p) -> (*[]char/utf32 $s, *int64 $n) {
 	networld/fs·size(*p) -> *n
-	networld/fs·read(*p, 0, *n) -> raw
+	networld/fs·read(*p, 0, *n) -> raw:[]uint8
 	compactarray·newreinterpret(raw, "[]char/utf32") -> *s
 }
 
 rwfunc test() -> () {
-	p = "/tmp/kvlang_fs_write.txt"
-	write_text(p, "hello") -> wn
+	p:[]char/utf32 = "/tmp/kvlang_fs_write.txt"
+	write_text(p, "hello") -> wn:int64
 	println("write=", wn)
-	append_text(p, " world") -> an
+	append_text(p, " world") -> an:int64
 	println("append=", an)
-	read_text(p) -> (txt, sz)
+	read_text(p) -> (txt:[]char/utf32, sz:int64)
 	println("size=", sz)
 	println("text=", txt)
 }

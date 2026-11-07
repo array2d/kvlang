@@ -3,15 +3,15 @@
 // 期望输出:
 //   28
 rwfunc title_to_num(*[]char/utf32 $s) -> () {
-	string·len(*s) -> n
-	result = 0
-	i = 0
+	string·len(*s) -> n:int64
+	result:int64 = 0
+	i:int64 = 0
 	while (i < n) {
-		result × 26 -> r26
-		result × 26 -> r26_m
-		c = string·char(*s, i)
-		v = string·ord(c) - 65
-		v + 1 -> d
+		result × 26 -> r26:int64
+		result × 26 -> r26_m:int64
+		c:char/utf32 = string·char(*s, i)
+		v:int64 = string·ord(c) - 65
+		v + 1 -> d:int64
 		result = r26 + d
 		i = i + 1
 	}

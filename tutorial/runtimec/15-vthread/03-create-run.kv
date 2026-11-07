@@ -11,7 +11,7 @@ rwfunc greet() -> () {
 }
 
 rwfunc test() -> () {
-	vthread·create("greet") -> vid
+	vthread·create("greet") -> vid:char/utf8
 	println("created")
 	vthread·run(vid)
 	println("done")

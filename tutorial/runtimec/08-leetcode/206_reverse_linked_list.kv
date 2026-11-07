@@ -12,17 +12,17 @@ struct Node {
 }
 
 rwfunc reverse() -> (**Node $head) {
-	prev = None
-	cur = *head
+	prev:*/lib/Node = None
+	cur:*/lib/Node = *head
 	while (cur != None) {
-		nxt = (*cur)·next
+		nxt:*/lib/Node = (*cur)·next
 		(*cur)·next = prev
 		prev = cur
 		cur = nxt
 	}
-	p = prev
+	p:*/lib/Node = prev
 	while (p != None) {
-		(*p)·val -> v
+		(*p)·val -> v:int64
 		println(v)
 		p = (*p)·next
 	}
@@ -34,6 +34,6 @@ rwfunc test() -> () {
 	n3:Node = {val=3 next=&n4}
 	n2:Node = {val=2 next=&n3}
 	n1:Node = {val=1 next=&n2}
-	&n1 -> h
+	&n1 -> h:*/lib/Node
 	reverse() -> h
 }

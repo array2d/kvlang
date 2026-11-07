@@ -4,9 +4,9 @@
 //   has existing: true
 
 rwfunc test() -> () {
-	h1 = /missing_key != None
+	h1:bool = /missing_key != None
 	println("has missing:", h1)
 	"hello" -> /exists_key
-	h2 = /exists_key != None
+	h2:bool = /exists_key != None
 	println("has existing:", h2)
 }

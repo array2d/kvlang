@@ -3,11 +3,11 @@
 //   true
 //   false
 rwfunc test() -> () {
-	time/duration·hours(2) -> a
-	time/duration·hours(2) -> b
-	time/duration·hours(3) -> c
-	time/duration·equal(a, b) -> eq
+	time/duration·hours(2) -> a:time/duration
+	time/duration·hours(2) -> b:time/duration
+	time/duration·hours(3) -> c:time/duration
+	time/duration·equal(a, b) -> eq:bool
 	println(eq)
-	time/duration·equal(a, c) -> neq
+	time/duration·equal(a, c) -> neq:bool
 	println(neq)
 }

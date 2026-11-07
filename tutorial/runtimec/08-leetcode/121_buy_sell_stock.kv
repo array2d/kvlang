@@ -5,19 +5,19 @@
 //   5
 rwfunc max_profit() -> () {
 	a:[]int64 = [7, 1, 5, 3, 6, 4]
-	compactarray·numel(a) -> n
-	min_price = a[0]
-	max_profit = 0
-	1 -> i
+	compactarray·numel(a) -> n:int64
+	min_price:int64 = a[0]
+	max_profit:int64 = 0
+	1 -> i:int64
 	while (i < n) {
-		price = a[i]
-		new_min = price < min_price
+		price:int64 = a[i]
+		new_min:bool = price < min_price
 
 		if (new_min) {
 			price -> min_price
 		} else {
-			profit = price - min_price
-			bigger = profit > max_profit
+			profit:int64 = price - min_price
+			bigger:bool = profit > max_profit
 
 			if (bigger) {
 				profit -> max_profit

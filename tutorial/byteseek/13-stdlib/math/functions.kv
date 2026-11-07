@@ -45,7 +45,7 @@ rwfunc test() -> () {
 	println("fact=", math·factorial(0), math·factorial(5))
 	println("isqrt=", math·isqrt(0), math·isqrt(1), math·isqrt(15), math·isqrt(100))
 	println("lerp=", math·lerp(10.0, 20.0, 0.5))
-	/lib/math·Pi -> pi
-	math·rad2deg(math·deg2rad(180.0)) -> deg
+	/lib/math·Pi -> pi:float64
+	math·rad2deg(math·deg2rad(180.0)) -> deg:float64
 	println("deg_rad=", math·round(deg))
 }

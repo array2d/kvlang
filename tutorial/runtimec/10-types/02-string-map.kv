@@ -4,17 +4,17 @@
 //   en = hello
 //   zh = 你好
 //   missing: true
-rwfunc lookup(*[]char/utf8·[]char/utf32 $dict, *[]char/utf32 $k) -> (*[]char/utf32 $v) {
+rwfunc lookup(*'[]char/utf8'[]char/utf32 $dict, *[]char/utf32 $k) -> (*[]char/utf32 $v) {
 	(*dict)·*k -> *v
 }
 rwfunc test() -> () {
-	d:[]char/utf8·[]char/utf32 = {}
+	d:'[]char/utf8'[]char/utf32 = {}
 	d·en = "hello"
 	d·zh = "你好"
-	lookup(d, "en") -> a
+	lookup(d, "en") -> a:[]char/utf32
 	println("en =", a)
-	lookup(d, "zh") -> b
+	lookup(d, "zh") -> b:[]char/utf32
 	println("zh =", b)
-	d·*"fr" == None -> gone
+	d·*"fr" == None -> gone:bool
 	println("missing:", gone)
 }

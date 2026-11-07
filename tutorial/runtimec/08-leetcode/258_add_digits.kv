@@ -3,15 +3,15 @@
 // 期望输出:
 //   2
 rwfunc add_digits(*int64 $n) -> () {
-	*n -> nv
+	*n -> nv:int64
 	while (nv >= 10) {
-		s = 0
-		nv -> x
+		s:int64 = 0
+		nv -> x:int64
 		while (x > 0) {
-			d = x % 10
+			d:int64 = x % 10
 			s = s + d
 			x ÷ 10 -> x
-			x ÷ 10 -> x_m
+			x ÷ 10 -> x_m:int64
 		}
 		nv = s
 	}

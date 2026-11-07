@@ -4,23 +4,23 @@
 //   [ 1 , 2 ]
 rwfunc two_sum_ii() -> () {
 	[2, 7, 11, 15] -> a:[]int64
-	target = 9
-	n = compactarray·numel(a)
-	0 -> l
-	r = n - 1
+	target:int64 = 9
+	n:int64 = compactarray·numel(a)
+	0 -> l:int64
+	r:int64 = n - 1
 	while (l < r) {
-		lv = a[l]
-		a[r] -> rv
-		s = lv + rv
-		hit = s == target
+		lv:int64 = a[l]
+		a[r] -> rv:int64
+		s:int64 = lv + rv
+		hit:bool = s == target
 
 		if (hit) {
-			l + 1 -> i1
-			i2 = r + 1
+			l + 1 -> i1:int64
+			i2:int64 = r + 1
 			println("[", i1, ",", i2, "]")
 			l = n
 		} else {
-			s < target -> lt
+			s < target -> lt:bool
 
 			if (lt) {
 				l = l + 1

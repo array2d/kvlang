@@ -8,13 +8,13 @@
 //   2
 rwfunc remove_element() -> () {
 	a:[]int64 = [3, 2, 2, 3]
-	3 -> val
-	n = compactarray·numel(a)
-	k = 0
-	0 -> i
+	3 -> val:int64
+	n:int64 = compactarray·numel(a)
+	k:int64 = 0
+	0 -> i:int64
 	while (i < n) {
-		cur = a[i]
-		skip = cur == val
+		cur:int64 = a[i]
+		skip:bool = cur == val
 
 		if (skip) {
 			i + 1 -> i
@@ -25,9 +25,9 @@ rwfunc remove_element() -> () {
 		}
 	}
 	println("k =", k)
-	0 -> j
+	0 -> j:int64
 	while (j < k) {
-		v = a[j]
+		v:int64 = a[j]
 		println(v)
 		j = j + 1
 	}

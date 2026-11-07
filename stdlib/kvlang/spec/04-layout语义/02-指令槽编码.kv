@@ -31,7 +31,7 @@ opcode 槽的 langtype：
 - opcode 一律语义名（`add`、`eq`…），**不带** `<kind>·` 前缀；类型标注落在
   读/写槽的 langtype 上，不进 opcode。
 - 不把 `/lib` 下的 def rwir 签名的 rp/wp/storetype/headlen/width 写进操作数槽；
-  槽编码保持既有 layout 推断，声明只用于 target/arity 检查。
+  该声明只用于 target/arity 检查。用户局部写槽的类型来自源码注解，不由 layout 推断（见 [[函数]]「局部变量必须声明类型」）。
 - 通用 `sub` 只能 **2r→1w**；一元负由 layout lower 成 `sub 0,x`（2r1w），
   保留 `sub` 单参数化；不新增 `neg`/`abs` 基础 rwir opcode。`abs` 属
   builtin/extension（现有 core 表中的 `abs` 归属按后续清理处理）；`neg` 若以后

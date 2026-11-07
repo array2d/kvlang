@@ -4,14 +4,14 @@
 //   1
 //   0
 rwfunc is_pal(*[]char/utf32 $s) -> () {
-	n = string·len(*s)
-	0 -> l
-	r = n - 1
-	ok = 1
+	n:int64 = string·len(*s)
+	0 -> l:int64
+	r:int64 = n - 1
+	ok:int64 = 1
 	while (l < r) {
-		string·char(*s, l) -> lc
-		rc = string·char(*s, r)
-		match = lc == rc
+		string·char(*s, l) -> lc:char/utf32
+		rc:char/utf32 = string·char(*s, r)
+		match:bool = lc == rc
 
 		if (match) {
 			l + 1 -> l

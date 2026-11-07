@@ -9,12 +9,12 @@ lib mylib {
 
 rwfunc double(*int64 $x) -> (*int64 $y) {
 	*y = *x × 2
-	y_m = *x × 2
+	y_m:int64 = *x × 2
 }
 
 rwfunc test() -> () {
-	a = mylib·add(10, 20)
+	a:int64 = mylib·add(10, 20)
 	println("mylib·add(10,20) =", a)
-	double(a) -> b
+	double(a) -> b:int64
 	println("double(mylib·add(10,20)) =", b)
 }

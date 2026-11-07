@@ -14,14 +14,14 @@ rwfunc sum6(*[6]int32 $a) -> (*int64 $total) {
 
 rwfunc test() -> () {
 	a:[4]int32 = []
-	compactarray·numel(a) -> na
+	compactarray·numel(a) -> na:int64
 	println("na =", na)
-	x0 = a[0]
+	x0:int32 = a[0]
 	println("a0 =", x0)
 	b:[2,3]int32 = [5...]
-	v12 = b[1,2]
+	v12:int32 = b[1,2]
 	println("b12 =", v12)
 	c:[6]int32 = [5...]
-	sum6(c) -> total
+	sum6(c) -> total:int64
 	println("sum =", total)
 }

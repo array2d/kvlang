@@ -8,16 +8,16 @@
 // read_text 读取整个文件的字节并整体重解释为 utf8 字符串，同时带回字节大小
 rwfunc read_text(*[]char/utf32 $p) -> (*[]char/utf8 $s, *int64 $n) {
 	networld/fs·size(*p) -> *n
-	networld/fs·read(*p, 0, *n) -> raw
+	networld/fs·read(*p, 0, *n) -> raw:[]uint8
 	compactarray·newreinterpret(raw, "[]char/utf8") -> *s
 }
 
 rwfunc test() -> () {
-	p = "/tmp/kvlangfs_demo.txt"
-	noenv:[int64]·[]char/utf32 = {}
-	w:[int64]·[]char/utf32 = {"sh", "-c", "printf 'hello kvlang' > /tmp/kvlangfs_demo.txt"}
-	networld/proc·exec(w, noenv) -> wc
-	read_text(p) -> (s, n)
+	p:[]char/utf32 = "/tmp/kvlangfs_demo.txt"
+	noenv:'[int64]'[]char/utf32 = {}
+	w:'[int64]'[]char/utf32 = {"sh", "-c", "printf 'hello kvlang' > /tmp/kvlangfs_demo.txt"}
+	networld/proc·exec(w, noenv) -> wc:uint8
+	read_text(p) -> (s:[]char/utf8, n:int64)
 	println("size=", n)
 	println("text=", s)
 }

@@ -10,10 +10,10 @@ rwfunc child() -> () {
 }
 
 rwfunc test() -> () {
-	sum = 0
+	sum:int64 = 0
 	xs:[]int64 = [0, 1, 2]
 	for (i in xs) {
-		vthread·create("child") -> vid
+		vthread·create("child") -> vid:char/utf8
 		vthread·run(vid)
 		sum = sum + i + 1
 	}

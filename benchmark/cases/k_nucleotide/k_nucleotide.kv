@@ -4,36 +4,37 @@
 // 期望输出（rep=5 时）:
 //   knuc: A = 80 C = 70 G = 90 T = 85
 rwfunc test() -> () {
-	"GGTATTGAGCACTGGCAATTGACGTCAGGTATCCGAATTGCACGTTAGCATGCATGCATGCACGT" -> base
-	"" -> s
-	0 -> r
+	"GGTATTGAGCACTGGCAATTGACGTCAGGTATCCGAATTGCACGTTAGCATGCATGCATGCACGT" -> base:[]char/utf32
+	"" -> s:[]char/utf32
+	0 -> r:int64
 	while (r < __SCALE__) {
-		s + base -> s
-		r + 1 -> r
+		s + base -> s:[]char/utf32
+		r + 1 -> r:int64
 	}
-	string·len(s) -> n
-	h:[int64]·int64 = {}
-	t0 = time·now()
-	0 -> i
+	string·len(s) -> n:int64
+	h:'int64'int64 = {}
+	t0:time = time·now()
+	0 -> i:int64
 	while (i < n) {
-		string·char(s, i) -> ch
-		string·ord(ch) -> c
-		h·*c -> cur
-		if (cur == None) {
-			0 -> cur
+		string·char(s, i) -> ch:char/utf32
+		string·ord(ch) -> c:int64
+		if (h·*c != None) {
+			h·*c -> cur:int64
+		} else {
+			0 -> cur:int64
 		}
-		cur + 1 -> cnt
+		cur + 1 -> cnt:int64
 		cnt -> h·*c
-		i + 1 -> i
+		i + 1 -> i:int64
 	}
-	t1 = time·now()
-	h·*65 -> a
-	h·*67 -> cc
-	h·*71 -> g
-	h·*84 -> t
+	t1:time = time·now()
+	h·65 -> a:int64
+	h·67 -> cc:int64
+	h·71 -> g:int64
+	h·84 -> t:int64
 	println("knuc: A =", a, "C =", cc, "G =", g, "T =", t)
-	delta = time·sub(t1, t0)
-	ns = time/duration·as_nanos(delta)
+	delta:time/duration = time·sub(t1, t0)
+	ns:int64 = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: rep=__SCALE__")
 }

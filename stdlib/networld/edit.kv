@@ -20,28 +20,28 @@ lib networld/edit {
 	//   非 UTF-8 文件同样不返回：view 空、total = -2。
 	rwfunc read(*[]char/utf32 $p, *int64 $from, *int64 $lines) -> (
 	          *[]char/utf32 $view, *int64 $total, *int64 $sz) {
-		networld/fs·readtext(*p) -> (t, *sz)
+		networld/fs·readtext(*p) -> (t:[]char/utf32, *sz)
 		"" -> *view
 		*total = 0
 		if (*sz >= 0) {
-			networld/fs·isutf8(*p) -> u8ok
+			networld/fs·isutf8(*p) -> u8ok:bool
 			if (u8ok == false) {
 				*total = -2
 			} else {
 			if (*sz > 8388608) {
 				*total = -1
 			} else {
-				parts:[int64]·[]char/utf32 = {}
+				parts:'[int64]'[]char/utf32 = {}
 				string·lines(t) -> (parts, *total)
-				lo = *from
+				lo:int64 = *from
 				if (lo < 1) { lo = 1 }
-				hi = *total
+				hi:int64 = *total
 				if (*lines > 0 && lo + *lines - 1 < *total) { hi = lo + *lines - 1 }
-				i = lo
+				i:int64 = lo
 				while (i <= hi) {
-					kvspace·listat(parts, i - 1) -> kk
-					parts·*kk -> ln
-					string·formatint(i, 10) -> no
+					kvspace·listat(parts, i - 1) -> kk:char/utf8
+					parts·*kk -> ln:[]char/utf32
+					string·formatint(i, 10) -> no:char/utf32
 					string·concat(*view, no) -> *view
 					string·concat(*view, ": ") -> *view
 					string·concat(*view, ln) -> *view
@@ -57,12 +57,12 @@ lib networld/edit {
 	//   4 写失败 / 5 回读不一致 / 0 成功；失败时 p 保持原样（不留半截文件）。
 	rwfunc commit(*[]char/utf32 $p, *[]char/utf32 $t) -> (*int64 $code) {
 		*code = 4
-		string·concat(*p, ".tmp") -> tp
-		networld/fs·writetext(tp, *t) -> wn
+		string·concat(*p, ".tmp") -> tp:[]char/utf32
+		networld/fs·writetext(tp, *t) -> wn:int64
 		if (wn >= 0) {
-			networld/fs·rename(tp, *p) -> rc
+			networld/fs·rename(tp, *p) -> rc:int64
 			if (rc == 0) {
-				networld/fs·readtext(*p) -> (back, _)
+				networld/fs·readtext(*p) -> (back:[]char/utf32, _)
 				if (string·cmp(back, *t) == 0) { *code = 0 } else { *code = 5 }
 			}
 		}
@@ -82,11 +82,11 @@ lib networld/edit {
 	               *int64 $dry) -> (*int64 $done, *int64 $hit, *int64 $code) {
 		*done = 0
 		*hit = 0
-		networld/fs·isutf8(*p) -> u8ok
+		networld/fs·isutf8(*p) -> u8ok:bool
 		if (u8ok == false) {
 			*code = 7
 		} else {
-		networld/fs·readtext(*p) -> (t, sz)
+		networld/fs·readtext(*p) -> (t:[]char/utf32, sz:int64)
 		if (sz < 0) {
 			*code = 3
 		} else {
@@ -97,7 +97,7 @@ lib networld/edit {
 				if (*hit > 1) {
 					*code = 2
 				} else {
-					string·replace(t, *old, *new) -> (t2, _)
+					string·replace(t, *old, *new) -> (t2:[]char/utf32, _)
 					if (*dry == 1) {
 						*done = 1
 						*code = 0
@@ -114,32 +114,32 @@ lib networld/edit {
 	// multi(p, olds, news, dry) -> (done, bad, code)：事务式多处替换。
 	//   逐条精确替换（每条 old 须恰命中 1 处），全部成功才落盘；
 	//   bad = 失败下标（-1 = 无失败），dry = 1 只预演。
-	rwfunc multi(*[]char/utf32 $p, *[int64]·[]char/utf32 $olds,
-	             *[int64]·[]char/utf32 $news, *int64 $dry) -> (
+	rwfunc multi(*[]char/utf32 $p, *'[int64]'[]char/utf32 $olds,
+	             *'[int64]'[]char/utf32 $news, *int64 $dry) -> (
 	             *int64 $done, *int64 $bad, *int64 $code) {
-		kvspace·listlen(*olds) -> cnt
-		kvspace·listlen(*news) -> m
+		kvspace·listlen(*olds) -> cnt:int64
+		kvspace·listlen(*news) -> m:int64
 		*done = 0
 		*bad = -1
-		networld/fs·isutf8(*p) -> u8ok
+		networld/fs·isutf8(*p) -> u8ok:bool
 		if (u8ok == false) {
 			*code = 7
 		} else {
 		if (cnt != m) {
 			*code = 6
 		} else {
-			networld/fs·readtext(*p) -> (t, sz)
+			networld/fs·readtext(*p) -> (t:[]char/utf32, sz:int64)
 			if (sz < 0) {
 				*code = 3
 			} else {
 				*code = 0
-				i = 0
+				i:int64 = 0
 				while (i < cnt) {
-					kvspace·listat(*olds, i) -> ko
-					kvspace·listat(*news, i) -> kn
-					(*olds)·*ko -> o
-					(*news)·*kn -> w
-					string·count(t, o) -> c
+					kvspace·listat(*olds, i) -> ko:char/utf8
+					kvspace·listat(*news, i) -> kn:char/utf8
+					(*olds)·*ko -> o:[]char/utf32
+					(*news)·*kn -> w:[]char/utf32
+					string·count(t, o) -> c:int64
 					if (c == 0) {
 						*bad = i
 						*code = 1
@@ -150,7 +150,7 @@ lib networld/edit {
 						*code = 2
 						break
 					}
-					string·replace(t, o, w) -> (t2, _)
+					string·replace(t, o, w) -> (t2:[]char/utf32, _)
 					t = t2
 					*done = *done + 1
 					i = i + 1

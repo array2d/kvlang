@@ -4,25 +4,25 @@
 // 期望输出:
 //   found 73 in 6 guesses
 rwfunc guess_number() -> () {
-	73 -> target
-	lo = 1
-	hi = 100
-	0 -> tries
-	found = 0
+	73 -> target:int64
+	lo:int64 = 1
+	hi:int64 = 100
+	0 -> tries:int64
+	found:int64 = 0
 	while (found == 0) {
-		s = lo + hi
-		s ÷ 2 -> mid_float
-		s ÷ 2 -> mid_float_m
-		mid = int64(mid_float)
+		s:int64 = lo + hi
+		s ÷ 2 -> mid_float:int64
+		s ÷ 2 -> mid_float_m:int64
+		mid:int64 = int64(mid_float)
 		tries = tries + 1
 		println("guess #", tries, ":", mid)
-		mid == target -> hit
+		mid == target -> hit:bool
 
 		if (hit) {
 			found = 1
 			println("  correct!")
 		} else {
-			too_low = mid < target
+			too_low:bool = mid < target
 
 			if (too_low) {
 				mid + 1 -> lo

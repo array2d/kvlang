@@ -4,20 +4,20 @@
 //   word count = 3
 // 散 key 数组作实参时 for-in 在 layout 脱糖成 compact 取值（compactarray·at），
 // 函数内改用 kvspace·listlen/kvspace·listat/kvspace·get 显式遍历。
-rwfunc word_count(*[int64]·[]char/utf32 $chars) -> (*int64 $nw) {
+rwfunc word_count(*'[int64]'[]char/utf32 $chars) -> (*int64 $nw) {
 	*nw = 0
-	0 -> state
-	kvspace·listlen(*chars) -> n
-	0 -> i
+	0 -> state:int64
+	kvspace·listlen(*chars) -> n:int64
+	0 -> i:int64
 	while (i < n) {
-		kvspace·listat(*chars, i) -> k
-		(*chars)·*k -> c
-		blank = c == " "
+		kvspace·listat(*chars, i) -> k:int64
+		(*chars)·*k -> c:[]char/utf32
+		blank:bool = c == " "
 
 		if (blank) {
 			state = 0
 		} else {
-			state == 0 -> was_out
+			state == 0 -> was_out:bool
 
 			if (was_out) {
 				state = 1
@@ -29,7 +29,7 @@ rwfunc word_count(*[int64]·[]char/utf32 $chars) -> (*int64 $nw) {
 }
 
 rwfunc test() -> () {
-	chars:[int64]·[]char/utf32 = {}
+	chars:'[int64]'[]char/utf32 = {}
 	chars·0 = "h"
 	"e" -> chars·1
 	chars·2 = "l"
@@ -48,7 +48,7 @@ rwfunc test() -> () {
 	chars·15 = "a"
 	"n" -> chars·16
 	chars·17 = "g"
-	word_count(chars) -> nw
+	word_count(chars) -> nw:int64
 	println("word count =", nw)
 	nw -> /last_wc
 }

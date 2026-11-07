@@ -4,14 +4,14 @@
 //   100
 //   10101
 rwfunc add_binary(*[]char/utf32 $a, *[]char/utf32 $b) -> () {
-	na = string·len(*a)
-	nb = string·len(*b)
-	carry = 0
-	i = na - 1
-	j = nb - 1
-	result = ""
+	na:int64 = string·len(*a)
+	nb:int64 = string·len(*b)
+	carry:int64 = 0
+	i:int64 = na - 1
+	j:int64 = nb - 1
+	result:[]char/utf32 = ""
 	while (i >= 0 || j >= 0 || carry > 0) {
-		sum = carry
+		sum:int64 = carry
 		if (i >= 0) {
 			if ((*a)[i] == "1") { sum + 1 -> sum }
 			i = i - 1
@@ -26,7 +26,7 @@ rwfunc add_binary(*[]char/utf32 $a, *[]char/utf32 $b) -> () {
 			"0" + result -> result
 		}
 		sum ÷ 2 -> carry
-		sum ÷ 2 -> carry_m
+		sum ÷ 2 -> carry_m:int64
 	}
 	println(result)
 }

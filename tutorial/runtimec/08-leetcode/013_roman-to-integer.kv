@@ -2,21 +2,21 @@
 // 期望输出: 58, 1994
 rwfunc romanToInt(*[]char/utf32 $s) -> (*int64 $val) {
 	0 -> *val
-	i = 0
-	n = string·len(*s)
-	"" -> prev
+	i:int64 = 0
+	n:int64 = string·len(*s)
+	"" -> prev:[]char/utf32
 	while (i < n) {
-		c = (*s)[i]
-		isI = c == "I"
-		c == "V" -> isV
-		isX = c == "X"
-		isL = c == "L"
-		c == "C" -> isC
-		isD = c == "D"
-		isM = c == "M"
-		pI = prev == "I"
-		prev == "X" -> pX
-		pC = prev == "C"
+		c:char/utf32 = (*s)[i]
+		isI:bool = c == "I"
+		c == "V" -> isV:bool
+		isX:bool = c == "X"
+		isL:bool = c == "L"
+		c == "C" -> isC:bool
+		isD:bool = c == "D"
+		isM:bool = c == "M"
+		pI:bool = prev == "I"
+		prev == "X" -> pX:bool
+		pC:bool = prev == "C"
 
 		if (isI) {
 			*val = *val + 1
@@ -46,9 +46,9 @@ rwfunc romanToInt(*[]char/utf32 $s) -> (*int64 $val) {
 			*val + 1000 -> *val
 		}
 
-		subI = pI
-		pX -> subX
-		subC = pC
+		subI:bool = pI
+		pX -> subX:bool
+		subC:bool = pC
 
 		if (isV) {
 			if (subI) {
@@ -93,9 +93,9 @@ rwfunc romanToInt(*[]char/utf32 $s) -> (*int64 $val) {
 
 rwfunc test() -> () {
 
-	romanToInt("LVIII") -> a
+	romanToInt("LVIII") -> a:int64
 	println("LVIII =", a)
-	b = romanToInt("MCMXCIV")
+	b:int64 = romanToInt("MCMXCIV")
 	println("MCMXCIV =", b)
 	/roman_lviii = a
 }

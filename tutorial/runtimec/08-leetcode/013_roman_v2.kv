@@ -3,30 +3,30 @@
 // 期望输出:
 //   58
 rwfunc roman_to_int(*[]char/utf32 $s) -> () {
-	string·len(*s) -> n
-	result = 0
-	i = 0
+	string·len(*s) -> n:int64
+	result:int64 = 0
+	i:int64 = 0
 	while (i < n) {
-		string·char(*s, i) -> c
-		is_I = c == "I"
-		is_V = c == "V"
-		c == "X" -> is_X
-		is_L = c == "L"
-		is_C = c == "C"
-		c == "D" -> is_D
-		is_M = c == "M"
+		string·char(*s, i) -> c:char/utf32
+		is_I:bool = c == "I"
+		is_V:bool = c == "V"
+		c == "X" -> is_X:bool
+		is_L:bool = c == "L"
+		is_C:bool = c == "C"
+		c == "D" -> is_D:bool
+		is_M:bool = c == "M"
 
 		if (is_I) {
-			ni = i + 1
-			ni < n -> has_next
+			ni:int64 = i + 1
+			ni < n -> has_next:bool
 
 			if (has_next) {
-				nc = string·char(*s, ni)
-				iv = nc == "V"
-				nc == "X" -> ix
+				nc:char/utf32 = string·char(*s, ni)
+				iv:bool = nc == "V"
+				nc == "X" -> ix:bool
 
 				if (iv) {
-					val = 4
+					val:int64 = 4
 					i = i + 1
 				} else {
 					if (ix) {

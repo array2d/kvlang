@@ -5,31 +5,31 @@
 //   4
 rwfunc search() -> () {
 	a:[]int64 = [4, 5, 6, 7, 0, 1, 2]
-	n = compactarray·numel(a)
-	0 -> target
-	lo = 0
-	hi = n - 1
-	-1 -> result
+	n:int64 = compactarray·numel(a)
+	0 -> target:int64
+	lo:int64 = 0
+	hi:int64 = n - 1
+	-1 -> result:int64
 	while (lo <= hi) {
-		s = lo + hi
-		mid = s ÷ 2
-		mid_m = s ÷ 2
-		a[mid] -> mv
-		eq = mv == target
+		s:int64 = lo + hi
+		mid:int64 = s ÷ 2
+		mid_m:int64 = s ÷ 2
+		a[mid] -> mv:int64
+		eq:bool = mv == target
 
 		if (eq) {
 			result = mid
 			hi + 1 -> lo
 		} else {
-			lv = a[lo]
-			rv = a[hi]
-			lv <= mv -> left_sorted
-			lv ≤ mv -> left_sorted_m
+			lv:int64 = a[lo]
+			rv:int64 = a[hi]
+			lv <= mv -> left_sorted:bool
+			lv ≤ mv -> left_sorted_m:bool
 
 			if (left_sorted) {
-				t1 = lv <= target
-				t1_m = lv ≤ target
-				t2 = target < mv
+				t1:bool = lv <= target
+				t1_m:bool = lv ≤ target
+				t2:bool = target < mv
 
 				if (t1 && t2) {
 					mid - 1 -> hi
@@ -37,10 +37,10 @@ rwfunc search() -> () {
 					lo = mid + 1
 				}
 			} else {
-				t3 = mv <= target
-				t3_m = mv ≤ target
-				target <= rv -> t4
-				target ≤ rv -> t4_m
+				t3:bool = mv <= target
+				t3_m:bool = mv ≤ target
+				target <= rv -> t4:bool
+				target ≤ rv -> t4_m:bool
 
 				if (t3 && t4) {
 					lo = mid + 1

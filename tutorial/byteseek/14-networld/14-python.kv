@@ -4,10 +4,10 @@
 //   str= abc
 //   exec= 5 pyout pyerr
 rwfunc test() -> () {
-	networld/python·run("print(6*7)") -> o
+	networld/python·run("print(6*7)") -> o:[]char/utf32
 	println("out=", o)
-	networld/python·run("print('a'+'bc')") -> s
+	networld/python·run("print('a'+'bc')") -> s:[]char/utf32
 	println("str=", s)
-	networld/python·exec("import sys; sys.stdout.write('pyout'); sys.stderr.write('pyerr'); sys.exit(5)") -> (c, po, pe)
+	networld/python·exec("import sys; sys.stdout.write('pyout'); sys.stderr.write('pyerr'); sys.exit(5)") -> (c:uint8, po:[]char/utf32, pe:[]char/utf32)
 	println("exec=", c, po, pe)
 }

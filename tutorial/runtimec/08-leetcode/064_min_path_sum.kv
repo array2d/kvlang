@@ -3,38 +3,38 @@
 // 期望输出:
 //   7
 rwfunc min_path_sum() -> (*int64 $result) {
-	rows = 3
-	cols = 3
+	rows:int64 = 3
+	cols:int64 = 3
 	grid:[]int64 = [1, 3, 1, 1, 5, 1, 4, 2, 1]
 	// first row
-	j = 1
+	j:int64 = 1
 	while (j < cols) {
 		grid[j] = grid[j] + grid[j-1]
 		j + 1 -> j
 	}
 	// first col and rest
-	r = 1
+	r:int64 = 1
 	while (r < rows) {
-		idx0 = r × cols
-		idx0_m = r × cols
+		idx0:int64 = r × cols
+		idx0_m:int64 = r × cols
 		grid[idx0] = grid[idx0] + grid[idx0-cols]
-		c = 1
+		c:int64 = 1
 		while (c < cols) {
-			idx = r × cols + c
-			idx_m = r × cols + c
-			up = grid[idx-cols]
-			left = grid[idx-1]
-			min = up
+			idx:int64 = r × cols + c
+			idx_m:int64 = r × cols + c
+			up:int64 = grid[idx-cols]
+			left:int64 = grid[idx-1]
+			min:int64 = up
 			if (left < up) { left -> min }
 			grid[idx] = grid[idx] + min
 			c + 1 -> c
 		}
-		r + 1 -> r
+		r + 1 -> r:int64
 	}
 	grid[rows × cols - 1] -> *result
 }
 
 rwfunc test() -> () {
-	r = min_path_sum()
+	r:int64 = min_path_sum()
 	println(r)
 }

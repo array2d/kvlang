@@ -4,32 +4,32 @@
 
 lib time {
 	rwfunc since(*time $t) -> (*time/duration $dur) {
-		time·now() -> now
+		time·now() -> now:time
 		time·sub(now, *t) -> *dur
 	}
 	rwfunc until(*time $t) -> (*time/duration $dur) {
-		time·now() -> now
+		time·now() -> now:time
 		time·sub(*t, now) -> *dur
 	}
 	rwfunc equal(*time $a, *time $b) -> (*bool $r) {
-		time·before(*a, *b) -> ba
-		time·after(*a, *b) -> aa
+		time·before(*a, *b) -> ba:bool
+		time·after(*a, *b) -> aa:bool
 		!ba && !aa -> *r
 	}
 	rwfunc elapsed_ns(*time $t) -> (*int64 $ns) {
-		time·since(*t) -> dur
+		time·since(*t) -> dur:time/duration
 		time/duration·as_nanos(dur) -> *ns
 	}
 	rwfunc elapsed_ms(*time $t) -> (*int64 $ms) {
-		time·since(*t) -> dur
+		time·since(*t) -> dur:time/duration
 		time/duration·as_millis(dur) -> *ms
 	}
 	rwfunc elapsed_s(*time $t) -> (*int64 $s) {
-		time·since(*t) -> dur
+		time·since(*t) -> dur:time/duration
 		time/duration·as_seconds(dur) -> *s
 	}
 	rwfunc max(*time $a, *time $b) -> (*time $r) {
-		time·after(*a, *b) -> gt
+		time·after(*a, *b) -> gt:bool
 		if (gt) {
 			*a -> *r
 		} else {
@@ -37,7 +37,7 @@ lib time {
 		}
 	}
 	rwfunc min(*time $a, *time $b) -> (*time $r) {
-		time·before(*a, *b) -> lt
+		time·before(*a, *b) -> lt:bool
 		if (lt) {
 			*a -> *r
 		} else {

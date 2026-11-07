@@ -6,7 +6,7 @@
 //   2
 rwfunc test() -> () {
 	a:[]int64 = [1, 2, 3, 4, 5]
-	b = compactarray·newslice(a, 1, 3)
-	compactarray·numel(b) -> n
+	b:[]int64 = compactarray·newslice(a, 1, 3)
+	compactarray·numel(b) -> n:int64
 	println(n)
 }

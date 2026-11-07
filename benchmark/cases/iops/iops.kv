@@ -4,7 +4,7 @@
 //   iops a = 2000
 rwfunc iops(*int64 $n) -> (*int64 $a) {
 	*a = 0
-	1 -> i
+	1 -> i:int64
 	while (i <= *n) {
 		*a = *a + 1
 		i = i + 1
@@ -12,12 +12,12 @@ rwfunc iops(*int64 $n) -> (*int64 $a) {
 }
 
 rwfunc test() -> () {
-	t0 = time·now()
-	iops(__SCALE__) -> ans
-	t1 = time·now()
+	t0:time = time·now()
+	iops(__SCALE__) -> ans:int64
+	t1:time = time·now()
 	println("iops a =", ans)
-	delta = time·sub(t1, t0)
-	ns = time/duration·as_nanos(delta)
+	delta:time/duration = time·sub(t1, t0)
+	ns:int64 = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: N=__SCALE__")
 }

@@ -5,15 +5,15 @@
 //   false
 rwfunc can_jump(*[]int64 $nums) -> (*int64 $ok) {
 	*ok = 1
-	n = compactarray·numel(*nums)
-	0 -> reach
-	i = 0
+	n:int64 = compactarray·numel(*nums)
+	0 -> reach:int64
+	i:int64 = 0
 	while (i < n) {
 		if (i > reach) {
 			0 -> *ok
 			n -> i
 		} else {
-			dist = (*nums)[i] + i
+			dist:int64 = (*nums)[i] + i
 			if (dist > reach) { dist -> reach }
 			if (reach >= n - 1) {
 				n -> i
@@ -26,8 +26,8 @@ rwfunc can_jump(*[]int64 $nums) -> (*int64 $ok) {
 rwfunc test() -> () {
 	a1:[]int64 = [2, 3, 1, 1, 4]
 	a2:[]int64 = [3, 2, 1, 0, 4]
-	r1 = can_jump(a1)
+	r1:int64 = can_jump(a1)
 	if (r1 == 1) { println("true") } else { println("false") }
-	r2 = can_jump(a2)
+	r2:int64 = can_jump(a2)
 	if (r2 == 1) { println("true") } else { println("false") }
 }

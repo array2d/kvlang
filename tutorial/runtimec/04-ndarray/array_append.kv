@@ -6,8 +6,8 @@
 //   4
 rwfunc test() -> () {
 	a:[]int64 = [1, 2, 3]
-	b = scatterarray·newscatter(a)
+	b:'[int64]'int64 = scatterarray·newscatter(a)
 	scatterarray·append(b, 4) -> b
-	scatterarray·len(b) -> n
+	scatterarray·len(b) -> n:int64
 	println(n)
 }

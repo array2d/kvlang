@@ -13,13 +13,13 @@ struct Node {
 }
 
 rwfunc reverse_list() -> (**Node $head, **Node $new_head) {
-	prev = None
-	cur = *head
+	prev:*/lib/Node = None
+	cur:*/lib/Node = *head
 	while (cur != None) {
-		(*cur)·next -> nxt
+		(*cur)·next -> nxt:*/lib/Node
 		prev -> (*cur)·next
 		prev = cur
-		cur = nxt
+		cur:*/lib/Node = nxt
 	}
 	prev -> *new_head
 }
@@ -28,11 +28,11 @@ rwfunc test() -> () {
 	n3:Node = {val=30}
 	n2:Node = {val=20 next=&n3}
 	n1:Node = {val=10 next=&n2}
-	&n1 -> h
-	reverse_list() -> h, head
-	head -> cur
+	&n1 -> h:*/lib/Node
+	reverse_list() -> h:*/lib/Node, head:*/lib/Node
+	head -> cur:*/lib/Node
 	while (cur != None) {
-		(*cur)·val -> v
+		(*cur)·val -> v:int64
 		println(v)
 		(*cur)·next -> cur
 	}

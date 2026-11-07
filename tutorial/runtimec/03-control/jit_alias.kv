@@ -10,62 +10,62 @@
 //   lt5(7) = false
 rwfunc sum_alias(*int64 $n) -> (*int64 $total) {
 	*total = 0
-	i = 0
+	i:int64 = 0
 	while (i < *n) {
 		*total = i + *total
-		i = i + 1
+		i:int64 = i + 1
 	}
 }
 rwfunc alias_dst(*int64 $n) -> (*int64 $r) {
 	*r = 1
-	i = 0
+	i:int64 = 0
 	while (i < *n) {
 		*r = *r + *r
-		t = i + *r
+		t:int64 = i + *r
 		*r = t + *r
-		i = i + 1
+		i:int64 = i + 1
 	}
 }
 rwfunc locals8(*int64 $n) -> (*int64 $r) {
 	*r = 0
-	a = 1
-	b = 2
-	c = 3
-	d = 4
-	e = 5
-	g = 6
-	i = 0
+	a:int64 = 1
+	b:int64 = 2
+	c:int64 = 3
+	d:int64 = 4
+	e:int64 = 5
+	g:int64 = 6
+	i:int64 = 0
 	while (i < *n) {
-		a = a + b
-		b = b + c
-		c = c + d
-		d = d + e
-		e = e + g
-		g = g + 1
+		a:int64 = a + b
+		b:int64 = b + c
+		c:int64 = c + d
+		d:int64 = d + e
+		e:int64 = e + g
+		g:int64 = g + 1
 		*r = *r + a
-		i = i + 1
+		i:int64 = i + 1
 	}
 }
 rwfunc locals9(*int64 $n) -> (*int64 $r) {
 	*r = 0
-	a = 1
-	b = 2
-	c = 3
-	d = 4
-	e = 5
-	g = 6
-	h = 7
-	i = 0
+	a:int64 = 1
+	b:int64 = 2
+	c:int64 = 3
+	d:int64 = 4
+	e:int64 = 5
+	g:int64 = 6
+	h:int64 = 7
+	i:int64 = 0
 	while (i < *n) {
 		a = a + b
 		b = b + c
-		c = c + d
+		c:bool = c + d
 		d = d + e
 		e = e + g
 		g = g + h
 		h = h + 1
 		*r = *r + a
-		i = i + 1
+		i:int64 = i + 1
 	}
 }
 rwfunc cmp_var(*int64 $n) -> (*int64 $r) {

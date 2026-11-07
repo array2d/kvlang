@@ -4,7 +4,7 @@
 //   hello
 //   -1
 rwfunc test() -> () {
-	s = "hello world"
+	s:[]char/utf32 = "hello world"
 	println(string·find(s, "world"))
 	println(string·slice(s, 0, 5))
 	println(string·find(s, "zz"))

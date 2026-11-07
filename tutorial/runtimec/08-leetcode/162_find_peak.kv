@@ -4,16 +4,16 @@
 //   2
 rwfunc find_peak() -> () {
 	a:[]int64 = [1, 2, 3, 1]
-	n = compactarray·numel(a)
-	0 -> lo
-	hi = n - 1
+	n:int64 = compactarray·numel(a)
+	0 -> lo:int64
+	hi:int64 = n - 1
 	while (lo < hi) {
-		s = lo + hi
-		s ÷ 2 -> mid
-		s ÷ 2 -> mid_m
-		mv = a[mid]
-		nv = a[mid + 1]
-		mv < nv -> up
+		s:int64 = lo + hi
+		s ÷ 2 -> mid:int64
+		s ÷ 2 -> mid_m:int64
+		mv:int64 = a[mid]
+		nv:int64 = a[mid + 1]
+		mv < nv -> up:bool
 
 		if (up) {
 			lo = mid + 1

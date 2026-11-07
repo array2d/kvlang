@@ -11,17 +11,17 @@
 //   string-nonempty= true
 //   missing-len= 0
 rwfunc test() -> () {
-	kvlang/reflect·fnlist("math") -> m
+	kvlang/reflect·fnlist("math") -> m:[]char/utf32
 	println("math=", m)
-	kvlang/reflect·fnlist("kvlang") -> k
+	kvlang/reflect·fnlist("kvlang") -> k:[]char/utf32
 	println("kvlang=", k)
-	kvlang/reflect·fnlist("string") -> s
-	string·contains(s, "allinset") -> a
+	kvlang/reflect·fnlist("string") -> s:[]char/utf32
+	string·contains(s, "allinset") -> a:bool
 	println("has-allinset=", a)
-	string·contains(s, "[0,") -> p
+	string·contains(s, "[0,") -> p:bool
 	println("has-param=", p)
-	string·len(s) -> sl
+	string·len(s) -> sl:int64
 	println("string-nonempty=", sl > 0)
-	kvlang/reflect·fnlist("no_such_lib_xyz") -> e
+	kvlang/reflect·fnlist("no_such_lib_xyz") -> e:[]char/utf32
 	println("missing-len=", string·len(e))
 }

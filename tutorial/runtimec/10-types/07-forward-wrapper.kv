@@ -10,6 +10,6 @@ rwfunc wrap(*int64 $a, *int64 $b) -> (*int64 $c) {
 	plus(*a, *b) -> *c
 }
 rwfunc test() -> () {
-	wrap(1, 2) -> c
+	wrap(1, 2) -> c:int64
 	println(c)
 }

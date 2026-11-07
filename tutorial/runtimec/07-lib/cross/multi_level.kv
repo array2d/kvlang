@@ -10,12 +10,12 @@ lib aaa/bbb/math {
     }
 }
 rwfunc test() -> () {
-    /lib/aaa/bbb/math·sum(3, 4) -> s
+    /lib/aaa/bbb/math·sum(3, 4) -> s:int64
     println(s)
 
-    aaa/bbb/math·sum(3, 4) -> t
+    aaa/bbb/math·sum(3, 4) -> t:int64
     println(t)
 
-    /lib/aaa/bbb/math·double(15) -> d
+    /lib/aaa/bbb/math·double(15) -> d:int64
     println(d)
 }

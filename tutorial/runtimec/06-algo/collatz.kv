@@ -3,18 +3,18 @@
 // 期望输出:
 //   steps = 111
 rwfunc collatz(*int64 $n) -> (*int64 $steps) {
-	*n -> nv
+	*n -> nv:int64
 	0 -> *steps
 	while (nv > 1) {
-		mod = nv % 2
-		even = mod == 0
+		mod:int64 = nv % 2
+		even:bool = mod == 0
 
 		if (even) {
 			nv ÷ 2 -> nv
-			nv ÷ 2 -> nv_m
+			nv ÷ 2 -> nv_m:int64
 		} else {
-			t = nv × 3
-			t_m = nv × 3
+			t:int64 = nv × 3
+			t_m:int64 = nv × 3
 			nv = t + 1
 		}
 
@@ -24,7 +24,7 @@ rwfunc collatz(*int64 $n) -> (*int64 $steps) {
 
 rwfunc test() -> () {
 
-	ans = collatz(27)
+	ans:int64 = collatz(27)
 	println("steps =", ans)
 	/last_steps = ans
 }

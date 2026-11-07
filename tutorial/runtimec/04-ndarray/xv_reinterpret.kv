@@ -5,11 +5,11 @@
 // 3 个 int64（24 字节）重解释为 24 个 uint8。
 rwfunc test() -> () {
 	a:[]int64 = [1, 2, 3]
-	compactarray·langtype(a) -> k0
-	compactarray·bodylen(a) -> b0
+	compactarray·langtype(a) -> k0:[]char/utf8
+	compactarray·bodylen(a) -> b0:int64
 	println("before:", k0, b0)
-	compactarray·newreinterpret(a, "[]uint8") -> raw
-	compactarray·langtype(raw) -> k1
-	compactarray·bodylen(raw) -> b1
+	compactarray·newreinterpret(a, "[]uint8") -> raw:[]uint8
+	compactarray·langtype(raw) -> k1:[]char/utf8
+	compactarray·bodylen(raw) -> b1:int64
 	println("as-bytes:", k1, b1)
 }

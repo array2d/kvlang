@@ -66,7 +66,7 @@ lib math {
 }
 ```
 
-任意 kvlang 代码以绝对路径访问 `print(/lib/math·Pi)`。裸名赋值（`Pi = 3.14`）是 `/vthread` 帧局部变
+任意 kvlang 代码以绝对路径访问 `print(/lib/math·Pi)`。裸名赋值（`Pi:float64 = 3.14`，首次写槽须带类型，见 [[函数]]「局部变量必须声明类型」）是 `/vthread` 帧局部变
 量、跑完回收，**不**入 `/lib`。so 内核（runtimec2）**不**自举 stdlib；**byteseek 启动时把携带的 stdlib 一并
 layout&run 进 kvspace**，其余宿主也可显式 layout 写入常量。
 

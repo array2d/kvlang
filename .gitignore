@@ -21,6 +21,13 @@ go.work.sum
 /build/
 build/
 
+# ctest 运行产物。它**不是** build/ 的子目录——由「在该目录直接跑 ctest」产生，
+# 与 build/ 无关，所以 build/ 的忽略盖不住它。
+#
+# **无前导斜杠**：`/Testing/` 只匹配仓库根，`layout/Testing/` 会漏（实测过）。
+# 无斜杠的模式在任意层级生效，这才是要的——任何目录下跑 ctest 都不该进库。
+Testing/
+
 # ── Rust ─────────────────────────────────────────────
 *target/
 

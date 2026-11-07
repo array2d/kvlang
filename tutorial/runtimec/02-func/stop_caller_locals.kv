@@ -23,10 +23,10 @@ rwfunc mid(*int64 $n) -> (*int64 $r) {
 	*r = *r + 10
 }
 rwfunc test() -> () {
-	x = 5
-	y = x + 2
-	g(y) -> z
+	x:int64 = 5
+	y:int64 = x + 2
+	g(y) -> z:int64
 	println("x=", x, " y=", y, " z=", z)
-	mid(x) -> w
+	mid(x) -> w:int64
 	println("x=", x, " w=", w)
 }

@@ -6,21 +6,21 @@ rwfunc fib(*int64 $n) -> (*int64 $r) {
 	if (*n <= 1) {
 		*n -> *r
 	} else {
-		a = *n - 1
-		b = *n - 2
-		fib(a) -> x
-		fib(b) -> y
+		a:int64 = *n - 1
+		b:int64 = *n - 2
+		fib(a) -> x:int64
+		fib(b) -> y:int64
 		*r = x + y
 	}
 }
 
 rwfunc test() -> () {
-	t0 = time·now()
-	fib(__SCALE__) -> ans
-	t1 = time·now()
+	t0:time = time·now()
+	fib(__SCALE__) -> ans:int64
+	t1:time = time·now()
 	println("fib =", ans)
-	delta = time·sub(t1, t0)
-	ns = time/duration·as_nanos(delta)
+	delta:time/duration = time·sub(t1, t0)
+	ns:int64 = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: n=__SCALE__")
 }

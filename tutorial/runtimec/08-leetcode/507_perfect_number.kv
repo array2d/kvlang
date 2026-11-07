@@ -3,18 +3,18 @@
 // 期望输出:
 //   1
 rwfunc is_perfect(*int64 $n) -> () {
-	sum = 1
-	2 -> i
-	sq = i × i
-	sq_m = i × i
+	sum:int64 = 1
+	2 -> i:int64
+	sq:int64 = i × i
+	sq_m:int64 = i × i
 	while (sq <= *n) {
-		rem = *n % i
-		rem == 0 -> div
+		rem:int64 = *n % i
+		rem == 0 -> div:bool
 
 		if (div) {
 			sum = sum + i
-			j = *n ÷ i
-			j_m = *n ÷ i
+			j:int64 = *n ÷ i
+			j_m:int64 = *n ÷ i
 			sum + j -> sum
 		}
 
@@ -22,7 +22,7 @@ rwfunc is_perfect(*int64 $n) -> () {
 		sq = i × i
 		sq_m = i × i
 	}
-	sum == *n -> ok
+	sum == *n -> ok:bool
 
 	if (ok) {
 		println(1)

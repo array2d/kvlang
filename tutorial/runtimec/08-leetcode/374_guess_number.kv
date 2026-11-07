@@ -3,18 +3,18 @@
 // 期望输出:
 //   6
 rwfunc guess_number(*int64 $n) -> () {
-	1 -> lo
-	hi = *n
+	1 -> lo:int64
+	hi:int64 = *n
 	while (lo <= hi) {
-		s = lo + hi
-		s ÷ 2 -> mid
-		s ÷ 2 -> mid_m
-		low = mid < 6
+		s:int64 = lo + hi
+		s ÷ 2 -> mid:int64
+		s ÷ 2 -> mid_m:int64
+		low:bool = mid < 6
 
 		if (low) {
 			lo = mid + 1
 		} else {
-			mid > 6 -> high
+			mid > 6 -> high:bool
 
 			if (high) {
 				hi = mid - 1

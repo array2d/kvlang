@@ -24,7 +24,7 @@ lib kvlang/spec/类型系统/文法与合法性 {
 - **mapexpr** = `memitemkey_langtype_formatter·memitemvalue_langtype`——`·`（U+00B7 中点）连接**两条各
   自独立**的类型表达式：左侧是 item **键**的格式器、右侧是 item **值/body** 类型。值类型递归为完整类型
   表达式（故 map 可无限嵌套）。map 声明形如
-  `memheadname:memitemkey_langtype_formatter·memitemvalue_langtype={}`，术语与形态详见 [[map容器]]。
+  `memheadname:'memitemkey_langtype_formatter'memitemvalue_langtype={}`，术语与形态详见 [[map容器]]。
 - **memitemkey_langtype_formatter**（键侧格式器，三选一，各自独立可校验）：key 只在**路径系统**里、无
   XValue body，故键侧描述的不是「值的类型」而是「把 key 值格式化成路径段字符串的格式器」——其输出即访问
   键（见 [[map容器]]）：
@@ -43,8 +43,8 @@ lib kvlang/spec/类型系统/文法与合法性 {
 | `[float64,float64]` | `a·[342.124,23.2345]` | 塌缩为 `[2]float64` 后再改键 |
 | `[]char/utf8` | `m·a`（`m·a = v` 即写） | 加维度或改编码 |
 
-即 `a:[float64,float64]·int32={}` 的真实存储/访问路径必须是 `a·[342.124,23.2345]`；
-`b:int64·int64={}` 必须是 `b·200`（**不是** `b·[200]`）。裸标量键与 1 元元组键 `[int64]`（访问键
+即 `a:'[float64,float64]'int32={}` 的真实存储/访问路径必须是 `a·[342.124,23.2345]`；
+`b:'int64'int64={}` 必须是 `b·200`（**不是** `b·[200]`）。裸标量键与 1 元元组键 `[int64]`（访问键
 `b·[200]`）是**不同** memitemkey，不得互相转换。
 
 ### 易混淆：`[float64,float64]`（元组键）≠ `[2]float64`（数组形状）
@@ -90,7 +90,8 @@ lib kvlang/spec/类型系统/文法与合法性 {
 structref 放行——裸名已被隐式展开为 `/lib/<name>`，正是靠「不是种类名」落网。**layout 只判右值形态与
 种类名，不查 kvspace**：`/lib/…` 有无原型、是不是 struct，归 **runtime** 判——`x:int = {}` layout
 放行，runtime 报 `TypeError: /lib/int is not a struct type`（见 [[langtype语义类型]]）。非字面量右值
-（`x:int = y`）无从推断，layout 放行。键须为 `[]char/<编码>` 或全标量元组。非法示例及拒因：
+（`x:int = y`）无从推断，layout 只校验已写出的标注、不推断右侧类型；未写标注的局部由[[函数]]「局部变量必须声明类型」拒绝，
+不并入本条。键须为 `[]char/<编码>` 或全标量元组。非法示例及拒因：
 
 | 非法 | 拒因 |
 |------|------|

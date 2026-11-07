@@ -4,15 +4,15 @@
 //   n = 42
 //   x = 7
 //   miss = true
-rwfunc build() -> (*[]char/utf8·int64 $m) {
+rwfunc build() -> (*'[]char/utf8'int64 $m) {
 	{n=42; x=7} -> *m
 }
 rwfunc test() -> () {
-	build() -> r
-	r·*"n" -> n
+	build() -> r:'[]char/utf8'int64
+	r·*"n" -> n:int64
 	println("n =", n)
-	r·*"x" -> x
+	r·*"x" -> x:int64
 	println("x =", x)
-	r·*"none" == None -> miss
+	r·*"none" == None -> miss:bool
 	println("miss =", miss)
 }

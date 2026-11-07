@@ -3,10 +3,10 @@
 // 期望输出:
 //   3
 rwfunc hamming(*int64 $n) -> () {
-	*n -> nv
-	count = 0
+	*n -> nv:int64
+	count:int64 = 0
 	while (nv > 0) {
-		nv % 2 -> bit
+		nv % 2 -> bit:int64
 
 		if (bit != 0) {
 			count = count + 1

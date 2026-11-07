@@ -6,14 +6,14 @@
 //   false
 rwfunc is_valid(*[]char/utf32 $s) -> (*int64 $ok) {
 	*ok = 1
-	si = -1
-	n = string·len(*s)
-	i = 0
+	si:int64 = -1
+	n:int64 = string·len(*s)
+	i:int64 = 0
 	while (i < n) {
-		c = (*s)[i]
+		c:char/utf32 = (*s)[i]
 		if (c == "(") {
 			si + 1 -> si
-			/tmp/vp:[int64]·int64 = {}
+			/tmp/vp:'[int64]'int64 = {}
 			1 -> "/tmp/vp"·*si
 		}
 		if (c == "[") {
@@ -27,10 +27,9 @@ rwfunc is_valid(*[]char/utf32 $s) -> (*int64 $ok) {
 		if (c == ")") {
 			if (si < 0) { 0 -> *ok ; n -> i }
 			else {
-				/tmp/vp[si] -> top
+				/tmp/vp[si] -> top:int64
 				si - 1 -> si
 				if (top != 1) { *ok = 0 ; n -> i }
-				if (top ≠ 1) { ok_m = 0 ; n -> i }
 			}
 		}
 		if (c == "]") {
@@ -39,7 +38,6 @@ rwfunc is_valid(*[]char/utf32 $s) -> (*int64 $ok) {
 				/tmp/vp[si] -> top
 				si - 1 -> si
 				if (top != 2) { 0 -> *ok ; n -> i }
-				if (top ≠ 2) { 0 -> ok_m ; n -> i }
 			}
 		}
 		if (c == "}") {
@@ -48,20 +46,18 @@ rwfunc is_valid(*[]char/utf32 $s) -> (*int64 $ok) {
 				/tmp/vp[si] -> top
 				si = si - 1
 				if (top != 3) { *ok = 0 ; i = n }
-				if (top ≠ 3) { ok_m = 0 ; i = n }
 			}
 		}
 		i = i + 1
 	}
 	if (si >= 0) { 0 -> *ok }
-	if (si ≥ 0) { 0 -> ok_m }
 }
 
 rwfunc test() -> () {
-	r1 = is_valid("()")
+	r1:int64 = is_valid("()")
 	if (r1 == 1) { println("true") } else { println("false") }
-	r2 = is_valid("()[]{}")
+	r2:int64 = is_valid("()[]{}")
 	if (r2 == 1) { println("true") } else { println("false") }
-	r3 = is_valid("(]")
+	r3:int64 = is_valid("(]")
 	if (r3 == 1) { println("true") } else { println("false") }
 }

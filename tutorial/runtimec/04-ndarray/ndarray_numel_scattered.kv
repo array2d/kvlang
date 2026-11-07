@@ -7,7 +7,7 @@
 //   3
 rwfunc test() -> () {
 	a:[]int64 = [1, 2, 3]
-	b = scatterarray·newscatter(a)
-	compactarray·numel(b) -> n
+	b:'[int64]'int64 = scatterarray·newscatter(a)
+	compactarray·numel(b) -> n:int64
 	println(n)
 }

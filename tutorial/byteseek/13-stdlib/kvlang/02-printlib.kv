@@ -11,13 +11,13 @@ lib pl_probe {
 }
 
 rwfunc test() -> () {
-	kvlang·printlib("/lib/pl_probe") -> before
-	string·contains(before, "rwfunc add") -> h1
+	kvlang·printlib("/lib/pl_probe") -> before:[]char/utf32
+	string·contains(before, "rwfunc add") -> h1:bool
 	println("before-has-fn=", h1)
 	kvspace·del("/lib/pl_probe·add.src") -> _
-	kvlang·printlib("/lib/pl_probe") -> after
-	string·contains(after, "rwfunc add") -> h2
+	kvlang·printlib("/lib/pl_probe") -> after:[]char/utf32
+	string·contains(after, "rwfunc add") -> h2:bool
 	println("after-has-fn=", h2)
-	string·cmp(before, after) -> same
+	string·cmp(before, after) -> same:int64
 	println("stable=", same)
 }

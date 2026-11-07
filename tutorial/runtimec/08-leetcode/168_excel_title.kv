@@ -6,20 +6,20 @@
 rwfunc convert(*int64 $n) -> () {
 	// Build reversed chars into array, then print in reverse
 	[0, 0, 0, 0, 0] -> a:[]int64
-	idx = 0
-	num = *n
+	idx:int64 = 0
+	num:int64 = *n
 	while (num > 0) {
-		num - 1 -> n1
-		r = n1 % 26
-		ch = 65 + r
+		num - 1 -> n1:int64
+		r:int64 = n1 % 26
+		ch:int64 = 65 + r
 		a[idx] = ch
 		idx + 1 -> idx
 		num = n1 ÷ 26
-		num_m = n1 ÷ 26
+		num_m:int64 = n1 ÷ 26
 	}
-	k = idx - 1
+	k:int64 = idx - 1
 	while (k >= 0) {
-		a[k] -> v
+		a[k] -> v:int64
 		println(v)
 		k = k - 1
 	}

@@ -26,13 +26,13 @@ rwfunc test() -> () {
 	c:[]int64 = [10, 40, 5, 15, 20]
 	println("eq=", xv·eq(a, c), xv·eq(a, b))
 	println("sorted_before=", xv·is_sorted(b))
-	s = xv·sort(b)
+	s:[]int64 = xv·sort(b)
 	println("sorted_after=", xv·is_sorted(s))
 	println("sorted_elems=", s[0], s[1], s[2], s[3], s[4], s[5])
-	u = xv·sort(a)
+	u:[]int64 = xv·sort(a)
 	println("bsearch=", xv·binary_search(u, 20), xv·binary_search(u, 99))
-	rev = xv·reverse(u)
+	rev:[]int64 = xv·reverse(u)
 	println("rev_ends=", xv·first(rev), xv·last(rev))
-	f = xv·fill(a, 7)
+	f:[]int64 = xv·fill(a, 7)
 	println("filled=", xv·first(f), xv·last(f))
 }

@@ -16,11 +16,11 @@
 //   45
 //   -2
 rwfunc test() -> () {
-	f = float32(3)
+	f:float32 = float32(3)
 	println(f)
-	i = int8(0.1)
+	i:int8 = int8(0.1)
 	println(i)
-	int8(300) -> w
+	int8(300) -> w:int8
 	println(w)
 
 	println(uint8(-1))
@@ -29,12 +29,12 @@ rwfunc test() -> () {
 	println(uint32(-1))
 	println(uint64(18446744073709551615))
 
-	p32 = float32(0.1)
+	p32:float32 = float32(0.1)
 	println(p32)
 	println(float32(16777217))
 
-	sum = w + 1
+	sum:int8 = w + 1
 	println(sum)
-	int16(-2) -> n
+	int16(-2) -> n:int16
 	println(n)
 }

@@ -10,44 +10,44 @@
 //   0
 rwfunc plus_one() -> () {
 	a:[]int64 = [1, 2, 3]
-	n = compactarray·numel(a)
-	n - 1 -> i
-	carry = 1
+	n:int64 = compactarray·numel(a)
+	n - 1 -> i:int64
+	carry:int64 = 1
 	while (i >= 0) {
-		d = a[i]
-		d + carry -> s
-		overflow = s == 10
+		d:int64 = a[i]
+		d + carry -> s:int64
+		overflow:bool = s == 10
 
 		if (overflow) {
-			carry = 0
+			carry:int64 = 0
 			a[i] = 0
 		} else {
 			a[i] = s
-			0 -> carry
-			i = -1
+			0 -> carry:int64
+			i:int64 = -1
 		}
 
-		i = i - 1
+		i:int64 = i - 1
 	}
-	carry == 1 -> need_extend
-	len_val = n
-	j = 0
+	carry == 1 -> need_extend:bool
+	len_val:int64 = n
+	j:int64 = 0
 	while (j < n) {
-		a[j] -> v
+		a[j] -> v:int64
 		println(v)
-		j = j + 1
+		j:int64 = j + 1
 	}
 }
 
 rwfunc plus_one_nines() -> () {
 	a:[]int64 = [9, 9, 9]
-	compactarray·numel(a) -> n
-	i = n - 1
-	carry = 1
+	compactarray·numel(a) -> n:int64
+	i:int64 = n - 1
+	carry:int64 = 1
 	while (i >= 0) {
-		a[i] -> d
-		s = d + carry
-		overflow = s == 10
+		a[i] -> d:int64
+		s:int64 = d + carry
+		overflow:bool = s == 10
 
 		if (overflow) {
 			a[i] = 0
@@ -60,9 +60,9 @@ rwfunc plus_one_nines() -> () {
 
 		i - 1 -> i
 	}
-	j = 0
+	j:int64 = 0
 	while (j < n) {
-		v = a[j]
+		v:int64 = a[j]
 		println(v)
 		j + 1 -> j
 	}

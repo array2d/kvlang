@@ -37,7 +37,7 @@ rwfunc mk2(*int64 $a) -> (*P $s, *P $t) {
 	*a + 10 -> (*t)·x
 }
 rwfunc test() -> () {
-	t:[int64]·N = {}
+	t:'[int64]'N = {}
 	t·2:N = {val=9}
 	t·1:N = {val=7 left=&t·2}
 	k = 1

@@ -12,10 +12,10 @@ struct Node {
 }
 
 rwfunc remove(*Node $head, *int64 $val) -> () {
-	head -> p
+	head -> p:*/lib/Node
 	while (p != None) {
-		v = (*p)·val
-		v == *val -> skip
+		v:int64 = (*p)·val
+		v == *val -> skip:bool
 
 		if (skip) {
 		} else {
@@ -34,6 +34,6 @@ rwfunc test() -> () {
 	n3:Node = {val=6 next=&n4}
 	n2:Node = {val=2 next=&n3}
 	n1:Node = {val=1 next=&n2}
-	&n1 -> h
+	&n1 -> h:*/lib/Node
 	remove(h, 6)
 }

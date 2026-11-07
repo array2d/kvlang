@@ -10,7 +10,7 @@ rwfunc print_any(* $a) -> () {
 	println(*a)
 }
 rwfunc test() -> () {
-	m:[int64]·[]char/utf32 = {"a", "b", "c"}
+	m:'[int64]'[]char/utf32 = {"a", "b", "c"}
 	size_of(m) -> n
 	println(n)
 	print_any(42)

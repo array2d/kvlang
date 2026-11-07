@@ -4,15 +4,15 @@
 //   0
 rwfunc find_min() -> () {
 	a:[]int64 = [4, 5, 6, 7, 0, 1, 2]
-	n = compactarray·numel(a)
-	0 -> lo
-	hi = n - 1
+	n:int64 = compactarray·numel(a)
+	0 -> lo:int64
+	hi:int64 = n - 1
 	while (lo < hi) {
-		s = lo + hi
-		s ÷ 2 -> mid
-		mv = a[mid]
-		rv = a[hi]
-		mv < rv -> ok
+		s:int64 = lo + hi
+		s ÷ 2 -> mid:int64
+		mv:int64 = a[mid]
+		rv:int64 = a[hi]
+		mv < rv -> ok:bool
 
 		if (ok) {
 			hi = mid
@@ -20,7 +20,7 @@ rwfunc find_min() -> () {
 			lo = mid + 1
 		}
 	}
-	a[lo] -> ans
+	a[lo] -> ans:int64
 	println(ans)
 }
 

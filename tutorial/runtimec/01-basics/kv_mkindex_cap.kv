@@ -11,6 +11,6 @@ rwfunc test() -> () {
 	1 -> /tmp/kvtc/a
 	2 -> /tmp/kvtc/bb
 	3 -> /tmp/kvtc/ccc
-	count_children("/tmp/kvtc/") -> n
+	count_children("/tmp/kvtc/") -> n:int64
 	println("n=", n)
 }

@@ -8,18 +8,18 @@
 //   arg= true
 //   cur= true
 rwfunc ps_inner(*int64 $n) -> (*int64 $r) {
-	div(*n, 0) -> x
+	div(*n, 0) -> x:int64
 }
 
 rwfunc ps_outer() -> () {
-	ps_inner(3) -> out
+	ps_inner(3) -> out:int64
 }
 
 rwfunc test() -> () {
-	vthread·create("ps_outer") -> vid
+	vthread·create("ps_outer") -> vid:char/utf8
 	char/utf32(vid) -> vid
 	vthread·run(vid)
-	kvlang·printstack(vid) -> st
+	kvlang·printstack(vid) -> st:[]char/utf32
 	println("status=", string·contains(st, "status=error"))
 	println("frames=", string·contains(st, "frames=2"))
 	println("outer-lib=", string·contains(st, "/lib/ps_outer"))

@@ -19,15 +19,15 @@ rwfunc chain_call(*int64 $a, *int64 $b) -> (*int64 $r) {
 }
 
 rwfunc test() -> () {
-	v1 = id_val(5)
+	v1:int64 = id_val(5)
 	println("PASS SI-1a: x=5 returns", v1)
-	v2 = id_val(10)
+	v2:int64 = id_val(10)
 	println("PASS SI-1b: x=10 returns", v2)
-	sum_diff(5, 3) -> (s1, d1)
+	sum_diff(5, 3) -> (s1:int64, d1:int64)
 	println("PASS SI-2a: S=", s1, "D=", d1)
-	sum_diff(10, 5) -> (s2, d2)
+	sum_diff(10, 5) -> (s2:int64, d2:int64)
 	println("PASS SI-2b: S=", s2, "D=", d2)
-	chain_call(7, 3) -> c
+	chain_call(7, 3) -> c:int64
 	println("PASS SI-3: chain =", c)
 	/last_chain = c
 }

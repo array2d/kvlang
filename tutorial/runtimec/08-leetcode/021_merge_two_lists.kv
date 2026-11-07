@@ -13,19 +13,19 @@ struct Node {
 }
 
 rwfunc merge(*Node $a, *Node $b) -> () {
-	pa = *a
-	pb = *b
+	pa:/lib/Node = *a
+	pb:/lib/Node = *b
 	while (pa != None) {
-		pa·val -> av
-		pick_a = pb == None
+		pa·val -> av:int64
+		pick_a:bool = pb == None
 
 		if (pick_a) {
 			println(av)
 			pa = pa·next
 		} else {
-			pb·val -> bv
-			take = av <= bv
-			take_m = av ≤ bv
+			pb·val -> bv:int64
+			take:bool = av <= bv
+			take_m:bool = av ≤ bv
 
 			if (take) {
 				println(av)
@@ -47,12 +47,12 @@ rwfunc test() -> () {
 	a3:Node = {val=4}
 	a2:Node = {val=2 next=&a3}
 	a1:Node = {val=1 next=&a2}
-	&a1 -> ha
+	&a1 -> ha:*/lib/Node
 
 	b3:Node = {val=4}
 	b2:Node = {val=3 next=&b3}
 	b1:Node = {val=1 next=&b2}
-	&b1 -> hb
+	&b1 -> hb:*/lib/Node
 
 	merge(ha, hb)
 }

@@ -6,15 +6,15 @@
 //   x= 100
 //   e= 11
 rwfunc test() -> () {
-	42 -> x
-	&x -> p
-	*p -> q
+	42 -> x:int64
+	&x -> p:*int64
+	*p -> q:int64
 	println("q=", q)
 	100 -> *p
 	println("x=", x)
 	list:[]int64 = [11, 22, 33]
-	&list -> lp
-	*lp -> lv
-	lv[0] -> e
+	&list -> lp:*[]int64
+	*lp -> lv:[]int64
+	lv[0] -> e:int64
 	println("e=", e)
 }

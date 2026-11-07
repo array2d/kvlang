@@ -13,7 +13,7 @@ rwfunc inner(*int64 $n) -> (*int64 $a, *int64 $b) {
 rwfunc outer1(*int64 $n) -> (*int64 $a) {
 	inner(*n) -> (*a, _)
 	println("outer1 a=", *a)
-	x = *a + 1
+	x:int64 = *a + 1
 }
 rwfunc outer(*int64 $n) -> (*int64 $a, *int64 $b) {
 	inner(*n) -> (*a, *b)
@@ -24,18 +24,18 @@ rwfunc fib(*int64 $n) -> (*int64 $a, *int64 $b) {
 		*a = 0
 		1 -> *b
 	} else {
-		n1 = *n - 1
+		n1:int64 = *n - 1
 		fib(n1) -> (*a, *b)
-		x = *a + *b
+		x:int64 = *a + *b
 		*b -> *a
 		*b = x
 	}
 }
 rwfunc test() -> () {
-	outer1(3) -> f1
+	outer1(3) -> f1:int64
 	println("f1=", f1)
-	outer(3) -> (f, g)
+	outer(3) -> (f:int64, g:int64)
 	println("f=", f, " g=", g)
-	fib(10) -> (p, q)
+	fib(10) -> (p:int64, q:int64)
 	println("fib(10) =", p, q)
 }

@@ -3,13 +3,13 @@
 //   same: true
 //   shifted: false
 rwfunc test() -> () {
-	time·now() -> t0
-	time/duration·seconds(1) -> one_sec
-	time·add(t0, one_sec) -> t1
-	time·equal(t0, t0) -> same
+	time·now() -> t0:time
+	time/duration·seconds(1) -> one_sec:time/duration
+	time·add(t0, one_sec) -> t1:time
+	time·equal(t0, t0) -> same:bool
 	print("same: ")
 	println(same)
-	time·equal(t0, t1) -> shifted
+	time·equal(t0, t1) -> shifted:bool
 	print("shifted: ")
 	println(shifted)
 }

@@ -4,15 +4,15 @@
 //   1
 //   0
 rwfunc is_power3(*int64 $n) -> () {
-	pos = *n > 0
+	pos:bool = *n > 0
 
 	if (pos) {
-		t = 1
+		t:int64 = 1
 		while (t < *n) {
 			t × 3 -> t
-			t × 3 -> t_m
+			t × 3 -> t_m:int64
 		}
-		eq = t == *n
+		eq:bool = t == *n
 
 		if (eq) {
 			println(1)

@@ -5,7 +5,7 @@
 //   y
 //   héllo
 rwfunc test() -> () {
-	a = "abc"               // 默认 char/utf32
+	a:[]char/utf32 = "abc"               // 默认 char/utf32
 	println(a)
 	b:[]char/ascii = "xyz"    // ASCII 定宽，可索引
 	println(string·char(b, 1))

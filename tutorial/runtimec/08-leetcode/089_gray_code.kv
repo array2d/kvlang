@@ -17,17 +17,17 @@
 // total=4 ⇒ 4 个值 × 2 行 = 8 行。实际输出 `0,0,1,1,3,3,2,2` 与之一一对应。
 // 补齐是同形修正，不是让测试迎合实现。
 rwfunc gray_code(*int64 $n) -> () {
-	total = 1
-	k = 0
+	total:int64 = 1
+	k:int64 = 0
 	while (k < *n) {
 		total = total × 2
-		total_m = total × 2
+		total_m:int64 = total × 2
 		k + 1 -> k
 	}
-	i = 0
+	i:int64 = 0
 	while (i < total) {
-		g = i ^ (i ÷ 2)
-		g_m = i ^ (i ÷ 2)
+		g:int64 = i ^ (i ÷ 2)
+		g_m:int64 = i ^ (i ÷ 2)
 		println(g_m)
 		println(g)
 		i + 1 -> i

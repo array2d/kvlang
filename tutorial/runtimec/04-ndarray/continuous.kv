@@ -14,15 +14,15 @@ rwfunc sum(*[]int64 $a) -> (*int64 $total) {
 
 rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30, 40]
-	compactarray·numel(a) -> n
+	compactarray·numel(a) -> n:int64
 	println("len =", n)
-	v0 = a[0]
+	v0:int64 = a[0]
 	println("[0] =", v0)
 	a[1] = 99
-	x0 = a[0]
-	a[1] -> x1
-	x2 = a[2]
+	x0:int64 = a[0]
+	a[1] -> x1:int64
+	x2:int64 = a[2]
 	println("after set:", x0, x1, x2)
-	sum(a) -> total
+	sum(a) -> total:int64
 	println("sum =", total)
 }

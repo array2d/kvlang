@@ -12,9 +12,9 @@
 
 lib xv {
 	rwfunc swap(*[]int64 $arr, *int64 $i, *int64 $j) -> (*[]int64 $result) {
-		vi = compactarray·at(*arr, *i)
-		vj = compactarray·at(*arr, *j)
-		tmp = compactarray·copy(*arr)
+		vi:int64 = compactarray·at(*arr, *i)
+		vj:int64 = compactarray·at(*arr, *j)
+		tmp:[]int64 = compactarray·copy(*arr)
 		compactarray·set(tmp, *i, vj) -> tmp
 		compactarray·set(tmp, *j, vi) -> tmp
 		*result = tmp
@@ -24,14 +24,14 @@ lib xv {
 		*result = compactarray·at(*arr, 0)
 	}
 	rwfunc last(*[]int64 $arr) -> (*int64 $result) {
-		n = compactarray·numel(*arr)
+		n:int64 = compactarray·numel(*arr)
 		*result = compactarray·at(*arr, n - 1)
 	}
 	rwfunc reverse(*[]int64 $arr) -> (*[]int64 $result) {
 		*result = *arr
-		n = compactarray·numel(*arr)
-		i = 0
-		j = n - 1
+		n:int64 = compactarray·numel(*arr)
+		i:int64 = 0
+		j:int64 = n - 1
 		while (i < j) {
 			xv·swap(*result, i, j) -> *result
 			i = i + 1
@@ -40,10 +40,10 @@ lib xv {
 	}
 	rwfunc find(*[]int64 $arr, *int64 $val) -> (*int64 $idx) {
 		*idx = -1
-		n = compactarray·numel(*arr)
-		i = 0
+		n:int64 = compactarray·numel(*arr)
+		i:int64 = 0
 		while (i < n) {
-			compactarray·at(*arr, i) -> v
+			compactarray·at(*arr, i) -> v:int64
 			if (v == *val) {
 				*idx = i
 				break
@@ -52,15 +52,15 @@ lib xv {
 		}
 	}
 	rwfunc contains(*[]int64 $arr, *int64 $val) -> (*bool $ok) {
-		xv·find(*arr, *val) -> idx
+		xv·find(*arr, *val) -> idx:int64
 		idx != -1 -> *ok
 	}
 	rwfunc count(*[]int64 $arr, *int64 $val) -> (*int64 $cnt) {
 		*cnt = 0
-		n = compactarray·numel(*arr)
-		i = 0
+		n:int64 = compactarray·numel(*arr)
+		i:int64 = 0
 		while (i < n) {
-			compactarray·at(*arr, i) -> v
+			compactarray·at(*arr, i) -> v:int64
 			if (v == *val) {
 				*cnt = *cnt + 1
 			}
@@ -69,20 +69,20 @@ lib xv {
 	}
 	rwfunc sum(*[]int64 $arr) -> (*int64 $total) {
 		*total = 0
-		n = compactarray·numel(*arr)
-		i = 0
+		n:int64 = compactarray·numel(*arr)
+		i:int64 = 0
 		while (i < n) {
-			compactarray·at(*arr, i) -> v
+			compactarray·at(*arr, i) -> v:int64
 			*total = *total + v
 			i = i + 1
 		}
 	}
 	rwfunc min(*[]int64 $arr) -> (*int64 $m) {
 		compactarray·at(*arr, 0) -> *m
-		n = compactarray·numel(*arr)
-		i = 1
+		n:int64 = compactarray·numel(*arr)
+		i:int64 = 1
 		while (i < n) {
-			compactarray·at(*arr, i) -> v
+			compactarray·at(*arr, i) -> v:int64
 			if (v < *m) {
 				*m = v
 			}
@@ -91,10 +91,10 @@ lib xv {
 	}
 	rwfunc max(*[]int64 $arr) -> (*int64 $m) {
 		compactarray·at(*arr, 0) -> *m
-		n = compactarray·numel(*arr)
-		i = 1
+		n:int64 = compactarray·numel(*arr)
+		i:int64 = 1
 		while (i < n) {
-			compactarray·at(*arr, i) -> v
+			compactarray·at(*arr, i) -> v:int64
 			if (v > *m) {
 				*m = v
 			}
@@ -102,21 +102,21 @@ lib xv {
 		}
 	}
 	rwfunc flatten(*[]int64 $arr) -> (*[]int64 $result) {
-		n = compactarray·numel(*arr)
+		n:int64 = compactarray·numel(*arr)
 		compactarray·newreshape(*arr, n) -> *result
 	}
 	// ── 以下为 #514 增补吸收（原 xv·at/set、ndarray·numel 改写为
 	//    compactarray 系；mutating 函数先 compactarray·copy 再 set）──
 	rwfunc argmin(*[]int64 $arr) -> (*int64 $idx) {
-		n = compactarray·numel(*arr)
+		n:int64 = compactarray·numel(*arr)
 		if (n == 0) {
 			*idx = -1
 		} else {
 			*idx = 0
-			best = compactarray·at(*arr, 0)
-			i = 1
+			best:int64 = compactarray·at(*arr, 0)
+			i:int64 = 1
 			while (i < n) {
-				v = compactarray·at(*arr, i)
+				v:int64 = compactarray·at(*arr, i)
 				if (v < best) {
 					best = v
 					*idx = i
@@ -126,15 +126,15 @@ lib xv {
 		}
 	}
 	rwfunc argmax(*[]int64 $arr) -> (*int64 $idx) {
-		n = compactarray·numel(*arr)
+		n:int64 = compactarray·numel(*arr)
 		if (n == 0) {
 			*idx = -1
 		} else {
 			*idx = 0
-			best = compactarray·at(*arr, 0)
-			i = 1
+			best:int64 = compactarray·at(*arr, 0)
+			i:int64 = 1
 			while (i < n) {
-				v = compactarray·at(*arr, i)
+				v:int64 = compactarray·at(*arr, i)
 				if (v > best) {
 					best = v
 					*idx = i
@@ -145,7 +145,7 @@ lib xv {
 	}
 	rwfunc rfind(*[]int64 $arr, *int64 $target) -> (*int64 $idx) {
 		*idx = -1
-		i = compactarray·numel(*arr) - 1
+		i:int64 = compactarray·numel(*arr) - 1
 		while (i >= 0) {
 			if (compactarray·at(*arr, i) == *target) {
 				*idx = i
@@ -155,12 +155,12 @@ lib xv {
 		}
 	}
 	rwfunc eq(*[]int64 $a, *[]int64 $b) -> (*bool $r) {
-		na = compactarray·numel(*a)
+		na:int64 = compactarray·numel(*a)
 		if (na != compactarray·numel(*b)) {
 			*r = false
 		} else {
 			*r = true
-			i = 0
+			i:int64 = 0
 			while (i < na) {
 				if (compactarray·at(*a, i) != compactarray·at(*b, i)) {
 					*r = false
@@ -171,9 +171,9 @@ lib xv {
 		}
 	}
 	rwfunc is_sorted(*[]int64 $arr) -> (*bool $r) {
-		n = compactarray·numel(*arr)
+		n:int64 = compactarray·numel(*arr)
 		*r = true
-		i = 1
+		i:int64 = 1
 		while (i < n) {
 			if (compactarray·at(*arr, i) < compactarray·at(*arr, i - 1)) {
 				*r = false
@@ -184,13 +184,13 @@ lib xv {
 	}
 	rwfunc sort(*[]int64 $arr) -> (*[]int64 $result) {
 		*result = compactarray·copy(*arr)
-		n = compactarray·numel(*result)
-		i = 1
+		n:int64 = compactarray·numel(*result)
+		i:int64 = 1
 		while (i < n) {
-			key = compactarray·at(*result, i)
-			j = i - 1
+			key:int64 = compactarray·at(*result, i)
+			j:int64 = i - 1
 			while (j >= 0) {
-				vj = compactarray·at(*result, j)
+				vj:int64 = compactarray·at(*result, j)
 				if (vj <= key) {
 					break
 				}
@@ -202,12 +202,12 @@ lib xv {
 		}
 	}
 	rwfunc binary_search(*[]int64 $arr, *int64 $target) -> (*int64 $idx) {
-		lo = 0
-		hi = compactarray·numel(*arr) - 1
+		lo:int64 = 0
+		hi:int64 = compactarray·numel(*arr) - 1
 		*idx = -1
 		while (lo <= hi) {
-			mid = lo + (hi - lo) ÷ 2
-			vm = compactarray·at(*arr, mid)
+			mid:int64 = lo + (hi - lo) ÷ 2
+			vm:int64 = compactarray·at(*arr, mid)
 			if (vm == *target) {
 				*idx = mid
 				break
@@ -220,8 +220,8 @@ lib xv {
 	}
 	rwfunc fill(*[]int64 $arr, *int64 $val) -> (*[]int64 $result) {
 		*result = compactarray·copy(*arr)
-		n = compactarray·numel(*result)
-		i = 0
+		n:int64 = compactarray·numel(*result)
+		i:int64 = 0
 		while (i < n) {
 			compactarray·set(*result, i, *val) -> *result
 			i = i + 1

@@ -4,23 +4,23 @@
 //   true
 //   false
 rwfunc has_dup(*[]int64 $a) -> () {
-	compactarray·numel(*a) -> n
-	seen:[]char/utf8·int64 = {}
-	found = false
-	i = 0
+	compactarray·numel(*a) -> n:int64
+	seen:'[]char/utf8'int64 = {}
+	found:bool = false
+	i:int64 = 0
 	while (i < n) {
-		(*a)[i] -> x
-		seen·*x != None -> exists
+		(*a)[i] -> x:int64
+		seen·*x != None -> exists:bool
 
 		if (exists) {
-			true -> found
-			i = n
+			true -> found:bool
+			i:int64 = n
 		} else {
 			1 -> seen·*x
-			i + 1 -> i
+			i + 1 -> i:int64
 		}
 	}
-	f = found
+	f:bool = found
 
 	if (f) {
 		println("true")
@@ -31,13 +31,13 @@ rwfunc has_dup(*[]int64 $a) -> () {
 
 rwfunc no_dup() -> () {
 	a:[]int64 = [1, 2, 3, 4]
-	seen:[]char/utf8·int64 = {}
-	compactarray·numel(a) -> n
-	found = false
-	i = 0
+	seen:'[]char/utf8'int64 = {}
+	compactarray·numel(a) -> n:int64
+	found:bool = false
+	i:int64 = 0
 	while (i < n) {
-		a[i] -> x
-		seen·*x != None -> exists
+		a[i] -> x:int64
+		seen·*x != None -> exists:bool
 
 		if (exists) {
 			true -> found
@@ -47,7 +47,7 @@ rwfunc no_dup() -> () {
 			i + 1 -> i
 		}
 	}
-	f = found
+	f:bool = found
 
 	if (f) {
 		println("true")

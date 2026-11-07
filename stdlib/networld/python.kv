@@ -6,15 +6,15 @@
 
 lib networld/python {
 	rwfunc run(*[]char/utf32 $code) -> (*[]char/utf32 $out) {
-		noenv:[int64]·[]char/utf32 = {}
-		a:[int64]·[]char/utf32 = {"python3", "-c", *code}
-		networld/proc·exec(a, noenv) -> ret, o, e
+		noenv:'[int64]'[]char/utf32 = {}
+		a:'[int64]'[]char/utf32 = {"python3", "-c", *code}
+		networld/proc·exec(a, noenv) -> ret:uint8, o:[]char/utf32, e:[]char/utf32
 		o -> *out
 	}
 	rwfunc exec(*[]char/utf32 $code) -> (*uint8 $ret, *[]char/utf32 $out, *[]char/utf32 $err) {
-		noenv:[int64]·[]char/utf32 = {}
-		a:[int64]·[]char/utf32 = {"python3", "-c", *code}
-		networld/proc·exec(a, noenv) -> *ret, o, e
+		noenv:'[int64]'[]char/utf32 = {}
+		a:'[int64]'[]char/utf32 = {"python3", "-c", *code}
+		networld/proc·exec(a, noenv) -> *ret, o:[]char/utf32, e:[]char/utf32
 		o -> *out
 		e -> *err
 	}

@@ -18,10 +18,10 @@ rwfunc 造点(*int64 $a, *int64 $b) -> (*点 $r) {
 }
 rwfunc test() -> () {
 	a:点 = {x=3 y=4}
-	求和(a) -> s
+	求和(a) -> s:int64
 	println(s)
 	r0:点 = {}
 	造点(1, 2) -> r0
-	求和(r0) -> s2
+	求和(r0) -> s2:int64
 	println(s2)
 }
