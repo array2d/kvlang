@@ -1,0 +1,12 @@
+// 判据：rwfunc 的返回值同样必须是单一类型——调用方要靠它给上层表达式定类型。
+//
+// 负向用例（第四态）：预期 layout 失败，且错误必须落在返回值这一侧。
+// 与 types/rwfunc_union_parameter.kv 分开两条，是因为实现里参数与返回值是
+// **两处**判定：只做参数侧（漏了返回值）在单条用例下看不出来。
+//
+// 依据：03-类型系统/05-langtype签名类型表达式.kv（normative 节）、
+//       05-runtime语义/04-函数调用.kv。
+// 期望错误: rwfunc return type must be a single type
+rwfunc pick(*int64 $x) -> (*int64|float64 $r) {
+	0 -> *r
+}

@@ -4,69 +4,69 @@
 // 期望输出（depth=6 时）:
 //   bintree: nodes = 127
 rwfunc test() -> () {
-	__SCALE__ -> depth
-	L:[int64]·int64 = {}
-	R:[int64]·int64 = {}
-	bid:[int64]·int64 = {}
-	bdep:[int64]·int64 = {}
-	0 -> nid
-	t0 = time·now()
-	nid + 1 -> nid
-	nid -> root
+	__SCALE__ -> depth:int64
+	L:'[int64]'int64 = {}
+	R:'[int64]'int64 = {}
+	bid:'[int64]'int64 = {}
+	bdep:'[int64]'int64 = {}
+	0 -> nid:int64
+	t0:time = time·now()
+	nid + 1 -> nid:int64
+	nid -> root:int64
 	0 -> L·*root
 	0 -> R·*root
-	0 -> top
+	0 -> top:int64
 	root -> bid·*top
 	depth -> bdep·*top
-	top + 1 -> top
+	top + 1 -> top:int64
 	while (top > 0) {
-		top - 1 -> top
-		bid·*top -> cur
-		bdep·*top -> d
+		top - 1 -> top:int64
+		bid·*top -> cur:int64
+		bdep·*top -> d:int64
 		if (d > 0) {
-			nid + 1 -> nid
-			nid -> lc
-			nid + 1 -> nid
-			nid -> rc
+			nid + 1 -> nid:int64
+			nid -> lc:int64
+			nid + 1 -> nid:int64
+			nid -> rc:int64
 			lc -> L·*cur
 			rc -> R·*cur
 			0 -> L·*lc
 			0 -> R·*lc
 			0 -> L·*rc
 			0 -> R·*rc
-			d - 1 -> nd
+			d - 1 -> nd:int64
 			lc -> bid·*top
 			nd -> bdep·*top
-			top + 1 -> top
+			top + 1 -> top:int64
 			rc -> bid·*top
 			nd -> bdep·*top
-			top + 1 -> top
+			top + 1 -> top:int64
 		}
 	}
-	0 -> count
-	tid:[int64]·int64 = {}
-	0 -> tp
+	0 -> count:int64
+	tid:'[int64]'int64 = {}
+	0 -> tp:int64
 	root -> tid·*tp
-	tp + 1 -> tp
+	tp + 1 -> tp:int64
 	while (tp > 0) {
-		tp - 1 -> tp
-		tid·*tp -> cur
-		count + 1 -> count
-		L·*cur -> lc
-		R·*cur -> rc
+		tp - 1 -> tp:int64
+		tid·*tp -> cur:int64
+		count + 1 -> count:int64
+		L·*cur -> lc:int64
+		R·*cur -> rc:int64
 		if (lc != 0) {
 			lc -> tid·*tp
-			tp + 1 -> tp
+			tp + 1 -> tp:int64
 		}
 		if (rc != 0) {
 			rc -> tid·*tp
-			tp + 1 -> tp
+			tp + 1 -> tp:int64
 		}
 	}
-	t1 = time·now()
+	t1:time = time·now()
 	println("bintree: nodes =", count)
-	delta = time·sub(t1, t0)
-	ns = time/duration·as_nanos(delta)
+	delta:time/duration = time·sub(t1, t0)
+	ns:int64 = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: depth=__SCALE__")
 }

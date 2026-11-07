@@ -1,0 +1,43 @@
+// guess_number: 二分查找猜数字（Python Tutorial §4.4）
+// 算法: while 循环 + 二分查找，在 [1,100] 中找 target=73
+// 来源: Python Tutorial §4.4
+// 期望输出:
+//   found 73 in 6 guesses
+rwfunc guess_number() -> () {
+	73 -> target:int64
+	lo:int64 = 1
+	hi:int64 = 100
+	0 -> tries:int64
+	found:int64 = 0
+	while (found == 0) {
+		s:int64 = lo + hi
+		s ÷ 2 -> mid_float:int64
+		s ÷ 2 -> mid_float_m:int64
+		mid:int64 = int64(mid_float)
+		tries = tries + 1
+		println("guess #", tries, ":", mid)
+		mid == target -> hit:bool
+
+		if (hit) {
+			found = 1
+			println("  correct!")
+		} else {
+			too_low:bool = mid < target
+
+			if (too_low) {
+				mid + 1 -> lo
+				println("  too low, range:", lo, "-", hi)
+			} else {
+				hi = mid - 1
+				println("  too high, range:", lo, "-", hi)
+			}
+		}
+	}
+	println("found", target, "in", tries, "guesses")
+	/last_guesses = tries
+}
+
+rwfunc test() -> () {
+
+	guess_number()
+}

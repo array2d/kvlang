@@ -9,7 +9,7 @@
 use std::env;
 use std::fs;
 
-use kvlanglayout::{compile, format, init_dirs, printlib, vet, Kv};
+use kvlanglayout::{compile, format, init_dirs, printlib, vet, vet_with_store, Kv};
 
 /// 复刻 Go runtime 的 findEntry：DFS /lib/ 找首个 init（顶层 `init` 或 lib 块内 `pkg·init`）。
 fn find_entry(kv: &mut Kv, prefix: &str, pkg: &str) -> String {
@@ -71,7 +71,16 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() >= 3 && args[1] == "vet" {
         let src = read_src(&args[2]);
-        match vet(&src) {
+        // `vet <file> [dsn]`：给了 dsn 就按 `compile` 的判据再跑一遍依赖 `/lib` 声明的检查。
+        // 不给就只做纯检查——此时「ok」**不**等于「能编译」，见 `code::vet` 的注释。
+        let result = match args.get(3) {
+            Some(dsn) => {
+                let mut kv = Kv::conn(dsn);
+                vet_with_store(&mut kv, &src)
+            }
+            None => vet(&src),
+        };
+        match result {
             Ok(()) => println!("ok"),
             Err(e) => {
                 eprintln!("{e}");

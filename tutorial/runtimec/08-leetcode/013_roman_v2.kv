@@ -1,0 +1,75 @@
+// 013: Roman to Integer — 罗马数字转整数
+// 来源: LeetCode #13
+// 期望输出:
+//   58
+rwfunc roman_to_int(*[]char/utf32 $s) -> () {
+	string·len(*s) -> n:int64
+	result:int64 = 0
+	i:int64 = 0
+	while (i < n) {
+		string·char(*s, i) -> c:char/utf32
+		is_I:bool = c == "I"
+		is_V:bool = c == "V"
+		c == "X" -> is_X:bool
+		is_L:bool = c == "L"
+		is_C:bool = c == "C"
+		c == "D" -> is_D:bool
+		is_M:bool = c == "M"
+
+		if (is_I) {
+			ni:int64 = i + 1
+			ni < n -> has_next:bool
+
+			if (has_next) {
+				nc:char/utf32 = string·char(*s, ni)
+				iv:bool = nc == "V"
+				nc == "X" -> ix:bool
+
+				if (iv) {
+					val:int64 = 4
+					i = i + 1
+				} else {
+					if (ix) {
+						9 -> val
+						i = i + 1
+					} else {
+						val = 1
+					}
+				}
+			} else {
+				1 -> val
+			}
+		} else {
+			if (is_V) {
+				val = 5
+			} else {
+				if (is_X) {
+					val = 10
+				} else {
+					if (is_L) {
+						50 -> val
+					} else {
+						if (is_C) {
+							val = 100
+						} else {
+							if (is_D) {
+								val = 500
+							} else {
+								1000 -> val
+							}
+						}
+					}
+				}
+			}
+		}
+
+		result = result + val
+		i = i + 1
+	}
+	println(result)
+}
+
+rwfunc test() -> () {
+
+	roman_to_int("LVIII")
+}

@@ -52,8 +52,7 @@ fn has_error_at(src: &str, line: i32, col: i32, needle: &str) -> bool {
 }
 
 fn body(data: &[u8]) -> Vec<u8> {
-    let h = kvkind::head(data);
-    kvkind::body(data, &h).to_vec()
+    data.to_vec()
 }
 
 /// Decode slot text: `int64` -> decimal, `rwir`/`rwfunc` -> name (stripping trailing `\0<langtype>`).
@@ -90,6 +89,8 @@ fn plane(kv: &mut Kv, func: &str) -> BTreeMap<i32, (String, Vec<String>)> {
     out
 }
 
+
+
 #[test]
 fn break_continue_outside_loop_is_positioned_error() {
     let src = "rwfunc test() -> () {\n\tprintln(\"before\")\n\tbreak\n}\n";
@@ -101,7 +102,7 @@ fn break_continue_outside_loop_is_positioned_error() {
     assert!(compile(&mut s.kv, src).is_err());
     assert!(s.kv.get_one("/lib/test/[0,0]").is_empty(), "rejected program must not be written");
     // Valid inside a loop (including nested `if`).
-    let ok = "rwfunc t(n:int64) -> () {\n\ti = 0\n\twhile (i < n) {\n\t\tif (i == 2) { break }\n\t\ti + 1 -> i\n\t}\n}\n";
+    let ok = "rwfunc t(*int64 $n) -> () {\n\ti = 0\n\twhile (i < *n) {\n\t\tif (i == 2) { break }\n\t\ti + 1 -> i\n\t}\n}\n";
     assert!(errors(ok).is_empty(), "{:?}", errors(ok));
     assert!(vet(ok).is_ok());
 }
@@ -121,7 +122,7 @@ fn user_label_errors_are_positioned() {
 /// Unterminated code before a `goto`-targeted label must emit a fall-through `goto` rather than panicking or skipping the block.
 #[test]
 fn targeted_label_is_entered_by_fallthrough() {
-    let top = "rwfunc f(c:int64) -> (r:int64) {\n\tif (c == 1) {\n\t\tgoto(L)\n\t}\n\t1 -> r\n\tL: {\n\t\tr + 10 -> r\n\t\treturn\n\t}\n}\n";
+    let top = "rwfunc f(*int64 $c) -> (*int64 $r) {\n\tif (*c == 1) {\n\t\tgoto(L)\n\t}\n\t1 -> *r\n\tL: {\n\t\t*r + 10 -> *r\n\t\treturn\n\t}\n}\n";
     assert!(vet(top).is_ok());
     let mut s = store();
     compile(&mut s.kv, top).unwrap();
@@ -143,7 +144,7 @@ fn targeted_label_is_entered_by_fallthrough() {
 fn vet_rejects_what_compile_rejects() {
     let bad = [
         "rwfunc f() -> () {\n\tx:int8 = 300\n}\n",
-        "rwfunc f(a:) -> () {\n\tsub(a) -> x\n}\n",
+        "rwfunc f(*int64 $a) -> () {\n\tx:int8 = 300\n}\n",
         "struct P {\n\tx:int8=300\n}\n",
         "struct P {\n\tx:int64=\"a\"\n}\n",
     ];
@@ -152,7 +153,7 @@ fn vet_rejects_what_compile_rejects() {
         let mut s = store();
         assert!(compile(&mut s.kv, src).is_err(), "compile accepted:\n{src}");
     }
-    let good = "rwfunc f(a:int64) -> (r:int64) {\n\tint64·add(a, 1) -> r\n}\n";
+    let good = "rwfunc f(*int64 $a) -> (*int64 $r) {\n\tadd(*a, 1) -> *r\n}\n";
     assert!(vet(good).is_ok());
     let mut s = store();
     compile(&mut s.kv, good).unwrap();
@@ -222,8 +223,9 @@ fn failed_compile_keeps_previous_function_intact() {
     assert_eq!(s.kv.get_one("/lib/g/[1,0]"), before, "old body must survive a failed re-layout");
     let src = slot(&mut s.kv, "/lib/g.src");
     assert!(src.contains("println"), "old .src must survive: {src:?}");
-    let err = compile(&mut s.kv, "rwfunc h(a:) -> () {\n\tsub(a) -> x\n}\n").unwrap_err();
-    assert!(err.contains("sub must emit"), "{err}");
+    let err = compile(&mut s.kv, "rwfunc h(*int64 $a) -> () {\n\tx:int8 = 300\n}\n").unwrap_err();
+    // 拒绝即可：具体诊断在 stderr，`compile` 只回「refusing to load」。
+    assert!(err.contains("refusing to load"), "{err}");
     assert!(s.kv.get_one("/lib/h/[0,0]").is_empty(), "no half-written signature");
     assert!(s.kv.get_one("/lib/h.src").is_empty());
     let err = compile(
@@ -238,6 +240,8 @@ fn failed_compile_keeps_previous_function_intact() {
 #[test]
 fn cli_reports_errors_without_panicking() {
     let dir = std::env::temp_dir().join(format!("kvlanglayout_robust_cli_{}", std::process::id()));
+    // 先删同名旧目录：测试在同一 pod 反复跑会累积，/tmp 曾因此 OOM。
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let f = dir.join("brk.kv");
     std::fs::write(&f, "rwfunc test() -> () {\n\tprintln(\"before\")\n\tbreak\n}\n").unwrap();
@@ -302,21 +306,10 @@ fn truncated_corpus_never_panics() {
 /// `format` preserves member reads and empty-kindexp params (`a:`) idempotently with identical layout output.
 #[test]
 fn format_round_trips_member_reads_and_empty_kindexp() {
-    let src = "rwfunc f(a:, n:int64) -> (r:int64) {\n\
-               \tm:[]char/utf8·int64 = {}\n\
-               \tk = \"x\"\n\
-               \tm·x = 1\n\
-               \tm·x -> v1\n\
-               \tm·*k -> v2\n\
-               \t\"/tmp/up\"·*n -> v3\n\
-               \t\"/tmp/up\"·0 -> v4\n\
-               \tm·\"a b\" -> v5\n\
-               \tm·\"if\" -> v6\n\
-               \tv1 + m·x -> r\n\
-               }\n";
+    let src = "rwfunc f(*int64 $a, *int64 $n) -> (*int64 $r) {\n\tm:[]char/utf8·int64 = {}\n\tk = \"x\"\n\tm·x = 1\n\tm·x -> v1\n\tm·*k -> v2\n\t\"/tmp/up\"·*n -> v3\n\t\"/tmp/up\"·0 -> v4\n\tm·\"a b\" -> v5\n\tm·\"if\" -> v6\n\tv1 + m·x -> *r\n}\n";
     let once = kvlanglayout::format(src).unwrap();
     assert!(!once.contains("=("), "member read rendered as a call:\n{once}");
-    assert!(once.contains("f(a:, n:int64)"), "{once}");
+    assert!(once.contains("f(*int64 $a, *int64 $n)"), "{once}");
     assert!(errors(&once).is_empty(), "formatted output must parse:\n{once}\n{:?}", errors(&once));
     assert_eq!(kvlanglayout::format(&once).unwrap(), once, "format must be idempotent");
     let (mut a, mut b) = (store(), store());
@@ -325,17 +318,116 @@ fn format_round_trips_member_reads_and_empty_kindexp() {
     assert_eq!(plane(&mut a.kv, "f"), plane(&mut b.kv, "f"));
 }
 
-/// `Instruction::flat` before lowering must not panic on non-leaf deref operands (`*(a + 1)`, `*f(x)`, `*p·x`).
+/// `Instruction::flat` before lowering must not panic on non-leaf deref operands (`*(a + 1)`, `*f(x)`)。
+///
+/// 样本里不能再写 `*a·b`：裸指针基座的成员访问已是错误（显式解引用铁律），
+/// 写 `(*a)·b` 才是它的对应形态。这条测的是 flat 的健壮性，不是解引用规则。
 #[test]
 fn deref_of_expression_does_not_panic() {
-    let src = "rwfunc t(a:int64) -> () {\n\t*(a + 1) -> x\n\t*a·b -> y\n}\n";
+    let src = "rwfunc t(*int64 $a) -> () {\n\t*(*a + 1) -> x\n\t(*a)·b -> y\n}\n";
     assert!(vet(src).is_ok());
     let mut s = store();
     compile(&mut s.kv, src).unwrap();
+    // `*a` 先展开成第 1 条拷贝指令（`_1 = *a`），`add` 因此落在第 2 条。
+    // 形参名在槽里替换成帧坐标（`param_slot`）：`*a` → `*[0,-1]`，读写两侧同一规则。
     let p = plane(&mut s.kv, "t");
-    assert_eq!(p[&1].0, "int64·add");
-    assert_eq!(p[&2], ("=".to_string(), vec!["*_1".to_string()]));
-    let src2 = "rwfunc f(a:int64) -> (r:int64) { a -> r }\nrwfunc t(a:int64) -> () {\n\tx = *f(a)\n}\n";
+    assert_eq!(p[&1], ("=".to_string(), vec!["*[0,-1]".to_string()]));
+    assert_eq!(p[&2].0, "add");
+    assert_eq!(p[&3], ("=".to_string(), vec!["*_1".to_string()]));
+    let src2 = "rwfunc f(*int64 $a) -> (*int64 $r) { *a -> *r }\nrwfunc t(*int64 $a) -> () {\n\tx = *f(*a)\n}\n";
     assert!(vet(src2).is_ok());
     compile(&mut store().kv, src2).unwrap();
+}
+
+/// `rwfunc` 的参数与返回值必须是单一类型：并集会让调用方无从推出类型。
+///
+/// 反向控制同样重要：`rwir` 声明**保留**并集能力（算子由编译期特化器收敛），
+/// 若没有这一条，把判据写成「所有签名都不许并集」也能让上面三条全绿。
+#[test]
+fn rwfunc_signature_rejects_union_but_rwir_declaration_keeps_it() {
+    let single = "rwfunc f(int64 $a) -> (int64 $r) {\n\t*a -> $r\n}\n";
+    assert!(
+        errors(single).iter().all(|(_, _, m)| !m.contains("single type")),
+        "{:?}",
+        errors(single)
+    );
+
+    let param_union = "rwfunc f(int64|float64 $a) -> (int64 $r) {\n\t*a -> $r\n}\n";
+    assert!(
+        errors(param_union)
+            .iter()
+            .any(|(_, _, m)| m.contains("rwfunc parameter must be a single type")),
+        "{:?}",
+        errors(param_union)
+    );
+
+    let return_union = "rwfunc f(int64 $a) -> (int64|float64 $r) {\n\t*a -> $r\n}\n";
+    assert!(
+        errors(return_union)
+            .iter()
+            .any(|(_, _, m)| m.contains("rwfunc return type must be a single type")),
+        "{:?}",
+        errors(return_union)
+    );
+
+    // 反向控制：同样的并集写在 rwir 声明处必须**不**被这条规则拦下。
+    let rwir_union = "rwir demo·pick(*int64|float64 $a) -> (*int64|float64 $r)\n";
+    assert!(
+        errors(rwir_union).iter().all(|(_, _, m)| !m.contains("single type")),
+        "{:?}",
+        errors(rwir_union)
+    );
+}
+
+/// 参数变参（spec 03-类型系统/08「参数变参」）：一个参数位吸收 0..N 个同型实参。
+///
+/// 判据是「**arity** 开放」——`...` 是**签名层**的 arity 属性，不是类型的一部分：
+/// 它落签名行锚点 `[0,0]` 的 `dynamic` 字节，参数 langtype 子串保持纯净。
+/// 所以放开的是**个数**，不是**类型**：`f(1)` 对 `*[]char/utf32 $s...` 仍须报
+/// `cannot pass int64`（见下面的反向控制）。
+///
+/// 这条放在 layout 的 Rust 用例里、不放 kv 语料，是因为语料用例的定义是
+/// 「给全能力集后能跑完并产出期望输出」。一条「本来就不打算执行」的用例会让
+/// blocked 从「能力缺口计数」变成「作者心情计数」——blocked 不许当免责通道。
+#[test]
+fn variadic_parameter_accepts_any_arity() {
+    for arity in [0usize, 1, 4] {
+        let args = vec!["1"; arity].join(", ");
+        let src = format!(
+            "rwfunc f(*int64... $x) -> () {{\n}}\nrwfunc g() -> () {{\n\tf({args})\n}}\n"
+        );
+        assert!(vet(&src).is_ok(), "arity {arity}: {:?}", errors(&src));
+    }
+}
+
+/// 反向控制：变参放开的是 arity，不是类型。
+///
+/// 若实现把 `...` 理解成「这一位什么都收」，下面第一条会绿——那就不是 arity 多态，
+/// 而是类型检查被关掉了。
+///
+/// **判据用 `vet` 不用 `errors()`**：实参类型检查在 lower 层（`check_call_args`/
+/// `check_call_shapes`），而 `errors()` 只跑 `parser::parse_code`，看不到那条诊断。
+/// 拿 `errors()` 判会得到一个恒真的「无诊断」——今天在别处踩过同形的坑。
+#[test]
+fn variadic_parameter_still_checks_type() {
+    let bad = "rwfunc f(*[]char/utf32 $s...) -> () {\n}\nrwfunc g() -> () {\n\tf(1, 2)\n}\n";
+    // `vet` 的 `Err` 只带汇总串（`type: error-level diagnostics — refusing to load`），
+    // 具体诊断在 stderr。这里判「被拒」；消息内容由 CLI 层验（`kvlang_layout_file`
+    // 的 stderr 含 `cannot pass int64`，见 workspace/622/coding3/shape-matching-fix.md）。
+    assert!(vet(bad).is_err(), "变参位把 int64 当字符串收了");
+
+    // 同类型的多实参必须放行——与上一条配对，证明拒绝的是类型不是个数。
+    let ok =
+        "rwfunc f(*[]char/utf32 $s...) -> () {\n}\nrwfunc g() -> () {\n\tf(\"a\", \"b\", \"c\")\n}\n";
+    assert!(vet(ok).is_ok(), "{:?}", errors(ok));
+}
+
+/// `...` 只属于**末**读参：写在非末位必须报错。
+#[test]
+fn variadic_marker_must_be_last() {
+    let src = "rwfunc f(*int64... $a, *int64 $b) -> () {\n}\n";
+    assert!(
+        !errors(src).is_empty(),
+        "非末位的 `...` 应被拒绝，实际无诊断"
+    );
 }

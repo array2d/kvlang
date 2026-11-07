@@ -15,8 +15,8 @@ myrwircaps 内的 rwir，直到遇到不在 myrwircaps 内的指令，把最终 
 ### 关键术语：myrwircaps（本 runtime 的 rwir 能力表）
 
 **myrwircaps 是每个 runtime 都必须定义的一张 map/table**——登记本 runtime **能就地解释的全部
-opcode**，映射 `opcode → 就地处理器`。它是 kvlang runtime 分层与派发的核心术语：一个 runtime「能跑什
-么」由且仅由它的 myrwircaps 界定。
+opcode**，映射 `opcode → 就地 rwir_runtimecimpl`。它是 kvlang runtime 分层与派发的核心术语：
+一个 runtime「能跑什么」由且仅由它的 myrwircaps 界定。
 
 - **每个 runtime 必须声明自己的 myrwircaps**。核心 runtimec2 的 myrwircaps 就是其 **native 静态注册
   表**（数组 + 线性查找，见 [[cruntime与后端abi]]），登记 native builtin（+ 控制流 `call`/`return`/
@@ -24,10 +24,10 @@ opcode**，映射 `opcode → 就地处理器`。它是 kvlang runtime 分层与
 - **每个扩展运行时各自定义一张 myrwircaps**，登记其自带的 rwir opcode。例：byteseek 为 `term`/
   `json`/`http`/`kvlang`/`networld` 等（见 [[notinmyrwircaps]] 就地集合）；未来
   deepx-gpu-compute 为 tensor 融合算子。
-- **派发判据**：`opcode ∈ 本 runtime.myrwircaps` → 查表取处理器**就地执行**；否则该 rwir 须经 def
-  rwir 路由，**移交**给以它为 myrwircaps 的另一扩展（跨进程 handoff/watch，或嵌入式交回宿主，见
-  [[notinmyrwircaps]]、[[cruntime与后端abi_续]]）。实现里 `rwir::is_inproc(op)` 即
-  「`op ∈ myrwircaps`」的查表判定。
+- **派发判据**：`opcode ∈ 本 runtime.myrwircaps` → 查表取其 rwir_runtimecimpl **就地执行**；
+  否则该 rwir 须经 def rwir 路由，**移交**给以它为 myrwircaps 的另一扩展（跨进程
+  handoff/watch，或嵌入式交回宿主，见 [[notinmyrwircaps]]、[[cruntime与后端abi_续]]）。
+  实现里 `rwir::is_inproc(op)` 即「`op ∈ myrwircaps`」的查表判定。
 
 myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑），不改变 rwir 的动态语义——同一 rwir 无论
 落进哪个 runtime 的 myrwircaps，行为必须一致。
@@ -40,7 +40,7 @@ myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑�
 核心公理（normative）：
 
 1. **rwir 自描述**：opcode + 读/写参已含执行所需全部信息。
-2. **注册即签名**：扩展把 `/‥isa/<folded-op>`（kind=`def rwir`，主槽 body=[nr][nw][dynamic]，各参数类型
+2. **注册即签名**：扩展把 `/lib/<op>`（kind=`def rwir`，主槽 body=[nr][nw][dynamic]，各参数类型
    在签名行 `[0,x]` 各槽）写进 kvspace 即完成声明——无 `/sys/`、无中心目录。
 3. **批量执行**：扩展连续执行 myrwircaps 内的 rwir 到不在 myrwircaps 内的指令，把最终 PC 写回
    vthread。
@@ -50,23 +50,23 @@ myrwircaps **只关乎执行位置**（哪张表登记了它、由谁就地跑�
 
 ### 签名注册
 
-扩展把每个 opcode 的签名写到 `/‥isa/<folded-op>`（kind=`def rwir`），格式为：
+扩展把每个 opcode 的签名写到 `/lib/<op>`（kind=`def rwir`），格式为：
 
 - 主槽 body：`[nr:u16 LE][nw:u16 LE][dynamic:u8]`——读参个数 `nr`、写参个数 `nw`、是否变参
   `dynamic`。
 - 签名行 `[0,x]` 各槽：每个参数类型落一个 `def langtype` xvalue（`x<0` 读参、`x>0` 写参、`[0,0]` 为
   锚点）。
 
-例：`/‥isa/json/to`（nr=1, nw=1）→ 主槽 body=[1,1,0]，`[0,-1]=def langtype("char/utf8")`，
+例：`/lib/json/to`（nr=1, nw=1）→ 主槽 body=[1,1,0]，`[0,-1]=def langtype("char/utf8")`，
 `[0,1]=def langtype("[]char/utf8")`。
 
-- native opcode 的签名由 layout 按作者清单写入 `/‥isa`；runtime 的
-  handler 仍在 C/各语言 myrwircaps 表中，启动时按名对账。
-- 其它 runtime 的 rwir 签名**落 `/‥isa/<folded-op>`**，中央 runtime 经 `notinmyrwircaps` 识别：
-  `opcode[0]=='/'` → false；否则读 `/‥isa/<folded-op>` 的 kind，等于 `def rwir` 即不在本 runtime
+- native opcode 的签名由 layout 按作者清单写入 `/lib` 下的 def rwir 节点；runtime 的
+  rwir_runtimecimpl 仍在 C/各语言 myrwircaps 表中，启动时按名对账。
+- 其它 runtime 的 rwir 签名**落 `/lib/<op>`**，中央 runtime 经 `notinmyrwircaps` 识别：
+  `opcode[0]=='/'` → false；否则读 `/lib/<op>` 的 kind，等于 `def rwir` 即不在本 runtime
   myrwircaps、须经 def rwir 路由。
 
-layout 把 `/‥isa/<folded-op>` 的 def rwir 当唯一签名来源；
+layout 把 `/lib/<op>` 的 def rwir 当唯一签名来源；
 native 与扩展同形。扩展在自己的 runtime 启动时写同名声明，不设
 `‥ext` manifest、不设独立控制 store。
 
@@ -81,7 +81,7 @@ native 与扩展同形。扩展在自己的 runtime 启动时写同名声明，�
 
 扩展的每个 opcode 携带读参表 `rp` 与写参表 `wp`，各槽一个 langtype（Rust
 `byteseek/src/rwir/mod.rs::Rwir{rp,wp}`）。注册时各参数类型分别写入
-`/‥isa/<folded-op>` 签名行 `[0,x]`
+`/lib/<op>` 签名行 `[0,x]`
 的 `def langtype` 槽（`rp` 各参 `x<0` 递减、`wp` 各参 `x>0` 递增）；主槽 body 只记
 `[nr][nw][dynamic]`（见 [[总体方案]]）。读参**只读**、写参**可写可读**；扩展**必须**把输出显式写入其
 写槽（见 [[执行模型]] §五）。示例（networld）：

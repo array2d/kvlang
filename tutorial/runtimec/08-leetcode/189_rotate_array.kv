@@ -1,0 +1,61 @@
+// 189: Rotate Array — 三次反转旋转
+// 算法: reverse(0,n-1), reverse(0,k-1), reverse(k,n-1)
+// 来源: LeetCode #189
+// 期望输出:
+//   5
+//   6
+//   7
+//   1
+//   2
+//   3
+//   4
+rwfunc rotate() -> () {
+	a:[]int64 = [1, 2, 3, 4, 5, 6, 7]
+	n:int64 = compactarray·numel(a)
+	3 -> k:int64
+	k_eff:int64 = k % n
+	// reverse all
+	lo:int64 = 0
+	n - 1 -> hi:int64
+	while (lo < hi) {
+		t:int64 = a[lo]
+		u:int64 = a[hi]
+		a[lo] = u
+		a[hi] = t
+		lo + 1 -> lo
+		hi = hi - 1
+	}
+	// reverse first k
+	lo2:int64 = 0
+	k_eff - 1 -> hi2:int64
+	while (lo2 < hi2) {
+		t2:int64 = a[lo2]
+		u2:int64 = a[hi2]
+		a[lo2] = u2
+		a[hi2] = t2
+		lo2 + 1 -> lo2
+		hi2 = hi2 - 1
+	}
+	// reverse last n-k
+	lo3:int64 = k_eff
+	n - 1 -> hi3:int64
+	while (lo3 < hi3) {
+		t3:int64 = a[lo3]
+		u3:int64 = a[hi3]
+		a[lo3] = u3
+		a[hi3] = t3
+		lo3 + 1 -> lo3
+		hi3 = hi3 - 1
+	}
+	j:int64 = 0
+	while (j < n) {
+		a[j] -> v:int64
+		println(v)
+		j = j + 1
+	}
+}
+
+rwfunc test() -> () {
+
+	rotate()
+}

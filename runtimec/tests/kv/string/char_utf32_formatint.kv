@@ -1,0 +1,14 @@
+// 判据：`string·formatint` 写到 `char/utf32` 槽时，每字符必须 4 字节。
+// 十进制码点全 <= 0x7F 只说明内容窄，不说明字节宽度——恒写 UTF-8 会让
+// 体长等于字符数而不是 4 倍，按 utf32 解即畸形。
+// 依据：five-language-behavior-matrix `string-format-base-radix`；
+//       `string_text_encode` 的 utf32 分支。
+// 期望输出:
+//   -42
+//   ff
+rwfunc test() -> () {
+	a:char/utf32 = string·formatint(-42)
+	println(a)
+	b:char/utf32 = string·formatuint(255, 16)
+	println(b)
+}

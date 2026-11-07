@@ -2,39 +2,39 @@
 // 棋盘规模 N 由 __SCALE__ 占位，run.py 按扫描点替换（勿改逻辑）
 // 期望输出（N=5 时）:
 //   queens = 10
-rwfunc nq(cols:int64, d1:int64, d2:int64, all:int64) -> (cnt:int64) {
-	if (cols == all) {
-		1 -> cnt
+rwfunc nq(*int64 $cols, *int64 $d1, *int64 $d2, *int64 $all) -> (*int64 $cnt) {
+	if (*cols == *all) {
+		1 -> *cnt
 	} else {
-		0 -> cnt
-		cols | d1 -> occ0
-		occ0 | d2 -> occ1
-		occ1 & all -> occ
-		occ ^ all -> avail
+		0 -> *cnt
+		*cols | *d1 -> occ0:int64
+		occ0 | *d2 -> occ1:int64
+		occ1 & *all -> occ:int64
+		occ ^ *all -> avail:int64
 		while (avail != 0) {
-			0 - avail -> neg
-			avail & neg -> p
-			avail ^ p -> avail
-			cols | p -> nc
-			d1 | p -> u1
-			u1 << 1 -> nd1
-			d2 | p -> u2
-			u2 >> 1 -> nd2
-			nq(nc, nd1, nd2, all) -> sub
-			cnt = cnt + sub
+			0 - avail -> neg:int64
+			avail & neg -> p:int64
+			avail ^ p -> avail:int64
+			*cols | p -> nc:int64
+			*d1 | p -> u1:int64
+			u1 << 1 -> nd1:int64
+			*d2 | p -> u2:int64
+			u2 >> 1 -> nd2:int64
+			nq(nc, nd1, nd2, *all) -> sub:int64
+			*cnt = *cnt + sub
 		}
 	}
 }
 
 rwfunc test() -> () {
-	t0 = time·now()
-	1 << __SCALE__ -> sh
-	sh - 1 -> all
-	nq(0, 0, 0, all) -> ans
-	t1 = time·now()
+	t0:time = time·now()
+	1 << __SCALE__ -> sh:int64
+	sh - 1 -> all:int64
+	nq(0, 0, 0, all) -> ans:int64
+	t1:time = time·now()
 	println("queens =", ans)
-	delta = time·sub(t1, t0)
-	ns = time/duration·as_nanos(delta)
+	delta:time/duration = time·sub(t1, t0)
+	ns:int64 = time/duration·as_nanos(delta)
 	println("__bench_ns:", ns)
 	println("__bench_input: N=__SCALE__")
 }

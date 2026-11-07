@@ -1,0 +1,15 @@
+// 判据：rwfunc 的参数必须是单一类型；并集让调用方无从推出实参类型。
+//
+// 负向用例（第四态）：本文件**预期 layout 失败**，且错误必须落在参数这一侧。
+// 若禁令被删掉，本文件会 layout 成功 → 判 FAIL「预期失败却通过了」；
+// 若禁令改成了「只拦返回值」，本文件仍会失败，但错误不含本串 → 也判 FAIL。
+//
+// 反向控制见 types/rwfunc_union_return.kv（返回值侧）与 lib/rwir_union_kept.kv
+// （rwir 声明侧保留并集）——三条缺一条，把禁令写成「所有签名都不许并集」也能全绿。
+//
+// 依据：03-类型系统/05-langtype签名类型表达式.kv（normative 节）、
+//       05-runtime语义/04-函数调用.kv。
+// 期望错误: rwfunc parameter must be a single type
+rwfunc pick(*int64|float64 $x) -> (*int64 $r) {
+	0 -> *r
+}

@@ -1,0 +1,37 @@
+// 029: Divide Two Integers — 不用 */ % 实现整数除法
+// 来源: LeetCode #29
+// 期望输出:
+//   3
+//   -2
+rwfunc divide(*int64 $dividend, *int64 $divisor) -> (*int64 $result) {
+	dend:int64 = *dividend
+	dsor:int64 = *divisor
+	neg:int64 = 0
+	if (dend < 0) {
+		neg = 1 - neg
+		dend = 0 - dend
+	}
+	if (dsor < 0) {
+		neg = 1 - neg
+		dsor = 0 - dsor
+	}
+	*result = 0
+	while (dend >= dsor) {
+		temp:int64 = dsor
+		multiple:int64 = 1
+		while (dend >= temp + temp) {
+			temp = temp + temp
+			multiple = multiple + multiple
+		}
+		dend = dend - temp
+		*result = *result + multiple
+	}
+	if (neg == 1) { *result = 0 - *result }
+}
+
+rwfunc test() -> () {
+	r1:int64 = divide(10, 3)
+	println(r1)
+	r2:int64 = divide(7, -3)
+	println(r2)
+}

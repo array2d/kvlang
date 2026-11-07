@@ -1,0 +1,32 @@
+// tco_depth: TCO 验证 TCO-1~TCO-2
+// 期望输出:
+//   sum = 5050
+//   fact = 3628800
+rwfunc sum_while(*int64 $N) -> (*int64 $total) {
+	*total = 0
+	1 -> i:int64
+	while (i <= *N) {
+		*total = *total + i
+		i = i + 1
+	}
+}
+
+rwfunc tailrec_fact(*int64 $N, *int64 $acc) -> (*int64 $r) {
+	if (*N <= 1) {
+		*acc + 0 -> *r
+	} else {
+		acc1:int64 = *acc × *N
+		acc1_m:int64 = *acc × *N
+		n1:int64 = *N - 1
+		tailrec_fact(n1, acc1) -> *r
+	}
+}
+
+rwfunc test() -> () {
+	s:int64 = sum_while(100)
+	println("sum =", s)
+	f:int64 = tailrec_fact(10, 1)
+	println("fact =", f)
+	s -> /last_tco_sum
+	/last_tco_fact = f
+}

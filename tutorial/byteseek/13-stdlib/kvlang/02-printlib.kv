@@ -1,0 +1,23 @@
+// kvlang·printlib：把 /lib 子树重建为可运行 kvlang —— **只看 layout 结果，不读 `.src`**
+//   验法：dump 一次 → 删掉该函数的源码副本 `.src` → 再 dump，两次输出必须一致
+// 期望输出:
+//   before-has-fn= true
+//   after-has-fn= true
+//   stable= 0
+lib pl_probe {
+	rwfunc add(*int64 $a, *int64 $b) -> (*int64 $c) {
+		*a + *b -> *c
+	}
+}
+
+rwfunc test() -> () {
+	kvlang·printlib("/lib/pl_probe") -> before:[]char/utf32
+	string·contains(before, "rwfunc add") -> h1:bool
+	println("before-has-fn=", h1)
+	kvspace·del("/lib/pl_probe·add.src") -> _
+	kvlang·printlib("/lib/pl_probe") -> after:[]char/utf32
+	string·contains(after, "rwfunc add") -> h2:bool
+	println("after-has-fn=", h2)
+	string·cmp(before, after) -> same:int64
+	println("stable=", same)
+}

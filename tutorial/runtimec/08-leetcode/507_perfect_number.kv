@@ -1,0 +1,37 @@
+// 507: Perfect Number
+// 来源: LeetCode #507
+// 期望输出:
+//   1
+rwfunc is_perfect(*int64 $n) -> () {
+	sum:int64 = 1
+	2 -> i:int64
+	sq:int64 = i × i
+	sq_m:int64 = i × i
+	while (sq <= *n) {
+		rem:int64 = *n % i
+		rem == 0 -> div:bool
+
+		if (div) {
+			sum = sum + i
+			j:int64 = *n ÷ i
+			j_m:int64 = *n ÷ i
+			sum + j -> sum
+		}
+
+		i = i + 1
+		sq = i × i
+		sq_m = i × i
+	}
+	sum == *n -> ok:bool
+
+	if (ok) {
+		println(1)
+	} else {
+		println(0)
+	}
+}
+
+rwfunc test() -> () {
+
+	is_perfect(28)
+}

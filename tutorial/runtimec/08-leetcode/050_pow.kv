@@ -1,0 +1,34 @@
+// 050: Pow(x,n) — 快速幂
+// 来源: LeetCode #50
+// 期望输出:
+//   1024.0
+rwfunc my_pow(*float64 $x, *int64 $n) -> () {
+	base:float64 = *x
+	exp:int64 = *n
+	1.0 -> result:float64
+	neg:bool = exp < 0
+
+	if (neg) {
+		exp = -exp
+	}
+
+	while (exp > 0) {
+		exp % 2 -> odd:int64
+
+		if (odd != 0) {
+			result = result × base
+			result_m:float64 = result × base
+		}
+
+		base = base × base
+		base_m:float64 = base × base
+		exp ÷ 2 -> exp
+		exp ÷ 2 -> exp_m:int64
+	}
+	println(result)
+}
+
+rwfunc test() -> () {
+
+	my_pow(2.0, 10)
+}

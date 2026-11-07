@@ -1,0 +1,61 @@
+// 083: Remove Duplicates from Sorted List — 链表去重（局部 map 建表 + next 改写）
+// 来源: LeetCode #83
+// 期望输出:
+//   1
+//   2
+//   1
+//   2
+//   3
+struct Node {
+	val:int64=0
+	next:*Node=None
+}
+
+rwfunc dedup() -> (**Node $head) {
+	cur:*/lib/Node = *head
+	while (cur != None) {
+		(*cur)·next -> nxt:*/lib/Node
+		advance:bool = true
+
+		if (nxt != None) {
+			(*cur)·val -> v:int64
+			(*nxt)·val -> nv:int64
+
+			if (nv == v) {
+				(*nxt)·next -> nn:*/lib/Node
+				nn -> (*cur)·next
+				false -> advance
+			}
+		}
+		if (advance) {
+			(*cur)·next -> cur
+		}
+	}
+}
+
+rwfunc show(**Node $head) -> () {
+	p:*/lib/Node = *head
+	while (p != None) {
+		(*p)·val -> v:int64
+		println(v)
+		(*p)·next -> p
+	}
+}
+
+rwfunc test() -> () {
+	e3:Node = {val=2}
+	e2:Node = {val=1 next=&e3}
+	e1:Node = {val=1 next=&e2}
+	&e1 -> eh:*/lib/Node
+	dedup() -> eh
+	show(eh)
+
+	f5:Node = {val=3}
+	f4:Node = {val=3 next=&f5}
+	f3:Node = {val=2 next=&f4}
+	f2:Node = {val=1 next=&f3}
+	f1:Node = {val=1 next=&f2}
+	&f1 -> fh:*/lib/Node
+	dedup() -> fh
+	show(fh)
+}

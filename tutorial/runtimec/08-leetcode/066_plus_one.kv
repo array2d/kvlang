@@ -1,0 +1,75 @@
+// 066: Plus One — 数组表示的大整数加一
+// 算法: 从右向左进位
+// 来源: LeetCode #66
+// 期望输出:
+//   1
+//   2
+//   4
+//   0
+//   0
+//   0
+rwfunc plus_one() -> () {
+	a:[]int64 = [1, 2, 3]
+	n:int64 = compactarray·numel(a)
+	n - 1 -> i:int64
+	carry:int64 = 1
+	while (i >= 0) {
+		d:int64 = a[i]
+		d + carry -> s:int64
+		overflow:bool = s == 10
+
+		if (overflow) {
+			carry:int64 = 0
+			a[i] = 0
+		} else {
+			a[i] = s
+			0 -> carry:int64
+			i:int64 = -1
+		}
+
+		i:int64 = i - 1
+	}
+	carry == 1 -> need_extend:bool
+	len_val:int64 = n
+	j:int64 = 0
+	while (j < n) {
+		a[j] -> v:int64
+		println(v)
+		j:int64 = j + 1
+	}
+}
+
+rwfunc plus_one_nines() -> () {
+	a:[]int64 = [9, 9, 9]
+	compactarray·numel(a) -> n:int64
+	i:int64 = n - 1
+	carry:int64 = 1
+	while (i >= 0) {
+		a[i] -> d:int64
+		s:int64 = d + carry
+		overflow:bool = s == 10
+
+		if (overflow) {
+			a[i] = 0
+			1 -> carry
+		} else {
+			a[i] = s
+			carry = 0
+			i = -1
+		}
+
+		i - 1 -> i
+	}
+	j:int64 = 0
+	while (j < n) {
+		v:int64 = a[j]
+		println(v)
+		j + 1 -> j
+	}
+}
+
+rwfunc test() -> () {
+
+	plus_one()
+	plus_one_nines()
+}

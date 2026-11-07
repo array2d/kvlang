@@ -1,105 +1,67 @@
 //! C ABI bindings for kvspace, kvlang runtime, and layout.
+//!
+//! **线格式（XValue head / attr 区）只有公共头一份**：`kvspace/include/kvspace/
+//! xvalue_head.h`。本文件不再自带任何解析或拼装 —— 曾从 `layout/src/ffi.rs` 复制
+//! 过一份 8 字节 head 的手写实现（`XH_PREFIX` / `xh_*` / `attr_bytes` /
+//! `with_langtype`），上游改成 16 字节后那份没跟上，编译绿而读值是错的。
+//! 禁止再复制：需要读/造值就调公共头的 `kvspaceXvalueHeadScan` /
+//! `kvspaceXvalueHeadEffectiveLen` 与 `kvspaceXvalueHeadNew*`。
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 
-/// 读 head 结果（与 layout/src/ffi.rs 的 kvspaceHead_t 逐字段对齐）。
-/// 三正交轴 ref×storetype×langtype；langtype 由 kvspaceGetHead 从值 attr 区读入。
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct kvspaceHead_t {
-    pub headlen: u16,
-    pub r#ref: u8,
-    pub storetype: u8,
-    pub body_len: i32,
-    pub ndim: i32,
-    pub dims: [i32; 8],
-    pub langtype: [u8; 256],
-    pub langtype_len: i32,
-    pub body_offset: i32,
-    pub body_cap: u64,
-}
+// ── 值读取：全部委托公共头（`kvspaceXvalueHeadScan` / `EffectiveLen`）──────
+//
+// 这里**不算任何偏移**：body 起点的唯一算术在公共头里（`KVSPACE_XVALUE_HEAD_LEN`
+// + 有效长度）。本层只做「切片 + 转 String」。
 
-// ── 原位 head 访问（v2 固定 8 字节 head：#566，偏移直取，不建结构、不校验）──
+/// `KVSPACE_XVALUE_HEAD_LEN`：head 定长 16。**唯一允许出现在本文件里的偏移常量**。
+pub const HEAD_LEN: usize = 16;
 
-/// wire: [len:u48 LE@0-5][storetype:u8@6][ptr:u8@7][body@8]；body 偏移恒 = 8。
-pub const XH_PREFIX: usize = 8;
-
-#[inline]
-pub fn xh_len(data: &[u8]) -> u64 {
-    let b = data.get(0..6).unwrap_or(&[]);
-    let mut v = 0u64;
-    for i in (0..b.len()).rev() {
-        v = (v << 8) | u64::from(b[i]);
+/// 值的完整 langtype 串（含 `[dims]` 与 `*`/`@` 前缀）；无/坏 → 空串。
+pub fn value_langtype(wire: &[u8]) -> String {
+    let mut lt: *const u8 = std::ptr::null();
+    let mut len: u16 = 0;
+    let rc = unsafe {
+        kvspaceXvalueHeadScan(wire.as_ptr(), wire.len() as u64,
+                              &mut lt, &mut len, std::ptr::null_mut())
+    };
+    if rc != 0 || lt.is_null() || len == 0 {
+        return String::new();
     }
-    v
-}
-#[inline]
-pub fn xh_storetype(data: &[u8]) -> u8 {
-    data.get(6).copied().unwrap_or(0)
-}
-/// ptr（offset 7）：0 inline / 1 PTR / 2 EXT；data 过短 → 0。
-#[inline]
-pub fn xh_ptr(data: &[u8]) -> u8 {
-    data.get(7).copied().unwrap_or(0)
-}
-#[inline]
-pub fn xh_is_ptr(data: &[u8]) -> bool {
-    xh_ptr(data) == 1
-}
-#[inline]
-pub fn xh_is_ext(data: &[u8]) -> bool {
-    xh_ptr(data) == 2
-}
-/// None：空字节，或固定头 len=0 且非 ptr/ext（SHORT 空值）。
-#[inline]
-pub fn xh_is_none(data: &[u8]) -> bool {
-    data.is_empty() || (data.len() >= XH_PREFIX && xh_len(data) == 0 && xh_ptr(data) == 0)
+    String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(lt, len as usize) }).into_owned()
 }
 
-/// body 切片（偏移恒 = XH_PREFIX，长度 = len）；越界 → 空。
-pub fn xh_body_slice(data: &[u8]) -> &[u8] {
-    let len = xh_len(data) as usize;
-    let Some(end) = XH_PREFIX.checked_add(len) else {
+/// 值的**有效** body 长度。`layout=1` 时 head 的 `bodylen` 是容量，必须走这条。
+pub fn value_effective_len(wire: &[u8]) -> Option<usize> {
+    let mut out: u64 = 0;
+    let rc = unsafe { kvspaceXvalueHeadEffectiveLen(wire.as_ptr(), wire.len() as u64, &mut out) };
+    if rc != 0 || out > usize::MAX as u64 {
+        return None;
+    }
+    Some(out as usize)
+}
+
+/// body 切片。长度取有效长度（容量形态不拖零尾巴）；越界 → 空。
+pub fn value_body(wire: &[u8]) -> &[u8] {
+    let Some(len) = value_effective_len(wire) else {
         return &[];
     };
-    if end > data.len() {
+    let Some(end) = HEAD_LEN.checked_add(len) else {
+        return &[];
+    };
+    if end > wire.len() {
         return &[];
     }
-    &data[XH_PREFIX..end]
+    &wire[HEAD_LEN..end]
 }
 
-/// 从值 wire 解析 attr 区取 tag=1（langtype）记录 data；无/坏 attr → 空串。
-/// attr = [attr_len:u16 LE@8+len][records...]，record = [tag:u8][len:u16 LE][data]。
-pub fn xh_langtype(data: &[u8]) -> String {
-    let Some(apos) = XH_PREFIX.checked_add(xh_len(data) as usize) else {
-        return String::new();
-    };
-    let Some(a) = data.get(apos..apos + 2) else {
-        return String::new();
-    };
-    let alen = u16::from_le_bytes([a[0], a[1]]) as usize;
-    if alen < 2 {
-        return String::new();
-    }
-    let Some(aend) = apos.checked_add(alen) else {
-        return String::new();
-    };
-    if aend > data.len() {
-        return String::new();
-    }
-    let mut p = apos + 2;
-    while p + 3 <= aend {
-        let tag = data[p];
-        let rlen = u16::from_le_bytes([data[p + 1], data[p + 2]]) as usize;
-        if p + 3 + rlen > aend {
-            return String::new(); // 坏记录：越界即整体无效
-        }
-        if tag == 1 {
-            return String::from_utf8_lossy(&data[p + 3..p + 3 + rlen]).into_owned();
-        }
-        p += 3 + rlen;
-    }
-    String::new()
+/// 引用形态：只看 langtype 首字节（新模型：head 里没有 ptr/storetype）。
+pub fn value_is_ptr(wire: &[u8]) -> bool {
+    value_langtype(wire).as_bytes().first() == Some(&b'*')
+}
+
+pub fn value_is_ext(wire: &[u8]) -> bool {
+    value_langtype(wire).as_bytes().first() == Some(&b'@')
 }
 
 /// 固定头构造器调用（#566：New* 的 out_len 为 u64）：成功且 total<=u32::MAX 才转 u32。
@@ -121,36 +83,8 @@ fn call_codec64(f: impl FnOnce(*mut *mut u8, *mut u64) -> c_int) -> Vec<u8> {
 /// 空 C 串（codec langtype 参数：空 = 空 attr 占位，真实类型由写层 with_langtype 填入）。
 pub static EMPTY_CSTR: [u8; 1] = [0];
 
-/// 把内联 XValue 组装成 wire（固定 8 字节 head + body + 空 attr 占位）。
-/// storetype 判定对齐 durable to_wire_head：char/* 与 rwir 族→SLACK、ndim>0 非容器→LARGE、
-/// 其余标量→SHORT。langtype 记录（含 [dims]）由写层按真实类型替换（#571 值内 attr 区）。
-pub fn xvalue_to_wire(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
-    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    if (kind.is_empty() || kind == "None") && raw.is_empty() {
-        return call_codec64(|out, out_len| unsafe { kvspaceXvalueHeadNewNone(out, out_len) });
-    }
-    if kind == "char" || kind.starts_with("char/") {
-        return call_codec64(|out, out_len| unsafe {
-            kvspaceXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64, raw.len() as u64, empty, out, out_len)
-        });
-    }
-    if !dims.is_empty() && !kind.contains('·') && !kind.starts_with('/') {
-        let d: Vec<u64> = dims.iter().map(|&x| x as u64).collect();
-        return call_codec64(|out, out_len| unsafe {
-            kvspaceXvalueHeadNewTensor(d.as_ptr(), d.len() as u32, raw.as_ptr(), raw.len() as u64, empty, out, out_len)
-        });
-    }
-    if kind == "rwir" || kind == "def langtype" || (kind == "rwfunc" && !raw.is_empty()) {
-        return call_codec64(|out, out_len| unsafe {
-            kvspaceXvalueHeadNewCode(raw.as_ptr(), raw.len() as u64, raw.len() as u64, empty, out, out_len)
-        });
-    }
-    call_codec64(|out, out_len| unsafe {
-        kvspaceXvalueHeadNewScalar(0, raw.as_ptr(), raw.len() as u32, empty, out, out_len)
-    })
-}
-
-/// 完整 langtype 串（#571）：ndim0 = 裸 kind；ndim>0 = [d1,d2,...]kind。
+/// 完整 langtype 串：ndim0 = 裸 kind；ndim>0 = `[d1,d2,...]kind`。
+/// 这是**类型串构造**，不是线格式——构造器直接吃它。
 pub fn full_langtype(kind: &str, dims: &[i32]) -> String {
     if dims.is_empty() {
         return kind.to_string();
@@ -159,55 +93,152 @@ pub fn full_langtype(kind: &str, dims: &[i32]) -> String {
     format!("[{}]{kind}", d.join(","))
 }
 
-/// attr 区字节（#571）：langtype 记录（含 attr_len 前缀）；空 lt = 空 attr `[2,0]`。
-pub fn attr_bytes(lt: &str) -> Vec<u8> {
-    if lt.is_empty() {
-        return vec![2, 0];
+/// 所有构造点的**唯一出口**：调公共构造器，再用公共头回读自检。
+///
+/// 自检两条（不相等即 panic——这是程序错误，不是数据错误）：
+///   1. `Scan` 回的 langtype 与传入的逐字节相同；
+///   2. `EffectiveLen` 等于有效长度。
+///
+/// 存在的理由：构造器实参错位（本项目真实发生过一次 `storetype` 形参多一个、
+/// 整体错一格）不会崩、不会报错，只在下游读成垃圾。一次回读就在构造点当场抓住。
+fn build_checked(f: impl FnOnce(*mut *mut u8, *mut u64) -> c_int,
+                 want_langtype: &str, want_len: usize) -> Vec<u8> {
+    let bytes = call_codec64(f);
+    if bytes.is_empty() {
+        return bytes;
     }
-    let alen = 2u16 + 3 + lt.len() as u16;
-    let mut v = Vec::with_capacity(5 + lt.len());
-    v.extend_from_slice(&alen.to_le_bytes());
-    v.push(1); // tag = langtype
-    v.extend_from_slice(&(lt.len() as u16).to_le_bytes());
-    v.extend_from_slice(lt.as_bytes());
-    v
+    let got_lt = value_langtype(&bytes);
+    assert_eq!(got_lt, want_langtype,
+               "constructor langtype mismatch: want {want_langtype:?}, wire has {got_lt:?}");
+    let got_len = value_effective_len(&bytes)
+        .unwrap_or_else(|| panic!("constructed wire has no effective length"));
+    assert_eq!(got_len, want_len,
+               "constructor effective length mismatch: want {want_len}, wire has {got_len}");
+    bytes
 }
 
-/// 用 langtype 记录替换 codec 产出的空 attr 占位：[head+body] + attr(lt)。
-/// wire 已自带 langtype 记录 → 原样写（不覆盖）。
-pub fn with_langtype(wire: &[u8], lt: &str) -> Vec<u8> {
-    if !xh_langtype(wire).is_empty() {
-        return wire.to_vec();
+/// 把内联 XValue 组装成 wire。**形态是值的语义，不是构造器的偏好**：
+/// 定长走 `NewScalar`、变长字符走 `NewSlack`、张量走 `NewTensor`、
+/// 代码槽走 `NewCode`——把 `char/*` 从 Slack 改成 Scalar 会改变 wire 的
+/// layout/容量语义。
+///
+/// 指针/扩展**不走这里**：`NewPtr`/`NewExt` 是唯一给 langtype 补 `*`/`@` 的构造点，
+/// 调用方要造指针值请直接调 `ptr_wire` / `ext_wire`。
+pub fn xvalue_to_wire(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
+    let lt = full_langtype(kind, dims);
+    let c_lt = CString::new(lt.clone()).expect("langtype contains NUL");
+    if !dims.is_empty() && !kind.contains('\u{b7}') && !kind.starts_with('/') {
+        let d: Vec<u64> = dims.iter().map(|&x| x as u64).collect();
+        return build_checked(
+            |out, out_len| unsafe {
+                kvspaceXvalueHeadNewTensor(d.as_ptr(), d.len() as u32,
+                                           raw.as_ptr(), raw.len() as u64,
+                                           c_lt.as_ptr(), out, out_len)
+            },
+            &lt, raw.len());
     }
-    let mut w = wire[..XH_PREFIX + xh_len(wire) as usize].to_vec();
-    w.extend_from_slice(&attr_bytes(lt));
-    w
+    if kind == "char" || kind.starts_with("char/") {
+        return build_checked(
+            |out, out_len| unsafe {
+                kvspaceXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64,
+                                          raw.len() as u64, c_lt.as_ptr(),
+                                          out, out_len)
+            },
+            &lt, raw.len());
+    }
+    if kind == "rwir" || kind == "def langtype" || (kind == "rwfunc" && !raw.is_empty()) {
+        return build_checked(
+            |out, out_len| unsafe {
+                kvspaceXvalueHeadNewCode(raw.as_ptr(), raw.len() as u64,
+                                         raw.len() as u64, c_lt.as_ptr(),
+                                         out, out_len)
+            },
+            &lt, raw.len());
+    }
+    build_checked(
+        |out, out_len| unsafe {
+            kvspaceXvalueHeadNewScalar(raw.as_ptr(), raw.len() as u32,
+                                       c_lt.as_ptr(), out, out_len)
+        },
+        &lt, raw.len())
 }
 
-/// 读 key 的完整 langtype（kvspaceGetHead 从值 attr 区读入）；无/空 → 空串。
+/// **无类型**值：空 langtype（公共头契约：空 langtype ⇒ 省略 langtype record）。
+/// 只用于系统键（`‥pc`/`‥status`）——runtime 的 `write_text` 写的就是无类型值。
+pub fn xvalue_to_wire_untyped(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
+    let empty = CString::new("").expect("empty");
+    if !dims.is_empty() && !kind.contains('\u{b7}') && !kind.starts_with('/') {
+        let d: Vec<u64> = dims.iter().map(|&x| x as u64).collect();
+        return build_checked(
+            |out, out_len| unsafe {
+                kvspaceXvalueHeadNewTensor(d.as_ptr(), d.len() as u32,
+                                           raw.as_ptr(), raw.len() as u64,
+                                           empty.as_ptr(), out, out_len)
+            },
+            "", raw.len());
+    }
+    if kind == "char" || kind.starts_with("char/") {
+        return build_checked(
+            |out, out_len| unsafe {
+                kvspaceXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64,
+                                          raw.len() as u64, empty.as_ptr(),
+                                          out, out_len)
+            },
+            "", raw.len());
+    }
+    build_checked(
+        |out, out_len| unsafe {
+            kvspaceXvalueHeadNewScalar(raw.as_ptr(), raw.len() as u32,
+                                       empty.as_ptr(), out, out_len)
+        },
+        "", raw.len())
+}
+
+/// `None` 值（空 body、无 langtype）。
+pub fn none_wire() -> Vec<u8> {
+    build_checked(|out, out_len| unsafe { kvspaceXvalueHeadNewNone(out, out_len) },
+                  "", 0)
+}
+
+/// 指针值：`base_langtype` 是**目标**的 kindexpr（不带 `*`），构造器补前缀。
+/// 传进来的若已带 `*`/`@`，公共构造器会拒绝（双重前缀 = 两处对格式理解不一致）。
+pub fn ptr_wire(base_langtype: &str, path: &[u8]) -> Vec<u8> {
+    let c_lt = CString::new(base_langtype).expect("langtype contains NUL");
+    let want = format!("*{base_langtype}");
+    build_checked(
+        |out, out_len| unsafe {
+            kvspaceXvalueHeadNewPtr(path.as_ptr(), path.len() as u32,
+                                    c_lt.as_ptr(), out, out_len)
+        },
+        &want, path.len())
+}
+
+/// 扩展句柄值：`base_langtype` 不带 `@`，构造器补前缀。
+pub fn ext_wire(base_langtype: &str, locator: &[u8]) -> Vec<u8> {
+    let c_lt = CString::new(base_langtype).expect("langtype contains NUL");
+    let want = format!("@{base_langtype}");
+    build_checked(
+        |out, out_len| unsafe {
+            kvspaceXvalueHeadNewExt(locator.as_ptr(), locator.len() as u32,
+                                    c_lt.as_ptr(), out, out_len)
+        },
+        &want, locator.len())
+}
+
+/// 读 key 的完整 langtype：走 `kvspaceGet` 取整条 wire，再用公共头 `Scan` 解。
+///
+/// **不再调 `kvspaceGetHead`**（已从 ABI 删除）。`kvspaceGet` 的返回值是借用视图
+/// （shm 指向映射、durable 指向读缓存），生命周期到下一次 `kvspace*` 调用为止——
+/// 所以这里**当场解完就转 String**，不把借用带出去。
 pub fn langtype_of(h: *mut c_void, key: &str) -> String {
-    let mut out = kvspaceHead_t {
-        headlen: 0,
-        r#ref: 0,
-        storetype: 0,
-        body_len: 0,
-        ndim: 0,
-        dims: [0i32; 8],
-        langtype: [0u8; 256],
-        langtype_len: 0,
-        body_offset: 0,
-        body_cap: 0,
-    };
-    let rc = unsafe { kvspaceGetHead(h, cs(key).as_ptr(), &mut out) };
-    if rc != 0 {
+    let mut out: *mut u8 = std::ptr::null_mut();
+    let mut len: u32 = 0;
+    let rc = unsafe { kvspaceGet(h, cs(key).as_ptr(), 0, &mut out, &mut len) };
+    if rc != 0 || out.is_null() || len == 0 {
         return String::new();
     }
-    let n = out
-        .langtype
-        .iter()
-        .position(|&b| b == 0)
-        .unwrap_or(out.langtype.len());
-    String::from_utf8_lossy(&out.langtype[..n]).into_owned()
+    let wire = unsafe { std::slice::from_raw_parts(out, len as usize) };
+    value_langtype(wire)
 }
 
 #[cfg(not(feature = "embed"))]
@@ -263,11 +294,25 @@ unsafe extern "C" {
         buf_cap: u32,
         out_len: *mut u32,
     ) -> c_int;
-    // #571：固定 8 字节 head 构造器（无转换层，直接 memcpy struct + body + attr 区；
-    // langtype 空 = 空 attr 占位）。out_len 为 u64。
+    // 固定 16 字节 head 构造器（`kvspace/include/kvspace/xvalue_head.h` 唯一实现）。
+    // langtype 空 = 空 attr；out_len 为 u64。
     pub fn kvspaceXvalueHeadNewNone(out: *mut *mut u8, out_len: *mut u64) -> c_int;
+    /// 扫 attr 区取 tag=1（langtype）与 tag=2（reallen）。**返回 langtype 长度**，
+    /// 0 = 缺失/坏值。`out` 被置为指向 wire 内部的借用指针（存活到 wire 失效）。
+    pub fn kvspaceXvalueHeadScan(
+        wire: *const u8,
+        wire_len: u64,
+        out: *mut *const u8,
+        out_len: *mut u16,
+        out_reallen: *mut u64,
+    ) -> c_int;
+    /// 有效长度：layout=0 是 bodylen；layout=1 是 attr tag 2 的 reallen。
+    pub fn kvspaceXvalueHeadEffectiveLen(
+        wire: *const u8,
+        wire_len: u64,
+        out: *mut u64,
+    ) -> c_int;
     pub fn kvspaceXvalueHeadNewScalar(
-        storetype: u8,
         raw: *const u8,
         raw_len: u32,
         langtype: *const c_char,
@@ -299,18 +344,19 @@ unsafe extern "C" {
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
+    pub fn kvspaceXvalueHeadNewPtr(
+        path: *const u8,
+        path_len: u32,
+        langtype: *const c_char,
+        out: *mut *mut u8,
+        out_len: *mut u64,
+    ) -> c_int;
     pub fn kvspaceXvalueHeadNewExt(
         locator: *const u8,
         locator_len: u32,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
-    ) -> c_int;
-    /// 读 head + 值 attr 区 langtype 记录：缺失/空 → 非 0。langtype 为明文事实源。
-    pub fn kvspaceGetHead(
-        h: *mut c_void,
-        key: *const c_char,
-        out: *mut kvspaceHead_t,
     ) -> c_int;
 
     // ── kvlang runtime：模式2 执行（kvlang_vthread.h）───────────────

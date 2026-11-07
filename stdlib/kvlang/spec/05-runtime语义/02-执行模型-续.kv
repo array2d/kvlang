@@ -13,11 +13,49 @@ lib kvlang/spec/runtime语义/执行模型_续 {
 | `‥returnpc` | 返回后继续的 PC |
 | `‥pc` / `‥status` | **仅根帧**（`/vthread/<vid>/`）持有，记录整个 vthread 的当前 PC 与状态 |
 
-runtime **不得**另存独立的调用栈结构：嵌套帧路径本身即调用链。
+runtime **不得**另存独立的调用栈结构：帧序号本身即调用链（`/vthread/<vid>/[d]`，`d` 递增）。
 
-### `‥pc` / `‥status` 槽编码
+### `‥pc` 槽编码
 
-两者是变长 `char/utf8`，每步都要重写，**必须**用 SLACK 头写：固定头
+`‥pc` 是**执行位置**，langtype `[2]int32`，body 8 字节小端：`[0]` = 帧序号、`[1]` = 该帧内的
+source logical program counter。整值写，热路径不缺省。
+
+`‥callpc`、`‥returnpc` **同编码**，区别只在指向：`‥callpc` 是「哪条指令发起了本帧」，
+`‥returnpc` 是「本帧返回后在调用方继续的位置」。
+
+### `vthread·pc()`
+
+`vthread·pc()` 无读参，返回**两个结果**（`int32` 与 `[2]int32`），给调试、崩溃恢复与调度
+提供可比较的执行位置：
+
+| 结果 | 类型 | 含义 |
+|---|---|---|
+| `result0` | `int32` | vid（当前 vthread 标识，数值） |
+| `result1` | `[2]int32` | `[0]` stackid（帧序号，根帧 0）；`[1]` **s0（指令轴坐标）** |
+
+## 两个轴：s0 与 s1
+
+函数体以二元坐标 `[s0,s1]` 定位（见 [[指令布局格式]]）：
+
+| 轴 | 含义 |
+|---|---|
+| `s0` | **指令轴**：行号。`[0,·]` 是签名行，指令从 `[1,·]` 起（指令 0 落在第 1 行） |
+| `s1` | **参数轴**：该指令内的槽序号（读参、写参各占一段） |
+
+`vthread·pc()` 的 `result1[1]` 是**当前指令的 s0**，不是参数轴、不是 source pc。
+
+**与执行游标的关系**：执行器内部用稠密指令标识符（从 0 起），它等于 `s0 - 1`；两者不得混用——
+`s0` 是坐标轴上的行号，稠密标识符是 Program 内的序号。取 s0 必须由坐标轴换算，不得把稠密
+标识符直接当 s0 写入。
+
+- **纯读**：不创建、不修改任何 key，也不改变执行位置；
+- 任一结果取不到 ⇒ **具名失败**，不得用 0 顶替（0 是合法的 stackid，顶替会制造假位置）；
+- 与 `‥pc` 的关系：`‥pc` 是持久化的 `[stackid, source pc]`，`vthread·pc()` 的 `result1` 是
+  **当前活跃帧**的 `[stackid, s0]`；两者不是同一事实，不得互相推导。
+
+### `‥status` 槽编码
+
+`‥status` 是变长 `char/utf8`，每步都要重写，**必须**用 SLACK 头写：固定头
 `len=当前字节长`、`storetype=1`、`ptr=0`，body 偏移恒为 8，langtype
 `[<码点数>]char/utf8` 存值内 attr 区（tag 1 记录）。值语义只取前 `len` 字节；物理容量超出
 部分不属于值。
@@ -34,15 +72,15 @@ runtime **不得**另存独立的调用栈结构：嵌套帧路径本身即调�
 
 ## 操作数只读 view
 
-runtime **可以**为本 vthread 帧子树内、`FIXED_SMALL` 的 typed 行读槽缓存
-head/body 指针（仅 shm 后端）。缓存是纯观测量，任何路径读到的值必须与
+runtime **可以**为本 vthread 帧子树内、`FIXED_SMALL` 的读槽缓存按槽 langtype
+解码得到的 head/body 二进制指针（仅 shm 后端）。缓存是纯观测量，任何路径读到的值必须与
 `GetByRef` 一致。
 
 - 外部对同一 key 的**同类型、同尺寸**写是原地覆写，view 必须读到新值。
 - runtime 自身写该 key：等长 body 快写不改变槽地址，view 继续有效；整值
   写、删除、树操作必须使 view 失效并重新获取。
 - 外部删除或改变尺寸/类型导致槽移动属**契约外**，runtime 不承诺检测。
-- 非 shm 后端、非帧内槽、非 typed 行**不得**使用 view，必须走
+- 非 shm 后端、非帧内槽、槽 langtype 与缓存时不一致**不得**使用 view，必须走
   `GetByRef`。
 
 ## vthread
@@ -57,13 +95,13 @@ vthread 是 kvlang 的执行线程，句柄为整数 `vid`，根在 `/vthread/<v
   `out_pc` 冒泡给上层驱动派发、推进子 pc 后重入续驱。
 - `vthread·call(funckey)`：在**当前 vthread（同 vid）**内按运行时 funckey 造一次动态 `call`，被调函
   数跑到结束再回本指令后继。**不新开 vid、不挂起**——被调里的 rwir 由当前驱动就地派发。
-- `vthread·sleep(dur)`：让当前 vthread 阻塞 `dur`（duration，纳秒），到点后推进 PC。
+- `vthread·sleep(dur)`：让当前 vthread 阻塞 `dur`（`time/duration`，纳秒），到点后推进 PC。
 - `vthread·setstatus(status)`：置本 vthread 状态并把 PC 前进到下一指令。恢复执行即把 `‥status` 改回
   `running` 再驱动该 vid。
 
 `vthread·create` 与 `vthread·run` 是**两步分离**（对应 `byteseek create <fn>` /
 `byteseek run <vid>` 两个子命令）；`vthread·call` 是同 vid 内的动态调用。
-三者**不得**混同。锚例：`tutorial/15-vthread/`
+三者**不得**混同。锚例：`tutorial/{runtimec,byteseek,byteseek-stdlib}/15-vthread/`
 （`01-call.kv`、`03-create-run.kv`、`04-sleep.kv`、`02-crashrecover.kv`）。
 
 ## networld 与外部世界
@@ -73,7 +111,7 @@ runtime 核心不含 I/O；与外部世界（进程、文件系统、网络）�
 进程 stdout/stderr）经**扩展世界句柄（storetype 3、ptr=2，@ext）**登记：写槽 storetype=3、langtype 为目标 langtype 串
 （不带 `@` 前缀）、body 为逻辑定位串（如 `/networld/<host>/proc/<pid>-<n>/stdout`），读取时由**支持 `@` 的
 rwir**（如 byteseek 的 networld/proc、networld/fs 一族）按该定位串兑现真实字节。锚例：
-`tutorial/14-networld/`。
+`tutorial/byteseek/14-networld/`。
 
 > **实现现状**（规范外提示）：当前 Rust runtime 以 `bootstrap → run_vid` 循环主导驱动 vthread；尚未
   实现"启动自注册 `/networld/<ip>/proc/<pid>` + watch vthread strkeymap 驱动"的分布式派发。该分布式
@@ -95,6 +133,6 @@ kvlang **没有独立调试器进程，也没有 `--debug` 开关**。调试模�
 - **恢复**：`kvspace set /vthread/<vid>/‥status running` 后
   `byteseek run <vid>` 从持久化 `‥pc` 续跑。
 
-锚例：`tutorial/09-debugger/`（`breakpoint.kv`、`sum_to.kv`、`chain_array.kv`）。
+锚例：`tutorial/runtimec/09-debugger/`（`breakpoint.kv`、`sum_to.kv`、`chain_array.kv`）。
 	"#### -> /lib/kvlang/spec/runtime语义/执行模型_续
 }

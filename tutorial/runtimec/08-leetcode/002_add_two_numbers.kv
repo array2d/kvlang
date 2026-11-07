@@ -1,0 +1,61 @@
+// 002: Add Two Numbers — 链表大数相加
+// 来源: LeetCode #2
+// 期望输出:
+//   7
+//   0
+//   8
+struct Node {
+	val:int64=0
+	next:*Node=None
+}
+
+lib lc {
+rwfunc add(*Node $a, *Node $b) -> () {
+	carry:int64 = 0
+	result:'[int64]'int64 = {  }
+	0 -> ri:int64
+	pa:/lib/Node = *a
+	pb:/lib/Node = *b
+	while (pa != None || pb != None || carry != 0) {
+		sum:int64 = carry
+
+		if (pa != None) {
+			pa·val -> av:int64
+			sum + av -> sum
+			pa = pa·next
+		}
+
+		if (pb != None) {
+			pb·val -> bv:int64
+			bv + sum -> sum
+			pb·next -> pb
+		}
+
+		digit:int64 = sum % 10
+		digit -> result·*ri
+		ri + 1 -> ri
+		sum ÷ 10 -> carry
+		sum ÷ 10 -> carry_m:int64
+	}
+	i:int64 = ri - 1
+	while (i >= 0) {
+		v:int64 = result·*i
+		println(v)
+		i - 1 -> i
+	}
+}
+}
+
+rwfunc test() -> () {
+	a3:Node = {val=3}
+	a2:Node = {val=4 next=&a3}
+	a1:Node = {val=2 next=&a2}
+	&a1 -> h1:*/lib/Node
+
+	b3:Node = {val=4}
+	b2:Node = {val=6 next=&b3}
+	b1:Node = {val=5 next=&b2}
+	&b1 -> h2:*/lib/Node
+
+	lc·add(h1, h2)
+}

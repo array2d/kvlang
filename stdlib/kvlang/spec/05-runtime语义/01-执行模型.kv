@@ -38,7 +38,7 @@ runtime **不得**在 kvspace 之外持有执行状态。PC、栈帧、局部变
 一条指令在其所属函数子树内由二元坐标 `[s0,s1]` 定位：`s0` 为指令行（行 0 为签名，指令从行 1 起），
 `s1` 为参数轴（0 为 opcode，负数为读参绑定 `[0,-k]`，正数为写参绑定 `[0,k]`）。签名槽 `[0,0]` 为
 opcode/签名行锚点；计数头落该锚点——rwfunc 的计数头在 `/lib/<pkg>·<name>/[0,0]`（langtype `rwfunc`），
-rwir 路由头的在 `/‥isa/<folded-op>` 节点自身（langtype `def rwir`，见 [[runtime开发规范]]）。
+rwir 路由头的在 `/lib/<op>` 节点自身（langtype `def rwir`，见 [[runtime开发规范]]）。
 
 ## 指令解释循环
 
@@ -66,26 +66,32 @@ runtime 对一个 vthread 的执行是如下循环（C 实现 `runtime/src/kvcpu
 3. **`=` 拷贝**（`op_id == OPID_COPY`）——值拷贝语义。
 4. 以上皆否（`op_id == OPID_notinmyrwircaps`，即 `notinmycaps`）时查
 `/lib`：**`notinmyrwircaps`**——
-   `/‥isa/<folded-op>` 存在 def rwir 路由头（kind=`def rwir`）→ 路由到能兑现它的其它 runtime（见
+   `/lib/<op>` 存在 def rwir 路由头（kind=`def rwir`）→ 路由到能兑现它的其它 runtime（见
    [[runtime开发规范]]）。
 5. **否则视为用户 rwfunc 调用**——opcode 移入 `reads[0]`，改写为 `call` 指令。
 
 layout 的 target selection（Rwir/User）在 **layout 期**完成；runtime
-runtime 只按 `/‥isa/<folded-op>` 与 myrwircaps 名字表对账。
+runtime 只按 `/lib/<op>` 与 myrwircaps 名字表对账。
 
 `op_id` 每条指令重新计算，控制/拷贝/myrwircaps 成员全折入同一整数字段，热路径无 opcode 字符串匹
-配。myrwircaps 判定先于 `/lib` 函数查表；`/‥isa` 只提供签名，不改变派发。
+配。myrwircaps 判定先于 `/lib` 函数查表；`/lib` 下的 def rwir 只提供签名，不改变派发。
 
 ## 调用即无返回值——输出走写参映射
 
 kvlang 的调用**没有返回值表达式**。函数/rwir 的输出一律经**写参映射** `f(a) -> r` 显式落到调用者指定
 的写槽；一条指令可有零个或多个写参。
 
-- **call**：创建子帧 `/vthread/<vid>/<父帧路径>/[s0,0]/`，把实参经 Ptr 链绑定进子帧的读参槽
-  `[0,-k]`、写参槽 `[0,k]`（零拷贝跨帧传参，不复制实参内容），子帧记 `‥callpc`（发起调用的 PC）与
-  `‥returnpc`（返回后继续的 PC），PC 进入子帧首指令。
+- **call**：创建子帧 `/vthread/<vid>/[d]/`（`d` 是**帧序号**，根帧为 `1`，每次调用递增；
+  **平铺**，不嵌在父帧路径下——调用链由帧序号本身表达），把实参经 Ptr 链绑定进子帧的读参槽
+  `[0,-k]`、写参槽 `[0,k]`（零拷贝跨帧传参，不复制实参内容），子帧记 `‥callpc`（发起本帧调用的
+  指令位置）与 `‥returnpc`（返回后继续的位置），PC 进入子帧首指令。
 - **return**：先把父 PC 或终态写入 kvspace，再清理子帧；顶层帧返回使整个 vthread 结束。
   返回链断裂（帧无 `‥returnpc`）**必须**报 `RuntimeError` 并保留该帧供排查。
+
+`‥callpc`、`‥returnpc` 与根帧的 `‥pc` **共用同一种编码**：`[2]int32`，body 8 字节，小端，
+`[0]` = 帧序号、`[1]` = 该帧内的 source logical program counter。三者的区别只在**指向谁**：
+`‥pc` 指向整个 vthread 的当前位置，`‥callpc` 指向「哪条指令发起了本帧」，`‥returnpc` 指向
+「本帧返回后在调用方继续的位置」。编码统一，读到的三方都不必再区分形态。
 - 读参**只读**、写参**可写可读**；修改型指令**必须**把结果显式写入其写槽（见 [[函数调用]]）。
 	"#### -> /lib/kvlang/spec/runtime语义/执行模型
 }

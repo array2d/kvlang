@@ -1,0 +1,29 @@
+// sparse_literal: 花括号 {..} 字面量 = 散 key 数组（每元素落 base·i 独立 key）
+// 括号规约: [1,2,3] = compact 定长打包进单 XValue；{1,2,3} = 散 key，变长/可增长
+// 语义: {..} 只作赋值右值或 for-in 源；for (x in nums) 遍历散 key 元素
+// 期望输出:
+//   10
+//   20
+//   30
+//   40
+//   sum = 100
+// 散 key 数组作实参时 for-in 在 layout 脱糖成 compact 取值（compactarray·at），
+// 函数内改用 kvspace·listlen/kvspace·listat/kvspace·get 显式遍历。
+rwfunc print_sum(*'[int64]'int64 $nums) -> (*int64 $total) {
+	*total = 0
+	kvspace·listlen(*nums) -> n:int64
+	0 -> i:int64
+	while (i < n) {
+		kvspace·listat(*nums, i) -> k:int64
+		(*nums)·*k -> x:int64
+		println(x)
+		*total = *total + x
+		i = i + 1
+	}
+}
+
+rwfunc test() -> () {
+	nums:'[int64]'int64 = {10, 20, 30, 40}
+	print_sum(nums) -> total:int64
+	println("sum =", total)
+}

@@ -1,0 +1,28 @@
+// 268: Missing Number — 找缺失数字（XOR 或求和）
+// 算法: 求和公式 n*(n+1)/2 - sum
+// 来源: LeetCode #268
+// 期望输出:
+//   2
+rwfunc missing() -> () {
+	a:[]int64 = [3, 0, 1]
+	n:int64 = compactarray·numel(a)
+	0 -> s:int64
+	i:int64 = 0
+	while (i < n) {
+		x:int64 = a[i]
+		s + x -> s
+		i = i + 1
+	}
+	nn:int64 = n × n
+	nn_m:int64 = n × n
+	nn + n -> total:int64
+	expected:int64 = total ÷ 2
+	expected_m:int64 = total ÷ 2
+	result:int64 = expected - s
+	println(result)
+}
+
+rwfunc test() -> () {
+
+	missing()
+}

@@ -25,8 +25,10 @@ pub fn parse_code(src: &str) -> Result<(ast::File, Vec<Diagnostic>), String> {
         tokens,
         pos: 0,
         errors: lex_errors,
-        addr_params: Vec::new(),
+        ptr_params: Vec::new(),
+        value_params: Vec::new(),
         flow: FlowCtx::default(),
+        position_slot_counter: 0,
     };
     let f = p.parse_file();
     for d in &mut p.errors {
@@ -40,15 +42,39 @@ pub fn parse_code(src: &str) -> Result<(ast::File, Vec<Diagnostic>), String> {
 
 // ── parser 结构体 ─────────────────────────────────────────────────────
 
+/// 签名出现在哪种定义处。两者文法相同，但**参数多态的能力不同**：
+///
+/// - `rwfunc`：参数与返回值必须是**单一类型**（不得含并集）——调用方只能从声明推类型；
+/// - `rwir` 声明：允许并集，算子由编译期特化器按实参类型收敛成唯一 opid。
+///
+/// 见 `stdlib/kvlang/spec/03-类型系统/05-langtype签名类型表达式.kv`。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SignatureSite {
+    Rwfunc,
+    RwDeclaration,
+}
+
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     errors: Vec<Diagnostic>,
-    // 当前函数体的地址形参名（声明带 `*`/`@`）：体内名字已被 layout 解引用一次（即实参值），
-    // 故体里再写 `*p` 就是两层间接——当前参数模型不支持（见 issue #286），报错不静默降级。
-    addr_params: Vec<String>,
+    // 当前函数体的指针形参名（声明带 `*`/`@`）。新参数模型下形参名就是**指针**：
+    // 读值要写 `*p`，做成员/坐标访问要写 `(*p)·x`——`·`/`[` 直接作用在 `p` 上是
+    // 隐式解引用，一律报错（spec 05-runtime语义/04-函数调用「禁止隐式解引用」）。
+    ptr_params: Vec<String>,
+    // 当前函数体的**值复制**形参名（声明无 `*`/`@` 且类型是标量）。体内只读，
+    // 不能被解引用、不能作写槽。
+    value_params: Vec<String>,
     // Per-function control-flow context, validated at function end.
     flow: FlowCtx,
+    /*
+     * 动态键展开产生的**位置槽**计数器（`_p1`、`_p2`…）。
+     *
+     * 与 lowering 的 `LabelGen::tmp`（`_1`、`_2`…）**分开**：两者在不同阶段自增，
+     * 共用前缀就会撞名，而撞名不报错、只是静默写同一个槽。前缀不同是唯一
+     * 能保证不撞的判据；`_p` 表意 pointer。
+     */
+    position_slot_counter: u32,
 }
 
 /// Per-function control-flow state: loop depth (`break`/`continue`), block labels, and
@@ -58,6 +84,67 @@ struct FlowCtx {
     loop_depth: u32,
     labels: Vec<(String, Pos)>,
     jumps: Vec<(Expr, Pos)>,
+}
+
+/*
+ * **写槽文本的规范拼写**：把同一个形参的几种写法收敛成一种。
+ *
+ * `*r`、`(*r)`、`((*r))`、`( *r )` 都是「解引用形参 r」，必须是**同一个槽**；
+ * 而 `*(a + 1)` 不是名字，**不许**被归一化——任何「按文本剥括号」的推广都会把
+ * 非名字表达式改坏。所以判据是「剥完括号后恰好是 `*` + 一个标识符、且整串到此
+ * 结束」，不是「长得像括号就剥」。
+ *
+ * 名字的判据与 `lower::slot_is_plain_name` 同源：标识符只含字母/数字/下划线，
+ * 且不以数字开头。这里单独写一份极小判断，是因为本函数在 **parser** 层，够不到
+ * lower 的类型表——但判据本身只有一条：`*` 后必须是一个**名字**。
+ *
+ * 不做归一化时**原样返回**：调用方拿到的永远是「可以当写槽名用」的文本，
+ * 不需要再判一次。
+ */
+fn canonical_write_slot_text(text: &str) -> String {
+    /* 循环剥首尾括号，允许括号内有空白。剥不动就停。 */
+    let mut current = text.trim();
+    loop {
+        if current.len() < 2 || !current.starts_with('(') || !current.ends_with(')') {
+            break;
+        }
+        /* 首尾这对括号必须**配对**（不是 `(a) + (b)` 这种）。逐字符深度计数。 */
+        let inner = current[1..current.len() - 1].trim();
+        let mut depth = 0i32;
+        let mut paired = true;
+        for byte in inner.bytes() {
+            match byte {
+                b'(' => depth += 1,
+                b')' => {
+                    depth -= 1;
+                    if depth < 0 {
+                        paired = false;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !paired || depth != 0 || inner.is_empty() {
+            break;
+        }
+        current = inner;
+    }
+    /* 剥完必须是 `*` + 一个标识符，且整串到此结束。 */
+    let Some(name) = current.strip_prefix('*') else {
+        return text.to_string();
+    };
+    let mut characters = name.chars();
+    let Some(first) = characters.next() else {
+        return text.to_string();
+    };
+    let identifier_start = first == '_' || first.is_alphabetic();
+    let identifier_rest = characters.all(|c| c == '_' || c.is_alphanumeric());
+    if identifier_start && identifier_rest {
+        current.to_string()
+    } else {
+        text.to_string()
+    }
 }
 
 impl Parser {
@@ -195,6 +282,21 @@ impl Parser {
     fn skip_newlines(&mut self) {
         while self.peek().kind == Kind::Newline {
             self.advance();
+        }
+    }
+
+    /// 当前在 `Colon` 之前时，回答「冒号之后跳过换行与注释，第一个有意义的 token
+    /// 是什么 kind」。用于块标签判据：只有 `{` 才是标签体。
+    ///
+    /// **只读**：不改 `self.pos`，调用方后面照常解析。
+    fn next_statement_token_after_colon(&self) -> Kind {
+        let mut offset: isize = 2; /* 0 = name, 1 = colon */
+        loop {
+            let token = self.peek_at(offset);
+            match token.kind {
+                Kind::Newline | Kind::Comment => offset += 1,
+                _ => return token.kind,
+            }
         }
     }
 
@@ -426,13 +528,24 @@ impl Parser {
 
     fn parse_func(&mut self) -> Func {
         let sig = self.parse_func_sig();
-        self.check_param_types(&sig);
+        self.check_param_types(&sig, SignatureSite::Rwfunc);
         self.check_variadic(&sig);
         self.check_param_dup(&sig);
-        self.addr_params = sig
+        // 指针参数的判据：显式 `*`/`@` 前缀（`by_ref`），或类型本身是值容器
+        // （structref `/lib/X`、mapexpr `k·v`——容器没有可拷贝的值，只能按地址传）。
+        self.ptr_params = sig
             .params
             .iter()
             .chain(sig.returns.iter())
+            .filter(|p| {
+                !p.by_ref.is_empty() || p.ty.starts_with('/') || p.ty.contains('\u{b7}')
+            })
+            .map(|p| p.name.clone())
+            .collect();
+        self.value_params = sig
+            .params
+            .iter()
+            .filter(|p| p.by_ref.is_empty())
             .map(|p| p.name.clone())
             .collect();
         self.skip_newlines_and_comments();
@@ -441,7 +554,8 @@ impl Parser {
         let body = self.parse_body();
         self.expect(Kind::RBrace);
         self.finish_flow(outer_flow);
-        self.addr_params.clear();
+        self.ptr_params.clear();
+        self.value_params.clear();
         let func = Func {
             comments: Vec::new(),
             sig,
@@ -487,7 +601,7 @@ impl Parser {
                 self.expect(Kind::RParen);
             }
         }
-        self.check_param_types(&decl.sig);
+        self.check_param_types(&decl.sig, SignatureSite::RwDeclaration);
         self.check_variadic(&decl.sig);
         self.check_param_dup(&decl.sig);
         decl
@@ -636,6 +750,35 @@ impl Parser {
                     sb.push(']');
                     self.advance();
                 }
+                // 括号分组：`*(int64|float64)` 里 `*` 作用于整个并集，括住才无歧义。
+                // 只有类型**内部**的 `(` 才收（`depth > 0`——此时已在 `[` 内或已进入一层括号）。
+                Kind::LParen => {
+                    depth += 1;
+                    sb.push('(');
+                    self.advance();
+                }
+                Kind::RParen if depth > 0 => {
+                    depth -= 1;
+                    sb.push(')');
+                    self.advance();
+                }
+                // `$name` 是参数声明的名字标记，不属于类型：遇到就收尾，留给调用方剥 `$`。
+                Kind::Ident | Kind::Literal if t.value.starts_with('$') => return sb,
+                /*
+                 * **类型位置的单引号串是 formatter**（issue #631）：
+                 * `'[int64,int64]'[]char/utf8` 里的 `'[int64,int64]'`。
+                 * 引号必须拼回去——lexer 已经把它切成一个 Literal token，
+                 * 剥掉引号就再也分不清「这是 formatter」还是「这是裸类型名」。
+                 *
+                 * 表达式位置的同名 token 仍是普通字符串：**位置决定含义**
+                 * （与 `·` 的两义处理同一条原则）。
+                 */
+                Kind::Literal if t.quote == b'\'' => {
+                    sb.push('\'');
+                    sb.push_str(&t.value);
+                    sb.push('\'');
+                    self.advance();
+                }
                 Kind::Ident | Kind::Literal => {
                     sb.push_str(&t.value);
                     self.advance();
@@ -669,6 +812,10 @@ impl Parser {
         }
     }
 
+    /// 参数声明只有两种形态（spec 04-layout语义/03-函数）：`*T $name` 传址、
+    /// `T $name` 标量值复制。**类型在前、`$name` 在后**；`$` 只是声明的标记，
+    /// 解析后剥掉——函数体内的引用写裸名（指针参数写 `*name`）。
+    /// 旧写法 `name: type` 不再接受。
     fn parse_param_list(&mut self, stop: Kind) -> Vec<Param> {
         let mut params = Vec::new();
         while self.peek().kind != stop && self.peek().kind != Kind::EOF {
@@ -679,42 +826,159 @@ impl Parser {
             if self.eat(Kind::Comma) {
                 continue;
             }
-            let t = self.peek();
-            if t.kind != Kind::Ident && t.kind != Kind::Literal {
+            let start = self.peek();
+            // 类型可以以 `[` 起头（`[]char/utf32`、`[int64]·int64`），也可以带 `*`/`@` 前缀。
+            if !matches!(
+                start.kind,
+                Kind::Ident | Kind::Literal | Kind::LBrack
+            ) {
                 break;
             }
-            let mut param = Param {
-                name: self.advance().value,
-                ty: String::new(),
-                has_ty: false,
-            };
-            if self.peek().kind == Kind::Colon {
-                self.advance();
-                param.has_ty = true;
-                param.ty = self.parse_type();
+            // 旧写法：`name: type`——第一个词后跟冒号。
+            if self.peek_at(1).kind == Kind::Colon {
+                self.advance(); // name
+                self.advance(); // :
+                let ty = self.parse_type();
+                self.errors.push(Diagnostic {
+                    pos: start.pos,
+                    warn: false,
+                    info: false,
+                    message: format!(
+                        "参数声明必须是 `*T $name` 或 `T $name`；旧写法 `{}:{}` 不再接受",
+                        start.value, ty
+                    ),
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+                params.push(Param {
+                    name: start.value,
+                    ty,
+                    by_ref: String::new(),
+                    has_ty: true,
+                });
+                continue;
             }
-            params.push(param);
+            // 新写法：`*T $name` / `T $name`——类型在前。`$` 不是分隔符，故
+            // `$name` 整个是一个 Ident；剥掉 `$` 即得体内引用的裸名。
+            let ty = self.parse_type();
+            let t = self.peek();
+            let name = match t.value.strip_prefix('$').filter(|_| t.kind == Kind::Ident) {
+                Some(n) => {
+                    self.advance();
+                    n.to_string()
+                }
+                None => {
+                    self.errors.push(Diagnostic {
+                        pos: t.pos,
+                        warn: false,
+                        info: false,
+                        message: format!(
+                            "参数声明必须是 `*T $name` 或 `T $name`；类型 {ty:?} 后面缺少 `$name`"
+                        ),
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                    String::new()
+                }
+            };
+            // 传递方式（`*`/`@`）与类型分开存：`ty` 只留类型表达式，
+            // `*int64|float64` 的 `*` 作用于整个 union，剥掉后是 `int64|float64`。
+            let by_ref = ty.chars().take_while(|c| *c == '*' || *c == '@').collect::<String>();
+            let ty_value = ty.trim_start_matches(['*', '@']).to_string();
+            // **参数必须声明类型**（spec 05-runtime语义/04-函数调用:27：
+            // 「`$a`、`* $a`、`a:` 都是错误」）。空 kindexp 在**值类型**层面合法
+            // （Ptr 目标可空），但参数声明是绑定、不是值类型表达式——没有类型就没有
+            // 可绑定的契约，`$a` 与 `* $a` 都是缺注解。
+            if ty_value.is_empty() {
+                self.errors.push(Diagnostic {
+                    pos: t.pos,
+                    warn: false,
+                    info: false,
+                    message: format!("参数必须声明类型：`{name}` 的类型为空"),
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+            }
+            params.push(Param {
+                name,
+                ty: ty_value,
+                by_ref,
+                has_ty: true,
+            });
         }
         params
     }
 
-    fn check_param_types(&mut self, sig: &FuncSig) {
+    fn check_param_types(&mut self, sig: &FuncSig, site: SignatureSite) {
         // 值容器类型必须写 `*`：map langtype（含 `·`）与 structref（`/` 开头）的成员落在兄弟槽
         // `{key}·`，单槽不是完备值，没有可拷贝的"值"，只能按地址传。
         //
         // 注意 `*` **不切换**传递方式——kvlang 只有传址，不存在按值传（spec 03-类型系统/16-ptr
         // 末段、05-runtime语义/04-函数调用）。这条校验只是要求作者把值容器显式标注出来。
-        for (slot, ret) in sig
-            .params
-            .iter()
-            .map(|p| ("param", p))
-            .chain(sig.returns.iter().map(|r| ("return value", r)))
-        {
-            if is_value_container_ty(&ret.ty) && !ptr_prefixed(&ret.ty) {
+        //
+        // 判据是 `is_value_container_ty`：**以 `/` 开头**（structref）或**含 `·`**（mapexpr）。
+        // 裸名不是种类名时，`langtype::expand_struct_refs` 会先把它展开成 `/lib/<名字>`
+        // （这是 struct 引用的语法糖），因此「写错/写漏种类名」的表现就是它突然被当成
+        // structref 容器、要求加 `*`。遇到这条诊断而类型看着像标量时，先看它是不是
+        // 拼错或未登记的种类名，而不是急着加 `*`。
+        // `*` 作用于**整个类型表达式**，不能逐成员写：`*int64|float64` 合法
+        // （指向 int64|float64 的指针），`*int64|*float64` 非法（同一参数两种传递方式）。
+        // `*` 是传递方式不是类型的一部分，逐成员写就是把它当类型用了（spec [[ptr]]）。
+        for param in sig.params.iter().chain(sig.returns.iter()) {
+            let members: Vec<&str> = param.ty.split('|').collect();
+            if members.len() > 1 && members.iter().skip(1).any(|m| m.trim().starts_with('*')) {
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    warn: false,
+                    info: false,
+                    message: format!(
+                        "参数 {:?}: `*` 作用于整个类型表达式，不能逐成员写 —— 写 `{}`",
+                        param.name, {
+                            let stripped: Vec<&str> =
+                                members.iter().map(|m| m.trim().trim_start_matches('*')).collect();
+                            format!("*{} ${}", stripped.join("|"), param.name)
+                        }
+                    ),
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+            }
+        }
+        // 参数位置与返回值位置各发**一条**诊断，不并列两个事实源：
+        // 参数侧的判据是「值复制只允许哪些类型」，返回值侧是「容器没有可拷贝的值」。
+        for param in &sig.params {
+            if !is_value_container_ty(&param.ty) || !param.by_ref.is_empty() {
+                continue;
+            }
+            let pointer_form = param
+                .ty
+                .split('|')
+                .map(|a| format!("*{a}"))
+                .collect::<Vec<_>>()
+                .join("|");
+            self.errors.push(Diagnostic {
+                pos: Pos { line: 0, col: 0 },
+                message: format!(
+                    "func {}: param {:?}: 值复制参数只能是字符串、数值或 bool —— 容器请写 `{} ${}`",
+                    sig.name, param.name, pointer_form, param.name
+                ),
+                warn: false,
+                info: false,
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+        }
+        for ret in &sig.returns {
+            if is_value_container_ty(&ret.ty) && ret.by_ref.is_empty() {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!(
-                        "func {}: {slot} {:?}: 值容器类型只能按地址传递 —— 写 `{:?}`",
+                        "func {}: return value {:?}: 值容器类型只能按地址传递 —— 写 `{:?}`",
                         sig.name,
                         ret.name,
                         ret.ty
@@ -756,6 +1020,22 @@ impl Parser {
                     src_file: String::new(),
                     src_name: String::new(),
                 });
+            } else if site == SignatureSite::Rwfunc && crate::langtype::has_union(ty) {
+                // rwfunc 的参数是帧槽的**唯一**类型：并集会让调用方无从推出实参类型。
+                // rwir 算子的并集由编译期特化器收敛，不受此约束（见 [[langtype签名类型表达式]]）。
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    message: format!(
+                        "func {}: param {:?}: rwfunc parameter must be a single type, \
+                         a union is not allowed (got {:?})",
+                        sig.name, param.name, param.ty
+                    ),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
             }
         }
         for ret in &sig.returns {
@@ -770,6 +1050,20 @@ impl Parser {
                         ret.name,
                         type_error(&ret.ty),
                         ret.ty
+                    ),
+                    warn: false,
+                    info: false,
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+            } else if site == SignatureSite::Rwfunc && crate::langtype::has_union(ty) {
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    message: format!(
+                        "func {}: return value {:?}: rwfunc return type must be a single type, \
+                         a union is not allowed (got {:?})",
+                        sig.name, ret.name, ret.ty
                     ),
                     warn: false,
                     info: false,
@@ -942,6 +1236,15 @@ impl Parser {
                 }
                 if ro.contains(w) {
                     bad(p, w, fname);
+                    continue;
+                }
+                // `*A = v` 写穿读参的 kvlang 指针——那改的是**调用方的数据**，
+                // 与把读参放到写槽是同一种违约。只读性按**位置**分（`[0,-i]` 读 /
+                // `[0,+i]` 写），不按 `*` 分：写穿不能绕过签名诚实原则。
+                if let Some(base) = w.strip_prefix(ast::DEREF_OP) {
+                    if ro.contains(base) {
+                        bad(p, base, fname);
+                    }
                 }
             }
             // 成员写（`v -> base·a·b` / `v -> base·*key`）：base 在写槽里（签名诚实原则）。
@@ -954,8 +1257,13 @@ impl Parser {
                 .and_then(|w| w.split(keytree::MEMBER_SEP).next())
                 .filter(|b| !b.contains('/'))
             {
-                if ro.contains(base) {
-                    bad(p, base, fname);
+                // `(*A)·x` 的基座写成 `(*A)`：剥括号再查只读表——写穿同样违约。
+                let bare = base
+                    .strip_prefix("(*")
+                    .and_then(|r| r.strip_suffix(')'))
+                    .unwrap_or(base);
+                if ro.contains(bare) {
+                    bad(p, bare, fname);
                 } else if let Some(src) = tainted.get(base) {
                     let ty = func
                         .sig
@@ -967,7 +1275,7 @@ impl Parser {
                     p.errors.push(Diagnostic {
                         pos: Pos { line: 1, col: 1 },
                         message: format!(
-                            "func {fname}: {base:?} aliases read param {src:?} (`{base} = {src}`); writing its members writes that object — put it on the write side: `-> ({src}:{ty})`"
+                            "func {fname}: {base:?} aliases read param {src:?} (`{base} = {src}`); writing its members writes that value — put it on the write side: `-> ({src}:{ty})`"
                         ),
                         warn: false,
                         info: false,
@@ -1018,17 +1326,27 @@ impl Parser {
     /// 解析一条语句，返回**一或 N 条** Stmt（多赋值展开为多条指令，其余语句恒 1 条）。
     /// 空 Vec = 解析不出语句（调用方据此结束块 / break）。
     fn parse_stmt(&mut self) -> Vec<Stmt> {
-        // 块标签检测（优先级最高）。排除类型注解写槽：`x:Type`（Ident）、`x:[…]`（LBrack）、
-        // `x:/lib/Name`（structref langtype，以 / 起头的路径 Literal）。
-        let t2 = self.peek_at(2);
-        let t2_structref = t2.kind == Kind::Literal && t2.value.starts_with('/');
-        if self.peek_at(1).kind == Kind::Colon
-            && t2.kind != Kind::Ident
-            && t2.kind != Kind::LBrack
-            && !t2_structref
-        {
-            // `x: = …` 是空 kindexp 标注（不是标签）：只允许出现在签名槽。
-            if t2.kind == Kind::Arrow && t2.value == "=" {
+        /*
+         * 块标签检测（优先级最高）。
+         *
+         * **判据是文法位置：`name : {` ——冒号后（跳过换行/注释）是 `{` 才是块标签。**
+         * 这正是 `parse_block_label` 自己的要求（它本来就 `expect(Kind::LBrace)`），
+         * 所以「判成标签但解析不了」不可能发生。
+         *
+         * 早先这里用**白名单排除法**：`peek_at(2).kind` 必须是 `Ident` / `LBrack` /
+         * `/` 开头的 Literal 之一，否则当标签。那按 **token 种类枚举**，
+         * 于是 `m:'int64'int64` 的 `'int64'`（引号 Literal，值不以 `/` 开头）
+         * 三条都不满足 ⇒ 整行被吃成块标签，后面的类型解析根本收不到它。
+         *
+         * **不枚举类型形态**：`Ident`、`LBrack`、`Literal('/…')`、`Literal('…')`、
+         * 将来任何新形态，全都自然落进「类型标注」。加一种类型文法不必回来改这里。
+         */
+        if self.peek_at(1).kind == Kind::Colon {
+            if self.next_statement_token_after_colon() == Kind::LBrace {
+                return vec![self.parse_block_label()];
+            }
+            /* `x: = …` 是空 kindexp 标注（不是标签）：只允许出现在签名槽。 */
+            if self.peek_at(2).kind == Kind::Arrow && self.peek_at(2).value == "=" {
                 self.errors.push(Diagnostic {
                     pos: self.peek().pos,
                     message: "empty kindexp is only allowed in signature slots (`name:`); \
@@ -1045,7 +1363,6 @@ impl Parser {
                 }
                 return Vec::new();
             }
-            return vec![self.parse_block_label()];
         }
         match self.peek().kind {
             Kind::If => vec![self.parse_if()],
@@ -1194,13 +1511,31 @@ impl Parser {
         })
     }
 
-    /// 校验散 key 字面量 `{...}` 的出现位置。`top_legal` 表示当前上下文允许顶层出现
-    /// （赋值右值 / for-in 源）；无论如何，其元素内部都不得再嵌套散 key 字面量。
-    /// `{}` 对应两种 langtype：写类型是 structref（`/lib/Name`）→ `struct·new(path, k, v, …)`；
-    /// 否则（容器字面量）保留 `obj`（runtime 构 map 容器）。容器字面量必须有 map langtype，
-    /// 由 lower::check_container_typed 统一把关（那里能看见签名里的参数/返回类型）。
-    fn dispatch_obj_by_type(&mut self, inst: &mut Instruction) {
-        if inst.expr.as_ref().map(|e| e.op.as_str()) != Some("obj") {
+    /// structref 写目标上的容器字面量改写成 `struct·new(原型路径, …)`。
+    ///
+    /// 容器字面量只有 `map·new` 一种算子（groupkv 的构造），struct 实例化**不是**另一种
+    /// 构造算子——它是同一个字面量在不同写目标下的落地方式，需要原型路径作为首参：
+    /// 成员名来自原型，实例化即克隆原型子树再覆盖字段（见 spec [[struct]]）。
+    ///
+    /// 判具名用「首参是字符串字面量」：`{k=v …}` 的键由 parser 包成 `str_lit`，
+    /// 位置型 `{v0, v1 …}` 的首参是值本身。这是解析期就确定的事实，不靠算子名区分。
+    fn dispatch_struct_literal(&mut self, inst: &mut Instruction) {
+        let is_named_map = inst.expr.as_ref().is_some_and(|e| {
+            e.op == "map·new" && e.args.first().is_some_and(|a| a.quote != 0)
+        });
+        /*
+         * 空字面量 `{}` 同样是「按写目标落地」：structref 目标要克隆原型
+         * （`p:Point = {}` 等价于带默认字段的原型实例），map 目标才是 `map·new`。
+         * 早先只改写具名形态，空字面量在 struct 目标上留下 `map·new`——
+         * 能力行的写掩码是 map，structref 落不进去，编码期报「result type is
+         * outside the capability mask」。位置型 `{1,2}` 不在此列（struct 字段
+         * 必须带名字，位置型对 struct 本身就不是合法构造）。
+         */
+        let is_empty_map = inst
+            .expr
+            .as_ref()
+            .is_some_and(|e| e.op == "map·new" && e.args.is_empty());
+        if !is_named_map && !is_empty_map {
             return;
         }
         let ty = inst.write_types.first().map(String::as_str).unwrap_or("");
@@ -1266,6 +1601,7 @@ impl Parser {
             comments: Vec::new(),
             label,
             body,
+            synthetic: false,
         })
     }
 
@@ -1285,6 +1621,12 @@ impl Parser {
         let start_pos = self.peek().pos;
         let mut inst = Instruction::default();
         let mut multi: Vec<Instruction> = Vec::new();
+        /*
+         * desugar 为**追加**产生的指令（动态键的 `resolveptr`）。
+         * 与 `multi` 分开：`multi` 是「这条源码语句本来就多条」的展开，
+         * 合用一个变量会让 `out` 的构造丢掉 `inst`（见下方注释）。
+         */
+        let mut expanded: Vec<Instruction> = Vec::new();
 
         match self.find_top_level_arrow() {
             Some(v) if v == "=" => {
@@ -1298,10 +1640,10 @@ impl Parser {
                     inst.writes = writes;
                     inst.write_types = wtypes;
                     inst.expr = reads.into_iter().next().flatten();
-                    self.dispatch_obj_by_type(&mut inst);
+                    self.dispatch_struct_literal(&mut inst);
                     self.lower_array_fill(&mut inst);
                     self.desugar_subscript_write(&mut inst);
-                    self.desugar_member_write(&mut inst);
+                    self.desugar_member_write(&mut inst, &mut expanded);
                 }
             }
             Some(_) => {
@@ -1314,9 +1656,9 @@ impl Parser {
                     inst.expr = reads.into_iter().next().flatten();
                     inst.writes = writes;
                     inst.write_types = wtypes;
-                    self.dispatch_obj_by_type(&mut inst);
+                    self.dispatch_struct_literal(&mut inst);
                     self.desugar_subscript_write(&mut inst);
-                    self.desugar_member_write(&mut inst);
+                    self.desugar_member_write(&mut inst, &mut expanded);
                 }
             }
             None => {
@@ -1336,7 +1678,14 @@ impl Parser {
         }
         self.eat(Kind::Newline);
 
+        /*
+         * `multi` 与 `expanded` 是**两件事**，不能合用：合用一个变量时
+         * `out = if multi.is_empty() { vec![inst] } else { multi }` 会在 desugar
+         * 往它 push 之后把 `inst` 整个丢掉——实测写侧只剩 `*_p1`、位置指令消失。
+         */
         let mut out = if multi.is_empty() { vec![inst] } else { multi };
+        /* desugar 的追加指令接在**其后**：位置在前、写在后（spec §3.1 的顺序）。 */
+        out.append(&mut expanded);
         // 逐条检查：先 mem::take 移出以避开 &mut self 与 &inst 的借用冲突。
         for k in 0..out.len() {
             let i = std::mem::take(&mut out[k]);
@@ -1350,6 +1699,16 @@ impl Parser {
                 }
             }
             out[k] = i;
+        }
+        /*
+         * 源码位置统一在这里落：`0:0` 表示「这条不是用户写的那一行」，
+         * 留给 layout 合成指令继续用默认值。诊断要指路就必须有这一跳——
+         * 1900 处迁移靠 `error: 0:0:` 只能 grep 变量名撞运气。
+         */
+        for inst in &mut out {
+            if inst.pos.line == 0 {
+                inst.pos = start_pos;
+            }
         }
         out.retain(|i| i.expr.is_some() || !i.writes.is_empty());
         out
@@ -1406,14 +1765,26 @@ impl Parser {
                 write_types: vec![wt],
                 arrow_left,
                 operator: false,
+                operand_kind: String::new(),
+            pos: Pos::default(),
             };
-            self.dispatch_obj_by_type(&mut i);
+            self.dispatch_struct_literal(&mut i);
             self.lower_array_fill(&mut i);
             self.desugar_subscript_write(&mut i);
-            self.desugar_member_write(&mut i);
+            /* 动态键展开要多一条 `resolveptr`：先收在 `expanded` 里，
+             * 等 `i` push 之后按顺序接上（位置指令在前、写指令在后）。 */
+            let mut expanded: Vec<Instruction> = Vec::new();
+            self.desugar_member_write(&mut i, &mut expanded);
             out.push(i);
+            out.append(&mut expanded);
         }
         out
+    }
+
+    /// 生成一个位置槽名（`_p1`、`_p2`…）。见 `position_slot_counter` 的注释。
+    fn fresh_position_slot(&mut self) -> String {
+        self.position_slot_counter += 1;
+        format!("_p{}", self.position_slot_counter)
     }
 
     fn find_top_level_arrow(&self) -> Option<String> {
@@ -1453,9 +1824,37 @@ impl Parser {
         // 动态键（*k 的变量）。= 读语义：`base·seg… -> v` 即成员路径拷贝读。
         let mut chain_base: Option<Expr> = None;
         let mut chain_segs: Vec<Expr> = Vec::new();
+        /* 动态段（`·*k`）单独收集：它们要的是运行期值，不能拼进成员路径文本。 */
+        let mut dynamic_segments: Vec<Expr> = Vec::new();
         loop {
             // 后缀成员访问
             if self.peek().kind == Kind::Dot {
+                // `·` 作用在指针基上是隐式解引用——必须写 `(*p)·x`（见 spec 05-runtime语义/
+                // 04-函数调用「禁止隐式解引用」）。判据只看基座是不是指针形参的裸名。
+                if chain_base.is_none() && chain_segs.is_empty() {
+                    if let Some(name) = bare_ptr_param(self, &left) {
+                        // `·[i]` 是坐标访问（元组键/散 key 下标），报另一条文本。
+                        let coordinate = matches!(
+                            self.peek_at(1).kind,
+                            Kind::LBrack
+                        );
+                        let pos = self.peek().pos;
+                        let message = if coordinate {
+                            format!("对指针类型的坐标访问必须显式解引用：写 (*{name})·[i]")
+                        } else {
+                            format!("对指针类型的成员访问必须显式解引用：写 (*{name})·name")
+                        };
+                        self.errors.push(Diagnostic {
+                            pos,
+                            warn: false,
+                            info: false,
+                            message,
+                            source: String::new(),
+                            src_file: String::new(),
+                            src_name: String::new(),
+                        });
+                    }
+                }
                 self.advance(); // consume ·
                                 // 动态键 d·*k：段是变量（运行时取值的字符串键）。
                 if self.peek().kind == Kind::Ident && self.peek().value == "*" {
@@ -1465,7 +1864,7 @@ impl Parser {
                         if chain_base.is_none() {
                             chain_base = Some(left.clone());
                         }
-                        chain_segs.push(ast::leaf(&key));
+                        dynamic_segments.push(ast::leaf(&key));
                         continue;
                     }
                     // `·*<literal>` falls through as a static key (`≡ ·<literal>`); reject complex `·*(...)` keys.
@@ -1512,12 +1911,78 @@ impl Parser {
             // 成员链被打断（下标/中缀/循环尾）：flush 成单个成员路径读 `base·seg…`。
             // `base·seg…` 的读语义 = 成员路径拷贝读（runtime 拼路径读值），不再经 kvspace·get。
             if let Some(base) = chain_base.take() {
-                let mut args = vec![base];
-                args.append(&mut chain_segs);
-                left = ast::call(MEMBER_READ_OP, args);
+                if dynamic_segments.is_empty() {
+                    let mut args = vec![base];
+                    args.append(&mut chain_segs);
+                    left = ast::call(MEMBER_READ_OP, args);
+                } else {
+                    /* 动态段改写为 `resolveptr` 序列（spec 12-动态键 §3.1）。
+                     * 混合段（静态 + 动态）本轮具名拒绝。 */
+                    if !chain_segs.is_empty() {
+                        self.error_at(
+                            Pos { line: 0, col: 0 },
+                            "dynamic member key mixed with static segments: not supported this round"
+                                .to_string(),
+                        );
+                        return None;
+                    }
+                    /*
+                     * 每段一次 `resolveptr(base, 段)`，多段**迭代**（spec §3.2）。
+                     * 首轮必须带上第一段——曾经写成 `resolveptr(base)` 起手再迭代，
+                     * 单段情形就丢掉了那一段，产出一条只有一个读参的畸形指令
+                     * （实测 `[3] resolveptr(h)` 只有 `h`）。
+                     */
+                    let mut segments = std::mem::take(&mut dynamic_segments).into_iter();
+                    let mut position = match segments.next() {
+                        Some(first) => ast::call("kvspace/key·resolveptr", vec![base, first]),
+                        None => base,
+                    };
+                    for segment in segments {
+                        position =
+                            ast::call("kvspace/key·resolveptr", vec![position, segment]);
+                    }
+                    /*
+                     * **读侧还要解引用**（spec §一：「读同形：`newm := resolveptr(...)`，
+                     * 再 `*newm -> x`」）。`resolveptr` 给的是**位置**（Ptr），
+                     * 不包一层 `*` 的话调用方拿到的是指针值，`cur + 1` 就会报
+                     * 「add expects numeric operand, got *int64」。
+                     */
+                    /*
+                     * **防回归断言**：读侧展开的结果必须是一个 `*` 表达式。
+                     *
+                     * 它证明的是「layout 不会再退化成直接读指针槽」，**不是**
+                     * 「执行期能跟跳成功」——后者要 BinRWIR 的 `dereference` 位与
+                     * 值访问层配合，layout 碰不到（见 `map-type-syntax.md` §十五
+                     * 那条「一个错误的首字符污染整条判据链」的反面：
+                     * 这里断言的是**我们自己产出的形态**）。
+                     *
+                     * 写成 `debug_assert!` 而不是探针：Release 下自动消失，
+                     * 不需要人记得删。
+                     */
+                    left = ast::call(ast::DEREF_OP, vec![position]);
+                    debug_assert!(
+                        left.op == ast::DEREF_OP && left.args.len() == 1,
+                        "dynamic-key read must wrap its position in an explicit `*`"
+                    );
+                }
             }
             // 后缀索引
             if self.peek().kind == Kind::LBrack {
+                // `[` 作用在指针基上同样是隐式解引用——写 `(*p)[i]`。
+                if let Some(name) = bare_ptr_param(self, &left) {
+                    let pos = self.peek().pos;
+                    self.errors.push(Diagnostic {
+                        pos,
+                        warn: false,
+                        info: false,
+                        message: format!(
+                            "对指针类型的坐标访问必须显式解引用：写 (*{name})[i]"
+                        ),
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                }
                 self.advance();
                 let mut indices = Vec::new();
                 while self.peek().kind != Kind::RBrack && self.peek().kind != Kind::EOF {
@@ -1619,11 +2084,15 @@ impl Parser {
                 self.check_deref_operand(&arg, t.pos);
                 return Some(ast::call(ast::DEREF_OP, vec![arg]));
             }
-            // 一元前缀 & = 取址：&x ≡ kvlang·abs(x)（中缀 & 仍为按位与，走 pratt 中缀路径）。
-            // & 对成员链（`=` 读）→ kvlang·abs(base, segs...)：取成员路径地址，非读值取址。
+            // 一元前缀 & = 取址：&x ≡ kvspace/key·abs(x)（中缀 & 仍为按位与，走 pratt 中缀路径）。
+            // & 对成员链（`=` 读）→ kvspace/key·abs(base, segs...)：取成员路径地址，非读值取址。
+            //
+            // 名字是 `kvspace/key·` 而不是 `kvspace·`：取址操作的是 **key 表达式**本身，
+            // 不是一次存储存取——`kvspace·` 族是「base + 存储动作」，base 可以是容器值
+            // 或 path 文本；取址收的是 key，两者不是同一个域。
             if symbol::lookup(&t.value).word == "bitand" {
                 let arg = self.parse_pratt(UNARY_PREC)?;
-                let op = format!("kvlang{}abs", keytree::MEMBER_SEP);
+                let op = format!("kvspace/key{}abs", keytree::MEMBER_SEP);
                 if arg.op == ast::MEMBER_READ_OP && arg.args.len() >= 2 {
                     return Some(ast::call(&op, arg.args));
                 }
@@ -1756,42 +2225,23 @@ impl Parser {
             ));
         }
 
-        // dict 字面量
+        // 容器字面量 `{…}`。位置型与具名型是**两种不同的东西**，用不同算子承载：
+        //
+        // - 位置型 `{v0, v1, …}` → `map·new(v0, v1, …)`：map 容器，成员键由键侧
+        //   formatter 产出；
+        // - 具名型 `{k=v, …}` → 待定的 struct 实例化：成员名来自原型，最终是否成立取决于
+        //   写槽 langtype（是 structref 才合法）。用独立算子承载，让分派处能分清，
+        //   否则「位置型字符串列表」与「具名字段表」在 args 里长得一样。
         if t.kind == Kind::LBrace {
             let mut j = 1isize;
             while self.peek_at(j).kind == Kind::Newline || self.peek_at(j).kind == Kind::Comment {
                 j += 1;
             }
-            let is_dict = self.peek_at(j).kind == Kind::RBrace
-                || (self.peek_at(j).kind == Kind::Ident
-                    && self.peek_at(j + 1).kind == Kind::Arrow
-                    && self.peek_at(j + 1).value == "=");
-            if !is_dict {
-                // 值列表 `{v0, v1, ...}`（无 `=> =`）→ 散 key 数组字面量，区别于 dict 的
-                // `key => = val`。散 key：每个元素落在 base.i 独立 key（变长/可增长），
-                // 字符串数组走这里；compact 定长打包走 `[...]`。
-                self.advance(); // consume {
-                let mut elems = Vec::new();
-                loop {
-                    while matches!(
-                        self.peek().kind,
-                        Kind::Newline | Kind::Comma | Kind::Comment
-                    ) {
-                        self.advance();
-                    }
-                    if self.peek().kind == Kind::RBrace || self.peek().kind == Kind::EOF {
-                        break;
-                    }
-                    match self.parse_pratt(0) {
-                        Some(e) => elems.push(e),
-                        None => break,
-                    }
-                }
-                self.expect(Kind::RBrace);
-                return Some(ast::call("map·new", elems));
-            }
+            let named = self.peek_at(j).kind == Kind::Ident
+                && self.peek_at(j + 1).kind == Kind::Arrow
+                && self.peek_at(j + 1).value == "=";
             self.advance(); // consume {
-            let mut args = Vec::new();
+            let mut elems = Vec::new();
             loop {
                 while matches!(
                     self.peek().kind,
@@ -1802,43 +2252,25 @@ impl Parser {
                 if self.peek().kind == Kind::RBrace || self.peek().kind == Kind::EOF {
                     break;
                 }
-                if self.peek().kind != Kind::Ident {
-                    let t = self.peek();
-                    self.errors.push(Diagnostic {
-                        pos: t.pos,
-                        warn: true,
-                        message: format!("obj literal: expected member name, got {:?}", t.value),
-                        info: false,
-                        source: String::new(),
-                        src_file: String::new(),
-                        src_name: String::new(),
-                    });
-                    break;
+                if named {
+                    // `{k=v …}`：键是标识符，值接在后面，键值交错。
+                    let key = self.advance().value;
+                    self.advance(); // consume =
+                    let Some(val) = self.parse_pratt(0) else { break };
+                    elems.push(ast::str_lit(&key));
+                    elems.push(val);
+                } else {
+                    match self.parse_pratt(0) {
+                        Some(e) => elems.push(e),
+                        None => break,
+                    }
                 }
-                let key = self.advance().value;
-                if !(self.peek().kind == Kind::Arrow && self.peek().value == "=") {
-                    let t = self.peek();
-                    self.errors.push(Diagnostic {
-                        pos: t.pos,
-                        warn: true,
-                        message: format!("obj literal: expected '=' after {key:?}"),
-                        info: false,
-                        source: String::new(),
-                        src_file: String::new(),
-                        src_name: String::new(),
-                    });
-                    break;
-                }
-                self.advance(); // consume =
-                let val = match self.parse_pratt(0) {
-                    Some(v) => v,
-                    None => break,
-                };
-                args.push(ast::str_lit(&key));
-                args.push(val);
             }
             self.expect(Kind::RBrace);
-            return Some(ast::call("obj", args));
+            // 具名成员 `{n=42; x=7}` 与位置成员 `{10, 20}` 都是「键值组」（groupkv）的
+            // 构造，不存在第二种构造算子——一律 `map·new`。字面量**替换**已有成员，
+            // 这一点由 `map·new` 的既有行为决定，写法不因键形态而分叉。
+            return Some(ast::call("map·new", elems));
         }
 
         // 括号分组
@@ -2013,7 +2445,17 @@ impl Parser {
     // ── 写槽收集 ─────────────────────────────────────────────────
 
     fn collect_write_list(&mut self) -> (Vec<String>, Vec<String>) {
-        if self.peek().kind == Kind::LParen {
+        // `(` 有两种含义：写参列表 `-> (a, b)` / `-> (*a, _)`，或解引用基座 `-> (*p)·k`。
+        // 判据不能只看括号内是不是 `*`——`(*a, _)` 也是写参列表。**必须看 `)` 之后是不是 `·`**：
+        // 只有 `(*name)·` 才是解引用后的成员写槽。
+        let is_deref_member = self.peek().kind == Kind::LParen
+            && self.peek_at(1).kind == Kind::Ident
+            && self.peek_at(1).value == ast::DEREF_OP
+            && self.peek_at(2).kind == Kind::Ident
+            && self.peek_at(3).kind == Kind::RParen
+            && self.peek_at(4).kind == Kind::Dot;
+        let is_write_param_list = self.peek().kind == Kind::LParen && !is_deref_member;
+        if is_write_param_list {
             self.advance();
             let mut writes = Vec::new();
             let mut wtypes = Vec::new();
@@ -2106,8 +2548,24 @@ impl Parser {
                     && self.peek_at(1).kind == Kind::Dot
                     && self.peek_at(2).kind != Kind::LBrack);
             if member_chain {
+                let base_token = self.peek();
                 let mut w = self.advance().value;
-                // 成员链写槽：整段 p·obj·deep 收成单个 write 槽，`=` 写（成员路径写）
+                // `·` 作用在指针基上是隐式解引用——**写位置不给例外**，与读同一判据。
+                // `*` 是显式解引用，任何位置都不得省略（spec 16-ptr）。
+                if self.ptr_params.contains(&w) {
+                    self.errors.push(Diagnostic {
+                        pos: base_token.pos,
+                        warn: false,
+                        info: false,
+                        message: format!(
+                            "对指针类型的成员访问必须显式解引用：写 `(*{w})·name`"
+                        ),
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                }
+                // 成员链写槽：整段 p·a·b·c 收成单个 write 槽，`=` 写（成员路径写）
                 // runtime ResolveWriteSlot 拼成员绝对路径。勿在每段 · 处截断
                 // （否则 deep 被当独立写槽）。
                 while self.peek().kind == Kind::Dot {
@@ -2115,6 +2573,54 @@ impl Parser {
                     w.push_str(keytree::MEMBER_SEP);
                     if !self.member_write_segment(&mut w) {
                         break;
+                    }
+                }
+                writes.push(w);
+                wtypes.push(String::new());
+                continue;
+            }
+            // `(*p)·seg…` / `(*p)[i]`：解引用后做成员写或下标写。
+            // `*` 不得省略，基座加括号才不会读成 `*(p·seg)`。
+            let is_deref_base = t.kind == Kind::LParen
+                && self.peek_at(1).kind == Kind::Ident
+                && self.peek_at(1).value == ast::DEREF_OP
+                && self.peek_at(2).kind == Kind::Ident
+                && self.peek_at(3).kind == Kind::RParen
+                && matches!(self.peek_at(4).kind, Kind::Dot | Kind::LBrack);
+            if is_deref_base {
+                let mut w = String::from("(*");
+                self.advance(); // (
+                self.advance(); // *
+                w.push_str(&self.advance().value); // 名字
+                self.advance(); // )
+                w.push(')');
+                if self.peek().kind == Kind::LBrack {
+                    // `(*p)[i] = v`：整段收成 `(*p)[i]` 写槽，交给 desugar_subscript_write。
+                    self.advance(); // [
+                    w.push('[');
+                    let mut depth = 1;
+                    while self.peek().kind != Kind::EOF && depth > 0 {
+                        let t = self.peek();
+                        if t.kind == Kind::LBrack {
+                            depth += 1;
+                        } else if t.kind == Kind::RBrack {
+                            depth -= 1;
+                            if depth == 0 {
+                                self.advance();
+                                break;
+                            }
+                        }
+                        w.push_str(&t.value);
+                        self.advance();
+                    }
+                    w.push(']');
+                } else {
+                    while self.peek().kind == Kind::Dot {
+                        self.advance(); // .
+                        w.push_str(keytree::MEMBER_SEP);
+                        if !self.member_write_segment(&mut w) {
+                            break;
+                        }
                     }
                 }
                 writes.push(w);
@@ -2163,10 +2669,12 @@ impl Parser {
         }
         let msg = if arg.quote != 0 {
             "`*` 解引用要求 Ptr 槽（名字），不能作用于字符串字面量".to_string()
-        } else if self.addr_params.contains(&arg.val) {
+        } else if self.value_params.contains(&arg.val) {
+            // 值复制形参是体内的一份副本，只读、没有可写的目标：
+            // 对它解引用等于凭空造一个指针（spec 05-runtime语义/04-函数调用）。
             format!(
-                "`*{}` 是两层间接：地址形参在体内已被解引用一次（名字即实参值）；先 `{} -> local` 再 `*local`（见 issue #286）",
-                arg.val, arg.val
+                "值复制参数不可解引用：只读，没有可写的目标（`{}` 是值复制形参）",
+                arg.val
             )
         } else {
             return;
@@ -2247,6 +2755,28 @@ impl Parser {
         // 只接**名字**——成员写 `p·x` 自带按指针优先、下标写先 `*p` 解引用到变量，故 `*` 后
         // 跟 `·`/`[` 一律报错，不静默错拼成两个写槽。
         let mut name = String::new();
+        // `(*p)·seg…`：解引用后做成员写。`*` 是显式解引用，写位置同样不得省略，
+        // 而 `*p·seg` 会被读成 `*(p·seg)`，所以基座必须加括号。
+        if self.peek().kind == Kind::LParen
+            && self.peek_at(1).kind == Kind::Ident
+            && self.peek_at(1).value == ast::DEREF_OP
+            && self.peek_at(2).kind == Kind::Ident
+            && self.peek_at(3).kind == Kind::RParen
+        {
+            self.advance(); // (
+            self.advance(); // *
+            name.push('(');
+            name.push_str(ast::DEREF_OP);
+            name.push_str(&self.advance().value); // 名字
+            self.advance(); // )
+            name.push(')');
+            if self.peek().kind == Kind::Dot {
+                self.advance();
+                name.push_str(keytree::MEMBER_SEP);
+                self.member_write_segment(&mut name);
+            }
+            return (name, String::new());
+        }
         if self.peek().kind == Kind::Ident
             && self.peek().value == ast::DEREF_OP
             && self.peek_at(1).kind == Kind::Ident
@@ -2255,15 +2785,14 @@ impl Parser {
             name.push_str(ast::DEREF_OP);
         }
         name.push_str(&self.advance().value);
-        if name.starts_with(ast::DEREF_OP) && self.addr_params.contains(&name[1..].to_string()) {
+        // 参数槽本身永远不可写：形参槽存的是指针，裸写 `-> p` 改的是**指针绑定**而不是
+        // 它指向的目标，等于偷偷换掉调用方的地址。要写目标必须写 `-> *p`。
+        if !name.starts_with(ast::DEREF_OP) && self.ptr_params.contains(&name) {
             self.errors.push(Diagnostic {
                 pos: self.peek().pos,
-                message: format!(
-                    "`{}` 是两层间接：地址形参在体内已被解引用一次（名字即实参值）；先 `{} -> local` 再写 `*local`（见 issue #286）",
-                    name, &name[1..]
-                ),
                 warn: false,
                 info: false,
+                message: format!("写指针形参必须显式解引用：写 `-> *{name}`"),
                 source: String::new(),
                 src_file: String::new(),
                 src_name: String::new(),
@@ -2317,7 +2846,15 @@ impl Parser {
     }
 
     fn collect_writes_until_arrow(&mut self) -> (Vec<String>, Vec<String>) {
-        let has_paren = self.peek().kind == Kind::LParen;
+        // `(` 有两种含义：`= (a, b)` 写参列表，或解引用基座 `= (*p)·k` / `= (*p)[i]`。
+        // 判据看 `)` 之后是不是 `·` 或 `[`——只有那种才是解引用后的成员/下标写槽。
+        let is_deref_base = self.peek().kind == Kind::LParen
+            && self.peek_at(1).kind == Kind::Ident
+            && self.peek_at(1).value == ast::DEREF_OP
+            && self.peek_at(2).kind == Kind::Ident
+            && self.peek_at(3).kind == Kind::RParen
+            && matches!(self.peek_at(4).kind, Kind::Dot | Kind::LBrack);
+        let has_paren = self.peek().kind == Kind::LParen && !is_deref_base;
         if has_paren {
             self.advance();
         }
@@ -2340,6 +2877,54 @@ impl Parser {
                 self.advance();
                 continue;
             }
+            // `(*p)·k` / `(*p)[i]`：解引用基座的成员/下标写槽，整段收成一个写槽。
+            // 这条必须在普通 ident 收集之前——否则 `(` 会被当成一个独立写槽，
+            // 括号内每个 token 各成一个槽（`(*r)[*i]` 被拆成 4 个）。
+            let is_deref_base_here = t.kind == Kind::LParen
+                && self.peek_at(1).kind == Kind::Ident
+                && self.peek_at(1).value == ast::DEREF_OP
+                && self.peek_at(2).kind == Kind::Ident
+                && self.peek_at(3).kind == Kind::RParen
+                && matches!(self.peek_at(4).kind, Kind::Dot | Kind::LBrack);
+            if is_deref_base_here {
+                let mut w = String::from("(*");
+                self.advance(); // (
+                self.advance(); // *
+                w.push_str(&self.advance().value); // 名字
+                self.advance(); // )
+                w.push(')');
+                if self.peek().kind == Kind::LBrack {
+                    self.advance(); // [
+                    w.push('[');
+                    let mut depth = 1;
+                    while self.peek().kind != Kind::EOF && depth > 0 {
+                        let inner = self.peek();
+                        if inner.kind == Kind::LBrack {
+                            depth += 1;
+                        } else if inner.kind == Kind::RBrack {
+                            depth -= 1;
+                            if depth == 0 {
+                                self.advance();
+                                break;
+                            }
+                        }
+                        w.push_str(&inner.value);
+                        self.advance();
+                    }
+                    w.push(']');
+                } else {
+                    while self.peek().kind == Kind::Dot {
+                        self.advance();
+                        w.push_str(keytree::MEMBER_SEP);
+                        if !self.member_write_segment(&mut w) {
+                            break;
+                        }
+                    }
+                }
+                writes.push(w);
+                wtypes.push(String::new());
+                continue;
+            }
             let is_path_lit = t.kind == Kind::Literal
                 && t.quote == 0
                 && !t.value.is_empty()
@@ -2354,7 +2939,19 @@ impl Parser {
                 && self.peek_at(2).kind != Kind::LBrack
             {
                 let mut w = self.advance().value;
-                // 成员链写槽：整段 p·obj·deep 收成单个 write 槽（勿在每段 · 处截断）。
+                // `·` 作用在指针基上是隐式解引用——写位置与读同一判据。
+                if self.ptr_params.contains(&w) {
+                    self.errors.push(Diagnostic {
+                        pos: t.pos,
+                        warn: false,
+                        info: false,
+                        message: format!("对指针类型的成员访问必须显式解引用：写 `(*{w})·name`"),
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                }
+                // 成员链写槽：整段 p·a·b·c 收成单个 write 槽（勿在每段 · 处截断）。
                 while self.peek().kind == Kind::Dot && self.peek_at(1).kind != Kind::LBrack {
                     self.advance(); // .
                     w.push_str(keytree::MEMBER_SEP);
@@ -2474,6 +3071,31 @@ impl Parser {
         let e = inst.expr.take();
         let dot_coord = arr.ends_with(keytree::MEMBER_SEP);
         let arr = arr.trim_end_matches(keytree::MEMBER_SEP).to_string();
+        // `(*p)[i] = v`：解引用基座的下标写，与 `base·[i] = v` 同一条路径——
+        // 落成员写槽（`=` 写），不是 `compactarray·set`。后者会把基座当容器整体，
+        // 下标被当成「写进容器的值」，于是 `(*r)[0] = "H"` 报「cannot assign int64」。
+        let deref_base = arr.starts_with("(*") && arr.ends_with(')');
+        /* **写槽名按语义归一，不按源码文本**：`(*r)` 与 `*r` 是同一个形参的两种
+         * 写法，必须落到同一个槽。曾经 `(*r)` 被逐字塞进 `writes`，于是符号池按
+         * 文本登记出一个**新符号**——它与写形参 `result0` 无关，任何指令都没写过它，
+         * 首次读它就是 `UNBOUND_SLOT`（`strings.kv` 的 `replace_at`）。
+         *
+         * 归一化放在 `dot_coord || arr.starts_with('/')` 那一支**之后**：成员写与
+         * 路径写各有自己的写槽形态，这里不碰。 */
+        let arr_canonical = canonical_write_slot_text(&arr);
+        // `p[i] = v`（`p` 是 kvlang 指针）：下标作用在指针基座上，是隐式解引用，
+        // 与读侧同一判据——写位置不给例外。
+        if !deref_base && self.ptr_params.contains(&arr) {
+            self.errors.push(Diagnostic {
+                pos: Pos { line: 0, col: 0 },
+                warn: false,
+                info: false,
+                message: format!("对指针类型的坐标访问必须显式解引用：写 (*{arr})[i]"),
+                source: String::new(),
+                src_file: String::new(),
+                src_name: String::new(),
+            });
+        }
         if dot_coord || arr.starts_with('/') {
             // 成员下标写：保留完整成员写槽 `arr·[i,j]`（=` 写），不再经 kvspace·set。
             inst.writes = vec![format!("{arr}{}[{}]", keytree::MEMBER_SEP, idxs)];
@@ -2481,7 +3103,11 @@ impl Parser {
             inst.expr = e;
             return;
         }
-        let mut args = vec![ast::leaf(&arr)];
+        /* **读参 base 与写槽名都用归一化文本**（`(*r)` → `*r`）：两者必须是同一个
+         * 槽，否则「算出来的元素写回哪里」与「读的哪里」分裂成两个符号。
+         * 上面 `ptr_params` 那条诊断**仍用原文 `arr`**——它判的是「基座是未显式
+         * 解引用的裸指针名」，归一化与它无关。 */
+        let mut args = vec![ast::leaf(&arr_canonical)];
         for idx in idxs.split(',').map(|x| x.trim()) {
             if !idx.is_empty() {
                 args.push(ast::leaf(idx));
@@ -2489,11 +3115,18 @@ impl Parser {
         }
         args.push(e.unwrap_or(ast::leaf("")));
         inst.expr = Some(ast::call("compactarray·set", args));
-        inst.writes = vec![arr];
+        inst.writes = vec![arr_canonical];
         inst.write_types = Vec::new();
     }
 
-    fn desugar_member_write(&mut self, inst: &mut Instruction) {
+    /// 写槽脱糖。`outputs` 用于**一条写语句变两条指令**（动态键要先算位置再写）：
+    /// 追加的指令由调用方接在 `inst` 之后，`source_logical_program_counter`
+    /// 与 `inst` 相同——恢复/重放/诊断都按 pc 定位源码行。
+    fn desugar_member_write(
+        &mut self,
+        inst: &mut Instruction,
+        outputs: &mut Vec<Instruction>,
+    ) {
         if inst.writes.len() != 1 || !inst.writes[0].contains(keytree::MEMBER_SEP) {
             return;
         }
@@ -2513,9 +3146,46 @@ impl Parser {
             .unwrap_or(false);
         if is_struct_new && !s.contains('*') {
             let e = inst.expr.take().unwrap();
-            inst.expr = Some(ast::call("kvspace·cplist", vec![e, ast::leaf(&s)]));
-            inst.writes = Vec::new();
-            inst.write_types = Vec::new();
+            /*
+             * **写类型必须跟着走**：`struct·new` 的第一个实参就是**原型路径**，
+             * 那就是这次实例化的类型（`/lib/Node`），不需要猜。
+             *
+             * 曾经这里把 `write_types` 和 `writes` 一起清空，于是 desugar 出的
+             * `kvspace·cplist(struct·new(…), dst)` 没有结果类型——临时槽与 dst
+             * 的类型都缺，编码器报「local '_1' is written with a non-concrete
+             * langtype」。`p:Point = {…}`（有声明写槽）不走这条 desugar，所以
+             * 只有「struct 字面量写进成员/散键」这条路径才暴露。
+             */
+            let prototype = e
+                .args
+                .first()
+                .filter(|a| a.quote != 0)
+                .map(|a| a.val.clone())
+                .unwrap_or_default();
+            /*
+             * **dst 是写参，不是第二个读参。**
+             *
+             * 规范 `04-layout语义/01-指令架构.kv`「写槽必须是位置」明确：写槽可以是
+             * 裸名、绝对路径、**成员写（`base·field` / `base·*key`）**、下标写。
+             * 所以 `s` 即使是一条成员链，放进 `writes` 也是**合法形态**——
+             * `lower.rs` 的 `check_map_inst` 本来就按「writes 里含 `·`」处理。
+             *
+             * 而 handler 的 `runtimec_host_copy_operation` 按
+             * `05-runtime语义/12-动态键.kv` 与 `kvspace-family.md` 定的
+             * 「src 读参 + dst 写参」实现，期望 1 读 1 写。发射两读参会让它收到
+             * 2 读 0 写，直接报 INVALID——那是把「形状不符」当成了「能力缺失」。
+             *
+             * `write_types` 必须与 `writes` **等长且逐位对应**：`struct·new` 的
+             * desugar 里类型就是原型路径。清空一个、留下另一个，就是早先
+             * `_1` 报 non-concrete langtype 的成因。
+             */
+            inst.expr = Some(ast::call("kvspace·cplist", vec![e]));
+            inst.writes = vec![s.clone()];
+            inst.write_types = if prototype.is_empty() {
+                Vec::new()
+            } else {
+                vec![prototype]
+            };
             return;
         }
         // 成员链写槽 p·a·b = v / p·*k = v：保持写槽原样（含 `·`/`·*`），不再转 kvspace·set。
@@ -2543,6 +3213,93 @@ impl Parser {
             } else {
                 args.push(ast::str_lit(field));
             }
+        }
+        /*
+         * **动态写槽 `base·*k` 改写为 `resolveptr` + 显式解引用写**
+         * （spec `12-动态键` §3.1）。静态成员写保留原串——`=` 写由 runtime 拼
+         * 成员绝对路径；但动态段的 `*k` 是运行期值，**编码器明令拒绝**
+         * （`encoder.c` 的 `dynamic member key not representable`，那条拒绝保留，
+         * 它是最后一道断言，不是要放行的东西）。
+         *
+         *   `v -> base·*k`  ⇒  `p := resolveptr(base, k)`   （本条指令）
+         *                     `v -> *_p`                  （追加到 outputs）
+         *
+         * 两条指令的 pc 相同：恢复/重放/诊断都按 pc 定位源码行，分开编号会让
+         * 「停在哪一行」对不上源码。
+         */
+        if s.split(keytree::MEMBER_SEP)
+            .skip(1)
+            .any(|field| field.starts_with('*'))
+        {
+            /* 混合段（静态 + 动态）本轮具名拒绝，不顺手打开。 */
+            if s.split(keytree::MEMBER_SEP)
+                .skip(1)
+                .any(|field| !field.starts_with('*'))
+            {
+                self.errors.push(Diagnostic {
+                    pos: Pos { line: 0, col: 0 },
+                    warn: false,
+                    info: false,
+                    message: format!(
+                        "dynamic member write mixed with static segments ({s}): not supported this round"
+                    ),
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+                return;
+            }
+            let value = match inst.expr.take() {
+                Some(e) => e,
+                None => return,
+            };
+            let mut position = ast::leaf(&base);
+            for field in s.split(keytree::MEMBER_SEP).skip(1) {
+                position = ast::call(
+                    "kvspace/key·resolveptr",
+                    vec![position, ast::leaf(&field[1..])],
+                );
+            }
+            /*
+             * 位置槽的名字用 `_p<N>`，**不复用 lowering 的 `_N`**。
+             *
+             * lowering 阶段（`LabelGen::tmp`）生成 `_1`、`_2`… 并按出现顺序自增；
+             * parser 阶段还没有那个计数器，造一个同前缀的槽会与它撞名——而撞名
+             * 不会报错，只会让两条指令写同一个槽（静默错值）。
+             * `_p` 前缀与 lowering 的 `_` 空间不相交，且表意（pointer）。
+             * 计数器放在 `FlowCtx` 之外的文件级 `Cell` 里递增，保证同一函数内唯一。
+             */
+            let slot = self.fresh_position_slot();
+            inst.expr = Some(position);
+            inst.writes = vec![slot.clone()];
+            inst.write_types = Vec::new();
+            /* 追加：值 → 解引用写。 */
+            /*
+             * **判据（架构师裁决）**：「位置槽的读写操作数必须带 `*`」。
+             *
+             * 这里只断言 **layout 自己产出的文本**：`*_p1` 这类文本原样进指令槽，
+             * 不被任何归一化吃掉。真正的端到端保证（值访问层能解析它）在
+             * `12-动态键` 的用例里——layout 断言替代不了那一条。
+             *
+             * 写成断言而不是注释：这条规则此前只存在于我脑子里，于是「循环体内
+             * 动态写」一直在红而没人知道。
+             */
+            let deref_text = format!("*{slot}");
+            debug_assert!(
+                deref_text.starts_with('*') && deref_text.len() > 1,
+                "position slot must be referenced with an explicit `*`: {deref_text:?}"
+            );
+            outputs.push(Instruction {
+                comments: Vec::new(),
+                expr: Some(value),
+                writes: vec![deref_text],
+                write_types: Vec::new(),
+                arrow_left: inst.arrow_left,
+                operator: false,
+                operand_kind: String::new(),
+            pos: Pos::default(),
+            });
+            return;
         }
         // base.a.b = v 即成员写 `v -> base·a·b`：写槽保留完整成员串，`=` 写由 runtime
         // ResolveWriteSlot 拼成员绝对路径。不再经 kvspace·set（清理方案：set 死刑）。
@@ -2741,20 +3498,19 @@ fn is_fixed_dim_array(t: &str) -> bool {
         .all(|d| !d.trim().is_empty() && d.trim().bytes().all(|c| c.is_ascii_digit()))
 }
 
-/// 类型串里是否有原子以 `*`（间接性前缀）起头——以 `|`（并）与 `·`（map 键值）切分后逐段看。
-fn ptr_prefixed(ty: &str) -> bool {
-    ty.split(['|', '·']).any(|a| a.starts_with('*'))
-}
-
 /// 值容器类型：成员落在兄弟槽 `{key}·` 的类型——map langtype（含 `·`）或 structref（`/` 开头）。
 /// 这类值没有可拷贝的单槽值，只能按地址传递（见 spec [[函数]]）。
+///
+/// 传递方式不参与判断：`*` 已由 `Param::by_ref` 单独承载，`ty` 只剩类型表达式。
 fn is_value_container_ty(ty: &str) -> bool {
     ty.split('|')
-        .any(|a| a.trim_start_matches('*').starts_with('/') || a.contains('·'))
+        .any(|a| a.starts_with('/') || a.contains('·'))
 }
 
 fn type_error(_kind: &str) -> String {
-    "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, obj, map, index, char, any, []T, [2,3]T, [?,N]T, A|B".to_string()
+    // 列的是**种类名**，容器不在此列：map 写 mapexpr（`[]char/utf8·int64`），
+    // struct 写原型路径（`/lib/Point`）——两者都不是种类（见 spec [[langtype语义类型]]）。
+    "unknown type — valid: int8/16/32/64, uint8/16/32/64, float32/64, bool, char/utf32, char, any, []T, [2,3]T, [?,N]T, A|B, key·value, /lib/Name".to_string()
 }
 
 /// 收集函数体（含嵌套块/分支/循环）里的全部指令，供别名污染的不动点迭代用。
@@ -2832,4 +3588,16 @@ fn type_has_any(raw: &str) -> bool {
         };
         base == "any"
     })
+}
+
+/// 基座是否为「指针形参的裸名」：是则返回名字。
+///
+/// 新参数模型下形参名是指针，`·`/`[` 直接作用在它上面就是隐式解引用。
+/// 判据只认**裸名**（`Expr::is_leaf` 且非字符串字面量）——`(*p)` 已经显式解引用过，
+/// 它的基座是解引用表达式，不在此列。
+fn bare_ptr_param(p: &Parser, e: &Expr) -> Option<String> {
+    if !e.is_leaf() || e.quote != 0 {
+        return None;
+    }
+    p.ptr_params.iter().find(|n| **n == e.val).cloned()
 }

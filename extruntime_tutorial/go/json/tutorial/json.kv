@@ -18,10 +18,10 @@
 //   flags = true false true
 //   list = 1 2 3
 rwfunc test() -> () {
-	/data:[]char/utf8·int64 = {}
-	/data·grp:[]char/utf8·int64 = {}
-	/data·nested:[]char/utf8·int64 = {}
-	/data·nested·level1:[]char/utf8·int64 = {}
+	/data:'[]char/utf8'int64 = {}
+	/data·grp:'[]char/utf8'int64 = {}
+	/data·nested:'[]char/utf8'int64 = {}
+	/data·nested·level1:'[]char/utf8'int64 = {}
 	42 -> /data·age
 	"alice" -> /data·name
 	3.14 -> /data·score
@@ -42,8 +42,8 @@ rwfunc test() -> () {
 	println("c =", /data2·grp·c)
 	println("cont =", /data2·cont·[0], /data2·cont·[1], /data2·cont·[2])
 	println("scat =", /data2·scat·[0], /data2·scat·[1], /data2·scat·[2])
-	compactarray·numel(/data2·cont) -> n1
-	compactarray·numel(/data2·scat) -> n2
+	compactarray·numel(/data2·cont) -> n1:int64
+	compactarray·numel(/data2·scat) -> n2:int64
 	println("len =", n1, n2)
 	println("level2 =", /data2·nested·level1·level2)
 	println("count =", /data2·nested·level1·count)

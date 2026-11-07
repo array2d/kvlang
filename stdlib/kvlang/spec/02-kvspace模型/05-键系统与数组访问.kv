@@ -36,9 +36,8 @@ langtype 串**全前缀**书写，最左符号为最外层构造器，无优先�
 值）写的是 `def langtype`（**匹配类型**）——后者是模式，**一个参数定义可匹配多种实际 `langtype`**（见
 [[langtype签名类型表达式]] 与 [[匹配语义与变参]]）。
 
-维数与各维长度编码进 langtype 串本身；ref（存储位置）已独立为 head 中的 ref u8 字段（见 [[XValueHead
-线格式]]），不再是 langtype 前缀——storetype 物理字段携带对应的 ndim/dims 结构。**源码**类型标注可在最
-前写 `*`/`@` 前缀表示 ref（如 `*int64`、`@[256,256]uint8`），layout 解析时剥离前缀落成 head `ref` 独立
-字节；wire 层 langtype 串不含 `*`/`@` 前缀（见 [[总体方案]]）。
+维数与各维长度编码进 langtype 串本身（形状段），head 只说明字节布局。**指针与扩展都是 langtype
+前缀**：源码写 `*int64` / `@[256,256]uint8`，wire langtype **原样保留**前缀（任何一层都不剥），
+引用性由此判定（见 [[XValueHead线格式]]）。
 	"#### -> /lib/kvlang/spec/kvspace模型/键系统与数组访问
 }

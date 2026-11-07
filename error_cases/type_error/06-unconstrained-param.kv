@@ -1,0 +1,17 @@
+// expected:
+//   参数必须声明类型：`a` 的类型为空
+// 修复: 参数必须声明类型；空类型不合法（spec 04-layout语义/03-函数「参数必须有类型」）。
+// 迁移前写作 `a:`（旧写法，已被 layout 拒绝），迁移工具改成 `* $a` —— 只是「没有类型 + 指针」，
+// 仍然没有类型，因此仍必须报错。
+rwfunc size_of(* $a) -> (*int64 $n) {
+	kvspace·listlen(*a) -> *n
+}
+rwfunc print_any(* $a) -> () {
+	println(*a)
+}
+rwfunc test() -> () {
+	m:'[int64]'[]char/utf32 = {"a", "b", "c"}
+	size_of(m) -> n
+	println(n)
+	print_any(42)
+}

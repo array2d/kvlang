@@ -1,0 +1,34 @@
+// 003: Longest Substring Without Repeating Characters — 滑动窗口
+// 来源: LeetCode #3
+// 期望输出:
+//   3
+//   1
+//   5
+rwfunc length_of_longest(*[]char/utf32 $s) -> (*int64 $max_len) {
+	n:int64 = string·len(*s)
+	last:'[]char/utf8'int64 = {}
+	*max_len = 0
+	left:int64 = 0
+	right:int64 = 0
+	while (right < n) {
+		(*s)[right] -> c:char/utf32
+		exists:bool = last·*c != None
+		if (exists) {
+			prev:int64 = last·*c
+			cand:int64 = prev + 1
+			if (cand > left) { left = cand }
+		}
+		right -> last·*c
+		cur:int64 = right - left + 1
+		if (cur > *max_len) { cur -> *max_len }
+		right + 1 -> right
+	}
+}
+
+rwfunc test() -> () {
+	r1:int64 = length_of_longest("abcabcbb")
+	println(r1)
+	println(length_of_longest("bbbbb"))
+	r3:int64 = length_of_longest("abcde")
+	println(r3)
+}

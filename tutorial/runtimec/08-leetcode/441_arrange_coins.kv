@@ -1,0 +1,34 @@
+// 441: Arranging Coins — 二分查找完整行数
+// 来源: LeetCode #441
+// 期望输出:
+//   2
+rwfunc arrange(*int64 $n) -> () {
+	lo:int64 = 1
+	*n -> hi:int64
+	ans:int64 = 0
+	while (lo <= hi) {
+		s:int64 = lo + hi
+		s ÷ 2 -> mid:int64
+		s ÷ 2 -> mid_m:int64
+		m2:int64 = mid × mid
+		m2_m:int64 = mid × mid
+		total:int64 = m2 + mid
+		total ÷ 2 -> t:int64
+		total ÷ 2 -> t_m:int64
+		ok:bool = t <= *n
+		ok_m:bool = t ≤ *n
+
+		if (ok) {
+			ans = mid
+			mid + 1 -> lo
+		} else {
+			hi = mid - 1
+		}
+	}
+	println(ans)
+}
+
+rwfunc test() -> () {
+
+	arrange(5)
+}

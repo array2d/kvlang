@@ -1,0 +1,27 @@
+// 期望输出:
+//   abs(-5) = 5
+//   false
+lib my {
+    rwfunc abs(*int64 $x) -> (*int64 $r) {
+        if (*x < 0) {
+            -*x -> *r
+        } else {
+            *r = *x
+        }
+    }
+}
+
+rwfunc test() -> () {
+
+	a:int64 = my·abs(-5)
+	println("abs(-5) =", a)
+	my·abs(3) -> b:int64
+	println("abs(3) =", b)
+	c:int64 = my·abs(-10)
+	println("abs(-10) =", c)
+	d:bool = b >= 90
+	d_m:bool = b ≥ 90
+	println(d_m)
+	println(d)
+	a -> /last_abs
+}

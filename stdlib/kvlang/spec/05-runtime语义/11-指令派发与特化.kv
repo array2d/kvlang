@@ -1,60 +1,65 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/runtime语义/指令派发与特化 {
-	r####"# 指令派发与数值特化
+	r####"# 指令派发与数值 promotion
 
 本章定义 runtime 执行一条指令时的派发模型（runtime 内部，不改变 KV 布局），以及
-opcode 的特化命名与数值 promotion 规则（语言可见）。
+opcode 形态与数值 promotion 规则（语言可见）。
 
 ## 派发模型（normative）
 
-- 每条指令的 handler 在 **row 加载期**确定一次，存为 row 的 `handler_id`：
+- 每条指令的 rwir_runtimecimpl 在 **row 加载期**确定一次，随 row 存下来：
   - opcode 属本 runtime 的 myrwircaps（native）→ 该表中该项的下标；
   - 其余（delegated、def rwir、用户 rwfunc 调用）→ 表尾统一的 `route` 项。
-- 执行期只做一次表调用 `optable[row->handler_id](&f)`；**禁止**每步按 opcode 字符串查找或
-  在热路径展开 native / delegated / def rwir / user call 的分支树。
-- `route` handler 内部按序处理：delegated 派发（本地则落用户调用）→ def rwir 签名校验与
-  外部 handoff → 用户 rwfunc 调用；`KVMODE_RETURN` 的 yield 由 route 设置
+- 执行期只做一次表调用：以 row 记下的下标直接索引 rwir_runtimecimpl 表，
+  不做字符串查找；**禁止**每步按 opcode 字符串查找或在热路径展开
+  native / delegated / def rwir / user call 的分支树。
+- `route` rwir_runtimecimpl 内部按序处理：delegated 派发（本地则落用户调用）→
+  def rwir 签名校验与外部 handoff → 用户 rwfunc 调用；
+  `KVMODE_RETURN` 的 yield 由 route 设置
   `yield_pc` 冒泡，主循环的 yield/pc 回传逻辑不变。
-- native handler 不感知委托、def rwir、调用与 yield。
+- native rwir_runtimecimpl 不感知委托、def rwir、调用与 yield。
 
 layout 的 target selection 在 layout 期完成（Rwir/User）；runtime 的
-handler_id/派发模型不因 `/‥isa` 改变。typed Rwir opcode 仍由 layout 的
-`specialize` 按静态类型发出；不做 Code/字节码下译。
+rwir_runtimecimpl 选定与派发模型不因 `/lib` 下的 def rwir 改变；不做 Code/字节码下译。
 
-## opcode 特化命名
+## opcode 形态与类型标注（normative）
 
-- 同型：`<kind>·<op>`（如 `int64·add`、`float64·lt`）。kind 由下一节 promotion
-  表唯一确定时发出；表给不出结果（int×uint 混合、动态槽（空 kindexp）、
-  比较类跨类混合）一律保留通用 opcode（如 `+`、`add`），由通用实现按值判别。
-- **特化决策时，未定型整数字面量不计入 `int × uint` 混合符号判定**：按
+- layout **只发语义算子名**：`add`、`sub`、`mul`、`div`、`lt`、`eq`、`neg`…；
+  源码符号（`+`、`-`、`×`、`÷`、`<`…）经别名表映射到同一语义名。
+- opcode **不携带类型**：不存在 `<kind>·<op>` 形态，精度专精 opcode 已废除。
+  类型由**槽上的 kind 标注**携带：读参槽 langtype 标操作数类型，写槽 langtype
+  标结果类型。
+- 下一节 promotion 表**不决定 opcode 名字**，只决定槽上的 kind 标注与结果类型。
+- `int × uint` 混合符号：算术/位运算按混合符号直接 TypeError，没有单一结果
+  kind；比较按精确数学值，不受影响。
+- **未定型整数字面量不计入 `int × uint` 混合符号判定**：按
   [[种类与定宽类型]] 第 10 条适配到另一侧类型后再判。字面量放不进目标
   类型时（如 `uint8_var + 300`）按自然类型处理，随后落入混合符号报错；
   不另设字面量越界诊断。
 - **char/字符串不在 `+`/`add` 的接受集合内**：字符串拼接由 layout 在语法层脱糖为
   `string·concat`，不发射 `+`/`add`；详见下文「字符串拼接」。
-- 混合（后续）：候选复合键 `<k1>·<k2>·<op>`（输入 kind 在前、结果 kind 由 promotion 表
-  决定）；在 wire 里直接写数值 handler id 作为备选方案记录，暂不采用。
 
 ## 数值 promotion（normative，唯一书面定义）
 
-layout 的 `specialize` 与 binircompiler 的按实参类型特化都按本表实现；实现与
-本表不一致属 bug，单独修复，任何一侧都不得加兼容分支。
+layout 的 `specialize`（定槽上 kind 标注）与 binircompiler 的按实参类型收敛都按
+本表实现；实现与本表不一致属 bug，单独修复，任何一侧都不得加兼容分支。
 
 记 `w(k)` 为整数宽度（8/16/32/64），`s(k)` 为有符号性。
 
 - **int × int**
-  - `s(a) == s(b)`：取宽度较大者的有符号/无符号种类；同宽取任一（两侧同型）。
-  - `s(a) != s(b)`：**不特化**。算术/位运算的通用实现直接 TypeError；比较按
+  - `s(a) == s(b)`：结果与标注取宽度较大者的有符号/无符号种类；同宽取任一
+    （两侧同型）。
+  - `s(a) != s(b)`：**无单一结果 kind**。算术/位运算直接 TypeError；比较按
     [[种类与定宽类型]] 的精确数学值规则，不报错。
 - **float × float**：任一方为 `float64` → `float64`；否则任一方为 `float32` → `float32`；
   其余按 `float64`。
 - **int × float**：按 float 规则（任一方 `float64` → `float64`，否则
-  `float32`）。该规则用于算术；比较类的跨类混合（int 与 float）不特化。
-- **sqrt / exp / log / pow**：结果与特化 kind 恒为 `float64`；`float32`
-  操作数不特化。
+  `float32`）。该规则用于算术；比较类的跨类混合（int 与 float）走按值比较。
+- **sqrt / exp / log / pow**：结果 kind 恒为 `float64`；`float32` 操作数按
+  `float64` 计算。
 - **char/字符串不参与数值 promotion**：`+`/`add` 的操作数 union 不含 char/字符串，
-  因此不会为它们产生数值特化 opcode。字符串拼接是 `string·concat` 的语义，由
-  layout 在语法层脱糖；字符串比较不受本条影响（见本表 `eq/neq/…` 的接受集合）。
+  因此数值算子永不接收 char/字符串操作数。字符串拼接是 `string·concat` 的语义，
+  由 layout 在语法层脱糖；字符串比较不受本条影响（见本表 `eq/neq/…` 的接受集合）。
 - **结果宽度与操作数顺序无关**：任何实现（解释器、即时编译）都不得按操作数位置
   选择宽度；同一组输入的两个顺序必须得到逐位相同的结果。
 
@@ -68,18 +73,22 @@ layout 的 `specialize` 与 binircompiler 的按实参类型特化都按本表�
 - `max min`：全数值，可变参，结果按 promotion。
 - `mod`：仅整型（SI*/UI*）。
 - `bitand bitor bitxor shl shr`：整型（SI*/UI*）；同符号不同宽度按 promotion，
-  混合符号不特化（运行时直接报错）。
+  混合符号直接 TypeError。
 - `neg abs`：任意数值（结果同操作数；无符号按回绕/恒等，见 [[种类与定宽类型]]）。
 - `sign`：任意数值（结果同操作数；无符号按 0/1）。
-- `sqrt exp log pow`：任意数值，结果恒 `float64`；`float32` 操作数不特化。
-- `eq neq lt le gt ge`：任意数值与 `bool`，结果 `bool`；跨类混合（int 与
-  float、int 与 uint）不特化，由通用实现按值比较（运行时支持）。
-- `and or not`：`bool`。
+- `sqrt exp log pow`：任意数值，结果恒 `float64`。`sqrt`/`exp`/`log` 一元，`pow(x,y)` 二元。
+- `eq neq lt le gt ge`：**任意数值**（10 种），结果 `bool`；跨类混合（int 与
+  float、int 与 uint）由 runtime 按值比较。`bool` 之间的相等走 `bool·eq` / `bool·neq`
+  两个独立行，**不在本行掩码内**。
+- `and or not`：**任意数值与 `bool`**（11 种），结果 `bool`；数值非零即真（见
+  [[五语言行为矩阵]] 的 `logical-operators-truthy`）。
 - 类型构造器（`int64(x)` 等）：任意数值/布尔/char，结果为目标 kind。
 
-本表是**接受集合**；具体实现（typed opcode）由 promotion 表配合本表选出。
+本表是**接受集合**；promotion 表在此之上定槽上的 kind 标注与结果类型。
+**这些并集只属于 rwir 算子声明**：`rwfunc` 的参数与返回值必须是单一类型，不得含并集
+（见 [[langtype签名类型表达式]]）——算子有编译期特化器把并集收敛成唯一 opid，用户函数没有。
 `int × uint` 在算术/位运算里两个集合都接受，但混合符号按
-[[种类与定宽类型]] 直接 TypeError、不特化；比较类按精确数学值比较，不报错。
+[[种类与定宽类型]] 直接 TypeError；比较类按精确数学值比较，不报错。
 
 ### 字符串拼接（layout 脱糖，normative）
 
@@ -91,13 +100,13 @@ layout 的 `specialize` 与 binircompiler 的按实参类型特化都按本表�
   opcode 是 `string·concat`，不是 `+`/`add`。
 - **错误时机在 layout**：字符串与非字符串相加（如 `"x" + 1`、`char + int`）在 layout
   阶段报错，不生成可执行指令；这**不是**运行时错误。
-- **runtime 不做字符串拼接**：`+`/`add` 的 handler 只接受数值操作数，不得按值判别后
+- **runtime 不做字符串拼接**：`+`/`add` 的 rwir_runtimecimpl 只接受数值操作数，不得按值判别后
   偷偷拼接字符串。自定义 rwir/扩展若需要字符串拼接，调用 `string·concat`。
 
 ## 值相关检查（保留）
 
 整数除零/模零、None 比较、越界与动态槽的运行时判别不受本章影响；
-浮点除零按 IEEE（±inf/NaN），不是 TypeError。通用 handler 按实际 kind 归约。
+浮点除零按 IEEE（±inf/NaN），不是 TypeError。通用 rwir_runtimecimpl 按实际 kind 归约。
 
 ## 写槽 body 快路径（实现约束）
 
@@ -110,7 +119,7 @@ layout 的 `specialize` 与 binircompiler 的按实参类型特化都按本表�
   结果类型；槽由本 vthread 写入，故 `ro=0`、`vid=0`（所有权守卫涵盖，无需回读）；
 - 指令只有一个写参。
 
-写槽被任何整值写/删除命中（含 array/map 删键、cp/cpTree）时，缓存的 body 指针
+写槽被任何整值写/删除命中（含 array/map 删键、cp/cpTree）时，缓存的 body 二进制指针
 **必须**立即失效；捕获失败后只在对应 key 再次被写时重试。不满足条件时**必须**
 回退整值写，不得截断、不得跳过 NextPc。
 

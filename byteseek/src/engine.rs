@@ -36,12 +36,14 @@ impl Engine {
                 raw.len()
             ));
         }
-        // 系统键（末段含 ‥：status/pc/‥lib）无类型保留空 attr；其余填 langtype 记录。
+        // 系统键（末段含 ‥：status/pc/‥lib）**不带 langtype**——runtime 的 write_text
+        // 写的就是无类型值，read_text 对无类型值按纯字节读。其余值直接带类型：
+        // `xvalue_to_wire` 已把完整 langtype（含 `[dims]`）交给构造器，不需要补 attr。
         let last_seg = key.rsplit('/').next().unwrap_or(key);
         let wire = if last_seg.contains('\u{2025}') {
-            value
+            xvalue_to_wire_untyped(kind, raw, dims)
         } else {
-            with_langtype(&value, &full_langtype(kind, dims))
+            value
         };
         self.set_xvalue(key, &wire)
     }
@@ -89,7 +91,7 @@ impl Engine {
             // Copy borrowed kvspaceGet bytes before calling langtype_of (GetHead invalidates volatile views).
             let d = std::slice::from_raw_parts(out, olen as usize).to_vec();
             let kx = crate::ffi::langtype_of(self.kv, key);
-            let body = xh_body_slice(&d);
+            let body = value_body(&d);
             if kx.ends_with("char/utf32") {
                 body.chunks_exact(4)
                     .map(|c| {
@@ -134,9 +136,9 @@ impl Engine {
         if xvalue.is_empty() {
             return (0, String::new());
         }
-        let r = if xh_is_ptr(&xvalue) {
+        let r = if value_is_ptr(&xvalue) {
             1
-        } else if xh_is_ext(&xvalue) {
+        } else if value_is_ext(&xvalue) {
             2
         } else {
             0
@@ -144,7 +146,7 @@ impl Engine {
         if r != 2 {
             return (r, String::new());
         }
-        let body = String::from_utf8_lossy(xh_body_slice(&xvalue)).into_owned();
+        let body = String::from_utf8_lossy(value_body(&xvalue)).into_owned();
         (r, body)
     }
 
@@ -169,8 +171,8 @@ impl Engine {
         let p = take(unsafe { kvlangRwirextResolveReadPath(self.kv, cs(pc).as_ptr(), idx) });
         if !p.is_empty() {
             let xv = self.get_xvalue(&p);
-            if !xv.is_empty() && !xh_is_ptr(&xv) && xh_storetype(&xv) == 0 {
-                let body = xh_body_slice(&xv);
+            if !xv.is_empty() && !value_is_ptr(&xv) && !value_is_ext(&xv) {
+                let body = value_body(&xv);
                 match (crate::ffi::langtype_of(self.kv, &p).as_str(), body.len()) {
                     ("float64", 8) => return f64::from_le_bytes(body.try_into().unwrap()),
                     ("float32", 4) => return f32::from_le_bytes(body.try_into().unwrap()) as f64,
@@ -213,14 +215,14 @@ impl Engine {
         if xvalue.is_empty() {
             return Vec::new();
         }
-        let r = if xh_is_ptr(&xvalue) {
+        let r = if value_is_ptr(&xvalue) {
             1
-        } else if xh_is_ext(&xvalue) {
+        } else if value_is_ext(&xvalue) {
             2
         } else {
             0
         };
-        let body = xh_body_slice(&xvalue);
+        let body = value_body(&xvalue);
         if r == 2 {
             return self.resolve_ext_bytes(&String::from_utf8_lossy(body));
         }
@@ -228,7 +230,7 @@ impl Engine {
     }
 
     pub fn set_str_list(&self, dst: &str, items: &[String]) -> KvResult {
-        self.set_xvalue_wire(dst, "[int64]·[]char/utf32", &[], &[])?;
+        self.set_xvalue_wire(dst, "'[int64]'[]char/utf32", &[], &[])?;
         for (i, it) in items.iter().enumerate() {
             self.set_kv(&format!("{dst}\u{b7}[{i}]"), it)?;
         }

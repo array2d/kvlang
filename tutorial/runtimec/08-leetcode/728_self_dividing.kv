@@ -1,0 +1,53 @@
+// 728: Self Dividing Numbers
+// 来源: LeetCode #728
+// 期望输出:
+//   1
+//   2
+//   3
+//   4
+//   5
+//   6
+//   7
+//   8
+//   9
+//   11
+//   12
+//   15
+rwfunc is_self(*int64 $n) -> (*bool $r) {
+	*n -> num:int64
+	ok:bool = true
+	while (num > 0) {
+		d:int64 = num % 10
+		d == 0 -> zero:bool
+
+		if (zero) {
+			ok = false
+			num = 0
+		} else {
+			*n % d -> rem:int64
+			div:bool = rem == 0
+
+			if (div) {
+				num = num ÷ 10
+				num_m:int64 = num ÷ 10
+			} else {
+				false -> ok
+				num = 0
+			}
+		}
+	}
+	*r = ok
+}
+
+rwfunc test() -> () {
+	1 -> i:int64
+	while (i <= 15) {
+		r:bool = is_self(i)
+
+		if (r) {
+			println(i)
+		}
+
+		i = i + 1
+	}
+}

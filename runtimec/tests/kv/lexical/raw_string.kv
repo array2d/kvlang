@@ -1,0 +1,10 @@
+// 判据：r"…" 零转义；r#"…"# 的内容可含双引号。
+// 若按普通转义串处理，第一行会把 \n 变成换行。
+// 依据：01-词法/07-字符串与空值布尔字面量.kv。
+// 期望输出:
+//   raw\nliteral
+//   he said "hi"
+rwfunc test() -> () {
+	println(r"raw\nliteral")
+	println(r#"he said "hi""#)
+}

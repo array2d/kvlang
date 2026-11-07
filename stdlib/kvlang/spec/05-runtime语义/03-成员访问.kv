@@ -2,7 +2,7 @@
 lib kvlang/spec/runtime语义/成员访问 {
 	r####"# 成员访问（运行期语义）
 
-本章界定运行期对复合数据的访问语义：成员符 `·` 的解引用规则、动态键、指针的单跳类型检查、容器
+本章界定运行期对复合数据的访问语义：成员符 `·` 的解引用规则、动态键、kvlang 指针的单跳类型检查、容器
 物理成员键的运行期行为、compact 数组下标。类型的静态形态（种类、langtype、数组形态）见类型系统卷；本
 章只讲 runtime **如何在 kvspace 中定位与读写**这些结构。
 
@@ -15,7 +15,7 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 | `a[i]` | **数组下标** | compact 数组的元素访问，`i` 为整数 |
 | `base·name` | **容器成员 / 限定名** | `·`（U+00B7，中点）是成员访问符 |
 
-容器成员一律走 `·`（或 `kvspace·get`/`kvspace·set`）；`[]` 只索引 compact 数组。
+容器成员一律走 `·`；`[]` 只索引 compact 数组。
 
 ## 容器值与物理成员键
 
@@ -23,60 +23,78 @@ kvlang 用两个符号访问复合数据，语义严格分离，runtime **不得
 成员 `base·name` 是独立物理 key；kvspace 按 `base·` 前缀枚举成员名，不维护 memindex 矩阵。
 
 - **写成员**：`rec·name = 值` 的写槽是完整成员键 `rec·name`，`=` 为值拷贝。
-- **读成员**：`rec·name -> v` 直接取 key `rec·name`；缺失成员的动态读（`kvspace·get`）返回 `None`。
+- **读成员**：`rec·name -> v` 直接取 key `rec·name`；缺失成员的读返回 `None`。
 
-## `·` 的解引用：按指针优先，按名回退
+## `·` 不对 kvlang 指针隐式解引用
 
-`base·name`（读写同规则）中 `base` 的解析在 runtime 按以下顺序确定成员键：
+`·` 的 base 必须是**值**。base 若是 kvlang 指针，layout 直接报错，要求写 `(*p)·name`。
 
-1. **按指针解引用**：`base` 的 head 指针位为 1 时，成员键 =
-   `target(base)·name`。例：`&n1 -> p` 后 `p·val` 解析为 `/…/n1·val`。
-2. **按名回退**：`base` 非 Ptr（局部 struct 实例等）时，成员键 = `解析(base)·name`；`解析()` 帧感知
-   ——裸名 → `帧根/base`，`/` 开头 → 直通绝对路径。
+不存在「按 kvlang 指针优先、按名回退」——那条规则已废止：它让「读到的是值还是该指针的目标」
+取决于运行时状态，同一个表达式在两种情况下指两个不同的 key，正是要消灭的静默歧义。
 
-该规则让"局部结构体"与"指针成员访问"共用一套语法：结构体的 `base` 非 Ptr（走按名），指针变量持 Ptr（按
-其 target）。跨函数共享的数据**应**放绝对路径（`/n1`），使不同帧的指针都解引用到同一 key。
+例：`&n1 -> p` 之后，`p·val` **报错**；写 `(*p)·val` 才是 `/…/n1·val`。
 
-3. **base 形态判定**：解析出的 `base`（Ptr 则取其**目标**）**必须**是容器——struct 实例（kindexpr 以
-   `/` 开头）或 typed map；或**路径串**（`[]char/*`，显式形式 `kvspace·get(path,
-   k)` 的 base 就是它，其值即成员键的父路径）。compact 数组与标量两者都不是，报 TypeError（`·` 要求容
-   器；compact 数组用 `[]` 索引）；None 是动态读，返回 None。**不得**把非容器、非路径串的 body 字节当路
-   径串拼成员键——那会静默给出脏值或 None。
+base 的解析只剩一条路：`base·name` 的成员键 = `解析(base)·name`；`解析()` 帧感知——
+裸名 → `帧根/base`，`/` 开头 → 直通绝对路径。跨函数共享的数据**应**放绝对路径
+（`/n1`），使不同帧的 kvlang 指针都指向同一 key。
+
+base 的形态判定：base **必须**是容器——struct 实例（kindexpr 以 `/` 开头）或 typed map；或
+**路径串**（`[]char/*`，其值即成员键的父路径）。compact 数组与标量两者都不是，报 TypeError
+（`·` 要求容器；compact 数组用 `[]`
+索引）；None 是动态读，返回 None。**不得**把非容器、非路径串的 body 字节当路径串拼成员键
+——那会静默给出脏值或 None。
+
+**base 为 kvlang 指针时不做形态判定**：`*` 已经把它解引用成目标值，判定的是解引用后的
+那个值（`(*p)·val` 判的是 `/…/n1` 这个 struct 实例）。`p·val` 在 layout 阶段就报错，不会
+走到运行期形态判定。
 
 ## 动态成员名 `·*`：解引用操作数取 memitemkey
 
 `base·*k` 用 `k` 的**值**作为成员键：`·*` 令 runtimec2 **解引用/求值**操作数 `k`，以其值定位
-`base·<k 值>`（等价显式形式 `kvspace·get(base, k)` / `kvspace·set(base, k, v)`）。裸 `base·k`（无 `*`）用字面
+`base·<k 值>`（显式算子形式已随 `kvspace·get/set` 删除，见 `kvspace-family.md` §四）。裸 `base·k`（无 `*`）用字面
 名 `k`；`base·*k` 才取 `k` 的值。
 
-**指针作 memitemkey 必须 `*` 开头**：当作为 key 的操作数是**指针**（ref=1 Ptr）时，**必须**写
-`base·*k`，由 runtimec2 沿 Ptr 解引用到被指向值、再以该值作 memitemkey；对指针操作数省略 `*` 非法（不
-会自动解引用）。解引用得到的值随后**逐字**作键——`*` 是**显式** deref，与逐字铁律（[[文法与合法性]]，
-禁止**自动**改键）不冲突：改写由源码 `*` 显式授权，非 runtime 擅自所为。
+**kvlang 指针作 memitemkey 必须 `*` 开头**：当作为 key 的操作数是**kvlang 指针**（ref=1 Ptr）时，
+**必须**写 `base·*k`，由 runtimec2 沿 Ptr 解引用到被指向值、再以该值作 memitemkey；对这类操作数省略 `*`
+非法——没有任何隐式解引用。解引用得到的值随后**逐字**作键：`*` 是**显式** deref，与逐字铁律
+（[[文法与合法性]]，禁止**自动**改键）不冲突——改写由源码 `*` 显式授权，非 runtime 擅自所为。
 
 ## 浮点文本（成员键与显示同源，normative）
 
 **成员键相等性不变量**：任意数值 `a`、`b`，若 `a == b` 为真（依据
 [[种类与定宽类型]] 的 `3 == 3.0`），则 `a`、`b` 作动态成员键必须落到同一个键。
 
-float32/float64 值转文本只有一条规则；成员键与显示（println、字符串拼接、
-错误消息）必须调用同一个实现，不得各写一套。
+float32/float64 值转文本**只有一个实现**（同一个函数、带模式参数），成员键与显示
+（println、字符串拼接、错误消息）调用它，不得各写一套。两种模式共享数字串与指数规则，
+只在「整数值补不补 `.0`」「负零保不保留符号」「非有限值报不报错」三处分叉——这三处
+由用途决定，不是两套规则。
 
-1. **负零归一**：`-0.0` 按 `+0.0` 处理，文本 `"0"`。
+| 方面 | 成员键模式 | 显示模式 |
+|---|---|---|
+| 数字串 | 最短往返（见 2） | 同左 |
+| 指数写法 | `< -4` 或 `>= 16`，补两位（见 4） | 同左 |
+| 整数值 | **不带 `.0`**：`1.0 → "1"` | **带 `.0`**：`1.0 → "1.0"` |
+| 负零 | 归一 `"0"`（见 1） | 保留符号 `"-0.0"` |
+| 非有限 | NaN → `TypeError`，不生成键；±Inf → `"inf"`/`"-inf"` | `"nan"`/`"inf"`/`"-inf"`，不报错 |
+
+1. **负零归一（键模式）**：`-0.0` 按 `+0.0` 处理，键文本 `"0"`——键相等性不变量
+   要求 `-0.0` 与 `0.0` 落到同一个键。显示不受此约束，保留符号（C/Python/Rust 阵营；
+   JS 的 `"0"`、Go 的 `-0` 不取）。
 2. **最短往返**：文本必须能唯一还原为原宽度的原值；float32 在 1..9 位
    有效数字、float64 在 1..17 位内取最短字符串（不是最小有效位数）。
    阵营：Python/JS/Go/Rust（+C++17 `to_chars`）均为最短往返；C `printf`
    的 `%g` 不是，不取。
-3. **整数值不带 `.0`**：`1.0 → "1"`、`100.0 → "100"`；`1.5 → "1.5"`、
-   `0.1 → "0.1"`、`1/3 → "0.3333333333333333"`。阵营：Go/Rust/JS/
-   C++17 不带 `.0`；Python 的 `"1.0"` 不取。
+3. **整数值**：键模式不带 `.0`（`1.0 → "1"`、`100.0 → "100"`）；显示模式带 `.0`
+   （`1.0 → "1.0"`、`16777216.0`，见 tutorial `01-basics/numtypes.kv` 的期望输出）。
+   非整数部分照常：`1.5 → "1.5"`、`0.1 → "0.1"`、`1/3 → "0.3333333333333333"`。
+   阵营：Go/Rust/JS/C++17 不带 `.0`；Python 的 `"1.0"` 在键模式不取。
 4. **指数写法**：十进制指数 `< -4` 或 `>= 16` 时用指数；指数恒补两位，
    形如 `"1e-05"`、`"1e+16"`、`"1e+300"`。`>= 16` 的依据是 float64 精确
    整数上限 `2^53≈9.007e15`，超过后展开全数字会暗示不存在的精度。
-5. **非有限值**：作成员键时 NaN → `TypeError`（不生成键）；±Inf 允许，
-   键文本 `"inf"`/`"-inf"`。作显示时输出 `"nan"`/`"inf"`/`"-inf"`，不报错。
-   阵营：显示统一为小写 `nan`/`inf`/`-inf`（C/Python 写法）；JS
-   `Infinity`、Go `+Inf`/`NaN`、Rust `NaN` 的写法不取。
+   已是指数形式时不再补 `.0`（两种模式同）。
+5. **非有限值**：键模式 NaN → `TypeError`（不生成键）、±Inf 允许成键；
+   显示模式一律输出文本、不报错。阵营：显示统一小写 `nan`/`inf`/`-inf`
+   （C/Python 写法）；JS `Infinity`、Go `+Inf`/`NaN`、Rust `NaN` 不取。
 6. **同键**：int `1` 与 float `1.0` 都落到键 `"1"`；`-0.0` 与 `0.0` 都落到
    `"0"`；成员数不增。阵营：Python/JS/Go 的 map 将 `-0.0`/`0.0` 视为
    同一键；五家相等性均 true。
@@ -107,16 +125,16 @@ float32/float64 值转文本只有一条规则；成员键与显示（println、
 四格 2:2 打平，Go 在 1e15 已切指数，均不取。指数格式取 Python/Go 的
 `e±NN`（两位），不取 Rust Debug/Node 的不补零。
 
-## 指针：完整 langtype + 单跳类型检查
+## kvlang 指针：完整 langtype + 单跳类型检查
 
-指针（`Ptr`，head ref==1，源码前缀 `*`）在 kvspace 中存**目标的完整 langtype + 目标 key**
+kvlang 指针（`Ptr`，head ref==1，源码前缀 `*`）在 kvspace 中存**目标的完整 langtype + 目标 key**
 （`kvspaceNewPtr` 是唯一构造入口，runtime **不得**自造 Ptr 编码）。
 
-- **单跳类型检查**：写入指针时，实现**必须**校验指针声明的目标 langtype 与被指向 key 的实际 langtype
-  一致——只查一跳，不递归展开链。
-- **读解引用链**：读参解析（`resolve_read_path`）从命名 Ptr 出发，只追显式 `Ptr`（ref==1）链到非指针
-  值即停；**不得**把 char 字符串值误当路径继续追（否则字符串实参内容会被当键，穿两层调用即变
-  `None`）。写侧解析（`ResolveWriteSlot`）遵循同一纪律。
+- **单跳类型检查**：写入 kvlang 指针时，实现**必须**校验该指针声明的目标 langtype 与被指向
+  key 的实际 langtype 一致——只查一跳，不递归展开链。
+- **读解引用链**：读参解析（`resolve_read_path`）从命名 Ptr 出发，只追显式 `Ptr`（ref==1）链到
+  非 kvlang 指针的值即停；**不得**把 char 字符串值误当路径继续追（否则字符串实参内容会被当
+  键，穿两层调用即变 `None`）。写侧解析（`ResolveWriteSlot`）遵循同一纪律。
 
 ## 扩展世界句柄（storetype 3，@ext）
 
@@ -132,7 +150,7 @@ float32/float64 值转文本只有一条规则；成员键与显示（println、
 数组有两种存储形态：**compact**（`[...]` 字面量，元素连续打包进单个 XValue，head kind = 元素类型）与
 **stringkeymap**（`{...}` 字面量，散 key，每元素落 `base·[i]` 坐标段独立子 key）。下标 `a[i]` /
 `compactarray·at` / `compactarray·set` 用于 **compact** 形态；stringkeymap 形态用 `scatterarray·at` /
-`scatterarray·set` / `for-in` / `kvspace·get` 遍历访问。
+`scatterarray·set` / `for-in` / 普通 key 读遍历访问。
 
 下标的操作数**必须**是 compact 数组**值**本身。Ptr（ref=1）是寻址用的间接层，不是数组：`p[i]`（`p:*[]T`）
 报 TypeError——先显式解引用 `*p` 再下标（`*` 是唯一解引用路径，`[]` 不做隐式解引用，见 [[ptr]]）。
@@ -144,7 +162,7 @@ float32/float64 值转文本只有一条规则；成员键与显示（println、
 - `compactarray·at(a, i) -> e` / `compactarray·set(a, i, v) -> a` 是显式等价形式。
 
 元素字节宽由 kind 决定（`char/utf8`=1，`int32`/`float32`=4，`int64`/`float64`=8……），数组与字符串的
-元素访问据此零拷贝定位。锚例：`tutorial/04-ndarray/`（`continuous.kv`、`subscript_write.kv`、
-`separated.kv`、`string_array.kv`）、`tutorial/05-dict/`、`tutorial/12-struct/`。
+元素访问据此零拷贝定位。锚例：`tutorial/runtimec/04-ndarray/`（`continuous.kv`、`subscript_write.kv`、
+`separated.kv`、`string_array.kv`）、`tutorial/runtimec/05-dict/`、`tutorial/runtimec/12-struct/`。
 	"#### -> /lib/kvlang/spec/runtime语义/成员访问
 }

@@ -1,0 +1,110 @@
+sequenceDiagram
+  participant Client as C client
+  participant Interface as Public interface
+  participant Route as engine route
+  participant Host as Host and kvspace services
+  participant Repository as Compilation repository
+  participant Vmkv as vmkv
+  participant Compiler as binrwir_compiler
+  participant JitCompiler as Internal JIT compiler
+  participant JitExecute as binrwir_jit_execute
+  participant VmbinExecute as vmbin_execute
+  participant XValue as KVspace XValue: 8-byte head plus V.body
+
+  Client->>Interface: structured execute request
+  Interface->>Route: validated request
+  Route->>Host: obtain authoritative snapshot and source revision
+  Host-->>Route: complete snapshot.source_revision
+  Route->>Repository: find compilation for exact snapshot identity
+  alt valid compilation found
+    Repository-->>Route: immutable compilation lease with valid argaddr values
+  else compilation not found or source revision changed
+    Repository-->>Route: not found
+    Route->>Vmkv: validate RWIR and build addressed BinRWIR
+    Vmkv->>Host: open plaintext function source for snapshot
+    Host-->>Vmkv: borrowed RWIR source bytes
+    loop every Read or Write parameter
+      Vmkv->>Host: dereference static parameter key to XValue base
+      alt nonzero XValue base exists and address lifetime is supported
+        Host-->>Vmkv: nonzero uint64 xvalue_address only
+        Vmkv->>Vmkv: require fixed 8-byte head ABI and check addition overflow
+        alt head is exactly 8 bytes and xvalue_address plus 8 does not overflow
+          Vmkv->>Vmkv: argaddr = xvalue_address + 8
+        else non-8-byte head ABI or addition overflow
+          break fail closed before BinRWIR creation
+            Vmkv-->>Route: explicit failure and no Program
+            Route-->>Interface: structured failure result
+            Interface-->>Client: failure
+          end
+        end
+      else zero base, dynamic map or struct key, or unsupported lifetime
+        Host-->>Vmkv: no usable XValue base
+        break unsupported stops before BinRWIR creation
+          Vmkv-->>Route: RUNTIMEC_STATUS_UNSUPPORTED and no Program
+          Route-->>Interface: structured unsupported result
+          Interface-->>Client: unsupported
+        end
+      end
+    end
+    Vmkv-->>Route: opid plus complete argidx and argaddr pairs
+    Route->>Compiler: compile addressed canonical Program
+    Compiler->>Compiler: build plan without value cache or general register allocation
+    alt JIT enabled
+      Compiler->>JitCompiler: verify, lower, allocate machine registers, and emit
+      alt COMPILED
+        JitCompiler-->>Compiler: generated machine code
+        Compiler-->>Route: complete JIT-target compilation
+      else NOT_COMPILABLE
+        JitCompiler-->>Compiler: successful refusal decision
+        Compiler-->>Route: complete VMBIN-target compilation
+      else ERROR
+        JitCompiler-->>Compiler: explicit compilation error
+        break compilation stops without fallback
+          Compiler-->>Route: error and no compilation
+          Route-->>Interface: structured error
+          Interface-->>Client: error
+        end
+      end
+    else JIT disabled
+      Compiler-->>Route: complete VMBIN-target compilation
+    end
+    opt completed compilation
+      Route->>Repository: insert complete address-qualified compilation
+      Repository-->>Route: immutable compilation lease
+    end
+  end
+
+  Route->>Route: read immutable execution target once
+  alt JIT target
+    Route->>JitExecute: execute existing machine code
+    JitExecute->>XValue: load V.body through final argaddr
+    JitExecute->>JitExecute: speculative register and spill computation
+    alt current logical instruction fully completed
+      Note over JitExecute,XValue: Every instruction completion is a mandatory recovery and observable boundary
+      JitExecute->>XValue: COMMIT_COMPLETED_STATE with all completed dirty values
+      XValue-->>JitExecute: every original argaddr write succeeded
+      JitExecute-->>Route: completed execution exit
+      Route->>Host: advance logical program counter and checkpoint
+    else guard failure, error, recovery, or resume before completion
+      JitExecute->>JitExecute: DISCARD_INCOMPLETE_STATE for all register and spill state
+      Note over JitExecute,XValue: No materialization entry and no partial body write
+      JitExecute-->>Route: incomplete exit from last committed boundary
+      Route->>Host: retain logical program counter and checkpoint
+    end
+  else VMBIN target
+    Route->>VmbinExecute: execute opid with argidx and argaddr pairs
+    VmbinExecute->>XValue: direct V.body Read through final argaddr
+    alt logical instruction completed
+      VmbinExecute->>XValue: direct V.body Write before completion boundary
+      Note over VmbinExecute,XValue: Every instruction completion is a mandatory recovery and observable boundary
+      XValue-->>VmbinExecute: completed body effects
+      VmbinExecute-->>Route: completed execution exit
+      Route->>Host: advance only after every completed body write succeeds
+    else execution error before completion
+      VmbinExecute-->>Route: incomplete error exit
+      Route->>Host: retain logical program counter and checkpoint
+    end
+  end
+  Route->>Repository: release compilation lease
+  Route-->>Interface: structured result
+  Interface-->>Client: status and result

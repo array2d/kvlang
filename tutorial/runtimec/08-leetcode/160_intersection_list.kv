@@ -1,0 +1,64 @@
+// 160: Intersection of Two Linked Lists — 找两个链表的交点
+// 来源: LeetCode #160
+// 双指针法: pa 走完走 B, pb 走完走 A, 相遇即交点
+// 期望输出:
+//   8
+struct Node {
+	val:int64=0
+	next:*Node=None
+}
+
+rwfunc get_intersection(*Node $ha, *Node $hb) -> () {
+	pa:*/lib/Node = ha
+	pb:*/lib/Node = hb
+	switch_a:int64 = 0
+	switch_b:int64 = 0
+	while (pa != pb) {
+		(*pa)·next -> nxt:*/lib/Node
+		if (nxt == None) {
+			if (switch_a == 0) {
+				pa = hb
+				1 -> switch_a
+			} else {
+				pa = None
+			}
+		} else {
+			pa = nxt
+		}
+		(*pb)·next -> nxt2:*/lib/Node
+		if (nxt2 == None) {
+			if (switch_b == 0) {
+				pb = ha
+				1 -> switch_b
+			} else {
+				pb = None
+			}
+		} else {
+			pb = nxt2
+		}
+	}
+	if (pa != None) {
+		(*pa)·val -> v:int64
+		println(v)
+	}
+}
+
+rwfunc test() -> () {
+	// common tail: 8→4→5
+	t5:Node = {val=5}
+	t4:Node = {val=4 next=&t5}
+	t8:Node = {val=8 next=&t4}
+
+	// list A: 4→1→t8
+	a2:Node = {val=1 next=&t8}
+	a1:Node = {val=4 next=&a2}
+	&a1 -> ha:*/lib/Node
+
+	// list B: 5→6→1→t8
+	b3:Node = {val=1 next=&t8}
+	b2:Node = {val=6 next=&b3}
+	b1:Node = {val=5 next=&b2}
+	&b1 -> hb:*/lib/Node
+
+	get_intersection(ha, hb)
+}

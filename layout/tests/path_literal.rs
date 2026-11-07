@@ -6,32 +6,40 @@
 use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 use std::process::Command;
 
-fn fresh_kv(tag: &str) -> Kv {
+/// store 守卫：离开作用域时删目录。先于 `Kv` 声明，故后 drop。
+struct TempStore(String);
+
+impl Drop for TempStore {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(self.0.trim_start_matches("fs://"));
+    }
+}
+
+fn fresh_kv(tag: &str) -> (TempStore, Kv) {
     let dsn = format!(
-        "fs:///tmp/kvlanglayout_pathlit_{}_{}_{}",
+        "fs:///tmp/kvlanglayout_pathlit_{}_{}",
         tag,
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        std::process::id()
     );
+    let store = TempStore(dsn.clone());
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
-    kv
+    (store, kv)
 }
 
 fn slot_text(kv: &mut Kv, key: &str) -> String {
     let v = kv.get_one(key);
-    let lt = kv.langtype_of(key);
-    let h = kvkind::head(&v);
-    let b = kvkind::body(&v, &h);
+    let b = kvkind::body(&v);
     String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 
+
+
 #[test]
 fn unquoted_path_write_is_kept() {
-    let mut kv = fresh_kv("unquoted");
+    let (_store, mut kv) = fresh_kv("unquoted");
     compile(
         &mut kv,
         "rwfunc f() -> () {\n    42 -> /tmp/pathlit/a\n}\n",
@@ -55,12 +63,8 @@ fn quoted_path_in_write_slot_is_rejected() {
     )
     .unwrap();
     let dsn = format!(
-        "fs:///tmp/kvlanglayout_pathlit_cli_{}_{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        "fs:///tmp/kvlanglayout_pathlit_cli_{}",
+        std::process::id()
     );
     let out = Command::new(bin)
         .arg(&file)
@@ -75,14 +79,16 @@ fn quoted_path_in_write_slot_is_rejected() {
         ),
         "诊断文本不符：{err}"
     );
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
 }
 
 #[test]
 fn quoted_member_base_is_still_allowed() {
-    let mut kv = fresh_kv("member");
+    let (_store, mut kv) = fresh_kv("member");
     compile(
         &mut kv,
-        "rwfunc f(i:int64) -> () {\n    1 -> \"/tmp/pathlit\"·*i\n}\n",
+        "rwfunc f(*int64 $i) -> () {\n    1 -> \"/tmp/pathlit\"·*i\n}\n",
     )
     .unwrap();
     let text = slot_text(&mut kv, "/lib/f/[1,1]");
@@ -94,7 +100,7 @@ fn quoted_member_base_is_still_allowed() {
 
 #[test]
 fn quoted_string_read_is_a_string_value() {
-    let mut kv = fresh_kv("read");
+    let (_store, mut kv) = fresh_kv("read");
     compile(&mut kv, "rwfunc f() -> () {\n    \"/tmp/pathlit\" -> v\n}\n").unwrap();
     let key = "/lib/f/[1,-1]";
     let v = kv.get_one(key);
@@ -109,7 +115,7 @@ fn quoted_string_read_is_a_string_value() {
 #[test]
 fn single_quoted_is_a_bare_literal_path() {
     // 单引号是「裸字面量，按上下文解释」（01-词法/07）：写槽位置按路径。
-    let mut kv = fresh_kv("single");
+    let (_store, mut kv) = fresh_kv("single");
     compile(
         &mut kv,
         "rwfunc f() -> () {\n    42 -> '/tmp/pathlit/b'\n}\n",
@@ -121,7 +127,7 @@ fn single_quoted_is_a_bare_literal_path() {
 
 #[test]
 fn quoted_string_assignment_is_fine() {
-    let mut kv = fresh_kv("assign");
+    let (_store, mut kv) = fresh_kv("assign");
     compile(&mut kv, "rwfunc f() -> () {\n    x = \"/a/b\"\n}\n").unwrap();
 }
 
@@ -139,12 +145,8 @@ fn raw_quoted_path_in_write_slot_is_rejected() {
     )
     .unwrap();
     let dsn = format!(
-        "fs:///tmp/kvlanglayout_pathlit_raw_{}_{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+        "fs:///tmp/kvlanglayout_pathlit_raw_{}",
+        std::process::id()
     );
     let out = Command::new(bin)
         .arg(&file)
@@ -159,15 +161,17 @@ fn raw_quoted_path_in_write_slot_is_rejected() {
         ),
         "原始串诊断文本不符：{err}"
     );
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
 }
 
 #[test]
 fn unquoted_path_member_base_is_allowed() {
     // 无引号路径 base + 成员链：重排顺序时必须保持接受。
-    let mut kv = fresh_kv("pathbase");
+    let (_store, mut kv) = fresh_kv("pathbase");
     compile(
         &mut kv,
-        "rwfunc f(i:int64) -> () {\n    1 -> /tmp/pathlit·*i\n}\n",
+        "rwfunc f(*int64 $i) -> () {\n    1 -> /tmp/pathlit·*i\n}\n",
     )
     .unwrap();
     let text = slot_text(&mut kv, "/lib/f/[1,1]");

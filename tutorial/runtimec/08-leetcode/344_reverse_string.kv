@@ -1,0 +1,35 @@
+// 344: Reverse String (用数组模拟) — 双指针反转
+// 来源: LeetCode #344
+// 期望输出:
+//   o
+//   l
+//   l
+//   e
+//   h
+rwfunc reverse_str() -> () {
+	// char 值数组: "hello" → ASCII [104, 101, 108, 108, 111]
+	a:[]int64 = [104, 101, 108, 108, 111]
+	n:int64 = compactarray·numel(a)
+	l:int64 = 0
+	n - 1 -> r:int64
+	while (l < r) {
+		tl:int64 = a[l]
+		tr:int64 = a[r]
+		a[l] = tr
+		a[r] = tl
+		l + 1 -> l
+		r = r - 1
+	}
+	i:int64 = 0
+	while (i < n) {
+		a[i] -> c:int64
+		string·char("abcdefghijklmnopqrstuvwxyz", c - 97) -> s:char/utf32
+		println(s)
+		i = i + 1
+	}
+}
+
+rwfunc test() -> () {
+
+	reverse_str()
+}

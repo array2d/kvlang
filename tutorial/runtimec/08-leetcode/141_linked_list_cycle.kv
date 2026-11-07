@@ -1,0 +1,46 @@
+// 141: Linked List Cycle — 快慢指针
+// 来源: LeetCode #141
+// 期望输出:
+//   1
+//   0
+struct Node {
+	val:int64=0
+	next:*Node=None
+}
+
+rwfunc has_cycle(*Node $head) -> (*int64 $result) {
+	0 -> *result
+	slow:*/lib/Node = head
+	fast:*/lib/Node = head
+	while (fast != None) {
+		(*fast)·next -> n1:*/lib/Node
+		if (n1 == None) {
+			fast = None
+		} else {
+			(*n1)·next -> fast
+			(*slow)·next -> slow
+			if (slow == fast) {
+				1 -> *result
+				fast = None
+			}
+		}
+	}
+}
+
+rwfunc test() -> () {
+	c1:Node = {val=3}
+	c2:Node = {val=2}
+	c3:Node = {val=0}
+	c1·next = &c2
+	c2·next = &c3
+	c3·next = &c1
+	&c1 -> h1:*/lib/Node
+	has_cycle(h1) -> r1:int64
+	println(r1)
+
+	d2:Node = {val=2}
+	d1:Node = {val=1 next=&d2}
+	&d1 -> h2:*/lib/Node
+	has_cycle(h2) -> r2:int64
+	println(r2)
+}

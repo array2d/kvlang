@@ -1,0 +1,48 @@
+// map_reduce: filter + map + reduce（MDN JS Array）
+// 算法: 遍历筛选奇数 + 累加平方
+// 期望输出:
+//   odd squares count: 5
+//   sum of squares: 165
+// 散 key 数组作实参时 for-in 在 layout 脱糖成 compact 取值（compactarray·at），
+// 函数内改用 kvspace·listlen/kvspace·listat/kvspace·get 显式遍历。
+rwfunc map_reduce(*'[int64]'int64 $nums) -> (*int64 $count, *int64 $total) {
+	0 -> *count
+	*total = 0
+	kvspace·listlen(*nums) -> n:int64
+	0 -> i:int64
+	while (i < n) {
+		kvspace·listat(*nums, i) -> k:int64
+		(*nums)·*k -> nv:int64
+		rem:int64 = nv % 2
+		rem == 1 -> is_odd:bool
+
+		if (is_odd) {
+			println("  keep:", nv)
+			sq:int64 = nv × nv
+			sq_m:int64 = nv × nv
+			*total = *total + sq
+			*count + 1 -> *count
+		} else {
+			println("  skip:", nv)
+		}
+		i = i + 1
+	}
+}
+
+rwfunc test() -> () {
+	nums:'[int64]'int64 = {}
+	nums·0 = 1
+	3 -> nums·1
+	nums·2 = 5
+	nums·3 = 7
+	9 -> nums·4
+	nums·5 = 2
+	nums·6 = 4
+	6 -> nums·7
+	nums·8 = 8
+	nums·9 = 10
+	map_reduce(nums) -> (count:int64, total:int64)
+	println("odd squares count:", count)
+	println("sum of squares:", total)
+	/last_sum = total
+}

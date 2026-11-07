@@ -221,10 +221,8 @@ static const kvlangRwirCap myrwircaps[] = {
     {"uint16", kvlangBuiltinCastUint16, false}, {"uint32", kvlangBuiltinCastUint32, false}, {"uint64", kvlangBuiltinCastUint64, false},
     {"float32", kvlangBuiltinCastFloat32, false}, {"float64", kvlangBuiltinCastFloat64, false},
     {"char/utf32", kvlangBuiltinCastCharUtf32, false}, {"char/utf8", kvlangBuiltinCastCharUtf8, false}, {"char/ascii", kvlangBuiltinCastCharAscii, false},
-    /* collection */
-    {"array·new", kvlangBuiltinArray, false}, {"array·fill", kvlangBuiltinArrayFill, false},
-    {"array·scatter", kvlangBuiltinScatter, false}, {"array·compact", kvlangBuiltinCompact, false},
-    {"array·append", kvlangBuiltinAppend, false}, {"array·slice", kvlangBuiltinSlice, false},
+    /* collection。`array·*` 六条已按 #622 裁决 E 删除：仓库只剩 compactarray /
+     * scatterarray 两形态，handler 仍由 `<form>·*` 行引用，不在此重复注册。 */
     {"obj", kvlangBuiltinObj, true}, {"map·new", kvlangBuiltinMap, true}, {"struct·new", kvlangBuiltinStructNew, false},
     {"ndarray·numel", kvlangBuiltinNdarrayNumel, false}, {"ndarray·dim", kvlangBuiltinNdarrayDim, false}, {"ndarray·shape", kvlangBuiltinNdarrayShape, false},
     {"xv·at", kvlangBuiltinXvAt, false}, {"xv·set", kvlangBuiltinXvSet, false}, {"xv·reshape", kvlangBuiltinXvReshape, false},

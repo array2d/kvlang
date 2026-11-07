@@ -1,17 +1,17 @@
 // 欢迎加入kvspace世界
 lib kvlang/spec/类型系统/ref存储位置 {
-	r####"# 值、指针与扩展定位
+	r####"# 值、kvlang 指针与扩展定位
 
-wire 的 storetype 为存储形态（0 短定长 / 1 变长 / 2 长定长 / 3 扩展世界），ptr 独立一字节
-（0=inline、1=ptr、2=@ext）。普通值按 storetype 0/1/2 存 body；指针（ptr=1）body 是目标
-KV key 的 UTF-8 路径。目标 key 若也是指针，沿路径再次读取即可表示多层间接；每格只保存一层。
-空指针用 None。
+wire 的 head 只描述字节布局（`bodylen` / `attrslen` / `layout` / `padding`），不再有 storetype 与 ptr
+字段。kvlang 指针是 langtype 以 `*` 开头的值，body 是目标 KV key 的 UTF-8 路径；目标 key 若也是指针，
+沿路径再次读取即可表示多层间接，每格只保存一层。空引用 = `*T` + 空 body。
 
-`@T` 使用 storetype 3、ptr=2：langtype 是真实目标类型，body 是扩展定位串。核心 runtimec2
-不兑现扩展存储；声明支持它的 rwir 按定位串读写实际内容。源码中的 `*`/`@` 类型前缀不进入
-wire langtype。
+`*T` 与 `@T` **都是 langtype 前缀**：前者是指针（body 为目标 key 路径），后者是扩展定位
+（body 为定位串）。wire langtype **保留**这两个前缀（2026-11-06 裁决），head 不再有 `ptr`
+字节；类型事实的唯一来源是值内 attr 区（tag 1 记录）。
 
-C ABI 的 `kvspaceHead_t.ref` 是从 ptr 解码出的兼容视图，不是独立的 wire 字节。类型事实源在
-值内 attr 区（tag 1 记录）。
+核心 runtime 本期不兑现扩展存储（`@` 仅保留语言与线格式语义），涉及 `@` 的测试以 `// wip`
+排除。C ABI 的 `kvspaceGetHead` / `kvspaceHead_t` 已删除：读头一律用 `xvalue_head.h` 的
+inline 方法，不另设解码结构体。
 "#### -> /lib/kvlang/spec/类型系统/ref存储位置
 }

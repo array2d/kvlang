@@ -1,8 +1,7 @@
 use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 
 fn body(data: &[u8]) -> &[u8] {
-    let h = kvkind::head(data);
-    kvkind::body(data, &h)
+    kvkind::body(data)
 }
 
 fn sig(data: &[u8]) -> String {
@@ -10,22 +9,35 @@ fn sig(data: &[u8]) -> String {
     String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 
-fn fresh_kv() -> Kv {
+/// store 守卫：离开作用域时删目录。先于 `Kv` 声明，故后 drop。
+struct TempStore(String);
+
+impl Drop for TempStore {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(self.0.trim_start_matches("fs://"));
+    }
+}
+
+fn fresh_kv() -> (TempStore, Kv) {
     // Isolate each parallel test in its own `fs://` directory to avoid concurrent backend races.
     static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dsn = format!(
-        "fs:///tmp/kvlanglayout_test_{}_{}",
-        std::process::id(),
+        "fs:///tmp/kvlanglayout_test_{}",
         SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     );
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+
+    let store = TempStore(dsn.clone());
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
-    kv
+    (store, kv)
 }
+
+
 
 #[test]
 fn refuse_rwir_and_rwfunc() {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     compile(&mut kv, "rwfunc one_def() -> () {\n1 -> _\n}\n").unwrap();
     let err = compile(&mut kv, "rwir one_def() -> ()\n").unwrap_err();
     assert!(err.contains("one opcode, one definition"), "{err}");
@@ -37,8 +49,8 @@ fn refuse_rwir_and_rwfunc() {
 
 #[test]
 fn compile_simple_func() {
-    let mut kv = fresh_kv();
-    let src = "rwfunc sum(A:int64, B:int64) -> (C:int64) {\n    A + B -> C\n}\n";
+    let (_store, mut kv) = fresh_kv();
+    let src = "rwfunc sum(*int64 $A, *int64 $B) -> (*int64 $C) {\n    *A + *B -> *C\n}\n";
     compile(&mut kv, src).unwrap();
 
     // 函数签名
@@ -60,15 +72,21 @@ fn compile_simple_func() {
         .collect();
     assert_eq!(types, vec!["int64", "int64", "int64"]);
 
-    // 指令（layout 类型特化：opcode = int64·add）
-    let op_key = "/lib/sum/[1,0]";
+    // 指令（layout 只发语义算子名：opcode = add，精度在操作数槽 langtype 上）。
+    // 新参数模型下 `*A` / `*B` 各展开成一条拷贝指令（第 1、2 行），`add` 落在第 3 行。
+    let op_key = "/lib/sum/[3,0]";
     let op = kv.get_one(op_key);
     assert_eq!(kvkind::kind(&op, &kv.langtype_of(op_key)), "rwir");
-    assert_eq!(sig(&op), "int64·add");
+    assert_eq!(sig(&op), "add");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[3,-1]")), "_1\0int64");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[3,-2]")), "_2\0int64");
+    // 形参引用一律编成**帧坐标** `*[0,±k]`（spec 04-layout语义/03-函数）：参数名只是
+    // 签名元数据，不是寻址路径。runtime 的 vmkv 读入时按坐标回填参数名与声明类型。
+    assert_eq!(sig(&kv.get_one("/lib/sum/[3,1]")), "*[0,1]\0int64");
+    // 解引用各自的读槽：`*A` 落 `[1,-1]`、`*B` 落 `[2,-1]`。
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "*[0,-1]\0int64");
-    assert_eq!(sig(&kv.get_one("/lib/sum/[1,-2]")), "*[0,-2]\0int64");
-    assert_eq!(sig(&kv.get_one("/lib/sum/[1,1]")), "*[0,1]\0int64");
-    assert_eq!(sig(&kv.get_one("/lib/sum/[2,0]")), "return");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[2,-1]")), "*[0,-2]\0int64");
+    assert_eq!(sig(&kv.get_one("/lib/sum/[4,0]")), "return");
 
     // 源码副本
     let src_key = "/lib/sum.src";
@@ -78,7 +96,7 @@ fn compile_simple_func() {
 
 #[test]
 fn compile_string_literal_and_lib() {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     let src = "lib p { rwfunc hi() -> () {\n    \"hello\" -> _\n} }\n";
     compile(&mut kv, src).unwrap();
 
@@ -101,7 +119,7 @@ fn compile_string_literal_and_lib() {
 
 #[test]
 fn compile_multiline_string_literal() {
-    let mut kv = fresh_kv();
+    let (_store, mut kv) = fresh_kv();
     let src = "lib m { rwfunc ml() -> () {\n    r#\"hello\nworld\"# -> _\n} }\n";
     compile(&mut kv, src).unwrap();
 
@@ -118,8 +136,8 @@ fn compile_multiline_string_literal() {
 
 #[test]
 fn compile_control_flow_is_single_plane() {
-    let mut kv = fresh_kv();
-    let src = "rwfunc f(X:int64) -> (Y:int64) {\n    if (X > 0) {\n        X -> Y\n    } else {\n        0 -> Y\n    }\n}\n";
+    let (_store, mut kv) = fresh_kv();
+    let src = "rwfunc f(*int64 $X) -> (*int64 $Y) {\n    if (*X > 0) {\n        *X -> *Y\n    } else {\n        0 -> *Y\n    }\n}\n";
     compile(&mut kv, src).unwrap();
 
     let sig_key = "/lib/f/[0,0]";
@@ -163,8 +181,8 @@ fn compile_control_flow_is_single_plane() {
 
 #[test]
 fn compile_while_goto_targets_are_int64() {
-    let mut kv = fresh_kv();
-    let src = "rwfunc sum_to(n:int64) -> (acc:int64) {\n    0 -> acc\n    1 -> i\n    while (i <= n) {\n        acc + i -> acc\n        i + 1 -> i\n    }\n}\n";
+    let (_store, mut kv) = fresh_kv();
+    let src = "rwfunc sum_to(*int64 $n) -> (*int64 $acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n";
     compile(&mut kv, src).unwrap();
     let children = kv.list("/lib/sum_to/", false, false);
     assert!(

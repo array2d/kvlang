@@ -1,0 +1,20 @@
+// fields: 多类型字段 + 默认值 + 部分覆盖
+// 语义: 字段声明 name:kindexpr=default；实例化只写给定字段，其余取默认；
+//       类型不符或字段不存在均在 runtime 报 TypeError。
+// 期望输出:
+//   alice 30 true
+//   anon 0 false
+struct User {
+	name:[]char/utf32="anon"
+	age:int64=0
+	active:bool=false
+}
+
+rwfunc test() -> () {
+	u:User = {name="alice" age=30 active=true}
+	u·name, u·age, u·active -> n:[]char/utf32, a:int64, ac:bool
+	println(n, a, ac)
+	d:User = {}
+	d·name, d·age, d·active -> dn:[]char/utf32, da:int64, dac:bool
+	println(dn, da, dac)
+}

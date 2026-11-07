@@ -1,0 +1,10 @@
+// 判据：`string·slice` 的结果字节必须服从写槽声明的 langtype。
+// `char/utf32` 槽上每字符 4 字节；恒写 UTF-8 会让 body 长度不是 4 的倍数。
+// 依据：同 `char_utf32_set.kv`。
+// 期望输出:
+//   中文
+rwfunc test() -> () {
+	s:[]char/utf32 = "中文测试"
+	t:char/utf32 = string·slice(s, 0, 2)
+	println(t)
+}

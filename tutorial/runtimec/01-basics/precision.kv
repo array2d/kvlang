@@ -1,0 +1,87 @@
+// precision: 数字精度与类型提升
+// 语义: int64 与 float64 是数值运算域；int64 op int64 → 原生 int64 运算与比较，绝不经 float64 中转（fix-020，对齐 C/Go/Rust）；
+//       任一侧 float → float64 提升（混合比较为 C 式 double 提升）
+//
+// 期望值变更（2026-11-06）：原块到 `9223372036854775807` 为止（18 行），实际 21 行。
+// 补齐的三行逐条对照源码尾段：
+// - println(bm)      ← bm = big - 1 = 9223372036854775806
+// - println(precise) ← precise = 9007199254740993 + 0，int64 不经 float 中转，值不变
+// - println(same)    ← same = big == 9223372036854775806，big 是 INT64_MAX，故 false
+// 实际输出与之一一对应，是期望不全，不是实现多打。
+//
+// 约定提醒：期望块内**只有**以三空格缩进（`//   ` 或 `// 	`）开头的行算内容，
+// 且块**不会**被 `//` 空行结束——只有非 `//` 行才结束。所以说明文字一律用
+// `// - ` 这种不带三空格的写法，否则会被当成内容。
+// 期望输出:
+//   5
+//   5.5
+//   3.0
+//   3.0
+//   3
+//   3
+//   -4
+//   -4
+//   3.5
+//   3.5
+//   1
+//   3
+//   7.0
+//   1000.0
+//   0.025
+//   0.30000000000000004
+//   true
+//   9223372036854775807
+//   9223372036854775806
+//   9007199254740993
+//   false
+rwfunc test() -> () {
+	a:int64 = 2 + 3
+	println(a)
+	b:float64 = 2 + 3.5
+	println(b)
+	1.5 × 2 -> c:float64
+	1.5 × 2 -> c_m:float64
+	println(c_m)
+	println(c)
+
+	q:int64 = 7 ÷ 2
+	q_m:int64 = 7 ÷ 2
+	println(q_m)
+	println(q)
+	-9 ÷ 2 -> qz:int64
+	-9 ÷ 2 -> qz_m:int64
+	println(qz_m)
+	println(qz)
+	fq:float64 = 7.0 ÷ 2
+	fq_m:float64 = 7.0 ÷ 2
+	println(fq_m)
+	println(fq)
+	r:int64 = 7 % 3
+	println(r)
+
+	ti:int64 = int64(3.99)
+	println(ti)
+	float64(7) -> tf:float64
+	println(tf)
+
+	sci:float64 = 1e3
+	println(sci)
+	small:float64 = 2.5e-2
+	println(small)
+
+	0.1 + 0.2 -> sum:float64
+	println(sum)
+
+	eq:bool = 3 == 3.0
+	println(eq)
+
+	big:int64 = 9223372036854775807
+	println(big)
+
+	big - 1 -> bm:int64
+	println(bm)
+	precise:int64 = 9007199254740993 + 0
+	println(precise)
+	same:bool = big == 9223372036854775806
+	println(same)
+}

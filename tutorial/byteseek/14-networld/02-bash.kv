@@ -1,0 +1,15 @@
+// networld/proc·exec 启动 bash：算术求值，取退出码
+// 期望输出:
+//   bash 42
+//   exit= 0
+rwfunc run_proc(*'[int64]'[]char/utf32 $args,
+		*'[int64]'[]char/utf32 $envs) -> (*uint8 $code) {
+	networld/proc·exec(*args, *envs) -> *code
+}
+
+rwfunc test() -> () {
+	noenv:'[int64]'[]char/utf32 = {}
+	args:'[int64]'[]char/utf32 = {"bash", "-c", "echo bash $((6*7))"}
+	run_proc(args, noenv) -> code:uint8
+	println("exit=", code)
+}

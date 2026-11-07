@@ -1,0 +1,24 @@
+// 258: Add Digits — 数字根（反复各位相加直到一位数）
+// 来源: LeetCode #258
+// 期望输出:
+//   2
+rwfunc add_digits(*int64 $n) -> () {
+	*n -> nv:int64
+	while (nv >= 10) {
+		s:int64 = 0
+		nv -> x:int64
+		while (x > 0) {
+			d:int64 = x % 10
+			s = s + d
+			x ÷ 10 -> x
+			x ÷ 10 -> x_m:int64
+		}
+		nv = s
+	}
+	println(nv)
+}
+
+rwfunc test() -> () {
+
+	add_digits(38)
+}

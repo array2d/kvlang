@@ -2,26 +2,67 @@
 lib kvlang/spec/类型系统/map容器 {
 	r####"# map 容器
 
-**map**（种类 `stringkeymap`）是 kvlang 的一等键-值容器。异构命名成员容器 **struct** 是另一种容器语义
-类型，见 [[struct]]（本卷不再涉及）；kvlang **没有** `dict` 种类，也没有 `object`/`scope` 种类（见
-[[总体方案]]）。
+**map** 是 kvlang 的一等键-值容器，groupkv 的三副面孔之一，其种类名为 **`stringkeymap`**。
+异构命名成员容器 **struct** 见 [[struct]]（本卷不再涉及）。kvlang 没有 `dict`、`scope`
+这两种容器种类（见 [[总体方案]]）。
+
+## groupkv：map / struct / scatterarray 是同一物理结构
+
+`map`、`struct`、`scatterarray` **本质是同一样东西：键值组（groupkv）**。它们不是三种
+「类型」，而是同一物理结构的三副面孔——差别只在**成员键怎么来**与**谁定义值类型**：
+
+| 面孔 | 成员键 | 值类型来源 |
+|------|--------|-----------|
+| map | `base·<memitemkey>` | langtype 的 mapexpr 侧 |
+| struct | `base·<field>` | 原型 `/lib/<Name>` 里各字段的 `def langtype` |
+| scatterarray | `base·[i]` 坐标段 | langtype 的 mapexpr 侧（键为坐标元组） |
+
+三者**共用的物理规则**（下文「容器物理结构」展开）：
+
+- base key 是**body 为空**的 XValue（容器头），只承载 langtype；
+- 每个成员是 `base·<成员键>` 的**独立 KV key**，各自一个 XValue；
+- 成员由**物理 key 前缀枚举**，不存任何索引矩阵。
+
+**groupkv 是概念名，不是种类名。** 落库时每个值仍需一个具体 langtype：map 是完整 mapexpr
+`'<formatter>'<value>`（**不存在** langtype 为种类名 `stringkeymap` 的落库值），struct 是原型路径
+`/lib/<Name>`（见 [[langtype语义类型]]）。概念解释
+「为什么三者是同一物理结构」，种类决定「落库时 langtype 的字符形状与 runtime 分派」——
+两者不是替换关系。
 
 ## 标准 map 定义
 
 一个 map 的 kvlang 代码形式：
 
 ```
-memheadname : memitemkey_langtype_formatter · memitemvalue_langtype = {}
+memheadname : 'memitemkey_langtype_formatter'memitemvalue_langtype = {}
 ```
 
 | 位置 | 名称 | 含义 |
 |------|------|------|
 | `:` 之前 | **memheadname** | map 的名字（头名，命名整族成员） |
-| `:` 与 `·` 之间 | **memitemkey_langtype_formatter** | item **键**的 langtype——键侧是**格式器**（见下），不是值类型 |
-| `·` 之后 | **memitemvalue_langtype** | item **值/body** 的 langtype（独立 langtype，可递归嵌套） |
+| `:` 与**闭合引号**之间 | **memitemkey_langtype_formatter** | item **键**的 formatter——键侧是**格式器**（见下），不是值类型 |
+| 闭合引号之后 | **memitemvalue_langtype** | item **值/body** 的 langtype（不得再含 `'`） |
 
-`·`（U+00B7 中点）连接 item 的键侧与值侧两条**各自独立**的类型表达式。**通过 item 的 key 访问 item 的
-body**：写 `memheadname·<memitemkey 的字符串形式>` 即取到该 item 的 body（memitemvalue）。
+**整段 key 只在一对单引号里**；引号内的 `·`（U+00B7 中点）是**key 层级分隔符**，多级 key 因此
+**打平成单级 map**（级只是 key 的分隔符，不产生嵌套容器）。引号闭合之后到文本结尾是 value 类型，
+**不得再出现 `'`**——本轮不支持嵌套 map（`''int64'int64'int64` 具名拒绝）。
+
+**通过 item 的 key 访问 item 的 body**：写 `memheadname·<formatter 输出的文本>` 即取到该 item 的
+body（memitemvalue）。多级 key 就是多段 formatter 输出依次连接：
+
+```
+n : '[int64]·[]char/utf8'int64 = {}    // 两段 key：(int64, 字符串) → int64，单级 map
+n·7·abc = 1                            // 访问键 = 两段 formatter 输出
+```
+
+**formatter 的输出恒为 utf8 路径文本，但 formatter 本身可以声明三种字符串编码**：
+`'[]char/utf8'`、`'[]char/utf32'`、`'[]char/ascii'` 都合法——它们说的是**键值自身的编码**，
+不是路径文本的编码。格式化点负责把 utf32/ascii 转成 UTF-8（`runtimec/contract/member_key_text.c`
+是唯一转换点）。这与**值**的存储编码无关；也不约束动态键（`h·*k` 的键值可以是任意编码，
+由访问时转成 utf8 路径文本，那是成员访问的规则，不是 formatter）。
+
+> 更正（2026-11-07）：曾写「只认 utf8、utf32/ascii 一律拒绝」——**错**。实现与 tutorial 都用
+> `'[]char/utf32'` 建字符串键 map，layout 与 runtime 均通过；正确的约束是「**输出**恒 utf8」，不是「输入只许 utf8」。
 
 ### 键侧是 formatter，不是值类型
 
@@ -34,57 +75,73 @@ key 格式化成什么字面量文本」：
 |-----------------|---------------------------|-----|
 | 裸标量（`bool` + 十个定宽数字种类） | 该标量的字面量文本 | `b·200` |
 | 标量元组 `[scalar,…]` | `[v0,v1,…]`（逗号分隔、无空格） | `a·[3.252,235124.23]` |
-| `[]char/<编码>` | 字符串本身（裸名） | `m·a` / `kvspace·set(m,"a",v)` |
+| `[]char/utf8` | 字符串本身（裸名） | `m·a`（`m·a = v` 即写） |
+
+**formatter 不是 printf 式的格式串**：没有 `%d`、没有宽度/精度/填充/占位符，也没有用户自定义格式。
+它只是一组**封闭的 key 种类**，每种种类对应一个确定的文本产出（见上表）。集合之外的类型（数组形状、
+容器、元组含非标量等）一律拒绝；要新增加一种 formatter，是改语言，不是写一个格式串。
 
 浮点 key 的文本规则（最短往返、整数不带 `.0`、`-0.0` 归一、指数阈值）见
 [[成员访问]]「浮点文本（成员键与显示同源）」；`a == b` ⟹ 同键。
 
 **不得**用数组形状 `[N]T` / `[d0,d1]T` 作键：形状描述「一段连续打包进 body 的等宽元素」，属 **value 的
-langtype**；key 无 body、纯路径文本，形状对它没有意义。故 `b:[2]int32·[]char/utf8 = {}` 报错，而表达同
-样「两个 int32」的元组键 `b2:[int32,int32]·[]char/utf8 = {}` 合法（formatter 产出 `b2·[1,2]`）。
+langtype**；key 无 body、纯路径文本，形状对它没有意义。故 `b:'[2]int32'[]char/utf8 = {}` 报错，而表达同
+样「两个 int32」的元组键 `b2:'[int32,int32]'[]char/utf8 = {}` 合法（formatter 产出 `b2·[1,2]`）。
 
-`a:int32·int32 = {}`（裸标量键，访问键 `a·200`）与 `a:[int32]·int32 = {}`（一元元组键，访问键
+`a:'int32'int32 = {}`（裸标量键，访问键 `a·200`）与 `a:'[int32]'int32 = {}`（一元元组键，访问键
 `a·[200]`）是**两个不同的 formatter**，不得互相转换（逐字铁律见 [[文法与合法性]]）。
 
 ## 例子
 
 ```kv
-m:[]char/utf8·int64 = {}   // 字符串键 map；空字面量须带类型标注
+m:'[]char/utf8'int64 = {}   // 字符串键 map；空字面量须带类型标注
 m·a = 10                   // 命名成员写
-kvspace·set(m, "b", 20)         // 动态键写
-kvspace·get(m, "a") -> x        // 动态键读；缺失返回 None
+m·b = 20                        // 成员写（= 即写目标）
+m·a != None -> has:bool         // 成员判存在；缺失 → false（读值到声明槽前必须先判存在）
 
-b:int64·int64 = {}         // 裸标量键 map
+b:'int64'int64 = {}         // 裸标量键 map
 b·200 = 7                  // 访问键就是 200，禁止写成 b·[200]
 
-a:[float64,float64]·int32 = {}          // 标量元组键 map（[float64,float64] ≠ [2]float64）
+a:'[float64,float64]'int32 = {}          // 标量元组键 map（[float64,float64] ≠ [2]float64）
 a·[342.124,23.2345] = 1                 // 访问键就是元组字面量本身
 
-b2:[int32,int32]·[]char/utf8 = {}       // 元组键 + 字符串值（两元素都是标量，合法）
+b2:'[int32,int32]'[]char/utf8 = {}       // 元组键 + 字符串值（两元素都是标量，合法）
 b2·[1,2] = "x"                          // 访问键 = formatter 输出 "[1,2]"
-// b:[2]int32·[]char/utf8 = {}          // 非法：数组形状 [2]int32 不是键（键无 body 可承载）
+// b:'[2]int32'[]char/utf8 = {}         // 非法：数组形状 [2]int32 不是 formatter（键无 body 可承载）
 ```
 
-memitemvalue 可递归嵌套（`[]char/utf8·[]char/utf8·int64` 即 `map[string]map[string]int64`）。
+memitemvalue **不得是 map**（本轮不支持嵌套 map）：`''int64'int64'int64` 具名拒绝。要表达「两段 key」
+写在一对引号里（`'[int64]·[]char/utf8'int64`，见上），它是**单级 map**，不是两级容器。
 
 ## 锚例
 
-- 字面量与访问：`tutorial/10-types/01-typed-map.kv`、`tutorial/05-dict/literal.kv`。
-- 动态键、缺失返 None：`tutorial/10-types/02-string-map.kv`、`05-dict/kv_has_string_key.kv`。
-- 嵌套 map 与元组键签名：`tutorial/10-types/04-nested-type.kv`、`05-tuple-key.kv`。
+- 字面量与访问：`tutorial/runtimec/10-types/01-typed-map.kv`、`tutorial/runtimec/05-dict/literal.kv`。
+- 动态键、缺失返 None：`tutorial/runtimec/10-types/02-string-map.kv`、`05-dict/kv_has_string_key.kv`。
+- 元组键签名：`tutorial/runtimec/10-types/05-tuple-key.kv`。
+  （嵌套 map 本轮不支持：value 类型不得再含 `'`；`04-nested-type.kv` 的旧签名写法属待清理项。）
 
 ## 容器物理结构
 
-map 的 base key 存 storetype 0、body 为空，langtype 为完整 map 类型（例如 `[]char/utf8·int64`）。每个成员落在 `base·memitemkey` 的独立 KV key，保存该成员自己的 XValue。成员通过物理 key 前缀枚举；不存放 `base·` 索引矩阵。struct 成员遵循同一物理规则。`/lib/{pkg}·{func}` 中的 `·` 是函数命名字符，函数成员则位于 `/` 目录下。
+groupkv 的 base key 是空 body 的容器头，langtype 为完整 map 类型（例如
+`'[]char/utf8'int64`）或原型路径（`/lib/Point`）。每个成员落在 `base·<成员键>` 的独立
+KV key，保存该成员自己的 XValue。成员通过物理 key 前缀枚举；不存放 `base·` 索引矩阵。
+`/lib/{pkg}·{func}` 中的 `·` 是函数命名字符，函数成员则位于 `/` 目录下。
 
 ## 容器字面量须带类型标注
 
-**任何**容器字面量都必须在写目标处带完整 map langtype（如 `x:[]char/utf8·int64 = {}`、
-`nums:[int64]·int64 = {10, 20, 30}`）；无标注时 layout 报错。类型来源二选一：写目标的 `:` 标注，
-或签名里形参/写参的声明类型（`{n=42} -> m`，`m:[]char/utf8·int64`）。
+**任何**容器字面量都必须在写目标处带完整 map langtype（如 `x:'[]char/utf8'int64 = {}`、
+`nums:'[int64]'int64 = {10, 20, 30}`）；无标注时 layout 报错。类型来源二选一：写目标的 `:` 标注，
+或签名里形参/写参的声明类型（`{n=42} -> m`，`m:'[]char/utf8'int64`）。
 
 容器值的 langtype **就是**该 map langtype，kvspace 里**不存在**「langtype = 种类名 `stringkeymap` 的
 值」——runtime 也**不得**在缺类型时退化兜底（无类型即 layout 漏检，直接 fatal）。空字面量 `{}` 尤其无
 法推断：它不含任何成员。
+
+## 具名与位置字面量同一个构造算子
+
+`{n=42; x=7} -> m:'[]char/utf8'int64`（具名）与 `{10, 20} -> m:'[int64]'int64`（位置）走**同一个**构造算子 `map·new`，
+行为一致：**替换已有成员**——先清掉 `m·` 下旧成员，再按字面量写入新成员。
+
+kvlang 没有第三种容器算子：具名 map 字面量不脱糖成任何别的算子，它就是 `map·new`。
 "#### -> /lib/kvlang/spec/类型系统/map容器
 }

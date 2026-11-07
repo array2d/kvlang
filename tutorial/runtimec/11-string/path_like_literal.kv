@@ -1,0 +1,29 @@
+// path_like_literal: quoted strings starting with `/` are string literals, not kvspace reads
+// (unquoted `/tmp/...` reads kvspace); path strings also work consistently as member bases.
+// Expected output:
+//   p= /tmp/plk.txt
+//   sep= /
+//   v= 42
+//   s= /tmp/plk·data
+//   via-base= 7
+//   via-abs= 7
+rwfunc test() -> () {
+	p:[]char/utf32 = "/tmp/plk.txt"
+	println("p=", p)
+	"/" -> sep:[]char/utf32
+	println("sep=", sep)
+	/tmp/plk:'int64'int64 = {}
+	42 -> /tmp/plk·data
+	/tmp/plk·data -> v:int64
+	println("v=", v)
+	"/tmp/plk·data" -> s:[]char/utf32
+	println("s=", s)
+	/tmp/plm:'[]char/utf32'int64 = {}
+	"/tmp/plm" -> h:[]char/utf32
+	k:[]char/utf32 = "a"
+	7 -> h·*k
+	h·*k -> r:char/utf32
+	println("via-base=", r)
+	/tmp/plm·a -> r2:int64
+	println("via-abs=", r2)
+}

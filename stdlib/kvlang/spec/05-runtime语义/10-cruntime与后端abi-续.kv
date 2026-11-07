@@ -25,7 +25,8 @@ rwir 路由的 rwir 的**执行位置策略**，且对 kvlang 程序不可观测
   范]]）一律经 `handoff_external_rwir`（Set `/lib/<op>/vids/<vtid>` + Watch 30s 超时）移交，供独立进
   程扩展消费；嵌入式模式（`KVMODE_RETURN`）经 `out_pc` 把控制交回同进程扩展。
 - **Rust runtime**：`is_inproc(op)` 命中的 rwir 在驱动循环里就地 `dispatch`（无 handoff、无
-  watch）；非就地 rwir 经 `kvlangRwirextHandoff` 移交独立进程扩展或委托宿主 `ext` 处理器。
+  watch）；非就地 rwir 经 `kvlangRwirextHandoff` 移交独立进程扩展或委托宿主 `ext` 的
+  rwir_runtimecimpl。
 
 二者对 native builtin、控制流、`=` 拷贝、值语义的处理**必须**一致；差异仅限须经 def rwir 路由的 rwir
 的**就地 vs 移交**这一执行位置维度，且对 kvlang 程序不可观测（同一 tutorial 三后端两 runtime 输出一
@@ -43,10 +44,10 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
 扩展宿主（op-gpu、numpy、Go json）**自己** `kvspaceConnect(dsn)` 拿句柄，rwir 移交只用
 `kvlangRwirext*` 的 runtime 语义（`kvlangDefRwir`/`Params`/`ResolveRead`/`ResolveReadPath`/`ResolveWrite`
 /`NextPc`）。tensor 类大 buffer **应**走 shm 后端零拷贝：`ResolveReadPath` 拿容器路径 → `kvspaceGet`
-取 XValue 指针 → memcpy `kvspaceXvalueHead` struct + `kvspaceXvalueHeadLen` 定位 body（head 固定 8 字节，body
-偏移恒 8）→ 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；
-写走 `kvspaceXvalueHeadNew*` + `WriteInPlace`/`WriteNewPlace`。锚例：`tutorial/14-numpy/`（shm 全流程）、
-`tutorial/14-networld/`（fs/proc）。
+取 XValue 的二进制指针 → memcpy `kvspaceXvalueHead` struct + `kvspaceXvalueHeadLen` 定位 body（head 固定
+16 字节，body 偏移恒 16）→ 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；
+写走 `kvspaceXvalueHeadNew*` + `WriteInPlace`/`WriteNewPlace`。锚例：`tutorial/14-numpy/`（shm 全流程，该目录尚未落地）、
+`tutorial/byteseek/14-networld/`（fs/proc）。
 ## slot view 的使用（runtimec2, normative）
 
 - **绑定期取 view**：`kvspaceSlotView` 在绑定/首次使用槽时调用；`-2` 表示后端不支持，
@@ -58,11 +59,13 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
   storetype/headlen 原样拷贝、只更新内容长度（langtype 在值内 attr 区，不随 body 重写）；
   总长超过 `cap` 或后端拒绝即永久回退 `SetPartByRef`。局部操作数不进入 owned（继续
   `WriteBody`）。
-- **operand 只读 view**：仅用于 typed_core 行的**本 vthread 独占 frame 槽**；每次读
-  按静态 kind 校验。外部改变长度/kind 导致 box 移动**不可检测**（无世代号，读旧 head
-  即 UAF）；外部写必须同 key/同类型/同尺寸，否则属契约外（debug 构建断言）。runtime
+- **operand 只读 view**：仅用于**本 vthread 独占 frame 槽**，按槽 langtype 缓存
+  解码结果；算子按完整 opcode 查表一次调用，不得按 `<kind>·` 前缀剥离回退。
+  外部改变长度/kind 导致 box 移动**不可检测**（无世代号，读旧 head 即 UAF）；
+  外部写必须同 key/同类型/同尺寸，否则属契约外（debug 构建断言）。runtime
   只在本进程自身写该 key 后按 `kvlangBodyInvalidate*` 重取。
-- 每步不得为判定 typed/owned 而查 `/‥isa` 声明或 `strcmp`；定性全部在行装载/绑定期完成。
+- 每步不得为判定 view 归属或 kind 而查 `/lib` 下的 def rwir 签名或 `strcmp`；定性全部在
+  行装载/绑定期完成。
 
 	"#### -> /lib/kvlang/spec/runtime语义/cruntime与后端abi_续
 }

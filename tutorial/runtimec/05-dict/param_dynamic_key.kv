@@ -1,0 +1,40 @@
+// param_dynamic_key: dynamic member write `v -> base·*k` where `k` (and/or `base`) is a
+// signature parameter rather than a frame local.
+// Expected output:
+//   i1= 10 i2= 20
+//   s= 7
+//   box= 5 6
+//   local= 3
+struct Box {
+	a:int64=0
+	b:int64=0
+}
+rwfunc put_i(*int64 $k, *int64 $v) -> (*'int64'int64 $m) {
+	*v -> (*m)·*k
+}
+rwfunc put_s(*[]char/utf8 $k, *int64 $v) -> (*'[]char/utf8'int64 $m) {
+	(*m)·*k = *v
+}
+rwfunc set_field(*[]char/utf8 $k, *int64 $v) -> (*Box $p) {
+	*v -> (*p)·*k
+}
+rwfunc local_map(*int64 $k) -> (*int64 $r) {
+	lm:'int64'int64 = {}
+	3 -> lm·*k
+	lm·*k -> *r
+}
+rwfunc test() -> () {
+	mi:'int64'int64 = {}
+	put_i(1, 10) -> mi
+	put_i(2, 20) -> mi
+	println("i1=", mi·1, "i2=", mi·2)
+	ms:'[]char/utf8'int64 = {}
+	put_s("x", 7) -> ms
+	println("s=", ms·x)
+	bx:Box = {}
+	set_field("a", 5) -> bx
+	set_field("b", 6) -> bx
+	println("box=", bx·a, bx·b)
+	local_map(4) -> r
+	println("local=", r)
+}

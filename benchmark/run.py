@@ -314,8 +314,11 @@ def main():
                     help="kvlang 后端子集，逗号分隔（shm,fs,redis）")
     ap.add_argument("--redis", default="redis://127.0.0.1:6379",
                     help="redis 后端 DSN")
+    # 默认用 runtimec 的驱动，不是 byteseek：byteseek 内嵌的是 **runtimec2**
+    # （`libkvlang_runtimec2.so`），那是已冻结的旧运行时；本仓当前主线是
+    # `runtimec/`，`bin/kvlangrun` 才是它的命令行入口。
     ap.add_argument("--kvlang-bin",
-                    default=str(Path(__file__).resolve().parent.parent / "bin" / "byteseek"))
+                    default=str(Path(__file__).resolve().parent.parent / "bin" / "kvlangrun"))
     ap.add_argument("--no-stdlib", action="store_true",
                     help="向 kvlang 追加 --no-stdlib（跳过 stdlib 引导，只测用户代码）")
     ap.add_argument("--timeout", type=int, default=300)

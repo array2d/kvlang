@@ -80,7 +80,7 @@ pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
     (
         "networld/proc·exec",
         rw(
-            &["*[int64]·[]char/utf32", "*[int64]·[]char/utf32"],
+            &["*'[int64]'[]char/utf32", "*'[int64]'[]char/utf32"],
             &["*uint8", "*[]uint8", "*[]uint8"],
             |e, _, pc| networld::proc::exec(e, pc),
         ),
@@ -96,7 +96,7 @@ pub const MYRWIRCAPS: &[(&str, Rwir)] = &[
     ("networld/fs·append", rw(&[STR, "*[]uint8"], I64, |e, _, pc| networld::fs::append(e, pc))),
     (
         "networld/fs·list",
-        rw(&[STR], &["*[int64]·[]char/utf32"], |e, _, pc| networld::fs::list(e, pc)),
+        rw(&[STR], &["*'[int64]'[]char/utf32"], |e, _, pc| networld::fs::list(e, pc)),
     ),
     ("networld/fs·del", rw(&[STR], I64, |e, _, pc| networld::fs::del(e, pc))),
     ("networld/fs·mkdir", rw(&[STR], I64, |e, _, pc| networld::fs::mkdir(e, pc))),

@@ -1,10 +1,13 @@
-//! KVLANG_LAYOUT_SEMANTIC_OP A/B 开关 + union 调用点报错信息（子进程）。
+//! 语义算子发射：layout 只发 `add`/`eq` 这类语义名，typed `int64·add` 已删除。
 //!
-//! 开关是进程级 OnceLock，只能靠跑独立 layout 进程来切换。
+//! 开关（`KVLANG_LAYOUT_SEMANTIC_OP`）随本改动一并删除，这里改为跑一次 layout 进程
+//! 直接断言落库 opcode。
 
 use kvlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
 use std::process::Command;
+
+
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
@@ -16,38 +19,31 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
         tag,
         std::process::id()
     ));
+    // 写前删同名：异常退出会留下残骸，反复跑会累积。
+    let _ = std::fs::remove_file(&path);
     std::fs::write(&path, src).unwrap();
     path
 }
 
 fn dsn(tag: &str) -> String {
     format!(
-        "fs:///tmp/kvlanglayout_semop_{}_{}_{}",
+        "fs:///tmp/kvlanglayout_semop_{}_{}",
         tag,
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
     )
 }
 
 fn slot_text(kv: &mut Kv, key: &str) -> String {
     let v = kv.get_one(key);
-    let b = kvkind::body(&v, &kvkind::head(&v));
+    let b = kvkind::body(&v);
     String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 
 /// 返回 (opcode, 全部操作数槽文本)。
-fn dump_ops(tag: &str, src: &str, semantic: bool) -> (String, Vec<String>) {
+fn dump_ops(tag: &str, src: &str) -> (String, Vec<String>) {
     let file = temp_file(tag, src);
     let db = dsn(tag);
-    let mut cmd = Command::new(bin());
-    cmd.arg(&file).arg(&db);
-    if semantic {
-        cmd.env("KVLANG_LAYOUT_SEMANTIC_OP", "1");
-    }
-    let out = cmd.output().unwrap();
+    let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();
     assert!(
         out.status.success(),
         "layout failed: {}",
@@ -68,43 +64,36 @@ fn dump_ops(tag: &str, src: &str, semantic: bool) -> (String, Vec<String>) {
         }
         let text = slot_text(&mut kv, &key);
         if name.ends_with(",0]") {
-            if text == "add" || text.ends_with("·add") {
+            if text == "add" {
                 opcode = text;
             }
         } else {
             operands.push(text);
         }
     }
+    // 用完即清：`.kv` 与 fs store 都删，反复跑不留残骸。
+    drop(kv);
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
     (opcode, operands)
 }
 
 #[test]
-fn switch_emits_semantic_or_typed_names() {
-    let src = "rwfunc t() -> (r:int64) {\n    acc = 0\n    acc = acc + 1\n    acc -> r\n}\n";
-    let (typed, mut ops_a) = dump_ops("off", src, false);
-    let (semantic, mut ops_b) = dump_ops("on", src, true);
-    assert_eq!(typed, "int64·add");
-    assert_eq!(semantic, "add");
-    // 除算子槽文本外，操作数槽必须逐字节一致。
-    ops_a.sort();
-    ops_b.sort();
-    assert_eq!(ops_a, ops_b);
+fn emits_semantic_names_only() {
+    let src = "rwfunc t() -> (*int64 $r) {\n    acc = 0\n    acc = acc + 1\n    acc -> *r\n}\n";
+    let (opcode, _) = dump_ops("sem", src);
+    assert_eq!(opcode, "add");
+    assert!(!opcode.contains('·'), "typed opcode 不应再出现：{opcode}");
 }
 
 /// 回归：语义算子名与同包 rwfunc 撞名（`eq` vs `lib string { rwfunc eq }`）时，
 /// 算子必须仍按 rwir 落库，绝不能被裸名解析成函数调用（曾导致无限递归）。
 #[test]
 fn semantic_operator_never_resolves_as_call() {
-    let src = "lib string {\n    rwfunc eq(a:[]char/utf32, b:[]char/utf32) -> (r:bool) {\n        false -> r\n    }\n}\n\
-               rwfunc t() -> (r:bool) {\n    1 == 1 -> r\n}\n";
+    let src = "lib string {\n    rwfunc eq(*[]char/utf32 $a, *[]char/utf32 $b) -> (*bool $r) {\n        false -> *r\n    }\n}\nrwfunc t() -> (*bool $r) {\n    1 == 1 -> *r\n}\n";
     let file = temp_file("collide", src);
     let db = dsn("collide");
-    let out = Command::new(bin())
-        .arg(&file)
-        .arg(&db)
-        .env("KVLANG_LAYOUT_SEMANTIC_OP", "1")
-        .output()
-        .unwrap();
+    let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();
     assert!(
         out.status.success(),
         "layout failed: {}",
@@ -122,7 +111,7 @@ fn semantic_operator_never_resolves_as_call() {
         let alloc = kv.get_one(&key);
         let kind = kvkind::kind(&alloc, &kv.langtype_of(&key));
         let text = slot_text(&mut kv, &key);
-        if text == "eq" || text.ends_with("·eq") {
+        if text == "eq" {
             comparison = Some((kind, text));
         }
     }
@@ -136,4 +125,7 @@ fn semantic_operator_never_resolves_as_call() {
         kvkind::kind(&fn_alloc, &kv.langtype_of(fn_key)),
         "rwfunc"
     );
+    drop(kv);
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
 }

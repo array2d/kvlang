@@ -1,0 +1,31 @@
+// 104: Maximum Depth of Binary Tree — 二叉树最大深度
+// 来源: LeetCode #104
+// 期望输出:
+//   3
+struct TNode {
+	val:int64=0
+	left:*TNode=None
+	right:*TNode=None
+}
+
+rwfunc max_depth(*TNode $root) -> (*int64 $depth) {
+	if (root == None) { 0 -> *depth }
+	else {
+		ld:int64 = max_depth((*root)·left)
+		rd:int64 = max_depth((*root)·right)
+		if (ld > rd) { ld + 1 -> *depth }
+		else { *depth = rd + 1 }
+	}
+}
+
+rwfunc test() -> () {
+	t:'[int64]'TNode = {}
+	t·2:TNode = {val=9}
+	t·4:TNode = {val=15}
+	t·5:TNode = {val=7}
+	t·3:TNode = {val=20 left=&t·4 right=&t·5}
+	t·1:TNode = {val=3 left=&t·2 right=&t·3}
+	&t·1 -> root:*'[int64]'/lib/TNode
+	d:int64 = max_depth(root)
+	println(d)
+}

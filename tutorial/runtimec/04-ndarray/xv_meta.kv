@@ -1,0 +1,18 @@
+// 期望输出:
+//   array kindexpr= [4]int64 bodylen= 32
+//   scalar kindexpr= int64 bodylen= 8
+//   string kindexpr= [2]char/utf8 bodylen= 2
+rwfunc test() -> () {
+	a:[]int64 = [10, 20, 30, 40]
+	compactarray·langtype(a) -> ka:[]char/utf8
+	compactarray·bodylen(a) -> ba:int64
+	println("array kindexpr=", ka, "bodylen=", ba)
+	n:int64 = 7
+	compactarray·langtype(n) -> kn:[]char/utf8
+	compactarray·bodylen(n) -> bn:int64
+	println("scalar kindexpr=", kn, "bodylen=", bn)
+	s:char/utf8 = "hi"
+	compactarray·langtype(s) -> ks:[]char/utf8
+	compactarray·bodylen(s) -> bs:int64
+	println("string kindexpr=", ks, "bodylen=", bs)
+}

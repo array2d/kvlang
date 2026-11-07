@@ -1,0 +1,991 @@
+/*
+ * 组件：specification/rwir_catalog.def
+ * 作用：myrwircap 的唯一 capability manifest —— 一行一个语义算子。
+ * 联系：surface 名字到本表行的映射在 rwir_alias_table.def；两表都由
+ *       tools/architecture/generate_rwir_catalog.py 生成并校验。
+ * 约束：rwir 的唯一标识是 operator key 文本；下面的数值 id 只服务 BinRWIR 编码，
+ *       是 runtimec 私有的实现细节，不是 rwir 身份。id 与 identifier 显式分配，
+ *       不来自数组下标、文件顺序或声明顺序；
+ *       读写掩码是 TypeSet 位集，不是占位串，不含 wildcard；未获得矩阵决策的
+ *       能力不进入本文件，记录在 rwir_catalog_gaps.md。
+ * 掩码位：0 int8，1 int16，2 int32，3 int64，4 uint8，5 uint16，6 uint32，
+ *       7 uint64，8 float32，9 float64，10 bool，11 char/utf8，12 char/utf32，
+ *       13 char/ascii，14 array，15 stringkeymap，16 structref，17 ext，
+ *       18 pointer；19 位以上保留且必须为零。
+ * 掩码零：该行不在标量 union 通道。parameterized 行的参数与结果类型由
+ *       /lib/<operator> 的 def rwir 槽在安装时声明（唯一签名来源，禁止在本表
+ *       复制第二张签名表）；ResultRule IDENTITY 表示结果类型取安装签名，
+ *       不是 wildcard。control 行不产生值。
+ * 统计：注册表 319 个 surface 名字 → 318 条别名映射；
+ *       123 条同名映射，195 条别名；能力行 133 条，待裁 0 条。
+ *
+ * 已退役（编号永久保留，不复用、不重编号）：
+ *   0x0028 OBJECT_LITERAL —— 具名容器字面量统一走 map·new（map/struct/scatterarray 本质是键值组）；obj 为其别名，一并退役
+ */
+#ifndef RUNTIMEC_RWIR_OPERATION
+#error "Define RUNTIMEC_RWIR_OPERATION before including rwir_catalog.def"
+#endif
+
+/* RUNTIMEC_RWIR_OPERATION(identifier, operator, opid,
+ *                        read_union_mask, write_union_mask,
+ *                        constraint, result_rule, alias_policy, behavior_decisions)
+ *
+ * Constraint    : RUNTIMEC_RWIR_CONSTRAINT_{NONE,SAME_CLASS,NUMERIC_COMPATIBLE,
+ *                 NUMERIC_COMPARE}
+ * ResultRule    : RUNTIMEC_RWIR_RESULT_{NONE,SAME_FIRST,SAME_SECOND,WIDEN,
+ *                 WIDEN_INTEGER,BOOLEAN,FLOAT64,TARGET_TYPE,IDENTITY,CHARACTER_UTF8}
+ * AliasPolicy   : RUNTIMEC_RWIR_ALIAS_{FORBIDDEN,DECLARED}
+ * behavior_decisions: 一个或多个逗号分隔的矩阵决策；第一个是该行的主决策。
+ */
+/* behavior-decision: read-write-alias */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COPY, "copy", 0x0001,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_DECLARED,
+                        "read-write-alias")  /* install signature -> install signature */
+/* behavior-decision: mixed-precision-promotion-order-independent */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_ADD, "add", 0x0002,
+                        0x000003FF, 0x000003FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_NUMERIC_COMPATIBLE,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-precision-promotion-order-independent")  /* number -> number */
+/* behavior-decision: mixed-precision-promotion-order-independent */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SUB, "sub", 0x0003,
+                        0x000003FF, 0x000003FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_NUMERIC_COMPATIBLE,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-precision-promotion-order-independent")  /* number -> number */
+/* behavior-decision: mixed-precision-promotion-order-independent */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_MUL, "mul", 0x0004,
+                        0x000003FF, 0x000003FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_NUMERIC_COMPATIBLE,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-precision-promotion-order-independent")  /* number -> number */
+/* behavior-decision: mixed-precision-promotion-order-independent */
+/* behavior-decision: signed-integer-division */
+/* behavior-decision: float-division-by-zero */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DIV, "div", 0x0005,
+                        0x000003FF, 0x000003FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_NUMERIC_COMPATIBLE,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-precision-promotion-order-independent,signed-integer-division,float-division-by-zero")  /* number -> number */
+/* behavior-decision: mixed-precision-promotion-order-independent */
+/* behavior-decision: integer-remainder-sign */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_MOD, "mod", 0x0006,
+                        0x000000FF, 0x000000FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
+                        RUNTIMEC_RWIR_RESULT_WIDEN_INTEGER,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-precision-promotion-order-independent,integer-remainder-sign")  /* integer -> integer */
+/* behavior-decision: mixed-precision-promotion-order-independent */
+/* behavior-decision: floating-min-max-nan */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_MAX, "max", 0x0007,
+                        0x000003FF, 0x000003FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_NUMERIC_COMPATIBLE,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-precision-promotion-order-independent,floating-min-max-nan")  /* number -> number */
+/* behavior-decision: mixed-precision-promotion-order-independent */
+/* behavior-decision: floating-min-max-nan */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_MIN, "min", 0x0008,
+                        0x000003FF, 0x000003FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_NUMERIC_COMPATIBLE,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-precision-promotion-order-independent,floating-min-max-nan")  /* number -> number */
+/* behavior-decision: signed-neg-abs-sign */
+/* behavior-decision: unsigned-neg-abs-sign */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_ABSOLUTE, "abs", 0x0009,
+                        0x000003FF, 0x000003FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_SAME_FIRST,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "signed-neg-abs-sign,unsigned-neg-abs-sign")  /* number -> number */
+/* behavior-decision: signed-neg-abs-sign */
+/* behavior-decision: unsigned-neg-abs-sign */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_NEGATION, "neg", 0x000A,
+                        0x000003FF, 0x000003FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_SAME_FIRST,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "signed-neg-abs-sign,unsigned-neg-abs-sign")  /* number -> number */
+/* behavior-decision: signed-neg-abs-sign */
+/* behavior-decision: unsigned-neg-abs-sign */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SIGN, "sign", 0x000B,
+                        0x000003FF, 0x000003FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_SAME_FIRST,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "signed-neg-abs-sign,unsigned-neg-abs-sign")  /* number -> number */
+/* behavior-decision: mixed-signed-unsigned-arithmetic */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BITWISE_AND, "bitand", 0x000C,
+                        0x000000FF, 0x000000FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-signed-unsigned-arithmetic")  /* integer -> integer */
+/* behavior-decision: mixed-signed-unsigned-arithmetic */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BITWISE_OR, "bitor", 0x000D,
+                        0x000000FF, 0x000000FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-signed-unsigned-arithmetic")  /* integer -> integer */
+/* behavior-decision: mixed-signed-unsigned-arithmetic */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BITWISE_XOR, "bitxor", 0x000E,
+                        0x000000FF, 0x000000FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-signed-unsigned-arithmetic")  /* integer -> integer */
+/* behavior-decision: shift-count-masking */
+/* behavior-decision: mixed-signed-unsigned-arithmetic */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SHIFT_LEFT, "shl", 0x000F,
+                        0x000000FF, 0x000000FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "shift-count-masking,mixed-signed-unsigned-arithmetic")  /* integer -> integer */
+/* behavior-decision: shift-count-masking */
+/* behavior-decision: mixed-signed-unsigned-arithmetic */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SHIFT_RIGHT, "shr", 0x0010,
+                        0x000000FF, 0x000000FF,
+                        RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
+                        RUNTIMEC_RWIR_RESULT_WIDEN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "shift-count-masking,mixed-signed-unsigned-arithmetic")  /* integer -> integer */
+/* behavior-decision: float-transcendental-result-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SQUARE_ROOT, "sqrt", 0x0011,
+                        0x000003FF, 0x00000200,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_FLOAT64,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "float-transcendental-result-kind")  /* number -> float64 */
+/* behavior-decision: float-transcendental-result-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_EXPONENTIAL, "exp", 0x0012,
+                        0x000003FF, 0x00000200,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_FLOAT64,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "float-transcendental-result-kind")  /* number -> float64 */
+/* behavior-decision: float-transcendental-result-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_LOGARITHM, "log", 0x0013,
+                        0x000003FF, 0x00000200,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_FLOAT64,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "float-transcendental-result-kind")  /* number -> float64 */
+/* behavior-decision: float-transcendental-result-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_POWER, "pow", 0x0014,
+                        0x000003FF, 0x00000200,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_FLOAT64,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "float-transcendental-result-kind")  /* number -> float64 */
+/* behavior-decision: mixed-numeric-equality */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_EQUAL, "eq", 0x0015,
+                        0x000003FF, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-numeric-equality")  /* number -> boolean */
+/* behavior-decision: mixed-numeric-equality */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_NOT_EQUAL, "neq", 0x0016,
+                        0x000003FF, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-numeric-equality")  /* number -> boolean */
+/* behavior-decision: mixed-numeric-equality */
+/* behavior-decision: mixed-signed-unsigned-arithmetic */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_LESS, "lt", 0x0017,
+                        0x000003FF, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NUMERIC_COMPARE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-numeric-equality,mixed-signed-unsigned-arithmetic")  /* number -> boolean */
+/* behavior-decision: mixed-numeric-equality */
+/* behavior-decision: mixed-signed-unsigned-arithmetic */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_LESS_EQUAL, "le", 0x0018,
+                        0x000003FF, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NUMERIC_COMPARE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-numeric-equality,mixed-signed-unsigned-arithmetic")  /* number -> boolean */
+/* behavior-decision: mixed-numeric-equality */
+/* behavior-decision: mixed-signed-unsigned-arithmetic */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_GREATER, "gt", 0x0019,
+                        0x000003FF, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NUMERIC_COMPARE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-numeric-equality,mixed-signed-unsigned-arithmetic")  /* number -> boolean */
+/* behavior-decision: mixed-numeric-equality */
+/* behavior-decision: mixed-signed-unsigned-arithmetic */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_GREATER_EQUAL, "ge", 0x001A,
+                        0x000003FF, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NUMERIC_COMPARE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "mixed-numeric-equality,mixed-signed-unsigned-arithmetic")  /* number -> boolean */
+/* behavior-decision: logical-operators-truthy */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_LOGICAL_AND, "and", 0x001B,
+                        0x000007FF, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "logical-operators-truthy")  /* number or boolean -> boolean */
+/* behavior-decision: logical-operators-truthy */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_LOGICAL_OR, "or", 0x001C,
+                        0x000007FF, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "logical-operators-truthy")  /* number or boolean -> boolean */
+/* behavior-decision: logical-operators-truthy */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_LOGICAL_NOT, "not", 0x001D,
+                        0x000007FF, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "logical-operators-truthy")  /* number or boolean -> boolean */
+/* behavior-decision: cast-target-kind */
+/* behavior-decision: floating-to-integer-truncation */
+/* behavior-decision: int-to-float32-single-rounding */
+/* behavior-decision: uint64-to-float-promotion */
+/* behavior-decision: bool-cast-strict */
+/* behavior-decision: character-conversion-result */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_CAST, "cast", 0x001E,
+                        0x00003FFF, 0x00003FFF,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_TARGET_TYPE,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "cast-target-kind,floating-to-integer-truncation,int-to-float32-single-rounding,uint64-to-float-promotion,bool-cast-strict,character-conversion-result")  /* cast source scalar -> cast source scalar */
+/* behavior-decision: character-concat-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_CONCAT, "concat", 0x001F,
+                        0x00003800, 0x00000800,
+                        RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
+                        RUNTIMEC_RWIR_RESULT_CHARACTER_UTF8,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "character-concat-kind")  /* character -> char/utf8 */
+/* behavior-decision: character-equality-by-text */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_CHARACTER_EQUAL, "streq", 0x0020,
+                        0x00003800, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "character-equality-by-text")  /* character -> boolean */
+/* behavior-decision: pointer-equality */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_POINTER_EQUAL, "ptreq", 0x0021,
+                        0x00040000, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "pointer-equality")  /* pointer -> boolean */
+/* behavior-decision: boolean-equality */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BOOLEAN_EQUAL, "bool·eq", 0x0022,
+                        0x00000400, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "boolean-equality")  /* boolean -> boolean */
+/* behavior-decision: character-equality-by-text */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_CHARACTER_NOT_EQUAL, "streq·not", 0x0029,
+                        0x00003800, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "character-equality-by-text")  /* character -> boolean */
+/* behavior-decision: pointer-equality */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_POINTER_NOT_EQUAL, "ptreq·not", 0x002A,
+                        0x00040000, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_SAME_CLASS,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "pointer-equality")  /* pointer -> boolean */
+/* behavior-decision: boolean-equality */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BOOLEAN_NOT_EQUAL, "bool·neq", 0x002B,
+                        0x00000400, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "boolean-equality")  /* boolean -> boolean */
+/* behavior-decision: debugger-pauses-execution */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DEBUGGER, "debugger", 0x0023,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_NONE,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "debugger-pauses-execution")  /* no value -> no value */
+/* behavior-decision: none-criterion */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_NONNULL, "nonnull", 0x01A4,
+                        0x00080000, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "none-criterion")  /* install signature -> boolean */
+/* behavior-decision: none-criterion */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_NONNULL_NOT, "nonnull·not", 0x01A5,
+                        0x00080000, 0x00000400,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_BOOLEAN,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "none-criterion")  /* install signature -> boolean */
+/* behavior-decision: control-flow-primitives */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_CALL, "call", 0x0024,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_NONE,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "control-flow-primitives")  /* no value -> no value */
+/* behavior-decision: control-flow-primitives */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_RETURN, "return", 0x0025,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_NONE,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "control-flow-primitives")  /* no value -> no value */
+/* behavior-decision: control-flow-primitives */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_GOTO, "goto", 0x0026,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_NONE,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "control-flow-primitives")  /* no value -> no value */
+/* behavior-decision: control-flow-primitives */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_BRANCH, "branch", 0x0027,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_NONE,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "control-flow-primitives")  /* no value -> no value */
+/* behavior-decision: array-copy-result-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_COPY, "compactarray·copy", 0x0100,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-copy-result-kind")  /* install signature -> install signature */
+/* behavior-decision: string-slice-bounds */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_NEW_SLICE, "compactarray·newslice", 0x0101,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-slice-bounds")  /* install signature -> install signature */
+/* behavior-decision: array-element-access-by-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_NEW, "compactarray·new", 0x0102,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-element-access-by-kind")  /* install signature -> install signature */
+/* behavior-decision: array-fill-write-param */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_FILL, "compactarray·fill", 0x0103,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_DECLARED,
+                        "array-fill-write-param")  /* install signature -> install signature */
+/* behavior-decision: array-element-access-by-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_NUMEL, "compactarray·numel", 0x0104,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-element-access-by-kind")  /* install signature -> install signature */
+/* behavior-decision: array-element-access-by-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_DIMENSION, "compactarray·dim", 0x0105,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-element-access-by-kind")  /* install signature -> install signature */
+/* behavior-decision: array-element-access-by-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_SHAPE, "compactarray·shape", 0x0106,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-element-access-by-kind")  /* install signature -> install signature */
+/* behavior-decision: array-element-access-by-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_AT, "compactarray·at", 0x0107,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-element-access-by-kind")  /* install signature -> install signature */
+/* behavior-decision: array-element-access-by-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_SET, "compactarray·set", 0x0108,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_DECLARED,
+                        "array-element-access-by-kind")  /* install signature -> install signature */
+/* behavior-decision: array-reshape-numel-mismatch */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_NEW_RESHAPE, "compactarray·newreshape", 0x0109,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-reshape-numel-mismatch")  /* install signature -> install signature */
+/* behavior-decision: array-reinterpret-raw */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_NEW_REINTERPRET, "compactarray·newreinterpret", 0x010A,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-reinterpret-raw")  /* install signature -> install signature */
+/* behavior-decision: xv-introspection-result-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_LANGTYPE, "compactarray·langtype", 0x010B,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "xv-introspection-result-kind")  /* install signature -> install signature */
+/* behavior-decision: xv-introspection-result-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_BODY_LENGTH, "compactarray·bodylen", 0x010C,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "xv-introspection-result-kind")  /* install signature -> install signature */
+/* behavior-decision: xv-introspection-result-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COMPACT_ARRAY_PARSE_LANGTYPE, "compactarray·parselangtype", 0x010D,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "xv-introspection-result-kind")  /* install signature -> install signature */
+/* behavior-decision: scatterarray-next-index */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SCATTER_ARRAY_NEW, "scatterarray·new", 0x0110,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "scatterarray-next-index")  /* install signature -> install signature */
+/* behavior-decision: scatterarray-next-index */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SCATTER_ARRAY_LENGTH, "scatterarray·len", 0x0111,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "scatterarray-next-index")  /* install signature -> install signature */
+/* behavior-decision: scatterarray-next-index */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SCATTER_ARRAY_AT, "scatterarray·at", 0x0112,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "scatterarray-next-index")  /* install signature -> install signature */
+/* behavior-decision: scatterarray-next-index */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SCATTER_ARRAY_SET, "scatterarray·set", 0x0113,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_DECLARED,
+                        "scatterarray-next-index")  /* install signature -> install signature */
+/* behavior-decision: scatterarray-next-index */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SCATTER_ARRAY_NEW_SCATTER, "scatterarray·newscatter", 0x0114,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "scatterarray-next-index")  /* install signature -> install signature */
+/* behavior-decision: scatterarray-next-index */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SCATTER_ARRAY_NEW_COMPACT, "scatterarray·newcompact", 0x0115,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "scatterarray-next-index")  /* install signature -> install signature */
+/* behavior-decision: scatterarray-next-index */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SCATTER_ARRAY_APPEND, "scatterarray·append", 0x0116,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_DECLARED,
+                        "scatterarray-next-index")  /* install signature -> install signature */
+/* behavior-decision: string-slice-bounds */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_SCATTER_ARRAY_SLICE, "scatterarray·slice", 0x0117,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-slice-bounds")  /* install signature -> install signature */
+/* behavior-decision: string-codepoint-indexing */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_SET, "string·set", 0x0120,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_DECLARED,
+                        "string-codepoint-indexing")  /* install signature -> install signature */
+/* behavior-decision: string-codepoint-indexing */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_CHARACTER, "string·char", 0x0121,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-codepoint-indexing")  /* install signature -> install signature */
+/* behavior-decision: string-codepoint-indexing */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_ORDINAL, "string·ord", 0x0122,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-codepoint-indexing")  /* install signature -> install signature */
+/* behavior-decision: string-compare-ordering */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_COMPARE, "string·cmp", 0x0123,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-compare-ordering")  /* install signature -> install signature */
+/* behavior-decision: string-codepoint-indexing */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_FIND, "string·find", 0x0124,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-codepoint-indexing")  /* install signature -> install signature */
+/* behavior-decision: string-codepoint-indexing */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_LENGTH, "string·len", 0x0125,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-codepoint-indexing")  /* install signature -> install signature */
+/* behavior-decision: string-slice-bounds */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_SLICE, "string·slice", 0x0126,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-slice-bounds")  /* install signature -> install signature */
+/* behavior-decision: string-concat-result-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_CONCAT, "string·concat", 0x0127,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-concat-result-kind")  /* install signature -> install signature */
+/* behavior-decision: string-format-base-radix */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_FORMAT_INTEGER, "string·formatint", 0x0128,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-format-base-radix")  /* install signature -> install signature */
+/* behavior-decision: string-format-base-radix */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_FORMAT_UNSIGNED_INTEGER, "string·formatuint", 0x0129,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-format-base-radix")  /* install signature -> install signature */
+/* behavior-decision: string-parse-strict-full-consumption */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_PARSE_INTEGER, "string·parseint", 0x012A,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-parse-strict-full-consumption")  /* install signature -> install signature */
+/* behavior-decision: string-parse-strict-full-consumption */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_PARSE_UNSIGNED_INTEGER, "string·parseuint", 0x012B,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-parse-strict-full-consumption")  /* install signature -> install signature */
+/* behavior-decision: string-parse-strict-full-consumption */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRING_PARSE_FLOAT, "string·parsefloat", 0x012C,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "string-parse-strict-full-consumption")  /* install signature -> install signature */
+/* behavior-decision: array-element-access-by-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_XVALUE_AT, "xv·at", 0x0130,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-element-access-by-kind")  /* install signature -> install signature */
+/* behavior-decision: array-element-access-by-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_XVALUE_SET, "xv·set", 0x0131,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_DECLARED,
+                        "array-element-access-by-kind")  /* install signature -> install signature */
+/* behavior-decision: array-reshape-numel-mismatch */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_XVALUE_RESHAPE, "xv·reshape", 0x0132,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-reshape-numel-mismatch")  /* install signature -> install signature */
+/* behavior-decision: array-reinterpret-raw */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_XVALUE_REINTERPRET, "xv·reinterpret", 0x0133,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-reinterpret-raw")  /* install signature -> install signature */
+/* behavior-decision: xv-introspection-result-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_XVALUE_LANGTYPE, "xv·langtype", 0x0134,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "xv-introspection-result-kind")  /* install signature -> install signature */
+/* behavior-decision: xv-introspection-result-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_XVALUE_BODY_LENGTH, "xv·bodylen", 0x0135,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "xv-introspection-result-kind")  /* install signature -> install signature */
+/* behavior-decision: xv-introspection-result-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_XVALUE_PARSE_LANGTYPE, "xv·parselangtype", 0x0136,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "xv-introspection-result-kind")  /* install signature -> install signature */
+/* behavior-decision: array-element-access-by-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_NDARRAY_NUMEL, "ndarray·numel", 0x0140,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-element-access-by-kind")  /* install signature -> install signature */
+/* behavior-decision: array-element-access-by-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_NDARRAY_DIMENSION, "ndarray·dim", 0x0141,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-element-access-by-kind")  /* install signature -> install signature */
+/* behavior-decision: array-element-access-by-kind */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_NDARRAY_SHAPE, "ndarray·shape", 0x0142,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "array-element-access-by-kind")  /* install signature -> install signature */
+/* behavior-decision: time-realtime-nanoseconds */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_TIME_NOW, "time·now", 0x0150,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "time-realtime-nanoseconds")  /* install signature -> install signature */
+/* behavior-decision: time-arithmetic-result */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_TIME_SUB, "time·sub", 0x0151,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "time-arithmetic-result")  /* install signature -> install signature */
+/* behavior-decision: time-arithmetic-result */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_TIME_ADD, "time·add", 0x0152,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "time-arithmetic-result")  /* install signature -> install signature */
+/* behavior-decision: time-arithmetic-result */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_TIME_BEFORE, "time·before", 0x0153,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "time-arithmetic-result")  /* install signature -> install signature */
+/* behavior-decision: time-arithmetic-result */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_TIME_AFTER, "time·after", 0x0154,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "time-arithmetic-result")  /* install signature -> install signature */
+/* behavior-decision: duration-overflow-wrap */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_NANOSECONDS, "time/duration·nanos", 0x0160,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-overflow-wrap")  /* install signature -> install signature */
+/* behavior-decision: duration-overflow-wrap */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_MILLISECONDS, "time/duration·millis", 0x0161,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-overflow-wrap")  /* install signature -> install signature */
+/* behavior-decision: duration-overflow-wrap */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_SECONDS, "time/duration·seconds", 0x0162,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-overflow-wrap")  /* install signature -> install signature */
+/* behavior-decision: duration-overflow-wrap */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_MINUTES, "time/duration·minutes", 0x0163,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-overflow-wrap")  /* install signature -> install signature */
+/* behavior-decision: duration-overflow-wrap */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_HOURS, "time/duration·hours", 0x0164,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-overflow-wrap")  /* install signature -> install signature */
+/* behavior-decision: duration-truncating-scale */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_AS_NANOSECONDS, "time/duration·as_nanos", 0x0165,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-truncating-scale")  /* install signature -> install signature */
+/* behavior-decision: duration-truncating-scale */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_AS_MILLISECONDS, "time/duration·as_millis", 0x0166,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-truncating-scale")  /* install signature -> install signature */
+/* behavior-decision: duration-truncating-scale */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_AS_SECONDS, "time/duration·as_seconds", 0x0167,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-truncating-scale")  /* install signature -> install signature */
+/* behavior-decision: duration-truncating-scale */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_AS_MINUTES, "time/duration·as_minutes", 0x0168,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-truncating-scale")  /* install signature -> install signature */
+/* behavior-decision: duration-truncating-scale */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_AS_HOURS, "time/duration·as_hours", 0x0169,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-truncating-scale")  /* install signature -> install signature */
+/* behavior-decision: duration-overflow-wrap */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_ADD, "time/duration·add", 0x016A,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-overflow-wrap")  /* install signature -> install signature */
+/* behavior-decision: duration-overflow-wrap */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_SUB, "time/duration·sub", 0x016B,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-overflow-wrap")  /* install signature -> install signature */
+/* behavior-decision: duration-truncating-scale */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_BEFORE, "time/duration·before", 0x016C,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-truncating-scale")  /* install signature -> install signature */
+/* behavior-decision: duration-truncating-scale */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_DURATION_AFTER, "time/duration·after", 0x016D,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "duration-truncating-scale")  /* install signature -> install signature */
+/* behavior-decision: kvspace-set-write-scope */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_DELETE, "kvspace·del", 0x0172,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "kvspace-set-write-scope")  /* install signature -> install signature */
+/* behavior-decision: kvspace-set-write-scope */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_DELETE_TREE, "kvspace·deltree", 0x0173,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "kvspace-set-write-scope")  /* install signature -> install signature */
+/* behavior-decision: kvspace-copy-semantics */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_COPY, "kvspace·cp", 0x0174,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "kvspace-copy-semantics")  /* install signature -> install signature */
+/* behavior-decision: kvspace-copy-semantics */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_COPY_DIRECTORY, "kvspace·cpdir", 0x0175,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "kvspace-copy-semantics")  /* install signature -> install signature */
+/* behavior-decision: kvspace-copy-semantics */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_COPY_LIST, "kvspace·cplist", 0x0176,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "kvspace-copy-semantics")  /* install signature -> install signature */
+/* behavior-decision: kvspace-list-ordering */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_LIST_LENGTH, "kvspace·listlen", 0x0177,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "kvspace-list-ordering")  /* install signature -> install signature */
+/* behavior-decision: kvspace-list-ordering */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_LIST_AT, "kvspace·listat", 0x0178,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "kvspace-list-ordering")  /* install signature -> install signature */
+/* behavior-decision: kvspace-index-capacity */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_MAKE_INDEX, "kvspace·mkindex", 0x0179,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "kvspace-index-capacity")  /* install signature -> install signature */
+/* behavior-decision: kvspace-extension-index */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_EXTENSION_INDEX, "kvspace·extindex", 0x017A,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "kvspace-extension-index")  /* install signature -> install signature */
+/* behavior-decision: kvspace-extension-index */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_DELETE_EXTENSION_INDEX, "kvspace·delextindex", 0x017B,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "kvspace-extension-index")  /* install signature -> install signature */
+/* behavior-decision: kvspace-watch-blocking */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVSPACE_WATCH, "kvspace·watch", 0x017C,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "kvspace-watch-blocking")  /* install signature -> install signature */
+/* behavior-decision: vthread-control-opcodes */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_VTHREAD_CREATE, "vthread·create", 0x0180,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "vthread-control-opcodes")  /* install signature -> install signature */
+/* behavior-decision: vthread-control-opcodes */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_VTHREAD_RUN, "vthread·run", 0x0181,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "vthread-control-opcodes")  /* install signature -> install signature */
+/* behavior-decision: vthread-control-opcodes */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_VTHREAD_CALL, "vthread·call", 0x0182,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "vthread-control-opcodes")  /* install signature -> install signature */
+/* behavior-decision: vthread-control-opcodes */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_VTHREAD_SLEEP, "vthread·sleep", 0x0183,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "vthread-control-opcodes")  /* install signature -> install signature */
+/* behavior-decision: vthread-control-opcodes */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_VTHREAD_SET_STATUS, "vthread·setstatus", 0x0184,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "vthread-control-opcodes")  /* install signature -> install signature */
+/* behavior-decision: vthread-pc-pure-read */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_VTHREAD_PC, "vthread·pc", 0x0185,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "vthread-pc-pure-read")  /* install signature -> install signature */
+/* behavior-decision: random-source-and-range */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_RANDOM_UNSIGNED_64, "random·uint64", 0x0190,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "random-source-and-range")  /* install signature -> install signature */
+/* behavior-decision: random-source-and-range */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_RANDOM_SIGNED_63, "random·int63", 0x0191,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "random-source-and-range")  /* install signature -> install signature */
+/* behavior-decision: random-source-and-range */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_RANDOM_BELOW, "random·intn", 0x0192,
+                        0x00000000, 0x00000000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "random-source-and-range")  /* install signature -> install signature */
+/* behavior-decision: map-literal-replaces-members */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_MAP_NEW, "map·new", 0x01A0,
+                        0x00000000, 0x00008000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_DECLARED,
+                        "map-literal-replaces-members")  /* install signature -> stringkeymap */
+/* behavior-decision: struct-new-from-prototype */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_STRUCT_NEW, "struct·new", 0x01A1,
+                        0x00000000, 0x00010000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_DECLARED,
+                        "struct-new-from-prototype")  /* install signature -> structref */
+/* behavior-decision: address-of-yields-pointer */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KEY_ADDRESS_OF, "kvspace/key·abs", 0x01A2,
+                        0x00000000, 0x00040000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "address-of-yields-pointer")  /* install signature -> pointer */
+/* behavior-decision: float-member-key-identity */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KEY_TOSTRING, "kvspace/key·tostr", 0x01A3,
+                        0x00000000, 0x00000800,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "float-member-key-identity")  /* install signature -> char/utf8 */
+/* behavior-decision: pointer-target-key-text */
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KEY_RESOLVE_POINTER, "kvspace/key·resolveptr", 0x01A6,
+                        0x00000000, 0x00040000,
+                        RUNTIMEC_RWIR_CONSTRAINT_NONE,
+                        RUNTIMEC_RWIR_RESULT_IDENTITY,
+                        RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
+                        "pointer-target-key-text")  /* install signature -> pointer */
+
+/* next free opid: 0x01A7 */

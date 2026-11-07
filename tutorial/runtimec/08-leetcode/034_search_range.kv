@@ -1,0 +1,52 @@
+// 034: Find First and Last Position — 二分查找区间
+// 算法: 两次二分分别找左边界和右边界
+// 来源: LeetCode #34
+// 期望输出:
+//   [ 3 , 4 ]
+rwfunc search_range() -> () {
+	[5, 7, 7, 8, 8, 10] -> a:[]int64
+	n:int64 = compactarray·numel(a)
+	target:int64 = 8
+	// find left
+	0 -> lo:int64
+	hi:int64 = n - 1
+	left:int64 = -1
+	while (lo <= hi) {
+		lo + hi -> s:int64
+		mid:int64 = s ÷ 2
+		mid_m:int64 = s ÷ 2
+		mv:int64 = a[mid]
+		mv < target -> lt:bool
+
+		if (lt) {
+			lo = mid + 1
+		} else {
+			left = mid
+			mid - 1 -> hi
+		}
+	}
+	// find right
+	lo2:int64 = 0
+	hi2:int64 = n - 1
+	-1 -> right:int64
+	while (lo2 <= hi2) {
+		s2:int64 = lo2 + hi2
+		mid2:int64 = s2 ÷ 2
+		mid2_m:int64 = s2 ÷ 2
+		a[mid2] -> mv2:int64
+		gt:bool = mv2 > target
+
+		if (gt) {
+			hi2 = mid2 - 1
+		} else {
+			mid2 -> right
+			lo2 = mid2 + 1
+		}
+	}
+	println("[", left, ",", right, "]")
+}
+
+rwfunc test() -> () {
+
+	search_range()
+}

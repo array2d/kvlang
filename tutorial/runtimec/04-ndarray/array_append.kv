@@ -1,0 +1,13 @@
+// array_append: 向散列数组追加元素
+// 规范依据: 02-kvspace模型/07-数组两种物理形态 —— scatterarray·append 只收散列容器，
+//           compact 源须先显式 scatterarray·newscatter（无隐式跨形态转换）
+// 语义: compact [1,2,3] 显式转散列后追加 4，元素数用 scatterarray·len 读
+// 期望输出:
+//   4
+rwfunc test() -> () {
+	a:[]int64 = [1, 2, 3]
+	b:'[int64]'int64 = scatterarray·newscatter(a)
+	scatterarray·append(b, 4) -> b
+	scatterarray·len(b) -> n:int64
+	println(n)
+}

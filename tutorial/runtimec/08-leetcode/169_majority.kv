@@ -1,0 +1,37 @@
+// 169: Majority Element — Boyer-Moore 投票算法
+// 算法: 计数抵消，多数元素必然存活
+// 来源: LeetCode #169
+// 期望输出:
+//   3
+rwfunc majority() -> () {
+	a:[]int64 = [3, 2, 3]
+	compactarray·numel(a) -> n:int64
+	candidate:int64 = a[0]
+	count:int64 = 1
+	1 -> i:int64
+	while (i < n) {
+		x:int64 = a[i]
+		reset:bool = count == 0
+
+		if (reset) {
+			x -> candidate
+			count = 1
+		} else {
+			match:bool = x == candidate
+
+			if (match) {
+				count + 1 -> count
+			} else {
+				count = count - 1
+			}
+		}
+
+		i = i + 1
+	}
+	println(candidate)
+}
+
+rwfunc test() -> () {
+
+	majority()
+}

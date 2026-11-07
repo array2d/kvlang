@@ -1,0 +1,60 @@
+// time: 时间与 duration 类型
+//
+// 关于 `delta ms = 0`：该值是**结构必然**——`t0`、`t1` 是相邻两次 `time·now()`，
+// 间隔远小于 1ms，故 `as_millis` 恒为 0。实测连跑 20 次，完整输出 md5 完全相同。
+// 若哪天实测出现 1，那是环境抢占噪声（进程被换出超过 1ms），不是实现变更；
+// 那时应改用例为「不依赖真实时间」，而不是把 1 写进期望。
+// 期望输出:
+//   before
+//   after
+//   t0 < t1: true
+//   t0 > t1: false
+//   delta >= 0 ns: true
+//   delta ms = 0
+//   delta s = 0
+//   t0 + delta == t1: true
+//   1000 ms
+//   1 s = 1000000000 ns
+rwfunc test() -> () {
+    println("before")
+    t0:time = time·now()
+    t1:time = time·now()
+    println("after")
+
+    before:bool = time·before(t0, t1)
+    print("t0 < t1: ")
+    println(before)
+
+    after:bool = time·after(t0, t1)
+    print("t0 > t1: ")
+    println(after)
+
+    delta:time/duration = time·sub(t1, t0)
+    print("delta >= 0 ns: ")
+    zero:time/duration = time/duration·nanos(0)
+    println(time/duration·before(zero, delta))
+
+    ms:int64 = time/duration·as_millis(delta)
+    print("delta ms = ")
+    println(ms)
+
+    s:int64 = time/duration·as_seconds(delta)
+    print("delta s = ")
+    println(s)
+
+    sum:time = time·add(t0, delta)
+    print("t0 + delta == t1: ")
+    a:bool = not(time·before(sum, t1))
+    b:bool = not(time·after(sum, t1))
+    println(and(a, b))
+
+    1000 -> n:int64
+    print(n)
+    println(" ms")
+
+    one_sec:time/duration = time/duration·seconds(1)
+    ns:int64 = time/duration·as_nanos(one_sec)
+    print("1 s = ")
+    print(ns)
+    println(" ns")
+}

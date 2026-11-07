@@ -1,0 +1,391 @@
+# 组件：runtimec 顶层构建
+# 作用：C11-only 构建（不链接 libstdc++）；按 contract、host、binrwir、
+#       vmkv、binrwir_compiler、vmbin、engine、interface 生成独立 target，
+#       并从 interface/exports.txt
+#       生成三平台导出脚本（README §9、§10）。当前产物名刻意带 _scaffold，禁止用于
+#       benchmark/tutorial/发布。
+# 联系：组件依赖只沿本文件声明的单向图连接；JIT 是 BinRWIR Compiler
+#       内部实现，只有 engine/execution_window 汇合 compiler 与 vmbin。
+cmake_minimum_required(VERSION 3.20)
+
+project(kvlang_runtimec_scaffold VERSION 0.1.0 LANGUAGES C)
+
+include(CTest)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_C_VISIBILITY_PRESET hidden)
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
+option(RUNTIMEC_ENABLE_JIT "Enable BinRWIR JIT compilation capability" ON)
+# **临时**：println/print/cerr 的就地实现，只为让 tutorial 的 runtimec 分组能被
+# runtimec 自己跑通。正式实现归 byteseek 扩展 runtime（issue #622 决策 D）。
+# 默认 OFF——尤其 .so 产物必须关闭，关闭后产物里 grep 不到任何 println。
+option(RUNTIMEC_TEMP_PRINTLN
+    "TEMPORARY: in-process println/print/cerr for tutorial grouping tests" OFF)
+if(RUNTIMEC_TEMP_PRINTLN)
+    message(STATUS "runtimec: TEMPORARY println enabled (must be OFF for .so)")
+endif()
+
+set(RUNTIMEC_INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include")
+# kvspace 头只有一个定义点：`kvspace` 仓自己的 include/。kvlang 内的
+# `include/kvspace/` 是 .gitignore 的过期副本，早已删除；它一旦重新出现，
+# 就会出现「真头是 16 字节、副本是 8 字节」这种无法验证的局面，故在此拦住。
+set(KVLANG_STALE_INCLUDE_DIRECTORY
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include/kvspace")
+get_filename_component(KVSPACE_INCLUDE_DIRECTORY
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../kvspace/include" ABSOLUTE)
+if(EXISTS "${KVLANG_STALE_INCLUDE_DIRECTORY}")
+    message(FATAL_ERROR
+        "kvlang/include/kvspace/ must not exist (stale copy of the kvspace "
+        "headers). Delete it; the single definition is "
+        "${KVSPACE_INCLUDE_DIRECTORY}/kvspace.")
+endif()
+if(NOT EXISTS "${KVSPACE_INCLUDE_DIRECTORY}/kvspace/xvalue_head.h")
+    message(FATAL_ERROR
+        "runtimec requires kvspace/include/kvspace/xvalue_head.h "
+        "(looked in ${KVSPACE_INCLUDE_DIRECTORY}/kvspace; clone array2d/kvspace "
+        "as a sibling of kvlang).")
+endif()
+set(RUNTIMEC_GENERATED_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${RUNTIMEC_GENERATED_DIRECTORY}")
+
+# 真库路径：金标准比对与 backend 用例共用。
+# 判据是「库文件在不在」，不是「某个环境变量有没有设」——后者会让 CI 假绿。
+#
+# 缺库即**配置期失败**，不跳过：静默跳过会让 wire_golden 绿着而一条都没比，
+# 别人看到绿就以为「替身与真库已比对」。跳过当通过是今天反复消灭的那类假信号。
+# backend 用例（host.kvspace_backend）仍保留 77 跳过语义——它验的是真库行为，
+# 缺库时无话可说；而金标准比对是「替身有没有漂移」，缺库时沉默等于没做。
+set(RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY
+    "${CMAKE_CURRENT_SOURCE_DIR}/../lib" CACHE PATH
+    "directory holding libkvspace")
+find_library(RUNTIMEC_KVSPACE_LIBRARY_PATH
+    NAMES kvspace
+    PATHS "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}"
+    NO_DEFAULT_PATH)
+# layout 产物：临时 println 的端到端测试要调 kvlangLayoutCode 把源码 layout 进
+# 同一个 store。只在这个可选测试里用，缺库时该测试跳过（77）。
+find_library(KVLANG_LAYOUT_LIBRARY
+    NAMES kvlanglayout
+    PATHS "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}"
+    NO_DEFAULT_PATH)
+
+if(NOT RUNTIMEC_KVSPACE_LIBRARY_PATH)
+    message(FATAL_ERROR
+        "cannot find libkvspace (searched ${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}). "
+        "runtimec needs it to link the wire-golden comparison, which proves the "
+        "test double has not drifted from the real implementation -- a silent "
+        "skip would leave that comparison green while running nothing. "
+        "Fix: build array2d/kvspace into ${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY} "
+        "(kvlang and kvspace must be sibling directories), or configure with "
+        "-DRUNTIMEC_KVSPACE_LIBRARY_DIRECTORY=<dir holding libkvspace>.")
+endif()
+
+set(RUNTIMEC_EXPORT_MANIFEST "${CMAKE_CURRENT_SOURCE_DIR}/interface/exports.txt")
+file(STRINGS "${RUNTIMEC_EXPORT_MANIFEST}" RUNTIMEC_PUBLIC_SYMBOLS)
+set(RUNTIMEC_ELF_EXPORTS "{\n  global:\n")
+set(RUNTIMEC_MACHO_EXPORTS "")
+set(RUNTIMEC_WINDOWS_EXPORTS "LIBRARY kvlang_runtimec_scaffold\nEXPORTS\n")
+foreach(public_symbol IN LISTS RUNTIMEC_PUBLIC_SYMBOLS)
+    string(APPEND RUNTIMEC_ELF_EXPORTS "    ${public_symbol};\n")
+    string(APPEND RUNTIMEC_MACHO_EXPORTS "_${public_symbol}\n")
+    string(APPEND RUNTIMEC_WINDOWS_EXPORTS "    ${public_symbol}\n")
+endforeach()
+string(APPEND RUNTIMEC_ELF_EXPORTS "  local: *;\n};\n")
+file(WRITE "${RUNTIMEC_GENERATED_DIRECTORY}/exports.map" "${RUNTIMEC_ELF_EXPORTS}")
+file(WRITE "${RUNTIMEC_GENERATED_DIRECTORY}/exports.macos" "${RUNTIMEC_MACHO_EXPORTS}")
+file(WRITE "${RUNTIMEC_GENERATED_DIRECTORY}/exports.def" "${RUNTIMEC_WINDOWS_EXPORTS}")
+
+function(runtimec_configure_target target_name)
+    target_compile_features(${target_name} PRIVATE c_std_11)
+    target_include_directories(${target_name}
+        PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+            "${RUNTIMEC_INCLUDE_DIRECTORY}"
+            "${KVSPACE_INCLUDE_DIRECTORY}")
+    set_target_properties(${target_name} PROPERTIES
+        C_VISIBILITY_PRESET hidden
+        POSITION_INDEPENDENT_CODE ON)
+
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+        target_compile_options(${target_name} PRIVATE
+            -Wall -Wextra -Wpedantic -Werror
+            -Wstrict-prototypes -Wmissing-prototypes)
+    elseif(MSVC)
+        target_compile_options(${target_name} PRIVATE /W4)
+    endif()
+endfunction()
+
+# 每个组件必须拥有真实源文件。缺失组件说明目录或构建关系错误，配置阶段
+# 立即失败；禁止用空翻译单元把缺失能力伪装成成功构建。
+function(runtimec_add_component target_name)
+    set(component_sources)
+    foreach(component_path IN LISTS ARGN)
+        file(GLOB_RECURSE path_sources CONFIGURE_DEPENDS
+            "${CMAKE_CURRENT_SOURCE_DIR}/${component_path}/*.c")
+        list(APPEND component_sources ${path_sources})
+    endforeach()
+
+    if(NOT component_sources)
+        message(FATAL_ERROR
+            "runtimec component ${target_name} has no source files")
+    endif()
+
+    add_library(${target_name} STATIC ${component_sources})
+    runtimec_configure_target(${target_name})
+endfunction()
+
+runtimec_add_component(runtimec_contract contract)
+runtimec_add_component(runtimec_binrwir binrwir)
+runtimec_add_component(runtimec_vmkv vmkv)
+
+# `vmkv/rwir_manifest.c` 用 `#include` 直接引入 `specification/*.def`。CMake 只追踪
+# 源文件列表里的 `.c/.h`，**不追踪被 include 的 `.def`**——生成器重写 def 之后，
+# `cmake --build` 认为 `.o` 仍然新鲜，于是别名表/能力表停留在旧内容，新算子静默落成
+# `foreign()`（不报错，运行期才以「能力不存在」的形式出现）。这里把 `.def` 显式登记为
+# 依赖，让增量构建跟上生成物。
+file(GLOB rwir_specification_defs CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/specification/*.def")
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/vmkv/rwir_manifest.c"
+    PROPERTIES OBJECT_DEPENDS "${rwir_specification_defs}")
+runtimec_add_component(runtimec_binrwir_compiler binrwir_compiler)
+runtimec_add_component(runtimec_vmbin vmbin)
+runtimec_add_component(runtimec_engine engine)
+
+# 语料 runner 专用副本：同样的源文件，额外定义 RUNTIMEC_TEMP_PRINTLN。
+#
+# 为什么复制而不在原目标上开宏：`kvlang_runtimec_scaffold`（产品库）链接的是
+# 上面那三个原目标。宏一开，println 就进了产品库——而它不属于 runtimec 的能力
+# （spec 05-runtime语义/07-notinmyrwircaps：归 term runtime）。复制三份、
+# 只给副本定义宏，产品库的符号表不受影响。
+#
+# 三个组件都要（缺一个的表现是「执行成功但零输出」，所有断言都过只有 stdout 空）：
+#   vmbin  → handler 实现    vmkv → 按实参个数展开变参    engine → 注册进 builtin 表
+foreach(temporary_component vmbin vmkv engine)
+    file(GLOB_RECURSE temporary_sources CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/${temporary_component}/*.c")
+    if(NOT temporary_sources)
+        message(FATAL_ERROR
+            "temporary println component ${temporary_component} has no sources")
+    endif()
+    set(temporary_target runtimec_kv_runner_${temporary_component})
+    add_library(${temporary_target} STATIC ${temporary_sources})
+    runtimec_configure_target(${temporary_target})
+    target_compile_definitions(${temporary_target}
+        PRIVATE RUNTIMEC_TEMP_PRINTLN=1)
+    target_link_libraries(${temporary_target}
+        PUBLIC runtimec_contract runtimec_binrwir)
+    add_library(kvlang::kv_runner_${temporary_component}
+        ALIAS ${temporary_target})
+endforeach()
+
+# 副本之间必须**互相**链接，不能一部分副本、一部分原目标。
+#
+# 反例：engine 副本若链接原 `runtimec_vmbin`，而 runner 又链接 vmbin 副本，
+# 则 vmbin 的全部符号进两次——`temp_println` 的 handler 表出现两份定义，
+# 静态链接器按先见者取，行为取决于链接顺序。那是最难查的一类：
+# 编译过、跑起来也可能对，只是 println 有时有有时没有。
+#
+# 依赖关系照抄原目标（`runtimec_vmbin`/`runtimec_vmkv`/`runtimec_engine` 的
+# PRIVATE 列表），只把三个被复制的名字换成副本。kvspace 与 libm 也要照抄——
+# `vmbin` 的 container handler 直接调 `kvspaceSetValue`/`kvspaceXvalueHeadNewSlack`。
+target_link_libraries(runtimec_kv_runner_vmbin
+    PRIVATE runtimec_contract runtimec_binrwir
+            "${RUNTIMEC_KVSPACE_LIBRARY_PATH}" m)
+target_link_libraries(runtimec_kv_runner_engine
+    PRIVATE
+        runtimec_kv_runner_vmkv
+        runtimec_kv_runner_vmbin
+        runtimec_binrwir_compiler)
+# 能力行探测工具：分类器，不是测试（不进 ctest，没有期望值）。
+# 位置 tools/capability_probe/，四线作者共用一个口径。
+add_executable(capability_probe
+    tools/capability_probe/capability_probe.c)
+target_compile_features(capability_probe PRIVATE c_std_11)
+# fileno/dup/dup2 是 POSIX：显式打开 _GNU_SOURCE，不靠编译器默认方言。
+target_compile_definitions(capability_probe PRIVATE _GNU_SOURCE)
+target_include_directories(capability_probe PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVLANG_INCLUDE_DIRECTORY}")
+target_link_libraries(capability_probe PRIVATE
+    runtimec_contract runtimec_vmbin runtimec_engine
+    "${CMAKE_DL_LIBS}")
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(capability_probe PRIVATE
+        -Wall -Wextra -Wpedantic -Werror)
+endif()
+
+# `kvlangrun`：命令行驱动，benchmark 的 kvlang 列用它跑 .kv 文件。
+#
+# 与 `capability_probe` 的区别：那是分类器（不给期望值），这是**执行入口**——
+# 把一个 .kv 跑到底，把被跑程序的 stdout 原样交给调用方。产物由 Makefile 搬到
+# bin/，与其它产物同规矩。
+#
+# **必须带 TEMP_PRINTLN**：benchmark 用例靠 println 输出 `__bench_ns:`；关掉它，
+# 驱动能跑但一行都打不出来，而 run.py 只会报「没有 __bench_ns」——把「打印被
+# 编译掉了」误报成「程序没跑到那一步」。
+add_executable(kvlangrun tools/kvlangrun.c)
+target_compile_features(kvlangrun PRIVATE c_std_11)
+target_include_directories(kvlangrun PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+# **链带 println 的副本，不是产品库。**
+#
+# 产品 `runtimec_vmbin` / `runtimec_engine` 恒不含 println（`.so` 的符号表里不能有它）。
+# 本驱动要跑 benchmark 的 case，那些 case 全靠 `println("__bench_ns:", …)` 打计时行，
+# 所以必须链 `runtimec_kv_runner_*` 那三个副本（同一份源文件 + 额外宏）。
+#
+# 曾经链的是产品目标：`opid=0xFF01` 在 registry 里查不到，执行期落进 `switch` 的
+# default → FOREIGN → HANDOFF → `handoff was not claimed in time`——**失败现场与
+# 真实成因（链错目标）毫无关系**。
+target_link_libraries(kvlangrun PRIVATE
+    runtimec_contract
+    runtimec_kv_runner_vmbin runtimec_kv_runner_vmkv runtimec_kv_runner_engine
+    "${RUNTIMEC_KVSPACE_LIBRARY_PATH}" "${CMAKE_DL_LIBS}" m)
+set_target_properties(kvlangrun PROPERTIES
+    BUILD_RPATH "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}")
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(kvlangrun PRIVATE
+        -Wall -Wextra -Wpedantic -Werror)
+endif()
+# **无条件定义，不跟随 `RUNTIMEC_TEMP_PRINTLN` 选项。**
+#
+# 本驱动把被测程序的 stdout 原样交给调用方，而 benchmark 的每个 case 都用
+# `println("__bench_ns:", …)` 打计时行。没有 println 它一行输出都没有——不是
+# 「少个功能」，是**这个驱动失去意义**。
+#
+# 曾经这里是 `if(RUNTIMEC_TEMP_PRINTLN)`：Release 树默认 OFF，于是 layout 编出的
+# `opid=0xFF01`（println）在 registry 里查不到，执行期落进 `switch` 的 default →
+# FOREIGN → HANDOFF → 等一个不存在的外部认领 → `handoff was not claimed in time`。
+# **失败现场与真实成因（构建缺宏）毫无关系**，一圈人查了 UB / dangling / 编码期
+# 三个方向才回到这里。所以条件化本身是错的，不是「默认值选错了」。
+target_compile_definitions(kvlangrun PRIVATE RUNTIMEC_TEMP_PRINTLN=1)
+
+# 开关只决定宏：temp_println.c 由 GLOB 收进源文件表，关闭时整个文件被
+# `#ifdef RUNTIMEC_TEMP_PRINTLN` 编成空翻译单元，不留任何符号。
+#
+# 三个目标都要这个宏，缺一个就出现「表建得出来但装不进/编不进」：
+#   vmbin  → handler 实现
+#   vmkv   → 按调用点实参个数展开变参
+#   engine → 把三条表交给 session 的 builtin 注册表
+# 少给一个的表现是「执行成功但零输出」——所有断言都过，只有 stdout 是空的。
+if(RUNTIMEC_TEMP_PRINTLN)
+    foreach(temporary_target
+            runtimec_vmbin runtimec_vmkv runtimec_engine)
+        target_compile_definitions(${temporary_target}
+            PRIVATE RUNTIMEC_TEMP_PRINTLN=1)
+    endforeach()
+endif()
+# 开关只决定宏：temp_println.c 由 GLOB 收进源文件表，关闭时整个文件被
+# `#ifdef RUNTIMEC_TEMP_PRINTLN` 编成空翻译单元，不留任何符号。
+#
+# 三个目标都要这个宏，缺一个就出现「表建得出来但装不进/编不进」：
+#   vmbin  → handler 实现
+#   vmkv   → 按调用点实参个数展开变参
+#   engine → 把三条表交给 session 的 builtin 注册表
+# 少给一个的表现是「执行成功但零输出」——所有断言都过，只有 stdout 是空的。
+if(RUNTIMEC_TEMP_PRINTLN)
+    foreach(temporary_target
+            runtimec_vmbin runtimec_vmkv runtimec_engine)
+        target_compile_definitions(${temporary_target}
+            PRIVATE RUNTIMEC_TEMP_PRINTLN=1)
+    endforeach()
+endif()
+
+target_include_directories(runtimec_contract
+    PUBLIC
+        "$<BUILD_INTERFACE:${RUNTIMEC_INCLUDE_DIRECTORY}>"
+        "$<BUILD_INTERFACE:${KVSPACE_INCLUDE_DIRECTORY}>")
+# contract/kvspace_access 直接调 kvspace C ABI（用户裁决：不对 ABI 二次封装，
+# 句柄就是 `void *`）。它原来是 host 层经二进制符号表间接调用；现在没有那一层。
+target_link_libraries(runtimec_contract
+    PRIVATE "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+target_link_libraries(runtimec_binrwir
+    PRIVATE runtimec_contract)
+target_link_libraries(runtimec_vmkv
+    PRIVATE runtimec_contract runtimec_binrwir)
+target_link_libraries(runtimec_binrwir_compiler
+    PRIVATE runtimec_contract runtimec_binrwir)
+# vmbin 的 host handler 直接调 kvspace C ABI（用户裁决：不对 ABI 二次封装），
+# 因此它必须链代理库。**只链前端 `libkvspace`**——kvspace-c / kvspace-durable 是
+# 它的运行时后端，由 DSN scheme 在运行期选择，编译期不出现。
+# `libm`：scalar 一族的 sqrt/exp/log 是 C 数学库函数。不写 `${CMAKE_DL_LIBS}` 那类
+# 猜测，直接链 m——`-lm` 在 glibc 与 musl 上都是它。
+target_link_libraries(runtimec_vmbin
+    PRIVATE runtimec_contract runtimec_binrwir
+            "${RUNTIMEC_KVSPACE_LIBRARY_PATH}" m)
+# engine 是**组合根**：它连接 kvspace 拿到句柄，再借给 `contract/kvspace_access`。
+# 与 vmbin 链 kvspace 的理由不同（那是 handler 直调 ABI），但两者都必须链真库。
+target_link_libraries(runtimec_engine
+    PRIVATE
+        runtimec_contract
+        runtimec_binrwir
+        runtimec_vmkv
+        runtimec_binrwir_compiler
+        runtimec_vmbin
+        "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+target_compile_definitions(runtimec_binrwir_compiler
+    PRIVATE RUNTIMEC_ENABLE_JIT=$<BOOL:${RUNTIMEC_ENABLE_JIT}>)
+target_compile_definitions(runtimec_engine
+    PRIVATE RUNTIMEC_ENABLE_JIT=$<BOOL:${RUNTIMEC_ENABLE_JIT}>)
+
+# 编译公共二进制接口实现一次，在静态接口组件和 scaffold 动态库间共享。
+add_library(runtimec_interface_objects OBJECT interface/public_interface.c)
+runtimec_configure_target(runtimec_interface_objects)
+target_compile_definitions(runtimec_interface_objects
+    PRIVATE KVLANG_RUNTIMEC_BUILDING_LIBRARY=1)
+
+add_library(runtimec_interface STATIC
+    $<TARGET_OBJECTS:runtimec_interface_objects>)
+runtimec_configure_target(runtimec_interface)
+target_link_libraries(runtimec_interface
+    PUBLIC runtimec_contract
+    PRIVATE runtimec_engine)
+
+add_library(kvlang_runtimec_scaffold SHARED
+    $<TARGET_OBJECTS:runtimec_interface_objects>)
+target_include_directories(kvlang_runtimec_scaffold
+    PUBLIC "$<BUILD_INTERFACE:${RUNTIMEC_INCLUDE_DIRECTORY}>")
+target_link_libraries(kvlang_runtimec_scaffold
+    PRIVATE runtimec_interface runtimec_engine)
+set_target_properties(kvlang_runtimec_scaffold PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    OUTPUT_NAME kvlang_runtimec_scaffold
+    POSITION_INDEPENDENT_CODE ON)
+
+if(APPLE)
+    target_link_options(kvlang_runtimec_scaffold PRIVATE
+        "LINKER:-exported_symbols_list,${RUNTIMEC_GENERATED_DIRECTORY}/exports.macos")
+    set_property(TARGET kvlang_runtimec_scaffold APPEND PROPERTY
+        LINK_DEPENDS "${RUNTIMEC_GENERATED_DIRECTORY}/exports.macos")
+elseif(WIN32)
+    target_sources(kvlang_runtimec_scaffold PRIVATE
+        "${RUNTIMEC_GENERATED_DIRECTORY}/exports.def")
+elseif(UNIX)
+    target_link_options(kvlang_runtimec_scaffold PRIVATE
+        "LINKER:--version-script=${RUNTIMEC_GENERATED_DIRECTORY}/exports.map")
+    set_property(TARGET kvlang_runtimec_scaffold APPEND PROPERTY
+        LINK_DEPENDS "${RUNTIMEC_GENERATED_DIRECTORY}/exports.map")
+endif()
+
+add_library(kvlang::runtimec_contract ALIAS runtimec_contract)
+add_library(kvlang::runtimec_binrwir ALIAS runtimec_binrwir)
+add_library(kvlang::runtimec_vmkv ALIAS runtimec_vmkv)
+add_library(kvlang::runtimec_binrwir_compiler ALIAS runtimec_binrwir_compiler)
+add_library(kvlang::runtimec_vmbin ALIAS runtimec_vmbin)
+add_library(kvlang::runtimec_engine ALIAS runtimec_engine)
+add_library(kvlang::runtimec_interface ALIAS runtimec_interface)
+add_library(kvlang::runtimec_scaffold ALIAS kvlang_runtimec_scaffold)
+
+if(BUILD_TESTING)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
+        message(FATAL_ERROR "BUILD_TESTING requires runtimec/tests/CMakeLists.txt")
+    endif()
+    add_subdirectory(tests)
+endif()

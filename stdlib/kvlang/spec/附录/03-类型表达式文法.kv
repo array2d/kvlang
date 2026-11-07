@@ -3,22 +3,33 @@ lib kvlang/spec/附录/类型表达式文法 {
 	r##"# 类型表达式（签名参数/返回值类型，多态 + 高维数组）
 
 > 完整语义见 [[langtype签名类型表达式]]（类型系统卷）。**签名位（参数/返回值）写的是 `def langtype`（定义处
-  的匹配类型）**，它可含并集/轴量词/空 kindexp，因而能匹配多种调用时的 `langtype`（值的真实类型）；两者区别
+  的匹配类型）**，它可含并集/轴量词，因而能匹配多种调用时的 `langtype`（值的真实类型）；两者区别
   见该章。铁律：无家族简写（`int`/`uint`/`float`/`num`/`char`）——位宽是开放集合，编码须写明确；多态靠
-  显式 `|` 枚举。
+  显式 `|` 枚举。**参数与返回值必须有类型**，空 kindexp 只留给 Ptr 目标（`*`）；mapexpr 的 value 必须写
+  （本轮不支持嵌套 map）。
 
 ```
-type_expr   = [ ref_prefix ] [ atom { "|" atom } ] (* 整体为空 = 空 kindexp（不约束） *)
-            (* 空 kindexp 只允许出现在签名槽（`name:`）、Ptr 目标（`*`）与 mapexpr value（`[k]·`）；
-               裸 `name`（缺冒号）仍是错误。 *)
-ref_prefix  = "*" | "@"                          (* * 置 head ptr=1；@ 置 storetype 3、ptr=2，见 [[XValueHead线格式]] *)
+type_expr   = target { "|" target }               (* 空 type_expr = 空 kindexp（不约束） *)
+target      = [ ref_prefix ] ( atom | "(" type_expr ")" )
+                                                  (* `*`/`@` 只作用于紧随其后的**一个原子**
+                                                     或括号组；要覆盖并集必须加括号：
+                                                     `*(A|B)`。`*A|B` 是并集，不是 kvlang 指针 *)
+            (* 空 type_expr 只允许出现在 Ptr 目标（`*`）；参数与返回值必须有类型，
+               裸 `name`（缺冒号）与 `name:` 都是错误。 *)
+ref_prefix  = "*" | "@"                          (* 源码前缀；wire langtype 保留 `*`/`@` 原样。
+                                                    head 无 ptr/storetype 字段——引用性由 langtype 首字节判定，
+                                                    见 [[XValueHead线格式]] *)
 atom        = shape | mapexpr | structref
 shape       = [ dims ] kind
-mapexpr     = memitemkey "·" [ memitemvalue ] (* stringkeymap；`·` 左=item 键侧的**格式器**（memitemkey_langtype_formatter）、右=item 值类型；右侧为空 = value 不约束。声明形如 memheadname:memitemkey_langtype_formatter·memitemvalue_langtype={}，见 [[map容器]] *)
-memitemvalue = type_expr                         (* item 值/body 类型，递归为完整 type_expr，故 map 可无限嵌套 *)
-memitemkey  = scalar                             (* 裸标量键：键只在路径系统、无 body，故这是"格式器"——输出该标量字面量本身，如 b·200；禁止包成 [200]（见 [[文法与合法性]]） *)
-            | "[]" char_enc                      (* 字符串键（格式器输出裸名字符串），等价 Go map[string]V *)
+mapexpr     = "'" formatter "'" memitemvalue  (* 键侧是 formatter（封闭集合），value 必填；声明形如 m:'formatter'value = {}，见 [[map容器]] *)
+formatter   = formatter_segment { "·" formatter_segment }
+                                                  (* 引号内 `·` 是 key 层级分隔符：多级 key 打平成**单级** map *)
+formatter_segment
+            = scalar                             (* 裸标量键：键只在路径系统、无 body，故这是"格式器"——输出该标量字面量本身，如 b·200；禁止包成 [200]（见 [[文法与合法性]]） *)
+            | "[]" char_enc                      (* 字符串键（格式器输出裸名字符串），等价 Go map[string]V。
+                                                    键值编码可 utf8/utf32/ascii；格式化点统一转 UTF-8 路径文本 *)
             | "[" scalar { "," scalar } "]"      (* 标量元组键（格式器输出 `[v0,v1,…]`），如 a·[342.124,23.2345]；与数组形状 [2]float64 不同——形状不可作键 *)
+memitemvalue = type_expr                         (* item 值/body 类型；**不得再含 `'`**——本轮不支持嵌套 map *)
 structref   = path                               (* struct 原型路径，如 /lib/Point *)
 char_enc    = "char/utf8" | "char/utf32" | "char/ascii"
 scalar      = "bool"
@@ -40,13 +51,14 @@ kind        = "bool"
             | "char/utf8" | "char/utf32" | "char/ascii"
             | "stringkeymap"
             | "struct"
-            | "rwir" | "rwfunc" | "time" | "duration"
+            | "rwir" | "rwfunc" | "time" | "time/duration"
               (* 标注可用 kind 白名单（layout known_kind）。rwfunc 兼作用户函数签名槽 kind；
-                 def rwir 是 /‥isa/<folded-op> 路由头（rwir 统一调度入口），不在标注白名单。
+                 def rwir 是 /lib/<op> 路由头（rwir 统一调度入口），不在标注白名单。
                  无 def rwfunc：rwfunc 有 kvlang 实现体（一串 rwir 指令槽），可被 main-runtime 直接解释执行，无需路由头（见 [[总体方案]]）。
-                 `object`/`scope` 彻底删除，无此种类名（见 [[总体方案]]）；异构命名容器一律 struct。
+                 `scope` 彻底删除，无此种类名（见 [[总体方案]]）；异构命名容器一律 struct。
                  目录成员由物理 key 前缀枚举，`index`/`extindex` 不再是 XValue 类型；
-                 `*`/`@` 是源码 ref_prefix（见上方 type_expr/ref_prefix 产生式）；layout 剥离前缀落 head 的 `ptr` 字段（`*` 置 ptr=1、`@` 置 storetype 3 与 ptr=2），wire langtype 不含前缀；
+                 `*`/`@` 是源码 ref_prefix（见上方 type_expr/ref_prefix 产生式）；**wire 里的 langtype 保留前缀原样**
+                 （head 已无 ptr/storetype 字段，引用性只看 langtype 首字节，见 [[XValueHead线格式]]）；
                  valid_langtype 校验剥离 ref_prefix 后的剩余部分；真正非法的是后缀 `int64*` 或前缀位置错误。 *)
 ```
 "## -> /lib/kvlang/spec/附录/类型表达式文法

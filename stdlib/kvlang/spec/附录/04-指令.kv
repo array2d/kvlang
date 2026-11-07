@@ -9,8 +9,10 @@ instruction = [ writes "=" read_list ]      (* 左写：writes = read_list *)
 
 read_list   = expr { "," expr }             (* 顶层逗号=多赋值：展开为 N 条单赋值；单 expr 即普通赋值 *)
 
-writes      = write_slot { "," write_slot }
-write_slot  = ident                    (* 裸名：帧内变量 *)
+writes      = write_slot { "," write_slot }              (* 括号可省 *)
+            | "(" write_slot { "," write_slot } ")"      (* 括号形式 *)
+write_slot  = ident [ ":" type_expr ]    (* 裸名：首次写槽可带类型，见 [[函数]]「局部变量必须声明类型」；`_` 为显式丢弃（不承载值，不要求声明） *)
+            | "*" ident                (* 指针目标写：*name —— 写参解引用；类型来自签名 *)
             | path                     (* 绝对路径 *)
             | ident "·" ident          (* 成员写：base·field *)
             | ident "·" "*" ident      (* 动态键写：base·*key *)

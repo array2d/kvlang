@@ -1,0 +1,20 @@
+// power: 快速幂（循环实现）
+// 算法: 循环 while + 条件更新，计算 2^10 = 1024
+// 期望输出:
+//   result = 1024
+rwfunc power(*int64 $base, *int64 $exp) -> (*int64 $result) {
+	*result = 1
+	0 -> e:int64
+	while (e < *exp) {
+		*result = *result × *base
+		result_m:int64 = *result × *base
+		e = e + 1
+	}
+}
+
+rwfunc test() -> () {
+
+	power(2, 10) -> ans:int64
+	println("result =", ans)
+	/last_pow = ans
+}

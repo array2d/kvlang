@@ -1,0 +1,44 @@
+// 014: Longest Common Prefix — 逐字符比较
+// 来源: LeetCode #14
+// 期望输出:
+//   fl
+rwfunc lcp() -> () {
+	"flower" -> a:[]char/utf32
+	b:[]char/utf32 = "flow"
+	c:[]char/utf32 = "flight"
+	string·len(a) -> na:int64
+	nb:int64 = string·len(b)
+	nc:int64 = string·len(c)
+	0 -> i:int64
+	ok:bool = true
+	while (ok) {
+		ca:bool = i < na
+		i < nb -> cb:bool
+		cc:bool = i < nc
+		all_ok:bool = ca && cb && cc
+
+		if (all_ok) {
+			string·char(a, i) -> va:char/utf32
+			vb:char/utf32 = string·char(b, i)
+			vc:char/utf32 = string·char(c, i)
+			va == vb -> ab:bool
+			bc:bool = vb == vc
+			match:bool = ab && bc
+
+			if (match) {
+				i + 1 -> i
+			} else {
+				ok = false
+			}
+		} else {
+			ok = false
+		}
+	}
+	string·slice(a, 0, i) -> ans:char/utf32
+	println(ans)
+}
+
+rwfunc test() -> () {
+
+	lcp()
+}

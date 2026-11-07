@@ -1,0 +1,42 @@
+// graph: 有向图存进 map（int 键、struct 值），邻居用 *GNode 指针
+// 语义: /graph 是 [int64]·GNode 的 map；e0/e1 是两条出边（None=无）；
+//       seen 标记去重；dfs 深度优先，node 是指针，本地拷贝 n 后经 (*n)·seen 回写。
+// 边: 1→2 1→3 2→3
+// 期望输出:
+//   1
+//   2
+//   3
+struct GNode {
+	val:int64=0
+	e0:*GNode=None
+	e1:*GNode=None
+	seen:bool=false
+}
+
+rwfunc dfs() -> (**GNode $node) {
+	if (node != None) {
+		(*node)·seen -> s
+		if (!s) {
+			n:*/lib/GNode = *node
+			true -> (*n)·seen
+			(*node)·val -> v
+			println(v)
+			(*node)·e0 -> a:*/lib/GNode
+			dfs() -> a
+			(*node)·e1 -> b:*/lib/GNode
+			dfs() -> b
+		}
+	}
+}
+
+rwfunc test() -> () {
+	/graph:'[int64]'GNode = {}
+	/graph·1:GNode = {val=1}
+	/graph·2:GNode = {val=2}
+	/graph·3:GNode = {val=3}
+	&/graph·2 -> /graph·1·e0
+	&/graph·3 -> /graph·1·e1
+	&/graph·3 -> /graph·2·e0
+	&/graph·1 -> g1
+	dfs() -> g1
+}

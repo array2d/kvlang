@@ -1,0 +1,30 @@
+// collatz: Collatz 猜想步数
+// 算法: while + 条件分支，start=27
+// 期望输出:
+//   steps = 111
+rwfunc collatz(*int64 $n) -> (*int64 $steps) {
+	*n -> nv:int64
+	0 -> *steps
+	while (nv > 1) {
+		mod:int64 = nv % 2
+		even:bool = mod == 0
+
+		if (even) {
+			nv ÷ 2 -> nv
+			nv ÷ 2 -> nv_m:int64
+		} else {
+			t:int64 = nv × 3
+			t_m:int64 = nv × 3
+			nv = t + 1
+		}
+
+		*steps + 1 -> *steps
+	}
+}
+
+rwfunc test() -> () {
+
+	ans:int64 = collatz(27)
+	println("steps =", ans)
+	/last_steps = ans
+}

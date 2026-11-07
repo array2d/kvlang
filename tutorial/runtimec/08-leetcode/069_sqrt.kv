@@ -1,0 +1,31 @@
+// 069: Sqrt(x) — 二分求平方根
+// 来源: LeetCode #69
+// 期望输出:
+//   2
+rwfunc my_sqrt(*int64 $x) -> () {
+	lo:int64 = 0
+	hi:int64 = *x
+	0 -> ans:int64
+	while (lo <= hi) {
+		s:int64 = lo + hi
+		mid:int64 = s ÷ 2
+		mid_m:int64 = s ÷ 2
+		mid × mid -> sq:int64
+		mid × mid -> sq_m:int64
+		ok:bool = sq <= *x
+		ok_m:bool = sq ≤ *x
+
+		if (ok) {
+			ans = mid
+			mid + 1 -> lo
+		} else {
+			hi = mid - 1
+		}
+	}
+	println(ans)
+}
+
+rwfunc test() -> () {
+
+	my_sqrt(4)
+}

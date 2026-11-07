@@ -1,9 +1,11 @@
-//! 字符串 `+` 脱糖：全字符串 → `string·concat`（规范 05-runtime语义/11）；
-//! 开关关闭时保持 `+`；字符串 + 可证明非字符串在 layout 阶段报错。
+//! 字符串 `+` 脱糖：全字符串 → `string·concat`（规范 05-runtime语义/11），无开关；
+//! 字符串 + 可证明非字符串在 layout 阶段报错。
 
 use kvlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
 use std::process::Command;
+
+
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
@@ -15,23 +17,36 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
         tag,
         std::process::id()
     ));
+    // 写前删同名：异常退出会留下残骸，反复跑会累积。
+    let _ = std::fs::remove_file(&path);
     std::fs::write(&path, src).unwrap();
     path
 }
 
 fn dsn(tag: &str) -> String {
     format!(
-        "fs:///tmp/kvlanglayout_concat_{}_{}_{}",
+        "fs:///tmp/kvlanglayout_concat_{}_{}",
         tag,
         std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
     )
 }
 
-fn layout(tag: &str, src: &str, envs: &[(&str, &str)]) -> (String, std::process::Output) {
+/// 一次 layout 的产物：`.kv` 路径 + fs store DSN + 输出。
+/// `Drop` 时把两者删掉——测试红了也不会留残骸，反复跑不累积。
+struct Fixture {
+    file: std::path::PathBuf,
+    db: String,
+    out: std::process::Output,
+}
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.file);
+        let _ = std::fs::remove_dir_all(self.db.trim_start_matches("fs://"));
+    }
+}
+
+fn layout(tag: &str, src: &str, envs: &[(&str, &str)]) -> Fixture {
     let file = temp_file(tag, src);
     let db = dsn(tag);
     let mut cmd = Command::new(bin());
@@ -40,7 +55,7 @@ fn layout(tag: &str, src: &str, envs: &[(&str, &str)]) -> (String, std::process:
         cmd.env(k, v);
     }
     let out = cmd.output().unwrap();
-    (db, out)
+    Fixture { file, db, out }
 }
 
 fn op_texts(db: &str) -> Vec<(String, String)> {
@@ -55,18 +70,19 @@ fn op_texts(db: &str) -> Vec<(String, String)> {
         let key = format!("/lib/t/{name}");
         let alloc = kv.get_one(&key);
         let kind = kvkind::kind(&alloc, &kv.langtype_of(&key));
-        let b = kvkind::body(&alloc, &kvkind::head(&alloc));
+        let b = kvkind::body(&alloc);
         let text = String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned();
         out.push((kind, text));
     }
     out
 }
 
-const SRC: &str = "rwfunc t() -> (r:char/utf32) {\n    a = \"hello\"\n    b = a + \"!\"\n    b -> r\n}\n";
+const SRC: &str = "rwfunc t() -> (*char/utf32 $r) {\n    a = \"hello\"\n    b = a + \"!\"\n    b -> *r\n}\n";
 
 #[test]
-fn string_plus_becomes_concat_when_enabled() {
-    let (db, out) = layout("on", SRC, &[("KVLANG_LAYOUT_SEMANTIC_OP", "1")]);
+fn string_plus_becomes_concat() {
+    let fx = layout("on", SRC, &[]);
+    let (db, out) = (&fx.db, &fx.out);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let ops = op_texts(&db);
     assert!(
@@ -76,28 +92,10 @@ fn string_plus_becomes_concat_when_enabled() {
 }
 
 #[test]
-fn string_plus_stays_plain_when_concat_disabled() {
-    let (db, out) = layout(
-        "off",
-        SRC,
-        &[
-            ("KVLANG_LAYOUT_SEMANTIC_OP", "1"),
-            ("KVLANG_LAYOUT_STRING_CONCAT", "0"),
-        ],
-    );
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    let ops = op_texts(&db);
-    assert!(
-        ops.iter().any(|(k, t)| k == "rwir" && t == "+"),
-        "expected plain + rwir, got {ops:?}"
-    );
-    assert!(!ops.iter().any(|(_, t)| t == "string·concat"));
-}
-
-#[test]
 fn mixed_string_and_number_is_layout_error() {
-    let src = "rwfunc t() -> (r:char/utf32) {\n    a = \"x\"\n    b = a + 1\n    b -> r\n}\n";
-    let (_, out) = layout("mix", src, &[("KVLANG_LAYOUT_SEMANTIC_OP", "1")]);
+    let src = "rwfunc t() -> (*char/utf32 $r) {\n    a = \"x\"\n    b = a + 1\n    b -> *r\n}\n";
+    let fx = layout("mix", src, &[]);
+    let out = &fx.out;
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(

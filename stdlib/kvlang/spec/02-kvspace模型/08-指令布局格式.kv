@@ -3,12 +3,12 @@ lib kvlang/spec/kvspace模型/指令布局格式 {
 	r####"# 指令布局格式
 
 本章界定函数经 layout 后在 `/lib` 下的 KV 布局：指令如何以坐标键落入 kvspace、签名与命名参数如何编
-码、调用如何经 extindex 复用指令树、参数如何经指针链解析。
+码、调用如何经 extindex 复用指令树、参数如何经 kvlang 指针链解析。
 
 ## 空间布局，非线性字节码
 
 传统 VM 编译产线性字节码，调用即压返回地址后跳入口。kvlang 的 layout 不产线性序列，而是**空间布局
-**：每条指令展开为一组 `[s0,s1]` 坐标键，可逐槽 `kvspace·get`/`kvspace·listlen`/`kvspace·listat` 寻址，无需反汇编器。函数体永不被
+**：每条指令展开为一组 `[s0,s1]` 坐标键，可逐槽按普通 key 读或 `kvspace·listlen`/`kvspace·listat` 寻址，无需反汇编器。函数体永不被
 复制——调用时经 extindex 令帧根指向 `/lib` 下同一份指令树（见下 [[调用extindex]] 调用机制）。
 
 ## 坐标键 `[s0,s1]`
@@ -22,8 +22,7 @@ lib kvlang/spec/kvspace模型/指令布局格式 {
 
 ### 签名行
 
-函数目录 `/lib/{pkg}·{name}/` 自身是**目录节点**：storage storetype 0、langtype = `rwfunc`、**无值**
-（body 空）。rwfunc 的**计数头**落签名行锚点 `/lib/{pkg}·{name}/[0,0]`——**storetype 1（有冗余的长度）、
+函数目录 `/lib/{pkg}·{name}/` 自身是**目录节点**（key 以 `/` 结尾）：langtype = `rwfunc`、**无值**（body 空）。rwfunc 的**计数头**落签名行锚点 `/lib/{pkg}·{name}/[0,0]`——**长度为有效字节数的代码值、
 a = 5、b ≥ 5**，langtype =
 `rwfunc`（裸种类名，**不含签名**），body = `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（读参个数 `nr`、写参
 个数 `nw`、是否变参 `dynamic`）。
@@ -34,30 +33,27 @@ body = 参数名 + NUL + 该参数的 **def langtype**（匹配类型）串—�
 数顺序由键中的 `±j` 显式记录（命名键不保序），故 func 目录
 根**不**落 `/[0,x]` 子槽。
 
-`def rwir` 则相反：节点位于 `/‥isa/<folded-op>`，
+`def rwir` 则相反：节点位于 `/lib/<op>`，
 langtype = `def rwir`（裸种类名），body 同计数格式；
 各参数类型落**位置化**签名行 `[0,x]` 子槽
 （`x<0` 读参、`x>0` 写参，class=1、
 langtype=`def langtype`，body 为该参数 langtype 串），
 无 `{param}` 命名键、无实现指令行——跨 runtime 队列
 按位置收参故须有序签名（见 [[总体方案]]）。
-`folded-op` 把 opcode 的 `·` 与 `/` 都折成 `/`
-（与 [[调用extindex]] 的函数路径折叠同一规则）：
-`int64·add` → `int64/add`，
-`networld/fs·read` → `networld/fs/read`。
-折叠后重名 → `ISA op path conflict`，不允许静默覆盖；
+`<op>` 就是算子全名，**不折叠**：`networld/fs·read` 落在 `/lib/networld/fs·read`，
+`add` 落在 `/lib/add`。**同一 key 不能既是 `rwfunc` 又是 `rwir`**，撞名硬错，不允许静默覆盖；
 native 与扩展同形。
 
 ### 指令行
 
-以 `id_val(x:int64) -> (R:int64) { int64·add(x, 0) -> R }` 为例，`/lib/id_val/` 下：
+以 `id_val(x:int64) -> (R:int64) { add(x, 0) -> R }` 为例，`/lib/id_val/` 下：
 
 ```
 /lib/id_val/  class=0  langtype=rwfunc  body=empty  ← 函数目录
 [0,0]         class=1  langtype=rwfunc  body=[nr,nw,dyn]  ← 签名行锚点（s0=0）
 .[0,-1]       def langtype:"x\0int64"          ← 参数定义键（点后缀）：参数名 + NUL + def langtype 串
 .[0,1]        def langtype:"R\0int64"          ← 参数定义键（写参）
-[1,0]         class=1  langtype=rwir  body=counts+"int64·add"  ← 指令0 opcode
+[1,0]         class=1  langtype=rwir  body=counts+"add"  ← 指令0 opcode
 [1,-1]        class=1  langtype=rwir    body=counts+"*[0,-1]\0int64"  ← 指令0 读槽1
 [1,-2]        class=0  langtype=int64   body=raw(8B)           ← 指令0 读槽2（内联字面量，非 rwir、无 counts）
 [1,1]         class=1  langtype=rwir    body=counts+"*[0,1]\0int64"   ← 指令0 写槽1
@@ -66,31 +62,33 @@ native 与扩展同形。
 opcode 槽由 layout 按目标写 `rwir` 或 `rwfunc`；两者的 body 均为 5 字节 counts 加目标名。
 
 `/lib` 中的读写槽是共享的布局模板。runtime 首次解码执行帧的 `[s0,±j]` 时，在同坐标写入物理
-`*T` XValue，body 为目标 KV key；此后从执行帧读取该指针并回读目标值。**内联字面量不落执行
-帧**：它没有槽也没有指针，runtime 直接取模板该槽的值作为读参。帧内槽覆盖 extindex 的读取
+`*T` XValue，body 为目标 KV key；此后从执行帧读取该 kvlang 指针并回读目标值。**内联字面量不落执行
+帧**：它没有槽也没有 kvlang 指针，runtime 直接取模板该槽的值作为读参。帧内槽覆盖 extindex 的读取
 结果，不修改共享模板；opcode `[s0,0]` 仍从 `/lib` 读取。
 
 **`rwir` 值的 body 格式（唯一）**：`counts` = `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（5 字节，指令槽恒
-`0,0,0`）+ 槽文本；文本是 opcode 名，或变量引用（相对指针 `*[0,±k]`）。已知目标类型的读写槽
+`0,0,0`）+ 槽文本；文本是 opcode 名，或变量引用（相对的 kvlang 指针 `*[0,±k]`）。已知目标类型的读写槽
 在文本后附 NUL 和类型串；目标已有值时 runtime 以实际 XValue head 的类型为准。**内联字面量不是 `rwir`**——按字
 面量自身的 kind 编码（如 `int64` 的 8 字节 raw），**无** `counts`。故读/写槽的值两类：`rwir`（counts +
 文本）或内联字面量（如 `int64raw`、`char/utf32` 串）。opcode 槽永不存变量引用，故值拷贝 `=` 与函数调用
 `call` 在 KV 层无歧义。
 
-### ISA 签名（数据 store 内）
+### rwir 签名（数据 store 内）
 
-ISA 签名只有一个来源：`/‥isa/<folded-op>` 的
+rwir 签名只有一个来源：`/lib/<op>` 的
 `def rwir` 明文节点，native 与扩展统一。不设独立控制
-store；数据 store 内 `/‥isa/` 只承载这些签名节点。
+store，也不做 opcode 折叠——`<op>` 就是算子全名（含 `·` 与 `/`）。
 
-- `folded-op`：opcode 中 `·` 与 `/` 都折成 `/`；例 `int64·add` →
-  `/‥isa/int64/add`，`networld/fs·read` → `/‥isa/networld/fs/read`。
-- 折叠后重名 → layout/runtime 硬错 `ISA op path conflict`。
+- key 形如 **`/lib/[<lib>/…]<lastname>`**：`lib` 层级可以是 **0 级或多级**，
+  末段是算子名。例：`add` → `/lib/add`（0 级 lib）；
+  `compactarray·at` → `/lib/compactarray·at`；
+  `networld/fs·read` → `/lib/networld/fs·read`（两级 lib + 末段 `fs·read`）。
+  数值算子只发语义名（`add`/`eq`…），不带 `<kind>·` 前缀。
+- **同一 key 不能既是 `rwfunc` 又是 `rwir`**：一个 key 只有一种定义，
+  撞名即硬错。
 - layout 写/读该节点：counts 与签名行槽格式同 `def rwir`。
-- runtime bootstrap 遍历自己的 `myrwircaps` 名字表，
-  按同一 fold 读取节点；再枚举 `/‥isa/` 子树与名字表
-  比对，缺一/多一硬错。bootstrap 不从路径反推名字，
-  折叠有损无碍。
+- runtime bootstrap 遍历自己的 `myrwircaps` 名字表逐个读取节点；
+  再枚举 `/lib/` 下的 `def rwir` 节点与名字表比对，缺一/多一硬错。
 - 签名行 `[0,x]`：`x<0` 读参、`x>0` 写参，class=1、
   langtype=`def langtype`，body 为该参数 langtype 串。
 

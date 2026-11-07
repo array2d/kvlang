@@ -5,6 +5,13 @@
 pub const MEMBER_SEP: &str = "·"; // 成员访问分隔符（U+00B7 中点号）：释放 '.' 供小数 key 使用
 pub const RUNTIME_MEMBER_SEP: &str = "\u{2025}"; // U+2025，运行时保留字段前缀
 pub const SEG_LABELS: &str = "labels"; // /lib/<func>/‥labels/<name> → irseq
+/// `/lib/<func>/‥inferred/<name>` → 空：这个名字是**推断**局部（源里没有类型注解）。
+///
+/// 它承载的信息只有一件：**写这个槽时要不要按写槽声明定宽**。用户声明的槽是
+/// 定宽的（None 写进去是真错误）；推断槽的类型跟随写入值，可以整值替换。
+/// 判据只能来自源码——`v -> name` 没有注解，`v: T -> name` 有——而 kvspace 里
+/// 的槽只存类型、不存「这类型是谁给的」，所以由 layout 显式落一份。
+pub const SEG_INFERRED: &str = "inferred";
 pub const SRC_EXT: &str = ".src"; // 函数源码文件后缀
 
 pub const LIB_ROOT: &str = "/lib";

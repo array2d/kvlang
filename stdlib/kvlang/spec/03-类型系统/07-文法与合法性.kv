@@ -24,7 +24,7 @@ lib kvlang/spec/类型系统/文法与合法性 {
 - **mapexpr** = `memitemkey_langtype_formatter·memitemvalue_langtype`——`·`（U+00B7 中点）连接**两条各
   自独立**的类型表达式：左侧是 item **键**的格式器、右侧是 item **值/body** 类型。值类型递归为完整类型
   表达式（故 map 可无限嵌套）。map 声明形如
-  `memheadname:memitemkey_langtype_formatter·memitemvalue_langtype={}`，术语与形态详见 [[map容器]]。
+  `memheadname:'memitemkey_langtype_formatter'memitemvalue_langtype={}`，术语与形态详见 [[map容器]]。
 - **memitemkey_langtype_formatter**（键侧格式器，三选一，各自独立可校验）：key 只在**路径系统**里、无
   XValue body，故键侧描述的不是「值的类型」而是「把 key 值格式化成路径段字符串的格式器」——其输出即访问
   键（见 [[map容器]]）：
@@ -41,10 +41,10 @@ lib kvlang/spec/类型系统/文法与合法性 {
 |------------|---------|----------------------|
 | `int64` | `b·200` | `b·[200]`（裸标量禁包成 1 元元组） |
 | `[float64,float64]` | `a·[342.124,23.2345]` | 塌缩为 `[2]float64` 后再改键 |
-| `[]char/utf8` | `m·a` / `kvspace·set(m,"a",v)` | 加维度或改编码 |
+| `[]char/utf8` | `m·a`（`m·a = v` 即写） | 加维度或改编码 |
 
-即 `a:[float64,float64]·int32={}` 的真实存储/访问路径必须是 `a·[342.124,23.2345]`；
-`b:int64·int64={}` 必须是 `b·200`（**不是** `b·[200]`）。裸标量键与 1 元元组键 `[int64]`（访问键
+即 `a:'[float64,float64]'int32={}` 的真实存储/访问路径必须是 `a·[342.124,23.2345]`；
+`b:'int64'int64={}` 必须是 `b·200`（**不是** `b·[200]`）。裸标量键与 1 元元组键 `[int64]`（访问键
 `b·[200]`）是**不同** memitemkey，不得互相转换。
 
 ### 易混淆：`[float64,float64]`（元组键）≠ `[2]float64`（数组形状）
@@ -58,11 +58,19 @@ lib kvlang/spec/类型系统/文法与合法性 {
 打包的元素），而键无 body；表达「两个 int32 的 key」只能用元组键 `[int32,int32]`，其 formatter 产出
 `b·[1,2]`（见 [[map容器]]）。
 - **structref** = 以 `/` 起始的原型路径（如 `/lib/Point`），作为 atom 标注结构类型（见 [[struct]]）。
-- **空 kindexp** = **不约束**，匹配任意种类（含 None）。它**只**出现在**签名槽**——参数/返回写
-  `name:`（冒号后为空），如 `rwfunc f(a:, b:int64) -> (r:)`；Ptr 目标空写 `*`；mapexpr 的 value 空写
-  `[int64]·`。省略冒号（`a`）仍是「缺注解」错误，**不得**静默当空。空 kindexp 不是 atom、不参与
-  并集（`A|`/`|A` 非法）；shape 的 base 不得为空——`[]` 只表示 dims，**不是**「空 base」；变量/字段/
-  字面量标注**不得**为空。
+- **空 kindexp** = **不约束**，匹配任意种类（含 None）。它**只**出现在两处：Ptr 目标空写 `*`；
+  mapexpr 的 value 空写 `[int64]·`。**参数与返回值必须有类型**——`rwfunc f(a:)` 的 `a:` 是错误，
+  与省略冒号（`a`）同属「缺注解」，**不得**静默当空。
+
+  这两处都只在**类型表达式内部**成立，**不构成参数/返回值的类型**。`*` 后直接跟 `$name`
+  （`* $a`）与 `$name`（`$a`）都是**缺类型**，报「参数必须声明类型」。判据：把 `* $a` 与
+  本段对照，应能直接读出它非法——不需要去别的文件拼。
+
+  空 kindexp 不是 atom、不参与并集（`A|`/`|A` 非法）；shape 的 base 不得为空——`[]` 只表示
+  dims，**不是**「空 base」；变量/字段/字面量标注**不得**为空。
+- **`*`/`@` 只作用于一个原子**：`*int64` 是「指向 int64 的 kvlang 指针」；要覆盖并集必须加括号
+  ——`*(int64|float64)` 是一个 kvlang 指针、目标类型是并集，而 `*int64|float64` 是并集
+  （第一支是 kvlang 指针，第二支是 int64）。
 
 > 轴量词 `.`/`?`/`*`/`+` 与正则一致，**只描述单个值的形状**。而**参数变参**（一个参数位吸收 0..N 个
   实参，旧写法末读参尾缀 `...`）是**签名**层的 arity 构造，**不属于类型表达式**，见 [[函数]]；它落成
@@ -82,7 +90,8 @@ lib kvlang/spec/类型系统/文法与合法性 {
 structref 放行——裸名已被隐式展开为 `/lib/<name>`，正是靠「不是种类名」落网。**layout 只判右值形态与
 种类名，不查 kvspace**：`/lib/…` 有无原型、是不是 struct，归 **runtime** 判——`x:int = {}` layout
 放行，runtime 报 `TypeError: /lib/int is not a struct type`（见 [[langtype语义类型]]）。非字面量右值
-（`x:int = y`）无从推断，layout 放行。键须为 `[]char/<编码>` 或全标量元组。非法示例及拒因：
+（`x:int = y`）无从推断，layout 只校验已写出的标注、不推断右侧类型；未写标注的局部由[[函数]]「局部变量必须声明类型」拒绝，
+不并入本条。键须为 `[]char/<编码>` 或全标量元组。非法示例及拒因：
 
 | 非法 | 拒因 |
 |------|------|
@@ -98,11 +107,10 @@ structref 放行——裸名已被隐式展开为 `/lib/<name>`，正是靠「�
 | 裸 `[]` / 裸 `[.]` | 无基种类 |
 | `[*,+]int64`、`[?,*]int64` | 一个 dims 含多于一个变元量词（`?`/`*`/`+`） |
 
-源码类型标注最前的 `*`/`@` 前缀（如 `*int64`、`@[256,256]uint8`）**合法**，layout 解析时剥离前缀落成
-head 的 **`ptr` 字段**（`*` 置 ptr=1；`@` 置 storetype=3、ptr=2），再校验剩余 langtype；
-wire 层 langtype 串不含前缀（见 [[总体方案]]）。
+源码类型标注最前的 `*`/`@` 前缀（如 `*int64`、`@[256,256]uint8`）**合法**，且**原样保留在 wire
+langtype 里**（2026-11-06 裁决，任何一层都不得剥掉）；layout 校验前缀之后的 langtype 本体。
 
-`def rwir` 是路由头 langtype（仅落于 `/‥isa/<folded-op>`），**不得**作为类型标注书写；`rwfunc` 有
+`def rwir` 是路由头 langtype（仅落于 `/lib/<op>`），**不得**作为类型标注书写；`rwfunc` 有
 kvlang 实
 现体，可被任意 main-runtime 直接解释，**无需也没有** def rwfunc（见 [[种类与定宽类型]]）。
 "#### -> /lib/kvlang/spec/类型系统/文法与合法性

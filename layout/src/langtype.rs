@@ -44,7 +44,7 @@ fn known_kind(k: &str) -> bool {
             | "scope"
             | "struct"
             | "time"
-            | "duration"
+            | "time/duration"
     )
 }
 
@@ -185,7 +185,38 @@ fn valid_atom(s: &str) -> bool {
 /// 类型表达式语法校验（装载期）。空串 = 空 kindexp（不约束，合法）；变参 `...` 是签名层
 /// arity、不入 langtype 串，此处永不见。`any` 不是类型名。
 pub fn valid_langtype(expr: &str) -> bool {
+    // 括号分组 `(A|B)`：括号内是一个完整的类型表达式，整体当一个 atom 校验。
+    if let Some(inner) = expr.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
+        return valid_langtype(inner);
+    }
+    /*
+     * **map 类型（`'<formatter>'<value>`，issue #631）**：按文法校验三段——
+     * 首字符 `'`、恰好一个闭引号、闭引号后非空且不含 `'`（本轮不支持嵌套）。
+     *
+     * 不交给 `valid_atom`：它按「裸名 / `[...]`」判，`'...'` 两样都不是。
+     */
+    if crate::kvkind::is_map_langtype(expr) {
+        let Some(closing) = expr[1..].find('\'') else {
+            return false; /* 引号未闭合 */
+        };
+        let value = &expr[closing + 2..];
+        return !value.is_empty() && !value.contains('\'');
+    }
     expr.is_empty() || expr.split('|').all(valid_atom)
+}
+
+/// `rwfunc` 参数/返回值的额外约束：**必须是单一类型**，串里不得出现 `|`。
+///
+/// 判据就是「整串是否含 `|`」——不是「base kind 是否唯一」：`[2]int64|[3]int64` 的 base
+/// kind 相同但形状不同，调用方照样无从定类型；`int64|int64` 是只有一个成员的并集，写它就是错。
+/// 括号分组 `(A|B)` 同样违规。轴量词 `[.,*]float32` 不含 `|`，合法。
+///
+/// 路径段与键表达式都不产生 `|`，所以不必做词法切分。
+///
+/// rwir 算子不受此约束：它有编译期特化器把并集收敛成唯一 opid；`rwfunc` 的调用方只能从
+/// 声明推类型，并集会让编译器没有唯一答案（见 [[langtype签名类型表达式]]）。
+pub fn has_union(expr: &str) -> bool {
+    expr.contains('|')
 }
 
 /// 是否只由**已知种类名**构成——即「标量字面量可写入的类型」。
@@ -205,10 +236,35 @@ pub fn is_plain_kind(ty: &str) -> bool {
 /// `/lib/<name>`，使 kv 源可写 `x:Node` / `[int64]·Node`，runtime 恒收到完整 `/lib/…` 路径。
 /// 已 `/` 开头或 known kind 原样返回。mapexpr 只对 value 递归展开（key 恒 `[…]` 非 struct）。
 pub fn expand_struct_refs(s: &str) -> String {
+    // 括号分组内的 `|` 不属于外层的并集切分：`*(int64|float64)` 是一个 atom，
+    // 先在 `depth == 0` 处切，括号内递归展开。
+    if let Some(inner) = s.strip_prefix('*').and_then(|r| r.strip_prefix('(')) {
+        if let Some(inner) = inner.strip_suffix(')') {
+            return format!("*({})", expand_struct_refs(inner));
+        }
+    }
     s.split('|').map(expand_atom).collect::<Vec<_>>().join("|")
 }
 
 fn expand_atom(s: &str) -> String {
+    /*
+     * 变参 `...` 是**签名层 arity**，不是 langtype 的一部分：它最终落计数头的
+     * dynamic 字节，类型串要「纯净、不含 `...`」（spec `03-类型系统/22`）。
+     *
+     * 但**不能在这里删掉它**：`Instruction::dynamic()` 与 `langtype_list()` 都
+     * 靠 `p.ty` 的尾缀识别变参；在此删掉，dynamic 字节会静默变 0，变参被当成
+     * 普通参数。所以这里只保证「判种类时看剥掉 `...` 的基名」，返回值仍保留标记；
+     * 由 `ast.rs:langtype_list()` 在落 wire 前剥。
+     *
+     * 修的是：`int64...` 不在种类表里，直接进 `known_kind` 会落进「裸名 →
+     * `/lib/<名>`」，把 `int64` 展开成 `/lib/int64`——类型名字全错且不报错。
+     */
+    if let Some(base) = s.strip_suffix("...") {
+        if base.is_empty() || known_kind(base) {
+            return s.to_string();
+        }
+        return format!("{}...", expand_atom(base));
+    }
     if let Some(rest) = s.strip_prefix('*') {
         return format!("*{}", expand_atom(rest));
     }
@@ -219,6 +275,22 @@ fn expand_atom(s: &str) -> String {
         return s.to_string();
     }
     // mapexpr `key·value`：键可以是 `[` 起头（字符串键/标量元组键）或**裸标量**，
+    /*
+     * **map 类型（`'<formatter>'<value>`，issue #631）：键侧原样、值侧递归展开。**
+     *
+     * 判据走 `is_map_langtype`（唯一）。旧写法按 `·` 切，新形式里 `·` 已消除，
+     * 于是 map 串会一路落到末尾的 `format!("/lib/{s}")`——实测
+     * `'[]char/utf8'int64` 被包成 `/lib/'[]char/utf8'int64`，
+     * 首字符成了 `/` 而不是 `'`，所有 `is_map_langtype` 判据随之失效（连锁）。
+     */
+    if crate::kvkind::is_map_langtype(s) {
+        if let Some(closing) = s[1..].find('\'') {
+            let key = &s[1..closing + 1];
+            let value = &s[closing + 2..];
+            return format!("'{key}'{}", expand_struct_refs(value));
+        }
+        return s.to_string(); /* 引号未闭合：原样返回，由下游判据拒绝 */
+    }
     // 只有 value 侧需要展开 struct 名；整串当 structref 包成 `/lib/<key·value>` 是错的。
     if let Some(i) = s.find('·') {
         let key = &s[..i];
@@ -228,6 +300,11 @@ fn expand_atom(s: &str) -> String {
     }
     if s.starts_with('[') {
         return s.to_string();
+    }
+    // 括号分组 `*(int64|float64)`：括号内是完整的类型表达式，逐成员展开，
+    // 整串当裸名包成 `/lib/(…)` 是错的（`*` 已在上层剥掉）。
+    if let Some(inner) = s.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
+        return format!("({})", expand_struct_refs(inner));
     }
     if s.is_empty() || known_kind(s) {
         return s.to_string();

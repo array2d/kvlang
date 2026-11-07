@@ -1,0 +1,63 @@
+// 217: Contains Duplicate — O(n) hash set
+// 来源: LeetCode #217
+// 期望输出:
+//   true
+//   false
+rwfunc has_dup(*[]int64 $a) -> () {
+	compactarray·numel(*a) -> n:int64
+	seen:'[]char/utf8'int64 = {}
+	found:bool = false
+	i:int64 = 0
+	while (i < n) {
+		(*a)[i] -> x:int64
+		seen·*x != None -> exists:bool
+
+		if (exists) {
+			true -> found:bool
+			i:int64 = n
+		} else {
+			1 -> seen·*x
+			i + 1 -> i:int64
+		}
+	}
+	f:bool = found
+
+	if (f) {
+		println("true")
+	} else {
+		println("false")
+	}
+}
+
+rwfunc no_dup() -> () {
+	a:[]int64 = [1, 2, 3, 4]
+	seen:'[]char/utf8'int64 = {}
+	compactarray·numel(a) -> n:int64
+	found:bool = false
+	i:int64 = 0
+	while (i < n) {
+		a[i] -> x:int64
+		seen·*x != None -> exists:bool
+
+		if (exists) {
+			true -> found
+			i = n
+		} else {
+			1 -> seen·*x
+			i + 1 -> i
+		}
+	}
+	f:bool = found
+
+	if (f) {
+		println("true")
+	} else {
+		println("false")
+	}
+}
+
+rwfunc test() -> () {
+	a1:[]int64 = [1, 2, 3, 1]
+	has_dup(a1)
+	no_dup()
+}

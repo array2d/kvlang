@@ -10,37 +10,37 @@ lib kvspace {
 	// 列举会同时给出裸名 X 与目录名 X/（或 X·）——它们是两个实体，**后端不去重**（fs 发两
 	// 条、redis 视场景而定，无统一规则）。需要「这层有哪些名字」的自省/遍历类调用方一律用
 	// 本函数：裸名后面紧跟同名 X/（或 X·）时只保留带目录标记的那条，名字取 `X/`。
-	// 调用方先声明空容器：`m:[int64]·[]char/utf32 = {}` + `kvspace·members(p) -> (m, n)`。
-	rwfunc members(path:[]char/utf32) -> (
-	               names:*[int64]·[]char/utf32, n:int64) {
-		kvspace·listlen(path) -> total
-		n = 0
-		i = 0
+	// 调用方先声明空容器：`m:'[int64]'[]char/utf32 = {}` + `kvspace·members(p) -> (m, n)`。
+	rwfunc members(*[]char/utf32 $path) -> (
+	               *'[int64]'[]char/utf32 $names, *int64 $n) {
+		kvspace·listlen(*path) -> total:int64
+		*n = 0
+		i:int64 = 0
 		while (i < total) {
-			kvspace·listat(path, i) -> m8
-			char/utf32(m8) -> m
-			skip = false
-			string·len(m) -> ml
+			kvspace·listat(*path, i) -> m8:char/utf8
+			char/utf32(m8) -> m:[]char/utf32
+			skip:bool = false
+			string·len(m) -> ml:int64
 			if (ml > 0) {
-				string·char(m, ml - 1) -> tail
+				string·char(m, ml - 1) -> tail:char/utf32
 				if (tail != "/" && tail != "·") {
 					// 名字带 `.[…]`/`.src` 的兄弟把裸名与 `<名>/` 隔开
 					// （列举按 cmp_coord 排序），所以要向后扫完同前缀条目，
 					// 不能只看下一条。
-					j = i + 1
+					j:int64 = i + 1
 					while (j < total) {
-						kvspace·listat(path, j) -> n8
-						char/utf32(n8) -> nx
-						string·len(nx) -> xl
+						kvspace·listat(*path, j) -> n8:char/utf8
+						char/utf32(n8) -> nx:[]char/utf32
+						string·len(nx) -> xl:int64
 						if (xl < ml) {
 							break
 						}
-						string·slice(nx, 0, ml) -> head
+						string·slice(nx, 0, ml) -> head:char/utf32
 						if (string·cmp(head, m) != 0) {
 							break
 						}
-						m + "/" -> t1
-						m + "·" -> t2
+						m + "/" -> t1:[]char/utf32
+						m + "·" -> t2:[]char/utf32
 						if (string·cmp(nx, t1) == 0) {
 							skip = true
 							break
@@ -54,15 +54,15 @@ lib kvspace {
 				}
 			}
 			if (!skip) {
-				scatterarray·append(names, m) -> names
-				n = n + 1
+				scatterarray·append(*names, m) -> *names
+				*n = *n + 1
 			}
 			i = i + 1
 		}
 	}
 	// count(path) -> n：统计目录 path 下折叠同名孪生条目后的直接成员数。
-	rwfunc count(path:[]char/utf32) -> (n:int64) {
-		ms:[int64]·[]char/utf32 = {}
-		kvspace·members(path) -> (ms, n)
+	rwfunc count(*[]char/utf32 $path) -> (*int64 $n) {
+		ms:'[int64]'[]char/utf32 = {}
+		kvspace·members(*path) -> (ms, *n)
 	}
 }

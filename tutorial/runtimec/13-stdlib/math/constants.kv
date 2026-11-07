@@ -1,0 +1,19 @@
+// math 常量：Pi / E / Tau（runtime 内嵌 stdlib，启动自动 layout+init）。读侧用绝对路径。
+//
+// 期望阻塞: 需要内嵌 stdlib math（Pi/E/Tau），本 runner 不装载
+//
+// 边界（勿混淆）：`13-stdlib/kv/cp.kv` 的 `10 -> /cp_src` 是**另一件事**——
+// 那是 #632 已裁决的「写指令创造 key」，与这里「读一个由内嵌 stdlib 提供的常量」
+// 无关；那条修好对本文没有帮助。
+// 期望输出:
+//   Pi= 3.141592653589793
+//   E= 2.718281828459045
+//   Tau= 6.283185307179586
+rwfunc test() -> () {
+	/lib/math·Pi -> pi
+	println("Pi=", pi)
+	/lib/math·E -> e
+	println("E=", e)
+	/lib/math·Tau -> tau
+	println("Tau=", tau)
+}

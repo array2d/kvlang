@@ -1,7 +1,7 @@
 // expected:
-//   error: IndexError: scatterarray·at: index out of range
+//   error: IndexError: 'scatterarray'at: index out of range
 
 rwfunc test() -> () {
-	a:[int64]·int64 = {}
+	a:'[int64]'int64 = {}
 	scatterarray·at(a, 0) -> _
 }

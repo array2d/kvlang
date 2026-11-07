@@ -1,0 +1,16 @@
+// 判据：× ÷ 是乘除，≠ ≤ ≥ 是比较；ASCII 的 * 与 / 不是乘除。
+// 若只认 ASCII，第一条会在 `×` 处失败。
+// 依据：01-词法/08-运算符基础.kv。
+// 期望输出:
+//   42
+//   5
+//   true
+//   true
+//   false
+rwfunc test() -> () {
+	println(6 × 7)
+	println(20 ÷ 4)
+	println(3 ≠ 4)
+	println(3 ≤ 3)
+	println(4 ≥ 5)
+}

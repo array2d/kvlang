@@ -1,0 +1,10 @@
+// 期望输出:
+//   hello kvlang
+rwfunc test() -> () {
+	t0:time = time·now()
+	println("hello kvlang")
+	t1:time = time·now()
+	delta:time/duration = time·sub(t1, t0)
+	ns:int64 = time/duration·as_nanos(delta)
+	println("__bench_ns:", ns)
+}

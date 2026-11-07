@@ -1,0 +1,55 @@
+// 期望输出:
+//   sum(1..10) = 55
+//   first div7 in [1,20] = 7
+//   sum odds(1..10) = 25
+rwfunc sum_to(*int64 $n) -> (*int64 $total) {
+	*total = 0
+	i:int64 = 1
+	while (i <= *n) {
+		*total + i -> *total
+		i:int64 = i + 1
+	}
+}
+
+rwfunc first_div7(*int64 $n) -> (*int64 $result) {
+	*result = 0
+	1 -> i:int64
+	while (i <= *n) {
+		rem:int64 = i % 7
+		hit:bool = rem == 0
+
+		if (hit) {
+			i -> *result
+			i:int64 = *n + 1
+		} else {
+			i:int64 = i + 1
+		}
+	}
+}
+
+rwfunc sum_odds(*int64 $n) -> (*int64 $total) {
+	0 -> *total
+	i:int64 = 1
+	while (i <= *n) {
+		rem:int64 = i % 2
+		rem == 1 -> is_odd:bool
+
+		if (is_odd) {
+			*total = *total + i
+		}
+
+		i = i + 1
+	}
+}
+
+rwfunc test() -> () {
+
+	sum_to(10) -> a:int64
+	println("sum(1..10) =", a)
+	b:int64 = first_div7(20)
+	println("first div7 in [1,20] =", b)
+	c:int64 = sum_odds(10)
+	println("sum odds(1..10) =", c)
+	a + b -> ab:int64
+	/last_sum = ab + c
+}

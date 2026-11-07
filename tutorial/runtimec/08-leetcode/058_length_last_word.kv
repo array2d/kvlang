@@ -1,0 +1,27 @@
+// 058: Length of Last Word
+// 来源: LeetCode #58
+// 期望输出:
+//   5
+rwfunc last_word_len(*[]char/utf32 $s) -> () {
+	n:int64 = string·len(*s)
+	n - 1 -> i:int64
+	count:int64 = 0
+	while (i >= 0) {
+		c:char/utf32 = string·char(*s, i)
+		c == " " -> sp:bool
+
+		if (sp) {
+			i = -1
+		} else {
+			count = count + 1
+		}
+
+		i - 1 -> i
+	}
+	println(count)
+}
+
+rwfunc test() -> () {
+
+	last_word_len("Hello World")
+}

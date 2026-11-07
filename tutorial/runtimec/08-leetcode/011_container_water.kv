@@ -1,0 +1,39 @@
+// 011: Container With Most Water — 数组参数版
+// 来源: LeetCode #11
+// 期望输出:
+//   49
+rwfunc max_area(*[]int64 $h) -> (*int64 $mx) {
+	compactarray·numel(*h) -> n:int64
+	l:int64 = 0
+	r:int64 = n - 1
+	0 -> *mx
+	while (l < r) {
+		hl:int64 = (*h)[l]
+		hr:int64 = (*h)[r]
+		r - l -> w:int64
+		ls:bool = hl < hr
+
+		if (ls) {
+			ar:int64 = hl × w
+			ar_m:int64 = hl × w
+			l + 1 -> l
+		} else {
+			ar = hr × w
+			ar_m = hr × w
+			r:int64 = r - 1
+		}
+
+		ar > *mx -> bg:bool
+
+		if (bg) {
+			*mx = ar
+		}
+	}
+}
+
+rwfunc test() -> () {
+
+	a:[]int64 = [1, 8, 6, 2, 5, 4, 8, 3, 7]
+	r:int64 = max_area(a)
+	println(r)
+}

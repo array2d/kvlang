@@ -1,0 +1,53 @@
+// 414: Third Maximum Number — 找第三大的数
+// 来源: LeetCode #414
+// 期望输出:
+//   1
+rwfunc third_max() -> () {
+	a:[]int64 = [2, 2, 3, 1]
+	compactarray·numel(a) -> n:int64
+	// track top 3
+	first:int64 = 0
+	second:int64 = 0
+	0 -> third:int64
+	i:int64 = 0
+	while (i < n) {
+		x:int64 = a[i]
+		x > first -> gt1:bool
+
+		if (gt1) {
+			third = second
+			second = first
+			x -> first
+		} else {
+			lt1:bool = x < first
+			gt2:bool = x > second
+
+			if (lt1 && gt2) {
+				second -> third
+				second = x
+			} else {
+				lt2:bool = x < second
+				x > third -> gt3:bool
+
+				if (lt2 && gt3) {
+					third = x
+				}
+			}
+		}
+
+		i = i + 1
+	}
+	third > 0 -> ok:bool
+
+	if (ok) {
+		println(third)
+	} else {
+		ans:int64 = first
+		println(ans)
+	}
+}
+
+rwfunc test() -> () {
+
+	third_max()
+}

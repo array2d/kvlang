@@ -1,0 +1,30 @@
+// 153: Find Minimum in Rotated Sorted Array
+// 来源: LeetCode #153
+// 期望输出:
+//   0
+rwfunc find_min() -> () {
+	a:[]int64 = [4, 5, 6, 7, 0, 1, 2]
+	n:int64 = compactarray·numel(a)
+	0 -> lo:int64
+	hi:int64 = n - 1
+	while (lo < hi) {
+		s:int64 = lo + hi
+		s ÷ 2 -> mid:int64
+		mv:int64 = a[mid]
+		rv:int64 = a[hi]
+		mv < rv -> ok:bool
+
+		if (ok) {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	a[lo] -> ans:int64
+	println(ans)
+}
+
+rwfunc test() -> () {
+
+	find_min()
+}

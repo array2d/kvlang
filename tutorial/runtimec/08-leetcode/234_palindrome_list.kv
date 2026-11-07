@@ -1,0 +1,54 @@
+// 234: Palindrome Linked List — 链表复制到键族数组 + 双指针
+// 来源: LeetCode #234
+// 期望输出:
+//   true
+//   false
+struct Node {
+	val:int64=0
+	next:*Node=None
+}
+
+rwfunc is_pal(*Node $head) -> () {
+	arr:'[int64]'int64 = {}
+	0 -> n:int64
+	head -> p:*/lib/Node
+	while (p != None) {
+		(*p)·val -> v:int64
+		v -> arr·*n
+		n = n + 1
+		(*p)·next -> p
+	}
+	ok:bool = true
+	0 -> l:int64
+	r:int64 = n - 1
+	while (l < r) {
+		arr·*l -> x:int64
+		arr·*r -> y:int64
+
+		if (x != y) {
+			false -> ok
+			r -> l
+		}
+		l = l + 1
+		r = r - 1
+	}
+	if (ok) {
+		println("true")
+	} else {
+		println("false")
+	}
+}
+
+rwfunc test() -> () {
+	p4:Node = {val=1}
+	p3:Node = {val=2 next=&p4}
+	p2:Node = {val=2 next=&p3}
+	p1:Node = {val=1 next=&p2}
+	&p1 -> hp:*/lib/Node
+	is_pal(hp)
+
+	q2:Node = {val=2}
+	q1:Node = {val=1 next=&q2}
+	&q1 -> hq:*/lib/Node
+	is_pal(hq)
+}

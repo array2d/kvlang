@@ -1,0 +1,37 @@
+// 167: Two Sum II — 有序数组双指针
+// 来源: LeetCode #167
+// 期望输出:
+//   [ 1 , 2 ]
+rwfunc two_sum_ii() -> () {
+	[2, 7, 11, 15] -> a:[]int64
+	target:int64 = 9
+	n:int64 = compactarray·numel(a)
+	0 -> l:int64
+	r:int64 = n - 1
+	while (l < r) {
+		lv:int64 = a[l]
+		a[r] -> rv:int64
+		s:int64 = lv + rv
+		hit:bool = s == target
+
+		if (hit) {
+			l + 1 -> i1:int64
+			i2:int64 = r + 1
+			println("[", i1, ",", i2, "]")
+			l = n
+		} else {
+			s < target -> lt:bool
+
+			if (lt) {
+				l = l + 1
+			} else {
+				r = r - 1
+			}
+		}
+	}
+}
+
+rwfunc test() -> () {
+
+	two_sum_ii()
+}

@@ -2,6 +2,7 @@
 
 use std::fmt;
 
+use super::scanner::Pos;
 use super::symbol;
 
 // ── 语句 ─────────────────────────────────────────────────────────────
@@ -63,8 +64,53 @@ pub fn stmt_comments(st: &Stmt) -> &[String] {
 #[derive(Clone)]
 pub struct Param {
     pub name: String,
-    pub ty: String,   // "" = 空 kindexp（不约束，仅签名槽 `name:` 合法）
+    /// 参数的**类型表达式**，不含 `*`/`@`：传递方式不是类型的一部分
+    /// （spec 04-layout语义/03-函数:17「wire langtype 不含 `*`/`@` 前缀」）。
+    /// "" = 空 kindexp（不约束）。
+    pub ty: String,
+    /// 声明前缀：`*` 传址、`@` 扩展句柄、空串值复制。存**完整前缀串**——
+    /// `**T`（指向指针的指针）也合法，只存一个字符会丢掉多余的 `*`。
+    pub by_ref: String,
     pub has_ty: bool, // 源码是否写了冒号（区分「空 kindexp」与「缺注解」）
+}
+
+impl Param {
+    /// 形参作为**变量**的类型：`by_ref` 前缀拼回类型表达式。
+    ///
+    /// `ty` 只存类型表达式（wire langtype 不含 `*`/`@`），但推导表 `declared`/`tm`
+    /// 记的是「这个名字是什么」——指针形参就记 `*T`。`p` 得**地址值**、`*p` 得**值**
+    /// （spec 16-ptr），两者必须可区分，否则 `root -> map[*N]` 会被当成值与指针同型。
+    pub fn pointer_type(&self) -> String {
+        format!("{}{}", self.by_ref, self.ty)
+    }
+
+    /// 进类型表（`declared` / `infer`）的形态：带传递方式前缀，但**不带变参标记**。
+    ///
+    /// `...` 是签名层 arity，不是类型（spec 03-类型系统/22）。它留在 `ty` 里是
+    /// 为了让 `FuncSig::dynamic()` 能识别；而由它推出的类型一旦进了指令槽，就是
+    /// 「类型串里混进 arity 标记」——槽类型必须纯净。
+    pub fn declared_type(&self) -> String {
+        let ty = self.ty.strip_suffix("...").unwrap_or(&self.ty);
+        format!("{}{ty}", self.by_ref)
+    }
+
+    /// 形参/返回**值的类型**（进 `declared` / 类型集合）。
+    ///
+    /// `*T $x` 的 `*` 是**传递方式**，不是值类型的一部分：
+    ///   - `*int64 $x`：`x` 的值是 `int64`——标量不可空，`x == None` 非法；
+    ///   - `*TNode $root`：`TNode` 是结构体引用，值本身即指针 `*TNode`，`root == None` 合法。
+    ///
+    /// 判据落在「被指向的 T 是不是引用类」：结构体引用（`/lib/…`）或已带 `*` 的类型
+    /// 保留 `*` 前缀，其余标量剥掉。这条直接决定 `None` 判空左值是否合法
+    /// （spec `03-类型系统/16-ptr`「空引用判定的左值」）。
+    pub fn value_type(&self) -> String {
+        let ty = self.ty.strip_suffix("...").unwrap_or(&self.ty);
+        if ty.starts_with('/') || ty.starts_with('*') {
+            format!("{}{ty}", self.by_ref)
+        } else {
+            ty.to_string()
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -85,32 +131,51 @@ impl FuncSig {
             if i > 0 {
                 sb.push_str(", ");
             }
-            // Always emit `:` even for unconstrained `a:` so format/printlib output re-parses.
+            // 参数声明是 `*T $name` / `T $name`（类型在前）；空 kindexpr 的指针形态写
+            // `* $name`（`*` 与名字间有空格，与 `*T` 区分），这样 format/printlib 的
+            // 输出能被 parser 重新读回（往返幂等）。
+            // 传递方式（`by_ref`）与类型分开存，输出时拼回前缀。
+            let (by_ref, ty) = (p.by_ref.as_str(), p.ty.as_str());
+            sb.push_str(by_ref);
+            sb.push_str(ty);
+            // 前缀后、有类型或有名字时要分隔：`*int64 $a` / `* $a`。
+            if !by_ref.is_empty() || !ty.is_empty() {
+                sb.push(' ');
+            }
+            sb.push('$');
             sb.push_str(&p.name);
-            sb.push(':');
-            sb.push_str(&p.ty);
         }
         sb.push_str(") -> (");
         for (i, p) in self.returns.iter().enumerate() {
             if i > 0 {
                 sb.push_str(", ");
             }
-            // Always emit `:` even for unconstrained `a:` so format/printlib output re-parses.
+            let (by_ref, ty) = (p.by_ref.as_str(), p.ty.as_str());
+            sb.push_str(by_ref);
+            sb.push_str(ty);
+            if !by_ref.is_empty() || !ty.is_empty() {
+                sb.push(' ');
+            }
+            sb.push('$');
             sb.push_str(&p.name);
-            sb.push(':');
-            sb.push_str(&p.ty);
         }
         sb.push(')');
         sb
     }
 
     /// 参数 langtype 列表（读参在前、写参在后），落盘于 rwir/rwfunc body。
-    /// 末读参尾缀 `...` 是签名层变参标记：此处剥离，langtype 串保持纯净（变参落 dynamic 字节）。
+    ///
+    /// 剥两样东西：末读参尾缀 `...`（签名层变参标记，落 dynamic 字节）、
+    /// 以及前导 `*`/`@`——spec 04-layout语义/03-函数:17 明写「wire langtype 不含
+    /// `*`/`@` 前缀」，传递方式由帧槽的指针位承载，不进类型串。
     pub fn langtype_list(&self) -> Vec<String> {
         self.params
             .iter()
             .chain(self.returns.iter())
-            .map(|p| p.ty.strip_suffix("...").unwrap_or(&p.ty).to_string())
+            .map(|p| {
+                let ty = p.ty.strip_suffix("...").unwrap_or(&p.ty);
+                ty.trim_start_matches(['*', '@']).to_string()
+            })
             .collect()
     }
 
@@ -400,6 +465,15 @@ pub struct Instruction {
     /// true = lower 认定为算子（不是函数调用）：发射语义名时不得被同包同名
     /// rwfunc 抢走（`==`→`eq` 与 `lib string { rwfunc eq }` 冲突）。
     pub operator: bool,
+    /// 该算子的操作数目标 kind（promotion 结果）。opcode 不再携带类型后，未定型
+    /// 整数字面量操作数要按它落槽，否则 `uint64_var > 1` 里的 `1` 会落成 int64。
+    pub operand_kind: String,
+    /// 这条指令在源码里的起始位置（1-based）。
+    ///
+    /// 诊断要指路就必须有它：`error: 0:0:` 对 1900 处迁移毫无用处，而
+    /// `error: <file>:5:1:` 能直接跳过去。由 `parse_inst` 在解析该语句时记录；
+    /// layout 自己合成的指令留 `Pos::default()`（0:0），它们没有源码位置可言。
+    pub pos: Pos,
 }
 
 impl Instruction {
@@ -436,6 +510,31 @@ impl Instruction {
                     )
                 }
             }
+        }
+        /*
+         * 成员读：`MEMBER_READ_OP(base, seg…)` 是 layout 的**内部记号**，没有对应的
+         * runtime 能力。落盘时必须发成「一个路径文本读参」——`base·seg…`，与**写参
+         * 同形**（写路的写参 key 本来就是 `m·k`，runtime 已能解析这种路径文本）。
+         *
+         * 不这么做的话，`=` 会带着 2 个读参落盘，而 runtime 把 `=` 当 COPY 处理，
+         * 硬要求 1 读 1 写 ⇒ `WRONG_ARITY`。实测：`m·k` 与 `struct·x` 都这样。
+         *
+         * 路径文本的拼法与 `Display`（本文件 413-430）同一规则——**同一事实不写两份**，
+         * 这里直接借它的输出。
+         */
+        if e.op == MEMBER_READ_OP && e.args.len() >= 2 {
+            return ("=".to_string(), vec![e.to_string()]);
+        }
+        /*
+         * 成员读：`MEMBER_READ_OP(base, seg…)` 是 layout 的**内部记号**，没有对应的
+         * runtime 能力。落盘时必须发成「一个路径文本读参」——`base·seg…`，与**写参
+         * 同形**（写路的写参 key 本来就是 `m·k`，runtime 已能解析这种路径文本）。
+         *
+         * 路径文本的拼法与 `Display`（本文件 413-430）同一规则——**同一事实不写两份**，
+         * 这里直接借它的输出。
+         */
+        if e.op == MEMBER_READ_OP && e.args.len() >= 2 {
+            return ("=".to_string(), vec![e.to_string()]);
         }
         let opcode = e.op.clone();
         let reads: Vec<String> = e
@@ -517,15 +616,14 @@ impl fmt::Display for Instruction {
             }
             return write!(f, "{s}");
         }
-        // obj("k1", v1, ...) → { k1=v1; k2=v2 }
-        if e.op == "obj" {
-            let mut pairs = Vec::new();
-            let mut j = 0;
-            while j + 1 < e.args.len() {
-                pairs.push(format!("{}={}", e.args[j].val, e.args[j + 1]));
-                j += 2;
-            }
-            let s = format!("{{ {} }}", pairs.join("; "));
+        // map·new(v0, v1, ...) → { v0, v1, ... }（含空 `{}`）
+        if e.op == "map·new" {
+            let items: Vec<String> = e.args.iter().map(ToString::to_string).collect();
+            let s = if items.is_empty() {
+                "{}".to_string()
+            } else {
+                format!("{{ {} }}", items.join(", "))
+            };
             if !self.writes.is_empty() {
                 if self.arrow_left {
                     return write!(f, "{writes}{}{s}", self.left_arrow());
@@ -661,6 +759,11 @@ pub struct ScopeStmt {
     pub comments: Vec<String>,
     pub label: String,
     pub body: Vec<Stmt>,
+    /// 由 lower 合成（if/while/for 展开）还是用户源码里写的具名块。
+    ///
+    /// 决定「块体末尾是否必须有终结符」：合成块的入口是跳转进来的，必须自己
+    /// 跳出去；用户具名块线性展平后，下一条语句就是它的续接，停下即衔接。
+    pub synthetic: bool,
 }
 
 impl fmt::Display for ScopeStmt {

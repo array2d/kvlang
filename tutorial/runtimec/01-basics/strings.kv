@@ -1,0 +1,44 @@
+// string: 字符串索引读写、+ 拼接、C 风格 API（fix-025）
+// 语义: s[i] 读返单字符字符串（动态阵营，可与 "a" 直接比较），越界返 ""；
+//       s[i] = "X" 单字符替换后整串回写（C 直觉 + 值语义）；+ 拼接（4/5 阵营）；
+//       strcmp 返 -1/0/1（C 语义），strstr 返首次下标、未找到 -1（C 名 + 索引语义）
+// 期望输出:
+//   e
+//   Hello
+//   kvlang
+//   Hello kvlang
+//   12
+//   -1
+//   0
+//   6
+//   -1
+//   l
+//   108
+
+// 替换第 i 个字符，返回新串（值语义：实参不被修改）
+rwfunc replace_at(*[]char/utf32 $s, *int64 $i,*[]char/utf32 $ch) -> (*[]char/utf32 $r) {
+	*s -> *r
+	(*r)[*i] = (*ch)[0]
+}
+
+rwfunc test() -> () {
+	s:[]char/utf32 = "hello"
+	println(s[1])
+	replace_at(s, 0, "H") -> s
+	println(s)
+
+	t:[]char/utf32 = "kv" + "lang"
+	println(t)
+	s + " " + t -> w:[]char/utf32
+	println(w)
+	println(string·len(w))
+
+	println(string·cmp("abc", "abd"))
+	println(string·cmp("x", "x"))
+	println(string·find(w, "kv"))
+	println(string·find(w, "zz"))
+
+	c:char/utf32 = w[3]
+	println(c)
+	println(string·ord(c))
+}

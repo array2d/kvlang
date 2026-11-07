@@ -1,8 +1,7 @@
 use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 
 fn body(data: &[u8]) -> &[u8] {
-    let h = kvkind::head(data);
-    kvkind::body(data, &h)
+    data
 }
 
 /// Run only when `KVLANG_TEST_REDIS_DSN` is explicitly set to avoid polluting a local Redis instance.
@@ -18,6 +17,8 @@ fn redis_dsn() -> Option<String> {
 #[test]
 fn redis_roundtrip() {
     let Some(dsn) = redis_dsn() else { return };
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
 
@@ -39,10 +40,12 @@ fn redis_roundtrip() {
 #[test]
 fn redis_compile() {
     let Some(dsn) = redis_dsn() else { return };
+    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
 
-    let src = "rwfunc sum(A:int64, B:int64) -> (C:int64) {\n    A + B -> C\n}\n";
+    let src = "rwfunc sum(*int64 $A, *int64 $B) -> (*int64 $C) {\n    *A + *B -> *C\n}\n";
     compile(&mut kv, src).unwrap();
 
     let sig_val = kv.get_one("/lib/sum/[0,0]");
@@ -53,5 +56,5 @@ fn redis_compile() {
 
     let op = kv.get_one("/lib/sum/[1,0]");
     assert_eq!(kvkind::kind(&op, &kv.langtype_of("/lib/sum/[1,0]")), "rwir");
-    assert_eq!(String::from_utf8_lossy(&body(&op)[5..]), "int64·add");
+    assert_eq!(String::from_utf8_lossy(&body(&op)[5..]), "add");
 }

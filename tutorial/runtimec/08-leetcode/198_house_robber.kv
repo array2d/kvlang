@@ -1,0 +1,46 @@
+// 198: House Robber — DP 打家劫舍
+// 来源: LeetCode #198
+// 期望输出:
+//   4
+rwfunc rob() -> () {
+	[1, 2, 3, 1] -> a:[]int64
+	n:int64 = compactarray·numel(a)
+	one:bool = n == 1
+	n == 2 -> two:bool
+
+	if (one) {
+		ans:int64 = a[0]
+		println(ans)
+	} else {
+		p1:int64 = a[0]
+		a[1] -> p2:int64
+		bigger:bool = p1 > p2
+
+		if (bigger) {
+			p2 = p1
+		}
+
+		2 -> i:int64
+		while (i < n) {
+			cur:int64 = a[i]
+			take:int64 = p1 + cur
+			take > p2 -> better:bool
+
+			if (better) {
+				tmp:int64 = take
+			} else {
+				tmp = p2
+			}
+
+			p2 -> p1
+			p2 = tmp
+			i = i + 1
+		}
+		println(p2)
+	}
+}
+
+rwfunc test() -> () {
+
+	rob()
+}

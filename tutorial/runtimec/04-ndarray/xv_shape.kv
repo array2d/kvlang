@@ -1,0 +1,17 @@
+// 期望输出:
+//   numel= 4 dim= 1
+//   shape0= 4
+//   at1= 20
+//   set1= 99
+rwfunc test() -> () {
+	a:[]int64 = [10, 20, 30, 40]
+	compactarray·numel(a) -> n:int64
+	compactarray·dim(a) -> d:int64
+	println("numel=", n, "dim=", d)
+	compactarray·shape(a) -> s:[]int64
+	println("shape0=", s[0])
+	compactarray·at(a, 1) -> e:int64
+	println("at1=", e)
+	compactarray·set(a, 1, 99) -> a
+	println("set1=", a[1])
+}

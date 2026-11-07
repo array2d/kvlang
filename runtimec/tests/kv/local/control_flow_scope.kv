@@ -1,0 +1,11 @@
+// 判据：layout 把块体展平进单一线性 irseq，不建 scope 子目录；
+// if 块内声明的局部在块外仍是同一帧槽。若按块作用域处理，y 读不到。
+// 依据：04-layout语义/05-控制流.kv、02-kvspace模型/10-系统变量.kv。
+// 期望输出:
+//   7
+rwfunc test() -> () {
+	if (true) {
+		y:int64 = 7
+	}
+	println(y)
+}

@@ -1,0 +1,55 @@
+// 088: Merge Sorted Array — 合并两个有序数组
+// 算法: 双指针从后向前合并
+// 来源: LeetCode #88
+// 期望输出:
+//   1
+//   2
+//   2
+//   3
+//   5
+//   6
+rwfunc merge() -> () {
+	[1, 2, 3, 0, 0, 0] -> a:[]int64
+	m:int64 = 3
+	b:[]int64 = [2, 5, 6]
+	3 -> n:int64
+	i:int64 = m - 1
+	j:int64 = n - 1
+	m + n -> total:int64
+	k:int64 = total - 1
+	while (j >= 0) {
+		i_ok:bool = i >= 0
+		i_ok_m:bool = i ≥ 0
+
+		if (i_ok) {
+			a[i] -> av:int64
+			bv:int64 = b[j]
+			a_bigger:bool = av > bv
+
+			if (a_bigger) {
+				a[k] = av
+				i - 1 -> i
+			} else {
+				a[k] = bv
+				j = j - 1
+			}
+		} else {
+			bv2:int64 = b[j]
+			a[k] = bv2
+			j - 1 -> j
+		}
+
+		k = k - 1
+	}
+	x:int64 = 0
+	while (x < 6) {
+		a[x] -> v:int64
+		println(v)
+		x = x + 1
+	}
+}
+
+rwfunc test() -> () {
+
+	merge()
+}

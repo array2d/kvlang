@@ -1,0 +1,55 @@
+// 125: Valid Palindrome — 双指针判断回文（用数组模拟字符）
+// 来源: LeetCode #125
+// 期望输出:
+//   1
+//   0
+// 用整数数组模拟字符串，1='a', 2='b', etc.
+rwfunc is_pal() -> () {
+	s:[]int64 = [1, 2, 1]
+	compactarray·numel(s) -> n:int64
+	l:int64 = 0
+	r:int64 = n - 1
+	1 -> ok:int64
+	while (l < r) {
+		lc:int64 = s[l]
+		rc:int64 = s[r]
+		lc == rc -> match:bool
+
+		if (match) {
+			l:int64 = l + 1
+			r:int64 = r - 1
+		} else {
+			0 -> ok:int64
+			l:int64 = n
+		}
+	}
+	println(ok)
+}
+
+rwfunc not_pal() -> () {
+	s:[]int64 = [1, 2]
+	compactarray·numel(s) -> n:int64
+	l:int64 = 0
+	r:int64 = n - 1
+	1 -> ok:int64
+	while (l < r) {
+		lc:int64 = s[l]
+		rc:int64 = s[r]
+		lc == rc -> match:bool
+
+		if (match) {
+			l = l + 1
+			r = r - 1
+		} else {
+			0 -> ok
+			l = n
+		}
+	}
+	println(ok)
+}
+
+rwfunc test() -> () {
+
+	is_pal()
+	not_pal()
+}

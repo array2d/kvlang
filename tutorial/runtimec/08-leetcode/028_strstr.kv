@@ -1,0 +1,41 @@
+// 028: strStr — 暴力子串查找
+// 来源: LeetCode #28
+// 期望输出:
+//   2
+//   2
+rwfunc str_str(*[]char/utf32 $hay, *[]char/utf32 $needle) -> () {
+	string·len(*hay) -> nh:int64
+	nn:int64 = string·len(*needle)
+	i:int64 = 0
+	-1 -> ans:int64
+	limit:int64 = nh - nn
+	while (i <= limit) {
+		match:bool = true
+		0 -> j:int64
+		while (j < nn) {
+			hc:char/utf32 = string·char(*hay, i + j)
+			nc:char/utf32 = string·char(*needle, j)
+			hc == nc -> eq:bool
+
+			if (eq) {
+				j = j + 1
+			} else {
+				match = false
+				nn -> j
+			}
+		}
+
+		if (match) {
+			ans = i
+			i = limit + 1
+		} else {
+			i + 1 -> i
+		}
+	}
+	println(ans)
+}
+
+rwfunc test() -> () {
+
+	str_str("hello", "ll")
+}

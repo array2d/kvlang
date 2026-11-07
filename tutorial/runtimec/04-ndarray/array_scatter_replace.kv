@@ -1,0 +1,14 @@
+// 期望输出:
+//   0
+//   2
+rwfunc test() -> () {
+    compactarray·fill("[0]int64") -> empty:[0]int64
+    a:'[int64]'int64 = {1, 2, 3}
+    scatterarray·newscatter(empty) -> a
+    kvspace·listlen(a) -> n:int64
+    println(n)
+    b:[]int64 = [8, 9]
+    scatterarray·newscatter(b) -> a
+    kvspace·listlen(a) -> m:int64
+    println(m)
+}

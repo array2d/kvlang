@@ -1,0 +1,18 @@
+// get_or：读取 KV 值，不存在时返回默认值（`= /path` 解引用读，if 条件回退）
+// 期望输出:
+//   get_or missing: default_val
+//   get_or existing: world
+
+rwfunc test() -> () {
+	v1:[]char/utf32 = /missing_key
+	if (v1 == None) {
+		"default_val" -> v1
+	}
+	println("get_or missing:", v1)
+	"world" -> /exists_key
+	v2:[]char/utf32 = /exists_key
+	if (v2 == None) {
+		"default_val" -> v2
+	}
+	println("get_or existing:", v2)
+}

@@ -1,0 +1,73 @@
+// 217: Contains Duplicate — 检测重复元素
+// 算法: O(n²) 双重遍历（无 hash map 时）
+// 来源: LeetCode #217
+// 期望输出:
+//   true
+//   false
+rwfunc has_dup() -> () {
+	a:[]int64 = [1, 2, 3, 1]
+	compactarray·numel(a) -> n:int64
+	found:bool = false
+	i:int64 = 0
+	while (i < n) {
+		i + 1 -> j:int64
+		while (j < n) {
+			x:int64 = a[i]
+			y:int64 = a[j]
+			x == y -> dup:bool
+
+			if (dup) {
+				found:bool = true
+				i:int64 = n
+				n -> j:int64
+			} else {
+				j:int64 = j + 1
+			}
+		}
+		i:int64 = i + 1
+	}
+	found -> f:bool
+
+	if (f) {
+		println("true")
+	} else {
+		println("false")
+	}
+}
+
+rwfunc no_dup() -> () {
+	a:[]int64 = [1, 2, 3, 4]
+	n:int64 = compactarray·numel(a)
+	false -> found:bool
+	i:int64 = 0
+	while (i < n) {
+		j:int64 = i + 1
+		while (j < n) {
+			a[i] -> x:int64
+			y:int64 = a[j]
+			dup:bool = x == y
+
+			if (dup) {
+				true -> found
+				i = n
+				j = n
+			} else {
+				j + 1 -> j
+			}
+		}
+		i = i + 1
+	}
+	f:bool = found
+
+	if (f) {
+		println("true")
+	} else {
+		println("false")
+	}
+}
+
+rwfunc test() -> () {
+
+	has_dup()
+	no_dup()
+}
