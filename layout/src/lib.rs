@@ -9,6 +9,7 @@ pub mod capi;
 pub mod code;
 pub mod crash_resume;
 pub mod ffi;
+pub mod fusion;
 pub mod keytree;
 pub mod kvkind;
 pub mod langtype;
