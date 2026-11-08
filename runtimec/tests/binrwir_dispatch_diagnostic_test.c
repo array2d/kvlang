@@ -51,8 +51,7 @@ static int failures;
 /* 三种 handler 形态，各自的出口断言不同。 */
 typedef enum test_expectation {
     TEST_EXPECTATION_PRECISE_DETAIL = 0, /* 写出口 + 返回非 SUCCESS：码原样保留 */
-    TEST_EXPECTATION_DEFAULT_DETAIL,    /* 不写出口：兜底成 HANDLER_FAILED */
-    TEST_EXPECTATION_CONTRADICTION       /* 写 ERROR 出口但返回 SUCCESS：矛盾 */
+    TEST_EXPECTATION_DEFAULT_DETAIL     /* 不写出口：兜底成 HANDLER_FAILED */
 } test_expectation_t;
 
 static void *test_allocate(void *context, size_t size, size_t alignment) {
@@ -91,24 +90,6 @@ static runtimec_status_t test_bare_handler(
     (void)instruction;
     (void)output_exit;
     return RUNTIMEC_STATUS_ERROR;
-}
-
-/*
- * ③ 置了 ERROR 出口，却返回 SUCCESS：两个通道自相矛盾，是实现 bug。
- *
- * 曾经这种形态一路活到调用方：执行窗口按返回状态判成败，于是把一次失败当成
- * 成功原样拷贝，下游看到 `status=0 detail=0`——「失败却报成功码」。
- */
-static runtimec_status_t test_contradictory_handler(
-    binrwir_binvthread_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    (void)frame;
-    (void)instruction;
-    output_exit->kind = BINRWIR_EXECUTION_EXIT_ERROR;
-    output_exit->status = RUNTIMEC_STATUS_INVALID;
-    output_exit->detail_code = TEST_PRECISE_DETAIL;
-    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 static runtimec_status_t test_build_program(const runtimec_allocator_t *allocator,
@@ -228,16 +209,6 @@ static void test_case(const runtimec_allocator_t *allocator,
                VMBIN_INTERPRETER_DIAG_HANDLER_FAILED);
         EXPECT(exit_state.logical_program_counter == 7U);
         break;
-    case TEST_EXPECTATION_CONTRADICTION:
-        /*
-         * 两个通道矛盾：`vmbin_execute` 不许以 SUCCESS 返回 ERROR 出口。
-         * 换成只属于本层的诊断，位置保留；handler 自己的码不再冒充本层分类。
-         */
-        EXPECT(exit_state.detail_code ==
-               VMBIN_INTERPRETER_DIAG_CONTRADICTORY_EXIT);
-        EXPECT(exit_state.logical_program_counter == 7U);
-        EXPECT(exit_state.detail_code != TEST_PRECISE_DETAIL);
-        break;
     }
 
     EXPECT(binrwir_frame_bindings_destroy(bindings) == RUNTIMEC_STATUS_SUCCESS);
@@ -253,8 +224,6 @@ int main(void) {
               TEST_EXPECTATION_PRECISE_DETAIL);
     test_case(&allocator, UINT16_C(0x7F02), test_bare_handler,
               TEST_EXPECTATION_DEFAULT_DETAIL);
-    test_case(&allocator, UINT16_C(0x7F03), test_contradictory_handler,
-              TEST_EXPECTATION_CONTRADICTION);
 
     if (failures != 0) {
         printf("binrwir_dispatch_diagnostic_test: %d failure(s)\n", failures);

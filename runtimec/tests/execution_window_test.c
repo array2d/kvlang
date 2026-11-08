@@ -26,6 +26,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <signal.h>
 #include <pthread.h>
 #include <unistd.h>
 
@@ -35,6 +37,7 @@
 #include "binrwir/argument.h"
 #include "binrwir/execution_exit.h"
 #include "binrwir/instruction.h"
+#include "binrwir/operation_identifiers.h"
 #include "binrwir/binfunc.h"
 #include "binrwir/signature.h"
 #include "binrwir_compiler/compiler.h"
@@ -46,6 +49,7 @@
 #include "engine/session.h"
 #include "kvspace/xvalue_head.h"
 #include "vmbin/core_operations.h"
+#include "vmbin/value_access.h"
 #include "vmkv/encoder.h"
 #include "vmkv/rwir_manifest.h"
 
@@ -87,6 +91,15 @@ static int failures;
 #define TEST_FRAME_PATH_HANDOFF_BETA "/vthread/2/[7]"
 #define TEST_HANDOFF_ALPHA_COUNTER 21U
 #define TEST_HANDOFF_BETA_COUNTER 22U
+/* 标准 status 循环：停止/恢复与崩溃/恢复。 */
+#define TEST_STOP_RESUME_TARGET "/lib/stop-resume"
+#define TEST_CRASH_RESUME_TARGET "/lib/crash-resume"
+#define TEST_FRAME_PATH_STOP_RESUME "/vthread/2/[10]"
+#define TEST_FRAME_PATH_CRASH_RESUME "/vthread/2/[11]"
+/* inplace 写：故障注入在「写已落、pc 未提交」之间。 */
+#define TEST_INPLACE_TARGET "/lib/inplace-resume"
+#define TEST_FRAME_PATH_INPLACE "/vthread/2/[12]"
+#define TEST_INPLACE_OPID UINT16_C(0x7F10)
 #define TEST_HANDOFF_ALPHA_NAME "ext\xC2\xB7" "alpha"
 #define TEST_HANDOFF_BETA_NAME "ext\xC2\xB7" "beta"
 #define TEST_STACK_IDENTIFIER 1
@@ -438,6 +451,270 @@ static runtimec_status_t test_program_build_local_round_trip(
 }
 
 /*
+ * 停止/恢复：`7 -> x; vthread·setstatus("paused"); x -> y; return`。
+ * 第二条执行完写 paused，循环下一拍读到它，停在第三条之前（pc s0=3）。
+ */
+static runtimec_status_t test_program_build_stop_resume(
+    const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
+    binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_argument_t literal_seven;
+    binrwir_argument_t literal_paused;
+    binrwir_argument_t source;
+    binrwir_argument_t target;
+    uint32_t seven_index = BINRWIR_LITERAL_INDEX_NONE;
+    uint32_t paused_index = BINRWIR_LITERAL_INDEX_NONE;
+    uint16_t source_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+    uint16_t target_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+    const int64_t seven = 7;
+    uint8_t *seven_wire = NULL;
+    uint8_t *paused_wire = NULL;
+    uint64_t seven_size = 0U;
+    uint64_t paused_size = 0U;
+    runtimec_status_t status;
+
+    *output_program = NULL;
+    memset(&identity, 0, sizeof(identity));
+    identity.snapshot_generation = TEST_GENERATION;
+    identity.program_generation = TEST_PROGRAM_GENERATION;
+    identity.schema_version = 1U;
+    identity.rwir_manifest_version = VMKV_RWIR_MANIFEST_VERSION;
+    identity.binrwir_binary_interface_generation =
+        BINRWIR_BINARY_INTERFACE_GENERATION;
+    identity.canonical_encoding_revision = canonical_encoding_revision;
+
+    if (kvspaceXvalueHeadNewSlack((const uint8_t *)&seven, sizeof(seven),
+                                  sizeof(seven), "int64", &seven_wire,
+                                  &seven_size) != 0 ||
+        kvspaceXvalueHeadNewSlack((const uint8_t *)"paused", 6U, 6U,
+                                  "[]char/utf8", &paused_wire,
+                                  &paused_size) != 0) {
+        free(seven_wire);
+        free(paused_wire);
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
+    if (status == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_binfunc_builder_add_symbol(
+            builder, runtimec_string_view_from_c_string("x"),
+            runtimec_string_view_from_c_string("int64"),
+            &source_symbol) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_binfunc_builder_add_symbol(
+            builder, runtimec_string_view_from_c_string("y"),
+            runtimec_string_view_from_c_string("int64"),
+            &target_symbol) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_binfunc_builder_add_literal(
+            builder, runtimec_bytes_view_make(seven_wire, (size_t)seven_size),
+            runtimec_string_view_from_c_string("int64"),
+            &seven_index) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_binfunc_builder_add_literal(
+            builder, runtimec_bytes_view_make(paused_wire, (size_t)paused_size),
+            runtimec_string_view_from_c_string("[]char/utf8"),
+            &paused_index) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_argument_create(0U, BINRWIR_REFERENCE_LITERAL, 0U, seven_index,
+                                &literal_seven) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_argument_create(1U, BINRWIR_REFERENCE_LITERAL, 0U,
+                                paused_index, &literal_paused) ==
+            RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_argument_create(2U, BINRWIR_REFERENCE_LOCAL, source_symbol, 0U,
+                                &source) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_argument_create(3U, BINRWIR_REFERENCE_LOCAL, target_symbol, 0U,
+                                &target) == RUNTIMEC_STATUS_SUCCESS &&
+        test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_COPY,
+                                     TEST_FIRST_SOURCE_COUNTER, &literal_seven,
+                                     1U, &source, 1U) ==
+            RUNTIMEC_STATUS_SUCCESS &&
+        test_program_add_instruction(
+            builder, BINRWIR_OPERATION_IDENTIFIER_VTHREAD_SET_STATUS,
+            TEST_FIRST_SOURCE_COUNTER + 1U, &literal_paused, 1U, NULL,
+            0U) == RUNTIMEC_STATUS_SUCCESS &&
+        test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_COPY,
+                                     TEST_FIRST_SOURCE_COUNTER + 2U, &source,
+                                     1U, &target, 1U) ==
+            RUNTIMEC_STATUS_SUCCESS &&
+        test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_RETURN,
+                                     TEST_FIRST_SOURCE_COUNTER + 3U, NULL, 0U,
+                                     NULL, 0U) == RUNTIMEC_STATUS_SUCCESS) {
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
+    }
+    (void)binrwir_binfunc_builder_destroy(builder);
+    free(seven_wire);
+    free(paused_wire);
+    return status;
+}
+
+/*
+ * 崩溃/恢复：`7 -> x; vthread·sleep(100ms); x -> y; return`。
+ * 子进程在 sleep 里被杀，父进程从 `‥pc` 续跑。
+ */
+static runtimec_status_t test_program_build_crash_resume(
+    const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
+    binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_argument_t literal_seven;
+    binrwir_argument_t literal_sleep;
+    binrwir_argument_t source;
+    binrwir_argument_t target;
+    uint32_t seven_index = BINRWIR_LITERAL_INDEX_NONE;
+    uint32_t sleep_index = BINRWIR_LITERAL_INDEX_NONE;
+    uint16_t source_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+    uint16_t target_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+    const int64_t seven = 7;
+    const uint64_t sleep_nanoseconds = UINT64_C(100000000);
+    uint8_t *seven_wire = NULL;
+    uint8_t *sleep_wire = NULL;
+    uint64_t seven_size = 0U;
+    uint64_t sleep_size = 0U;
+    runtimec_status_t status;
+
+    *output_program = NULL;
+    memset(&identity, 0, sizeof(identity));
+    identity.snapshot_generation = TEST_GENERATION;
+    identity.program_generation = TEST_PROGRAM_GENERATION;
+    identity.schema_version = 1U;
+    identity.rwir_manifest_version = VMKV_RWIR_MANIFEST_VERSION;
+    identity.binrwir_binary_interface_generation =
+        BINRWIR_BINARY_INTERFACE_GENERATION;
+    identity.canonical_encoding_revision = canonical_encoding_revision;
+
+    if (kvspaceXvalueHeadNewSlack((const uint8_t *)&seven, sizeof(seven),
+                                  sizeof(seven), "int64", &seven_wire,
+                                  &seven_size) != 0 ||
+        kvspaceXvalueHeadNewSlack((const uint8_t *)&sleep_nanoseconds,
+                                  sizeof(sleep_nanoseconds),
+                                  sizeof(sleep_nanoseconds), "uint64",
+                                  &sleep_wire, &sleep_size) != 0) {
+        free(seven_wire);
+        free(sleep_wire);
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
+    if (status == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_binfunc_builder_add_symbol(
+            builder, runtimec_string_view_from_c_string("x"),
+            runtimec_string_view_from_c_string("int64"),
+            &source_symbol) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_binfunc_builder_add_symbol(
+            builder, runtimec_string_view_from_c_string("y"),
+            runtimec_string_view_from_c_string("int64"),
+            &target_symbol) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_binfunc_builder_add_literal(
+            builder, runtimec_bytes_view_make(seven_wire, (size_t)seven_size),
+            runtimec_string_view_from_c_string("int64"),
+            &seven_index) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_binfunc_builder_add_literal(
+            builder, runtimec_bytes_view_make(sleep_wire, (size_t)sleep_size),
+            runtimec_string_view_from_c_string("uint64"),
+            &sleep_index) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_argument_create(0U, BINRWIR_REFERENCE_LITERAL, 0U, seven_index,
+                                &literal_seven) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_argument_create(1U, BINRWIR_REFERENCE_LITERAL, 0U, sleep_index,
+                                &literal_sleep) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_argument_create(2U, BINRWIR_REFERENCE_LOCAL, source_symbol, 0U,
+                                &source) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_argument_create(3U, BINRWIR_REFERENCE_LOCAL, target_symbol, 0U,
+                                &target) == RUNTIMEC_STATUS_SUCCESS &&
+        test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_COPY,
+                                     TEST_FIRST_SOURCE_COUNTER, &literal_seven,
+                                     1U, &source, 1U) ==
+            RUNTIMEC_STATUS_SUCCESS &&
+        test_program_add_instruction(
+            builder, BINRWIR_OPERATION_IDENTIFIER_VTHREAD_SLEEP,
+            TEST_FIRST_SOURCE_COUNTER + 1U, &literal_sleep, 1U, NULL,
+            0U) == RUNTIMEC_STATUS_SUCCESS &&
+        test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_COPY,
+                                     TEST_FIRST_SOURCE_COUNTER + 2U, &source,
+                                     1U, &target, 1U) ==
+            RUNTIMEC_STATUS_SUCCESS &&
+        test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_RETURN,
+                                     TEST_FIRST_SOURCE_COUNTER + 3U, NULL, 0U,
+                                     NULL, 0U) == RUNTIMEC_STATUS_SUCCESS) {
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
+    }
+    (void)binrwir_binfunc_builder_destroy(builder);
+    free(seven_wire);
+    free(sleep_wire);
+    return status;
+}
+
+/* inplace 写：`1 -> x; x = x + 1`（自定义 handler）`; x -> y; return`。 */
+static runtimec_status_t test_program_build_inplace_resume(
+    const runtimec_allocator_t *allocator, uint32_t canonical_encoding_revision,
+    binrwir_binfunc_t **output_program) {
+    binrwir_binfunc_identity_t identity;
+    binrwir_binfunc_builder_t *builder = NULL;
+    binrwir_argument_t literal_one;
+    binrwir_argument_t source;
+    binrwir_argument_t target;
+    uint32_t one_index = BINRWIR_LITERAL_INDEX_NONE;
+    uint16_t source_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+    uint16_t target_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+    const int64_t one = 1;
+    uint8_t *one_wire = NULL;
+    uint64_t one_size = 0U;
+    runtimec_status_t status;
+
+    *output_program = NULL;
+    memset(&identity, 0, sizeof(identity));
+    identity.snapshot_generation = TEST_GENERATION;
+    identity.program_generation = TEST_PROGRAM_GENERATION;
+    identity.schema_version = 1U;
+    identity.rwir_manifest_version = VMKV_RWIR_MANIFEST_VERSION;
+    identity.binrwir_binary_interface_generation =
+        BINRWIR_BINARY_INTERFACE_GENERATION;
+    identity.canonical_encoding_revision = canonical_encoding_revision;
+
+    if (kvspaceXvalueHeadNewSlack((const uint8_t *)&one, sizeof(one),
+                                  sizeof(one), "int64", &one_wire,
+                                  &one_size) != 0) {
+        free(one_wire);
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    status = binrwir_binfunc_builder_create(allocator, &identity, &builder);
+    if (status == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_binfunc_builder_add_symbol(
+            builder, runtimec_string_view_from_c_string("x"),
+            runtimec_string_view_from_c_string("int64"),
+            &source_symbol) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_binfunc_builder_add_symbol(
+            builder, runtimec_string_view_from_c_string("y"),
+            runtimec_string_view_from_c_string("int64"),
+            &target_symbol) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_binfunc_builder_add_literal(
+            builder, runtimec_bytes_view_make(one_wire, (size_t)one_size),
+            runtimec_string_view_from_c_string("int64"),
+            &one_index) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_argument_create(0U, BINRWIR_REFERENCE_LITERAL, 0U, one_index,
+                                &literal_one) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_argument_create(1U, BINRWIR_REFERENCE_LOCAL, source_symbol, 0U,
+                                &source) == RUNTIMEC_STATUS_SUCCESS &&
+        binrwir_argument_create(2U, BINRWIR_REFERENCE_LOCAL, target_symbol, 0U,
+                                &target) == RUNTIMEC_STATUS_SUCCESS &&
+        test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_COPY,
+                                     TEST_FIRST_SOURCE_COUNTER, &literal_one,
+                                     1U, &source, 1U) ==
+            RUNTIMEC_STATUS_SUCCESS &&
+        test_program_add_instruction(builder, TEST_INPLACE_OPID,
+                                     TEST_FIRST_SOURCE_COUNTER + 1U, &source,
+                                     1U, &source, 1U) ==
+            RUNTIMEC_STATUS_SUCCESS &&
+        test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_COPY,
+                                     TEST_FIRST_SOURCE_COUNTER + 2U, &source,
+                                     1U, &target, 1U) ==
+            RUNTIMEC_STATUS_SUCCESS &&
+        test_program_add_instruction(builder, VMBIN_OPERATION_IDENTIFIER_RETURN,
+                                     TEST_FIRST_SOURCE_COUNTER + 3U, NULL, 0U,
+                                     NULL, 0U) == RUNTIMEC_STATUS_SUCCESS) {
+        status = binrwir_binfunc_builder_finalize(builder, output_program);
+    }
+    (void)binrwir_binfunc_builder_destroy(builder);
+    free(one_wire);
+    return status;
+}
+
+/*
  * 带局部变量的零参数函数：`rwfunc f() -> () { y:int64 = 0; flag:bool = false }`。
  * 两条 LOCAL 分别在写位出现，符号池里带各自的 langtype——执行窗口靠这个物化槽。
  */
@@ -705,6 +982,26 @@ static void *claim_handoff_entry(void *context) {
 }
 
 /* 写一条「指令槽」：counts 头 5 字节 + 操作名文本。 */
+/* 标准 status 循环只看 `‥status` 字符串；每个用例开始前把它置回 running。 */
+static bool test_store_set_status(test_context_t *test, const char *text) {
+    uint8_t *wire = NULL;
+    uint64_t wire_size = 0U;
+    const size_t length = strlen(text);
+    char error_text[256];
+
+    if (kvspaceXvalueHeadNewSlack((const uint8_t *)text, length, 80U,
+                                  "[]char/utf8", &wire, &wire_size) != 0 ||
+        wire == NULL) {
+        return false;
+    }
+    error_text[0] = '\0';
+    const int written = kvspaceSetValue(
+        test->handle, "/vthread/2/\xE2\x80\xA5" "status", wire,
+        (uint32_t)wire_size, error_text, (uint32_t)sizeof(error_text));
+    free(wire);
+    return written == 0;
+}
+
 static bool test_store_put_opcode(test_context_t *test, const char *key,
                                   const char *operation_name) {
     uint8_t body[128];
@@ -723,6 +1020,54 @@ static bool test_store_put_opcode(test_context_t *test, const char *key,
      * 带 NUL 会被解析方判成「名字带类型后缀」——那是参数槽的形态，不是指令槽。 */
     memcpy(body + 5U, operation_name, name_size);
     return test_store_put(test, key, body, 5U + name_size, "rwir");
+}
+
+/*
+ * inplace 写的故障注入 handler：读 x、写 x+1，然后在「写已落、pc 未提交」之间
+ * 停住（YIELD）或杀死进程（SIGKILL）。
+ *
+ * `.kv` 源码（`tests/resume/inplace_resume.kv`）只能表达 `x = x + 1`；这个窗口
+ * 只能由测试注入，所以这里是手写 handler。
+ */
+static int test_inplace_yield_once = 0;
+static int test_inplace_kill_once = 0;
+
+static runtimec_status_t test_inplace_increment_handler(
+    binrwir_binvthread_frame_t *frame,
+    const binrwir_instruction_view_t *instruction,
+    binrwir_execution_exit_t *output_exit) {
+    runtimec_error_t error;
+    uint8_t bytes[sizeof(int64_t)];
+    runtimec_bytes_buffer_t buffer = {bytes, 0U, sizeof(bytes)};
+    int64_t value = 0;
+
+    runtimec_error_reset(&error);
+    if (vmbin_value_access_read_body(frame,
+                                     &instruction->read_arguments.data[0],
+                                     &buffer, &error) !=
+            RUNTIMEC_STATUS_SUCCESS ||
+        buffer.size != sizeof(value)) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    memcpy(&value, bytes, sizeof(value));
+    value += 1;
+    memcpy(bytes, &value, sizeof(value));
+    if (vmbin_value_access_write(
+            frame, &instruction->write_arguments.data[0],
+            runtimec_bytes_view_make(bytes, sizeof(bytes)), &error) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        return error.status;
+    }
+    if (test_inplace_kill_once) {
+        test_inplace_kill_once = 0;
+        raise(SIGKILL);
+    }
+    if (test_inplace_yield_once) {
+        test_inplace_yield_once = 0;
+        output_exit->kind = BINRWIR_EXECUTION_EXIT_YIELD;
+        output_exit->status = RUNTIMEC_STATUS_SUCCESS;
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
 }
 
 /* 窗口会算出的同一把 key：snapshot + 四个版本号。 */
@@ -833,7 +1178,8 @@ int main(void) {
             /* `/lib/missing` 也要有 ctime：未命中用例的失败点要落在**编码**
              * （签名锚点缺失），而不是快照门。 */
             TEST_MISSING_TARGET, TEST_HANDOFF_ALPHA_TARGET,
-            TEST_HANDOFF_BETA_TARGET,
+            TEST_HANDOFF_BETA_TARGET, TEST_STOP_RESUME_TARGET,
+            TEST_CRASH_RESUME_TARGET, TEST_INPLACE_TARGET,
         };
         static const uint8_t revision_bytes[8] = {1, 0, 0, 0, 0, 0, 0, 0};
         char ctime_key[192];
@@ -866,9 +1212,12 @@ int main(void) {
      * 预置 5 条：/lib/route、/lib/route-done、/lib/zero、/lib/locals、
      * /lib/round-trip。留 8 给后续用例，**加用例时同步加这个数**。
      */
-    options.compilation_cache_capacity = 8U;
+    options.compilation_cache_capacity = 12U;
     options.machine_code_capacity = 0U;
     options.enable_jit = false;
+    /* 会话的裸句柄：`vthread·setstatus` / `vthread·sleep` 与每步 `‥pc` 提交
+     * 都走它；只给 adapter 不给它，这些路径会报「没有存储能力」。 */
+    options.kvspace_handle = test.handle;
     EXPECT(runtimec_session_create(test.access, &options, &session,
                                    &error) == RUNTIMEC_STATUS_SUCCESS);
     if (session == NULL) {
@@ -876,6 +1225,21 @@ int main(void) {
     }
     EXPECT(runtimec_session_get_runtime_components(session, &components) ==
            RUNTIMEC_STATUS_SUCCESS);
+    /*
+     * 故障注入 handler：注册进 session 自己的注册表。`builtin_registry` 是
+     * const 视图，底层由 session 拥有且可变；测试直接 append 一个专用 opid。
+     */
+    {
+        binrwir_registry_entry_t inplace_entry = {
+            .operation_identifier = TEST_INPLACE_OPID,
+            .flags = BINRWIR_REGISTRY_FLAG_NONE,
+            .handler = test_inplace_increment_handler,
+        };
+        EXPECT(binrwir_registry_append(
+                   (binrwir_registry_t *)(uintptr_t)components.builtin_registry,
+                   "resume-test", &inplace_entry, 1U, NULL) ==
+               RUNTIMEC_STATUS_SUCCESS);
+    }
     EXPECT(vmkv_encoder_get_canonical_encoding_revision(
                components.vmkv_encoder, &canonical_encoding_revision) ==
            RUNTIMEC_STATUS_SUCCESS);
@@ -922,6 +1286,24 @@ int main(void) {
                &allocator, canonical_encoding_revision, &program) ==
            RUNTIMEC_STATUS_SUCCESS);
     EXPECT(test_compile_and_insert(&components, TEST_ROUND_TRIP_TARGET,
+                                   canonical_encoding_revision, program,
+                                   &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_program_build_stop_resume(
+               &allocator, canonical_encoding_revision, &program) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_compile_and_insert(&components, TEST_STOP_RESUME_TARGET,
+                                   canonical_encoding_revision, program,
+                                   &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_program_build_crash_resume(
+               &allocator, canonical_encoding_revision, &program) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_compile_and_insert(&components, TEST_CRASH_RESUME_TARGET,
+                                   canonical_encoding_revision, program,
+                                   &error) == RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_program_build_inplace_resume(
+               &allocator, canonical_encoding_revision, &program) ==
+           RUNTIMEC_STATUS_SUCCESS);
+    EXPECT(test_compile_and_insert(&components, TEST_INPLACE_TARGET,
                                    canonical_encoding_revision, program,
                                    &error) == RUNTIMEC_STATUS_SUCCESS);
 
@@ -1168,6 +1550,7 @@ int main(void) {
         round_trip_request.frame_path =
             runtimec_string_view_from_c_string(TEST_FRAME_PATH_ROUND_TRIP);
         {
+            EXPECT(test_store_set_status(&test, "running"));
             const runtimec_status_t rt = runtimec_execution_window_execute(
                 session, &round_trip_request, &result, &error);
             EXPECT(rt == RUNTIMEC_STATUS_SUCCESS);
@@ -1186,6 +1569,140 @@ int main(void) {
                 EXPECT(target_value == 7U);
             }
         }
+    }
+
+    const char *resume_case = getenv("RUNTIMEC_RESUME_CASE");
+
+    /*
+     * 2.94 停止/恢复：`setstatus("paused")` 让循环停在第三条之前。
+     * 第一条写 x=7，第二条写 paused，循环下一拍读到 paused 返回 YIELD；
+     * `‥pc` 必须已经指向第三条。恢复时把 status 置回 running，从 pc 续跑。
+     */
+    if (resume_case == NULL || strcmp(resume_case, "stop") == 0) {
+        const int case_failures = failures;
+        runtimec_execution_window_request_t stop_request = request;
+        stop_request.function_path =
+            runtimec_string_view_from_c_string(TEST_STOP_RESUME_TARGET);
+        stop_request.arguments = NULL;
+        stop_request.argument_count = 0U;
+        stop_request.frame_path =
+            runtimec_string_view_from_c_string(TEST_FRAME_PATH_STOP_RESUME);
+        stop_request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
+
+        EXPECT(test_store_set_status(&test, "running"));
+        EXPECT(runtimec_execution_window_execute(session, &stop_request, &result,
+                                                 &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_YIELD);
+        EXPECT(result.execution_exit.logical_program_counter ==
+               TEST_FIRST_SOURCE_COUNTER + 2U);
+        {
+            uint8_t *pc_wire = NULL;
+            uint32_t pc_size = 0U;
+            EXPECT(test_store_get(&test, "/vthread/2/\xE2\x80\xA5" "pc",
+                                  &pc_wire, &pc_size));
+            if (pc_wire != NULL && pc_size >= KVSPACE_XVALUE_HEAD_LEN + 8U) {
+                int32_t stack_identifier = 0;
+                int32_t ordinal = 0;
+                memcpy(&stack_identifier, pc_wire + KVSPACE_XVALUE_HEAD_LEN, 4U);
+                memcpy(&ordinal, pc_wire + KVSPACE_XVALUE_HEAD_LEN + 4U, 4U);
+                EXPECT(stack_identifier == TEST_STACK_IDENTIFIER);
+                EXPECT(ordinal ==
+                       (int32_t)(TEST_FIRST_SOURCE_COUNTER + 2U));
+            }
+        }
+
+        EXPECT(test_store_set_status(&test, "running"));
+        stop_request.source_logical_program_counter =
+            TEST_FIRST_SOURCE_COUNTER + 2U;
+        EXPECT(runtimec_execution_window_execute(session, &stop_request, &result,
+                                                 &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_DONE);
+        {
+            uint8_t *wire = NULL;
+            uint32_t wire_size = 0U;
+            EXPECT(test_store_get(&test, TEST_FRAME_PATH_STOP_RESUME "/y",
+                                  &wire, &wire_size));
+            if (wire != NULL && wire_size >= KVSPACE_XVALUE_HEAD_LEN + 8U) {
+                uint64_t value = 0U;
+                memcpy(&value, wire + KVSPACE_XVALUE_HEAD_LEN, 8U);
+                EXPECT(value == 7U);
+            }
+        }
+        printf("RESUME_CASE stop failures=%d\n", failures - case_failures);
+    }
+
+    /*
+     * 2.95 崩溃/恢复：子进程在 `vthread·sleep(100ms)` 里被 SIGKILL。
+     * 父进程从 `‥pc` 续跑：sleep 步（s0=2）或已提交到下一步（s0=3）；
+     * 无论哪种，重放后 y 都必须是 7。
+     */
+    if (resume_case == NULL || strcmp(resume_case, "crash") == 0) {
+        const int case_failures = failures;
+        runtimec_execution_window_request_t crash_request = request;
+        crash_request.function_path =
+            runtimec_string_view_from_c_string(TEST_CRASH_RESUME_TARGET);
+        crash_request.arguments = NULL;
+        crash_request.argument_count = 0U;
+        crash_request.frame_path =
+            runtimec_string_view_from_c_string(TEST_FRAME_PATH_CRASH_RESUME);
+        crash_request.source_logical_program_counter = TEST_FIRST_SOURCE_COUNTER;
+
+        EXPECT(test_store_set_status(&test, "running"));
+        const pid_t child = fork();
+        EXPECT(child >= 0);
+        if (child == 0) {
+            runtimec_execution_window_result_t child_result;
+            runtimec_error_t child_error;
+            runtimec_error_reset(&child_error);
+            (void)runtimec_execution_window_execute(session, &crash_request,
+                                                    &child_result, &child_error);
+            _exit(0);
+        }
+        usleep(30000U);
+        (void)kill(child, SIGKILL);
+        {
+            int wait_status = 0;
+            (void)waitpid(child, &wait_status, 0);
+        }
+
+        int32_t crash_ordinal = -1;
+        {
+            uint8_t *pc_wire = NULL;
+            uint32_t pc_size = 0U;
+            EXPECT(test_store_get(&test, "/vthread/2/\xE2\x80\xA5" "pc",
+                                  &pc_wire, &pc_size));
+            if (pc_wire != NULL && pc_size >= KVSPACE_XVALUE_HEAD_LEN + 8U) {
+                int32_t stack_identifier = 0;
+                memcpy(&stack_identifier, pc_wire + KVSPACE_XVALUE_HEAD_LEN, 4U);
+                memcpy(&crash_ordinal, pc_wire + KVSPACE_XVALUE_HEAD_LEN + 4U,
+                       4U);
+                EXPECT(stack_identifier == TEST_STACK_IDENTIFIER);
+                EXPECT(crash_ordinal >= (int32_t)(TEST_FIRST_SOURCE_COUNTER + 1U));
+                EXPECT(crash_ordinal <= (int32_t)(TEST_FIRST_SOURCE_COUNTER + 2U));
+            }
+        }
+
+        EXPECT(crash_ordinal > 0);
+        EXPECT(test_store_set_status(&test, "running"));
+        crash_request.source_logical_program_counter = (uint32_t)crash_ordinal;
+        EXPECT(runtimec_execution_window_execute(session, &crash_request, &result,
+                                                 &error) ==
+               RUNTIMEC_STATUS_SUCCESS);
+        EXPECT(result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_DONE);
+        {
+            uint8_t *wire = NULL;
+            uint32_t wire_size = 0U;
+            EXPECT(test_store_get(&test, TEST_FRAME_PATH_CRASH_RESUME "/y",
+                                  &wire, &wire_size));
+            if (wire != NULL && wire_size >= KVSPACE_XVALUE_HEAD_LEN + 8U) {
+                uint64_t value = 0U;
+                memcpy(&value, wire + KVSPACE_XVALUE_HEAD_LEN, 8U);
+                EXPECT(value == 7U);
+            }
+        }
+        printf("RESUME_CASE crash failures=%d\n", failures - case_failures);
     }
 
     /*
@@ -1250,6 +1767,7 @@ int main(void) {
                                &claimer) == 0;
             EXPECT(started);
 
+            EXPECT(test_store_set_status(&test, "running"));
             const runtimec_status_t handoff_status =
                 runtimec_execution_window_execute(session, &handoff_request,
                                                   &result, &error);
@@ -1380,6 +1898,7 @@ int main(void) {
            零实参会让帧准备报 `frame parameter binding failed`——那是正确拒绝，
            不是本用例要测的东西。继续沿用 request 的两条 EXISTING_KEY 实参。 */
         for (int round = 0; round < 2; round++) {
+            EXPECT(test_store_set_status(&test, "running"));
             EXPECT(runtimec_execution_window_execute(
                        session, &repeat_request, &result, &error) ==
                    RUNTIMEC_STATUS_SUCCESS);

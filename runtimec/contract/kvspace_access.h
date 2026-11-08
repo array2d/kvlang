@@ -228,6 +228,16 @@ runtimec_status_t runtimec_kvspace_access_frame_generation(
 runtimec_status_t runtimec_kvspace_access_checkpoint(
     runtimec_kvspace_access_t *access, const runtimec_checkpoint_t *checkpoint,
     runtimec_error_t *error);
+/*
+ * 只写 `‥pc`：单 key 整值写，body 是 `[2]int32`（`[stackid][s0]`，各 4 字节小端）。
+ *
+ * 与 checkpoint 分开是因为**提交频率不同**：解释器每一步都要推进 `‥pc`，
+ * 而 `‥status` / `‥msg` 只在结构化退出时写。调用方必须保证该步的全部效果
+ * 已经落到存储，再调本函数；顺序反了就是「pc 说完成了、值还没写」。
+ */
+runtimec_status_t runtimec_kvspace_access_write_program_counter(
+    runtimec_kvspace_access_t *access, runtimec_string_view_t vthread,
+    runtimec_program_counter_t counter, runtimec_error_t *error);
 runtimec_status_t runtimec_kvspace_access_handoff(
     runtimec_kvspace_access_t *access,
     const runtimec_handoff_request_t *request, runtimec_error_t *error);
