@@ -1630,6 +1630,155 @@ runtimec_status_t runtimec_kvspace_access_write_program_counter(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
+/*
+ * 读 `‥pc`：与写侧同一套 key 拼法与编码（`[2]int32`，8 字节小端）。
+ *
+ * 缺失与坏槽必须分开：缺失返回 present=false（新 vthread 还没写过位置，是正常
+ * 状态）；存在但 body 不是 8 字节是坏槽，返回 INVALID。把两者都折叠成「没有
+ * 位置」，会让一个损坏的 pc 被当成「从头开始」——那正是 resume 最危险的形态。
+ */
+runtimec_status_t runtimec_kvspace_access_read_program_counter(
+    runtimec_kvspace_access_t *access, runtimec_string_view_t vthread,
+    runtimec_program_counter_t *output_counter, bool *output_present,
+    runtimec_error_t *error) {
+    runtimec_kvspace_access_t *adapter = access;
+    char key_text[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    const size_t separator_size =
+        sizeof(RUNTIMEC_KVSPACE_RUNTIME_MEMBER_SEPARATOR) - 1U;
+
+    if (output_counter != NULL) {
+        *output_counter = RUNTIMEC_PROGRAM_COUNTER_NONE;
+    }
+    if (output_present != NULL) {
+        *output_present = false;
+    }
+    if (adapter == NULL || !runtimec_string_view_is_valid(vthread) ||
+        vthread.size == 0U || output_counter == NULL ||
+        output_present == NULL || error == NULL) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, 95,
+            "invalid program counter read request");
+    }
+    if (sizeof("/vthread/") - 1U + vthread.size + 1U + separator_size +
+            strlen(runtimec_kvspace_member_program_counter) + 1U >
+        sizeof(key_text)) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, 96, "counter key is too long");
+    }
+    const int written = snprintf(
+        key_text, sizeof(key_text), "/vthread/%.*s/%s%s", (int)vthread.size,
+        vthread.data, RUNTIMEC_KVSPACE_RUNTIME_MEMBER_SEPARATOR,
+        runtimec_kvspace_member_program_counter);
+    if (written <= 0 || (size_t)written >= sizeof(key_text)) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, 97,
+            "counter key formatting failed");
+    }
+
+    uint8_t *wire = NULL;
+    uint32_t wire_size = 0U;
+    if (kvspaceGet(adapter->handle, key_text, 1, &wire, &wire_size) != 0 ||
+        wire == NULL) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    if (wire_size < KVSPACE_XVALUE_HEAD_LEN) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_ERROR, 98, "counter wire is truncated");
+    }
+    kvspaceXvalueHead head;
+    memcpy(&head, wire, sizeof(head));
+    if (kvspaceXvalueHeadLen(&head) != 8U) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, 99,
+            "counter body is not [2]int32");
+    }
+    const uint8_t *body = wire + KVSPACE_XVALUE_HEAD_LEN;
+    uint32_t stack_bits = 0U;
+    uint32_t ordinal_bits = 0U;
+    for (size_t index = 0U; index < 4U; ++index) {
+        stack_bits |= (uint32_t)body[index] << (8U * index);
+        ordinal_bits |= (uint32_t)body[4U + index] << (8U * index);
+    }
+    output_counter->stack_identifier = (int32_t)stack_bits;
+    output_counter->source_instruction_ordinal = (int32_t)ordinal_bits;
+    *output_present = true;
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 读 `<frame_path>/‥lib`。值体是函数 key 文本（`ensure_frame` 写入的形状）。
+ * 返回的文本由调用方缓冲承接，NUL 结尾；body 超容量是 INVALID，不截断。
+ */
+runtimec_status_t runtimec_kvspace_access_read_frame_library(
+    runtimec_kvspace_access_t *access, runtimec_key_view_t frame_path,
+    char *output_text, size_t output_capacity, runtimec_error_t *error) {
+    runtimec_kvspace_access_t *adapter = access;
+    char frame_text[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    char library_key[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    size_t directory_size;
+    int written;
+
+    if (output_text != NULL && output_capacity != 0U) {
+        output_text[0] = '\0';
+    }
+    if (adapter == NULL || !runtimec_key_view_is_valid(frame_path) ||
+        frame_path.size == 0U || output_text == NULL ||
+        output_capacity == 0U || error == NULL) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, 100,
+            "invalid frame library read request");
+    }
+    if (!runtimec_kvspace_access_key_text(frame_path, frame_text,
+                                          sizeof(frame_text), NULL)) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED, 101,
+            "frame path is not an absolute key");
+    }
+    directory_size = strlen(frame_text);
+    if (directory_size + 1U >= sizeof(frame_text)) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, 102, "frame path is too long");
+    }
+    if (frame_text[directory_size - 1U] != '/') {
+        frame_text[directory_size] = '/';
+        ++directory_size;
+        frame_text[directory_size] = '\0';
+    }
+    written = snprintf(library_key, sizeof(library_key), "%s%s%s", frame_text,
+                       RUNTIMEC_KVSPACE_RUNTIME_MEMBER_SEPARATOR,
+                       runtimec_kvspace_member_library);
+    if (written <= 0 || (size_t)written >= sizeof(library_key)) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, 103,
+            "library key formatting failed");
+    }
+
+    uint8_t *wire = NULL;
+    uint32_t wire_size = 0U;
+    if (kvspaceGet(adapter->handle, library_key, 1, &wire, &wire_size) != 0 ||
+        wire == NULL) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED, 104,
+            "frame has no library");
+    }
+    if (wire_size < KVSPACE_XVALUE_HEAD_LEN) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_ERROR, 105, "library wire is truncated");
+    }
+    kvspaceXvalueHead head;
+    memcpy(&head, wire, sizeof(head));
+    const uint64_t body_size = kvspaceXvalueHeadLen(&head);
+    if (body_size + 1U > (uint64_t)output_capacity ||
+        body_size > (uint64_t)UINT32_MAX) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, 106,
+            "library text exceeds the output buffer");
+    }
+    memcpy(output_text, wire + KVSPACE_XVALUE_HEAD_LEN, (size_t)body_size);
+    output_text[body_size] = '\0';
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 runtimec_status_t runtimec_kvspace_access_checkpoint(
     runtimec_kvspace_access_t *access, const runtimec_checkpoint_t *checkpoint,
     runtimec_error_t *error) {

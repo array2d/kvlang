@@ -175,14 +175,24 @@ def run_kvlang(case_dir, label, args, workdir, scale):
     def _run():
         kv_reset(label, workdir, args.redis)
         env = {**os.environ, "KVSPACE": dsn}
-        cmd = [args.kvlang_bin, str(src)]
+        # vthread 的创建与运行分两步：create 只建状态并打印 vid，run 从该 vid
+        # 的持久化 ‥pc 推进。计时段是 run 的 stdout，不含 create 的 vid 行。
+        create = [args.kvlang_bin, "create", str(src)]
         if args.no_stdlib:
-            cmd.append("--no-stdlib")
-        r = sh(cmd, timeout=args.timeout, env=env)
+            create.append("--no-stdlib")
+        created = sh(create, timeout=args.timeout, env=env)
+        if created.returncode != 0:
+            tail = (created.stderr.strip().splitlines() or [""])[-1]
+            raise RuntimeError(
+                f"kvlang/{label} create exit {created.returncode}: {tail[:200]}")
+        vid = created.stdout.strip().splitlines()[-1] if created.stdout.strip() else ""
+        if not vid:
+            raise RuntimeError(f"kvlang/{label} create printed no vid")
+        r = sh([args.kvlang_bin, "run", vid], timeout=args.timeout, env=env)
         if r.returncode != 0:
             tail = (r.stderr.strip().splitlines() or [""])[-1]
             raise RuntimeError(
-                f"kvlang/{label} exit {r.returncode}: {tail[:200]}")
+                f"kvlang/{label} run exit {r.returncode}: {tail[:200]}")
         return r.stdout
     return _run
 

@@ -84,7 +84,10 @@ typedef enum frame_driver_outcome {
     FRAME_DRIVER_OUTCOME_DONE,
     FRAME_DRIVER_OUTCOME_HANDOFF,
     FRAME_DRIVER_OUTCOME_ERROR,
-    FRAME_DRIVER_OUTCOME_EXECUTE_FAILED
+    FRAME_DRIVER_OUTCOME_EXECUTE_FAILED,
+    /* `‥status` 不是继续态（paused 等）：执行停在当前指令之前，位置已由
+     * checkpoint 落盘。调用方可以退出，之后用同一个 vid 再进入。 */
+    FRAME_DRIVER_OUTCOME_YIELD
 } frame_driver_outcome_t;
 
 typedef struct frame_driver_effective_key {

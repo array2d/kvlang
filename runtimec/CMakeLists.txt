@@ -205,14 +205,17 @@ endif()
 
 # `kvlangrun`：命令行驱动，benchmark 的 kvlang 列用它跑 .kv 文件。
 #
-# 与 `capability_probe` 的区别：那是分类器（不给期望值），这是**执行入口**——
-# 把一个 .kv 跑到底，把被跑程序的 stdout 原样交给调用方。产物由 Makefile 搬到
-# bin/，与其它产物同规矩。
+# 与 `capability_probe` 的区别：那是分类器（不给期望值），这是**执行入口**。
+# 子命令把 vthread 的创建与运行分开（对照 runtime/ 的 `vthread·create` /
+# `vthread·run`）：
+#   create <file.kv>  → layout + 建 vthread（写 ‥pc/‥status/帧 ‥lib），打印 vid
+#   run <vid>         → 从该 vid 持久化的 ‥pc 继续执行，stdout 原样透传
+# 产物由 Makefile 搬到 bin/，与其它产物同规矩。
 #
 # **必须带 TEMP_PRINTLN**：benchmark 用例靠 println 输出 `__bench_ns:`；关掉它，
 # 驱动能跑但一行都打不出来，而 run.py 只会报「没有 __bench_ns」——把「打印被
 # 编译掉了」误报成「程序没跑到那一步」。
-add_executable(kvlangrun tools/kvlangrun.c)
+add_executable(kvlangrun cli/kvlangrun.c)
 target_compile_features(kvlangrun PRIVATE c_std_11)
 target_include_directories(kvlangrun PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"

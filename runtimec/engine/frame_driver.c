@@ -181,6 +181,10 @@ frame_driver_outcome_t frame_driver_execute(
         return FRAME_DRIVER_OUTCOME_HANDOFF;
     case BINRWIR_EXECUTION_EXIT_ERROR:
         return FRAME_DRIVER_OUTCOME_ERROR;
+    case BINRWIR_EXECUTION_EXIT_YIELD:
+        /* `‥status` 不是继续态：停在当前指令之前，位置已提交。不是失败，
+         * 也不是 DONE——调用方可以退出，之后按同一 vid 再进入。 */
+        return FRAME_DRIVER_OUTCOME_YIELD;
     case BINRWIR_EXECUTION_EXIT_CALL: {
         /* 返回链断裂：调用方没给 resume 点。spec 要求报错并保留帧，
          * **不许**当成「跑完了」。 */
