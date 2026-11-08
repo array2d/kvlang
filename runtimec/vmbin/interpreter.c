@@ -14,10 +14,13 @@
 #include <string.h>
 
 #include "contract/error.h"
+#include "contract/kvspace_access.h"
+#include "contract/program_counter.h"
 #include "core_operations.h"
 #include "frame_slot.h"
 #include "frame_target_key.h"
 #include "value_access.h"
+#include "vthread_status.h"
 
 #define VMBIN_SCRATCH_INITIAL_CAPACITY 32U
 
@@ -686,52 +689,28 @@ static runtimec_status_t vmbin_interpreter_dispatch_builtin(
             VMBIN_INTERPRETER_DIAG_INVALID_INSTRUCTION, output_exit);
     }
     /*
-     * 调 handler 前清零，调完只补缺的字段——**两件事不冲突，各有各的职责**：
-     *
-     *   清零在前，防陈旧：上一次分派留下的 exit 不能漏进这一次，否则 handler
-     *   什么都不写时，调用方会读到上一条指令的退出状态。
-     *   补字段在后，保成因：handler 已经写好的诊断码是它对自己的失败最准确的
-     *   描述（例如 `0x4304` 值宽不符），用通用的 `DIAG_HANDLER_FAILED` 覆盖掉
-     *   等于把「为什么失败」换成「某个 handler 失败了」。
-     *
-     * 所以下面分两种情形：handler 自己写了 ERROR 出口就只补位置，没写才兜底
-     * 成 `DIAG_HANDLER_FAILED`。别把这两句当成矛盾而删掉其中一个。
+     * handler 的返回值不参与状态判断。逻辑错误的唯一出口是 `output_exit.kind
+     * = ERROR`，由主循环写 `‥status="error"`；本层只看出口决定是否推进。
      */
     *output_exit = (binrwir_execution_exit_t){0};
-    status = entry->handler(execution->frame, instruction,
-                                      output_exit);
-    if (status != RUNTIMEC_STATUS_SUCCESS) {
-        if (output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR) {
-            /*
-             * handler 已给 kind 与诊断码：只补它不知道的位置信息。
-             *
-             * 判据不能用 `== PROGRAM_COUNTER_NONE`：出口在调 handler 前被清零，
-             * 未设置的位置是 **0**，而哨兵是 `UINT32_MAX`——拿哨兵去比，等于
-             * 永远补不上。0 不是合法的源码位置（源码 pc 从 1 起），所以判据
-             * 写成「0 或哨兵都补」。
-             */
-            if (output_exit->logical_program_counter == 0U ||
-                output_exit->logical_program_counter ==
-                    BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE) {
-                output_exit->logical_program_counter =
-                    instruction->source_logical_program_counter;
-            }
-            if (output_exit->resume_logical_program_counter == 0U ||
-                output_exit->resume_logical_program_counter ==
-                    BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE) {
-                output_exit->resume_logical_program_counter =
-                    instruction->source_logical_program_counter;
-            }
-        } else {
-            /* handler 只回了状态、没写出口：兜底成通用诊断。 */
+    {
+        const runtimec_status_t handler_status =
+            entry->handler(execution->frame, instruction, output_exit);
+        /*
+         * 过渡兜底：仍有 handler 只回状态、不写出口。它们的状态不是循环判据，
+         * 但必须折成一个 ERROR 出口，主循环才能用 `‥status="error"` 停机。
+         * 新写的 handler 应当自己置 ERROR 出口，不再依赖这条。
+         */
+        if (output_exit->kind == BINRWIR_EXECUTION_EXIT_NONE &&
+            handler_status != RUNTIMEC_STATUS_SUCCESS) {
             vmbin_interpreter_error_exit(
-                output_exit, status, VMBIN_INTERPRETER_DIAG_HANDLER_FAILED,
+                output_exit, handler_status,
+                VMBIN_INTERPRETER_DIAG_HANDLER_FAILED,
                 instruction->source_logical_program_counter);
         }
-        return status;
     }
     if (output_exit->kind != BINRWIR_EXECUTION_EXIT_NONE) {
-        /* handler 主动侧退出：指令未提交，游标不推进。 */
+        /* 侧出口（错误 / call / handoff / yield）：指令未提交，游标不推进。 */
         return RUNTIMEC_STATUS_SUCCESS;
     }
     vmbin_interpreter_advance(execution, identifier);
@@ -798,6 +777,145 @@ static runtimec_status_t vmbin_interpreter_step(
     }
 }
 
+/*
+ * 标准 status 循环只做两件事：
+ *   1. 读 kvspace 的 `‥status` 字符串，决定继续 / 停；
+ *   2. 每步把 `‥pc` 写回 kvspace。
+ * handler 的返回值与返回状态不参与判断；错误只写 `‥status = "error"`。
+ */
+static bool vmbin_interpreter_observable(
+    const binrwir_binvthread_frame_t *frame) {
+    return (frame->flags & BINRWIR_BINVTHREAD_FRAME_FLAG_OBSERVABLE) != 0U;
+}
+
+/* `‥status` 是继续态：init / running / wait。键缺失按继续处理。 */
+static bool vmbin_interpreter_status_continue(
+    vmbin_execution_t *execution, uint32_t identifier,
+    binrwir_execution_exit_t *output_exit) {
+    char key[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    runtimec_string_view_t text;
+    runtimec_error_t error;
+    binrwir_instruction_view_t instruction;
+
+    if (!vmbin_interpreter_observable(execution->frame) ||
+        execution->frame->kvspace_access == NULL ||
+        execution->frame->kvspace_access->handle == NULL ||
+        runtimec_vthread_status_key(
+            execution->frame->frame_path,
+            runtimec_string_view_from_c_string("/‥status"), key,
+            sizeof(key)) != RUNTIMEC_STATUS_SUCCESS) {
+        return true;
+    }
+    runtimec_error_reset(&error);
+    if (runtimec_vthread_status_read(
+            execution->frame->kvspace_access->handle, key, &text, &error) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        return true;
+    }
+    if ((text.size == 4U && memcmp(text.data, "init", 4U) == 0) ||
+        (text.size == 7U && memcmp(text.data, "running", 7U) == 0) ||
+        (text.size == 4U && memcmp(text.data, "wait", 4U) == 0)) {
+        return true;
+    }
+    if (binrwir_binfunc_get_instruction(execution->program, identifier,
+                                        &instruction) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        return false;
+    }
+    if (text.size == 6U && memcmp(text.data, "paused", 6U) == 0) {
+        vmbin_interpreter_committed_exit(
+            output_exit, BINRWIR_EXECUTION_EXIT_YIELD,
+            instruction.source_logical_program_counter,
+            instruction.source_logical_program_counter, 0U);
+    } else if (text.size == 5U && memcmp(text.data, "error", 5U) == 0) {
+        vmbin_interpreter_error_exit(
+            output_exit, RUNTIMEC_STATUS_ERROR, 0U,
+            instruction.source_logical_program_counter);
+    } else {
+        vmbin_interpreter_committed_exit(
+            output_exit, BINRWIR_EXECUTION_EXIT_DONE,
+            instruction.source_logical_program_counter,
+            instruction.source_logical_program_counter, 0U);
+    }
+    return false;
+}
+
+/* 错误只写 `‥status = "error"`；没有状态返回、没有新增诊断码。 */
+static void vmbin_interpreter_write_error_status(
+    const binrwir_binvthread_frame_t *frame) {
+    char key[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    static const char error_text[] = "error";
+
+    if (frame->kvspace_access == NULL ||
+        frame->kvspace_access->handle == NULL ||
+        runtimec_vthread_status_key(
+            frame->frame_path,
+            runtimec_string_view_from_c_string("/‥status"), key,
+            sizeof(key)) != RUNTIMEC_STATUS_SUCCESS) {
+        return;
+    }
+    (void)runtimec_vthread_status_write(
+        frame->kvspace_access->handle, key,
+        runtimec_bytes_view_make((const uint8_t *)error_text,
+                                 sizeof(error_text) - 1U));
+}
+
+/* 提交 `‥pc`：失败就写 `‥status = "error"`，不返回状态。 */
+static void vmbin_interpreter_commit_pc(vmbin_execution_t *execution,
+                                        uint32_t source_program_counter) {
+    runtimec_program_counter_t counter;
+    runtimec_error_t error;
+
+    if (!vmbin_interpreter_observable(execution->frame) ||
+        execution->frame->kvspace_access == NULL ||
+        !runtimec_string_view_is_valid(execution->frame->vthread_identifier) ||
+        execution->frame->vthread_identifier.size == 0U) {
+        return;
+    }
+    runtimec_error_reset(&error);
+    counter.stack_identifier = execution->frame->stack_identifier;
+    counter.source_instruction_ordinal = (int32_t)source_program_counter;
+    if (runtimec_kvspace_access_write_program_counter(
+            execution->frame->kvspace_access,
+            execution->frame->vthread_identifier, counter, &error) !=
+        RUNTIMEC_STATUS_SUCCESS) {
+        vmbin_interpreter_write_error_status(execution->frame);
+    }
+}
+
+/* 入口提交：第一条指令执行前先落一个合法恢复点。 */
+static void vmbin_interpreter_commit_entry(vmbin_execution_t *execution) {
+    binrwir_instruction_view_t instruction;
+    const uint32_t identifier = execution->frame->logical_program_counter;
+
+    if (!vmbin_interpreter_observable(execution->frame) ||
+        identifier == BINRWIR_IDENTIFIER_NONE ||
+        (size_t)identifier >= execution->instruction_count ||
+        binrwir_binfunc_get_instruction(execution->program, identifier,
+                                        &instruction) !=
+            RUNTIMEC_STATUS_SUCCESS) {
+        return;
+    }
+    vmbin_interpreter_commit_pc(
+        execution, instruction.source_logical_program_counter);
+}
+
+/* 每步提交：普通指令完成后推进到下一格。 */
+static void vmbin_interpreter_commit_step(vmbin_execution_t *execution) {
+    binrwir_instruction_view_t instruction;
+    const uint32_t identifier = execution->frame->logical_program_counter;
+
+    if (!vmbin_interpreter_observable(execution->frame) ||
+        (size_t)identifier >= execution->instruction_count ||
+        binrwir_binfunc_get_instruction(execution->program, identifier,
+                                        &instruction) !=
+            RUNTIMEC_STATUS_SUCCESS) {
+        return;
+    }
+    vmbin_interpreter_commit_pc(
+        execution, instruction.source_logical_program_counter);
+}
+
 runtimec_status_t
 vmbin_execute(const binrwir_binfunc_t *program,
               const binrwir_execution_plan_t *execution_plan,
@@ -838,6 +956,12 @@ vmbin_execute(const binrwir_binfunc_t *program,
     /* call 出口要靠它判断「有没有后继指令」，从而给出可恢复位置。 */
     execution.instruction_count = program_view.instruction_count;
 
+    /*
+     * 标准 status 循环：
+     *   读 `‥status` 字符串 → 执行一条 → 提交 `‥pc`。
+     * handler 的返回值与 exit.status 不参与判断；错误只写 `‥status="error"`。
+     */
+    vmbin_interpreter_commit_entry(&execution);
     for (;;) {
         uint32_t identifier = frame->logical_program_counter;
 
@@ -858,48 +982,55 @@ vmbin_execute(const binrwir_binfunc_t *program,
             status = RUNTIMEC_STATUS_SUCCESS;
             break;
         }
-        status = vmbin_interpreter_step(&execution, identifier, output_exit);
-        if (status != RUNTIMEC_STATUS_SUCCESS ||
-            output_exit->kind != BINRWIR_EXECUTION_EXIT_NONE) {
+        /*
+         * 唯一的 continue 判据：`‥status` 字符串是 init / running / wait。
+         * 暂停停在当前指令之前（`‥pc` 已由上一格提交指向它），恢复从同一位置重入。
+         */
+        if (!vmbin_interpreter_status_continue(&execution, identifier,
+                                               output_exit)) {
+            status = output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR
+                         ? RUNTIMEC_STATUS_ERROR
+                         : RUNTIMEC_STATUS_SUCCESS;
             break;
         }
-    }
-    /*
-     * 不变量：返回 SUCCESS 时，结构化退出不许是 ERROR。
-     *
-     * 两个通道表达同一件事——返回状态与 exit.kind。它们不一致时调用方没有唯一
-     * 规则：执行窗口按返回状态判成败，于是把一次失败当成成功原样拷贝，下游看到
-     * `status=0`、`detail=0`，而 exit.kind 明明是 ERROR。
-     *
-     * 这是实现 bug（handler 置了错，却报了成功），不做静默对齐：换成一条只属于
-     * 本层的诊断，让它在第一次出现时就把位置暴露出来。
-     */
-    if (status == RUNTIMEC_STATUS_SUCCESS &&
-        output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR) {
-        const runtimec_status_t reported_status =
-            output_exit->status != RUNTIMEC_STATUS_SUCCESS
-                ? output_exit->status
-                : RUNTIMEC_STATUS_ERROR;
         /*
-         * handler 返回了 SUCCESS，所以分派层没给它补位置——出口里的 pc 不可信
-         * （多半是 0）。矛盾发生在**刚执行的那条指令**上，位置从游标取。
+         * 执行一条。**不看返回值**：handler 逻辑错误的唯一出口是把
+         * `‥status` 写成 "error"。
          */
-        uint32_t source_program_counter =
-            output_exit->logical_program_counter;
-        {
+        (void)vmbin_interpreter_step(&execution, identifier, output_exit);
+        if (output_exit->kind == BINRWIR_EXECUTION_EXIT_ERROR) {
             binrwir_instruction_view_t failing_instruction;
-            if (binrwir_binfunc_get_instruction(
-                    program, frame->logical_program_counter,
-                    &failing_instruction) == RUNTIMEC_STATUS_SUCCESS) {
-                source_program_counter =
+            /*
+             * 唯一失败通道是 `‥status="error"`。位置只在诊断里用；handler 没写
+             * 就从当前游标补上。
+             */
+            if ((output_exit->logical_program_counter == 0U ||
+                 output_exit->logical_program_counter ==
+                     BINRWIR_EXECUTION_PROGRAM_COUNTER_NONE) &&
+                binrwir_binfunc_get_instruction(program, identifier,
+                                                &failing_instruction) ==
+                    RUNTIMEC_STATUS_SUCCESS) {
+                output_exit->logical_program_counter =
+                    failing_instruction.source_logical_program_counter;
+                output_exit->resume_logical_program_counter =
                     failing_instruction.source_logical_program_counter;
             }
+            vmbin_interpreter_write_error_status(frame);
+            status = output_exit->status != RUNTIMEC_STATUS_SUCCESS
+                         ? output_exit->status
+                         : RUNTIMEC_STATUS_ERROR;
+            break;
         }
-
-        vmbin_interpreter_error_exit(
-            output_exit, reported_status,
-            VMBIN_INTERPRETER_DIAG_CONTRADICTORY_EXIT, source_program_counter);
-        return reported_status;
+        if (output_exit->kind != BINRWIR_EXECUTION_EXIT_NONE) {
+            /* CALL / DONE / HANDOFF / YIELD：控制流出口，不是状态。 */
+            status = RUNTIMEC_STATUS_SUCCESS;
+            break;
+        }
+        /*
+         * 普通指令完成后推进 `‥pc`。控制流出口可能改变 stackid，位置由
+         * 窗口层 checkpoint 提交（不能只改 s0）。
+         */
+        vmbin_interpreter_commit_step(&execution);
     }
     return status;
 }

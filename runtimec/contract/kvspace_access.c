@@ -1568,7 +1568,7 @@ runtimec_status_t runtimec_kvspace_access_ensure_zero_value(
  * 本阶段只实现整值写：当前唯一调用方（checkpoint）总是写完整位置，没有「只推进 s0」
  * 的调用点。没有调用方的分支不会被任何用例覆盖，等它出现时再和调用方一起验。
  */
-static runtimec_status_t runtimec_kvspace_access_write_program_counter(
+runtimec_status_t runtimec_kvspace_access_write_program_counter(
     runtimec_kvspace_access_t *adapter, runtimec_string_view_t vthread,
     runtimec_program_counter_t counter, runtimec_error_t *error) {
     if (counter.source_instruction_ordinal < 0) {

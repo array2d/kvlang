@@ -50,6 +50,16 @@ typedef struct binrwir_binvthread_frame {
      */
     runtimec_key_view_t frame_path;
     /*
+     * 本帧的栈帧号（`‥pc` 的第一个 int32）。由调用入口写入；0 是合法帧号，
+     * 调用入口未写时保持 0。只有 OBSERVABLE 帧才会用它提交 `‥pc`。
+     */
+    int32_t stack_identifier;
+    /*
+     * 所属 vthread 的标识（`‥pc` 的键前缀）。借用请求字节，本次调用内有效。
+     * 与 `frame_path` 同源：frame_path 是 `/vthread/<vid>/[d]`，本字段是 `<vid>`。
+     */
+    runtimec_string_view_t vthread_identifier;
+    /*
      * host services（借用，可为 NULL）。值访问写路径需要两件只有 host 才能做的事：
      *   - 按 langtype **创建**尚不存在的写目标（`ensure_zero_value`，零值规则的
      *     唯一实现）；

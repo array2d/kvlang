@@ -597,10 +597,13 @@ static runtimec_status_t runtimec_execution_window_operation_name(
 
 /* 只有写已落到存储的退出才提交；resume pc 为空表示没有可恢复位置。 */
 static runtimec_string_view_t runtimec_execution_window_persistent_status(
-    uint16_t exit_kind) {
+    uint16_t exit_kind, int32_t stack_identifier) {
     switch (exit_kind) {
     case BINRWIR_EXECUTION_EXIT_DONE:
-        return runtimec_string_view_from_c_string("done");
+        /* 子帧的 return 只是回到调用方，vthread 还没结束：必须保持 running，
+         * 否则调用方的下一次 execute 会被状态门挡住。 */
+        return runtimec_string_view_from_c_string(
+            stack_identifier > 1 ? "running" : "done");
     case BINRWIR_EXECUTION_EXIT_YIELD:
         return runtimec_string_view_from_c_string("paused");
     case BINRWIR_EXECUTION_EXIT_HANDOFF:
@@ -664,8 +667,8 @@ static runtimec_status_t runtimec_execution_window_commit_checkpoint(
     checkpoint.logical_program_counter =
         runtimec_execution_window_make_program_counter(
             request->stack_identifier, source_program_counter);
-    checkpoint.persistent_status =
-        runtimec_execution_window_persistent_status(execution_exit->kind);
+    checkpoint.persistent_status = runtimec_execution_window_persistent_status(
+        execution_exit->kind, request->stack_identifier);
     checkpoint.outcome = execution_exit->status;
     return runtimec_kvspace_access_checkpoint(host, &checkpoint, error);
 }
@@ -1331,6 +1334,14 @@ runtimec_status_t runtimec_execution_window_execute(
     frame.kvspace_access = host;
     frame.snapshot = snapshot;
     /*
+     * 可观察帧：`vmbin` 在每一步之后推进 `‥pc`、并在每步之前读 `‥status`。
+     * 栈帧号与 vthread 标识由请求原样借入，调用期内有效。
+     * 单元测试直接构造 Frame 时不会设这个标志，因此不会触发每步提交。
+     */
+    frame.stack_identifier = request->stack_identifier;
+    frame.vthread_identifier = request->vthread_identifier;
+    frame.flags |= BINRWIR_BINVTHREAD_FRAME_FLAG_OBSERVABLE;
+    /*
      * 帧路径原样借用——不重新拼接。重新拼就是第二份地址来源，一旦与请求里
      * 那份不一致，事后无法判断哪一份才是调用方要的。借用视图，不拷贝：
      * 字节归请求所有，本次调用内有效。
@@ -1390,7 +1401,8 @@ runtimec_status_t runtimec_execution_window_execute(
                 request->vthread_identifier;
             handoff_request.checkpoint.frame_identifier = request->frame_path;
             handoff_request.checkpoint.persistent_status =
-                runtimec_execution_window_persistent_status(execution_exit.kind);
+                runtimec_execution_window_persistent_status(
+                    execution_exit.kind, request->stack_identifier);
             handoff_request.checkpoint.outcome = execution_exit.status;
             status = runtimec_kvspace_access_handoff(
                 host, &handoff_request, error);
