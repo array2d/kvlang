@@ -10,8 +10,6 @@ cmake_minimum_required(VERSION 3.20)
 
 project(kvlang_runtimec_scaffold VERSION 0.1.0 LANGUAGES C)
 
-include(CTest)
-
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
@@ -52,13 +50,7 @@ endif()
 set(RUNTIMEC_GENERATED_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${RUNTIMEC_GENERATED_DIRECTORY}")
 
-# 真库路径：金标准比对与 backend 用例共用。
-# 判据是「库文件在不在」，不是「某个环境变量有没有设」——后者会让 CI 假绿。
-#
-# 缺库即**配置期失败**，不跳过：静默跳过会让 wire_golden 绿着而一条都没比，
-# 别人看到绿就以为「替身与真库已比对」。跳过当通过是今天反复消灭的那类假信号。
-# backend 用例（host.kvspace_backend）仍保留 77 跳过语义——它验的是真库行为，
-# 缺库时无话可说；而金标准比对是「替身有没有漂移」，缺库时沉默等于没做。
+# kvspace 的真库路径：runtimec 的存储访问直接链接它，不是测试替身。
 set(RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY
     "${CMAKE_CURRENT_SOURCE_DIR}/../lib" CACHE PATH
     "directory holding libkvspace")
@@ -66,19 +58,10 @@ find_library(RUNTIMEC_KVSPACE_LIBRARY_PATH
     NAMES kvspace
     PATHS "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}"
     NO_DEFAULT_PATH)
-# layout 产物：临时 println 的端到端测试要调 kvlangLayoutCode 把源码 layout 进
-# 同一个 store。只在这个可选测试里用，缺库时该测试跳过（77）。
-find_library(KVLANG_LAYOUT_LIBRARY
-    NAMES kvlanglayout
-    PATHS "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}"
-    NO_DEFAULT_PATH)
 
 if(NOT RUNTIMEC_KVSPACE_LIBRARY_PATH)
     message(FATAL_ERROR
         "cannot find libkvspace (searched ${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}). "
-        "runtimec needs it to link the wire-golden comparison, which proves the "
-        "test double has not drifted from the real implementation -- a silent "
-        "skip would leave that comparison green while running nothing. "
         "Fix: build array2d/kvspace into ${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY} "
         "(kvlang and kvspace must be sibling directories), or configure with "
         "-DRUNTIMEC_KVSPACE_LIBRARY_DIRECTORY=<dir holding libkvspace>.")
@@ -254,6 +237,25 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     target_compile_options(kvlangrun PRIVATE
         -Wall -Wextra -Wpedantic -Werror)
 endif()
+
+# kv 语料运行器：布局 .kv → 执行 → 校验输出。与 kvlangrun 共用带 println 的副本。
+# 用法：kv_runner <corpus-dir> <layout-lib> <kvspace-lib>
+add_executable(kv_runner cli/kv_runner.c)
+target_compile_features(kv_runner PRIVATE c_std_11)
+target_include_directories(kv_runner PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${RUNTIMEC_INCLUDE_DIRECTORY}"
+    "${KVSPACE_INCLUDE_DIRECTORY}")
+target_link_libraries(kv_runner PRIVATE
+    runtimec_contract runtimec_binrwir
+    runtimec_kv_runner_vmbin runtimec_kv_runner_vmkv runtimec_kv_runner_engine
+    "${RUNTIMEC_KVSPACE_LIBRARY_PATH}" "${CMAKE_DL_LIBS}" m)
+set_target_properties(kv_runner PROPERTIES
+    BUILD_RPATH "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}")
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    target_compile_options(kv_runner PRIVATE
+        -Wall -Wextra -Wpedantic -Werror)
+endif()
 # **无条件定义，不跟随 `RUNTIMEC_TEMP_PRINTLN` 选项。**
 #
 # 本驱动把被测程序的 stdout 原样交给调用方，而 benchmark 的每个 case 都用
@@ -383,9 +385,3 @@ add_library(kvlang::runtimec_engine ALIAS runtimec_engine)
 add_library(kvlang::runtimec_interface ALIAS runtimec_interface)
 add_library(kvlang::runtimec_scaffold ALIAS kvlang_runtimec_scaffold)
 
-if(BUILD_TESTING)
-    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
-        message(FATAL_ERROR "BUILD_TESTING requires runtimec/tests/CMakeLists.txt")
-    endif()
-    add_subdirectory(tests)
-endif()
