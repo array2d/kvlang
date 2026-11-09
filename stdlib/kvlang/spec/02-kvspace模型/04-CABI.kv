@@ -141,7 +141,7 @@ box 退役进垃圾环；释放发生在屏障轮（`kvspaceViewSweep` 同步跑
 
 无句柄的 XValue 构造/读取（前端静态导出，byte-identical）：head 固定 **16 字节**、无 encode/decode 层——
 构造走 `kvspaceXvalueHeadNewNone`/`NewScalar`/`NewSlack`/`NewTensor`/`NewPtr`/`NewExt`/`NewCode`/`Reserve`
-（`kvspaceXvalueHead` struct 为 `bodylen:u64 @0`、`attrslen:u32 @8`、`layout:u8 @12`、`padding:3 @13-15`，
+（`kvspaceXvalueHead` struct 为 `bodylen:u64 @0`、`attrslen:u16 @8`、`reserved:u16 @10`、`layout:u8 @12`、`padding:3 @13-15`，
 body 偏移恒 16），读一律走 `xvalue_head.h` 的 inline 访问器（字段的唯一定义点）；langtype 不在 head——
 落值内 attr 区（tag 1 记录），随单 key 一次写整体落下。标准标量构造器保留：`kvspaceNewPtr`（存目标完整 langtype +
 目标 key）、`kvspaceNewChar` / `kvspaceNewBool` / `kvspaceNewInt64` / `kvspaceNewFloat64`（签名各增

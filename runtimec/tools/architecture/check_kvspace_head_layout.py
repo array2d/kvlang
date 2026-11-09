@@ -13,7 +13,8 @@
 看字节：
 
     8 字节布局 : [len:u48][storetype][ptr]  body  [attr_len:u16][records]
-    16 字节布局: [bodylen:u64][attrslen:u32][storetype][ptr][pad:2]  body  [records]
+    16 字节布局: [bodylen:u64][attrslen:u16][reserved:u16][layout][padding:3]
+                 body  [records]
 
 后端查找顺序的**依据是规范条款** `workspace/622/routing/README.md` §十
 「后端查找顺序（规范性条款）」，不是 `frontend.c` 的实现：
@@ -108,11 +109,11 @@ def probe_library(library_path: str) -> str:
         print(f"  wire too short: {total} bytes")
         return RESULT_UNKNOWN
     bodylen = int.from_bytes(data[0:8], "little")
-    attrslen = int.from_bytes(data[8:12], "little")
+    attrslen = int.from_bytes(data[8:10], "little")
     reallen = data[16 + bodylen + LANGTYPE_RECORD_BYTES:
                    16 + bodylen + LANGTYPE_RECORD_BYTES + REALLEN_RECORD_BYTES]
     if (bodylen == PROBE_CAPACITY and data[12] == 1 and
-            data[13:16] == b"\x00\x00\x00" and
+            data[10:12] == b"\x00\x00" and data[13:16] == b"\x00\x00\x00" and
             attrslen == LANGTYPE_RECORD_BYTES + REALLEN_RECORD_BYTES and
             len(reallen) == REALLEN_RECORD_BYTES and
             reallen[0] == 2 and
@@ -124,7 +125,8 @@ def probe_library(library_path: str) -> str:
 
     # 16 字节头、但 bodylen 报的是长度而不是容量：WriteNewPlace 忽略了 body_cap。
     # 这不能算 8 字节（总长 >= 16+body），也不能算合格的新布局。
-    if (data[12] == 0 and data[13:16] == b"\x00\x00\x00" and
+    if (data[12] == 0 and data[10:12] == b"\x00\x00" and
+            data[13:16] == b"\x00\x00\x00" and
             bodylen == EXPECTED_BODY and
             total == EXPECTED_HEAD_LEN + bodylen + attrslen):
         print(f"  layout: 16-byte head but body_cap ignored "
@@ -241,11 +243,12 @@ def probe_backend(frontend_path: str, scheme: str, dsn_template: str,
             if len(data) < EXPECTED_HEAD_LEN:
                 return RESULT_UNKNOWN, f"wire too short: {len(data)} bytes"
             bodylen = int.from_bytes(data[0:8], "little")
-            attrslen = int.from_bytes(data[8:12], "little")
+            attrslen = int.from_bytes(data[8:10], "little")
             reallen = data[16 + bodylen + LANGTYPE_RECORD_BYTES:
                            16 + bodylen + LANGTYPE_RECORD_BYTES +
                            REALLEN_RECORD_BYTES]
             if (bodylen == PROBE_CAPACITY and data[12] == 1 and
+                    data[10:12] == b"\x00\x00" and
                     data[13:16] == b"\x00\x00\x00" and
                     attrslen == LANGTYPE_RECORD_BYTES + REALLEN_RECORD_BYTES and
                     len(reallen) == REALLEN_RECORD_BYTES and
@@ -255,7 +258,8 @@ def probe_backend(frontend_path: str, scheme: str, dsn_template: str,
                 return RESULT_SIXTEEN, (
                     f"capacity form bodylen={bodylen} reallen={EXPECTED_BODY} "
                     f"attrslen={attrslen} total={len(data)}")
-            if (data[12] == 0 and data[13:16] == b"\x00\x00\x00" and
+            if (data[12] == 0 and data[10:12] == b"\x00\x00" and
+                    data[13:16] == b"\x00\x00\x00" and
                     bodylen == EXPECTED_BODY and
                     len(data) == EXPECTED_HEAD_LEN + bodylen + attrslen):
                 return RESULT_SIXTEEN_NO_CAPACITY, (
@@ -493,16 +497,17 @@ int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetyp
     memset(g_wire, 0, sizeof g_wire);
     const unsigned record = 3 + lt;
 #if __HEAD_LEN__ == 16
-    /* [bodylen:u64][attrslen:u32][layout:u8][padding:3][body][attrs]
-       容量形态：bodylen 是容量，有效长度在 attr tag 2。 */
+    /* [bodylen:u64][attrslen:u16][reserved:u16][layout:u8][padding:3]
+       [body][attrs]。容量形态：bodylen 是容量，有效长度在 attr tag 2。 */
     const int capacity_layout = body_cap > (uint64_t)body_len;
     const uint64_t body_field = capacity_layout ? body_cap : (uint64_t)body_len;
     const unsigned reallen_bytes = capacity_layout ? 11U : 0U;
     /* `body_len` 是 uint32_t：只拷 4 字节会把高位留成栈垃圾。按 u64 显式展开。 */
     const uint64_t body_len_u64 = body_field;
     memcpy(g_wire + 0, &body_len_u64, 8);
-    const uint32_t attrs_len = (uint32_t)(record + reallen_bytes);
-    memcpy(g_wire + 8, &attrs_len, 4);
+    const uint16_t attrs_len = (uint16_t)(record + reallen_bytes);
+    memcpy(g_wire + 8, &attrs_len, 2);
+    g_wire[10] = 0U; g_wire[11] = 0U; /* reserved */
     g_wire[12] = capacity_layout ? 1U : 0U;
     g_wire[13] = 0U; g_wire[14] = 0U; g_wire[15] = 0U;
     memset(g_wire + 16, 'a', (size_t)body_field);
