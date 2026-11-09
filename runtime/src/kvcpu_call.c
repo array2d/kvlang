@@ -294,6 +294,12 @@ static void param_decl_type(kvspace_t *kv, const char *func_key, int x,
             if (ab[bi] != 0)
                 continue;
             int tl = al - (bi + 1);
+            /* Write params may carry the layout `inplace` mark. */
+            static const char mark[] = " inplace";
+            const int ml = (int)(sizeof mark - 1U);
+            if (x > 0 && tl > ml &&
+                memcmp(ab + bi + 1 + (tl - ml), mark, (size_t)ml) == 0)
+                tl -= ml;
             if (tl > 0 && tl < (int)cap) {
                 memcpy(lt, ab + bi + 1, (size_t)tl);
                 lt[tl] = 0;

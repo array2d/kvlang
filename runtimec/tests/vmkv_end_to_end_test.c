@@ -578,6 +578,21 @@ static void stage_four_negative(test_environment_t *environment) {
                               &foreign_count));
 }
 
+static void stage_five_inplace_write_parameter(test_environment_t *environment) {
+    static const char source[] =
+        "rwfunc add_to(*int64 $d) -> (*int64 $acc inplace) {\n"
+        "\t*acc + *d -> *acc\n"
+        "}\n";
+    printf("stage 5: inplace write parameter end-to-end encode\n");
+    EXPECT(layout_into_store(environment, source, "inplace"));
+    size_t instruction_count = 0U;
+    size_t foreign_count = 0U;
+    EXPECT(encode_and_report(environment, "/lib/add_to", &instruction_count,
+                             &foreign_count));
+    EXPECT(instruction_count > 0U);
+    EXPECT(foreign_count == 0U);
+}
+
 int main(int argument_count, char **arguments) {
     const char *layout_path = argument_count > 1
                                   ? arguments[1]
@@ -611,6 +626,7 @@ int main(int argument_count, char **arguments) {
             stage_two_foreign(&environment);
             stage_three_tutorial_smoke(&environment);
             stage_four_negative(&environment);
+            stage_five_inplace_write_parameter(&environment);
         } else {
             fprintf(stderr,
                     "FAIL: external capability declarations were rejected by "

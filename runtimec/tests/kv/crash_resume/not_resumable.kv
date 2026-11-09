@@ -1,13 +1,7 @@
 // 期望输出:
 //   7
-// 判据（本用例只覆盖**可恢复**分支，见下方说明）：
-// 函数里同时有「写绝对 key」与「inplace 指令」，但 inplace 读的是局部 `a`、
-// 不是那个全局 key ⇒ 上溯不会撞上全局路径，判 CONDITIONALLY_RESUMABLE。
-//
-// **NOT_RESUMABLE 的自然形态语料里没有**：需要「inplace 指令的读参本身是绝对
-// key」，而 layout 目前不接受 `/tmp/x[i] = v` 这种写法（会报下标未声明类型）。
-// 该态由单元测试 `fixture_not_resumable` 覆盖（构造读参为绝对 key 的指令流）。
-// 本用例的价值是**反例驱动的另一半**：证明「有全局写」不等于「判 NOT」。
+// crash_resume: `a[0] = 7` reads and writes `a`; it anchors at `a = [1, 2, 3]`
+// (CONDITIONALLY_RESUMABLE:2<-0). The absolute-key write is not read, so it does not block.
 rwfunc test() -> () {
 	a:[]int64 = [1, 2, 3]
 	9 -> /tmp/cr_global

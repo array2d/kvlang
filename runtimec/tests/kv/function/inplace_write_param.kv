@@ -1,0 +1,12 @@
+// An inplace write param (stored in .[0,+k]) reads and updates the caller's slot.
+// 期望输出:
+//   15
+rwfunc add_to(*int64 $d) -> (*int64 $acc inplace) {
+	*acc + *d -> *acc
+}
+
+rwfunc test() -> () {
+	10 -> v:int64
+	add_to(5) -> v
+	println(v)
+}

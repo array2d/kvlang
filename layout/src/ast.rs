@@ -74,9 +74,8 @@ pub struct Param {
     pub has_ty: bool, // 源码是否写了冒号（区分「空 kindexp」与「缺注解」）
     /// 写参修饰符：该参数**在同一指令内既读又写**（`add(*acc, x) -> *acc`）。
     ///
-    /// 只允许出现在 rwfunc 的**写参**上；rwir 的能力行不加这一列。语义由 layout 的
-    /// 深度校验兑现（见 `lower::check_inplace_parameters`）：仅仅「读过又写过」不算，
-    /// 必须有**同一条指令**同时把它列进 reads 与 writes。
+    /// Write params of rwfunc or rwir only. For rwfunc, `lower::check_inplace_unit`
+    /// requires one instruction that both reads and writes it.
     pub inplace: bool,
 }
 
@@ -164,6 +163,9 @@ impl FuncSig {
             }
             sb.push('$');
             sb.push_str(&p.name);
+            if p.inplace {
+                sb.push_str(" inplace");
+            }
         }
         sb.push(')');
         sb

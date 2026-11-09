@@ -45,13 +45,18 @@ def_rwir]]）。
 rwfunc add_to(*int64 $n, int64 $d) -> (*int64 $acc inplace) {
     *acc + d -> *acc          // 同一条指令里既读 *acc 又写 *acc
 }
+
+rwir accumulate(*int64 $delta) -> (*int64 $acc inplace)
 ```
 
 语义：该参数在**同一条指令内既被读又被写**。调用方看到的仍是普通传址参数，不需要额外语法。
 
-- **只能出现在 rwfunc 的写参上**。读参加 `inplace` 报错（读参不得作写槽）；
-  rwir（`def rwir`）的能力行不加这一列。
+- Allowed on write params of `rwfunc` and `rwir` only; a read param marked `inplace` is an error.
 - 一个函数可以有多个 `inplace` 写参，逐个校验，不限数量。
+- Stored form: rwfunc write param key `funcDir.[0,+k]` (`def langtype`) has body
+  `<name>\0<langtype> inplace`; a def rwir write slot `/lib/<op>/[0,+k]` has body
+  `<langtype> inplace`. Unmarked params keep `<name>\0<langtype>` / `<langtype>`.
+  printlib restores the mark; vmkv strips it and rejects it on read params.
 
 ### 三条深度校验（缺一即报错，具名指出缺哪条）
 
@@ -81,6 +86,15 @@ rwfunc add_to(*int64 $n, int64 $d) -> (*int64 $acc inplace) {
 比较名字时**先归一再看**（`normalize_slot_name`）：读参在表达式树里是 `acc`，
 写槽在 writes 里是 `*acc` / `*[0,+k]`——字符串不等但指的是同一个形参。判据是「同一个名字」，
 不是「同一串字符」。
+
+- Coordinates `*[0,±k]` count for their parameter; `(*m)·*k` (desugared to a `resolveptr`
+  position slot `_pN` and a write to `*_pN`) counts as a write of `m`. Quoted literals and
+  static member keys (`(*q)·acc`) are not reads.
+- A call `g(...) -> (..., *P, ...)` reads and writes `P` when `g` marks that write position
+  `inplace`. rwir declarations (this unit, the store, native) and rwfuncs already in the store
+  count as declared; a same-unit rwfunc counts only once its own mark verifies (least fixpoint
+  over the unit), so recursion never justifies a mark.
+- A `for` variable must not reuse a parameter name (it would be emitted as that parameter's slot).
 
 ## rwfunc 声明位置
 
