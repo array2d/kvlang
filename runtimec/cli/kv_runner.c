@@ -1,5 +1,5 @@
 /*
- * 组件：tests/kv_runner
+ * 组件：cli/kv_runner
  * 作用：以 kvlang 语法为单位的用例运行器——把 .kv 源码 layout 进 kvspace、
  *       编成 BinRWIR、执行，并产出三态结论。
  *

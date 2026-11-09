@@ -1574,10 +1574,6 @@ fn flatten_nested_calls(inst: &Instruction, lg: &mut LabelGen) -> (Instruction, 
     (flat, extra)
 }
 
-fn flatten_expr(e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>) -> Expr {
-    flatten_expr_with(e, lg, extra, false)
-}
-
 /// `none_test` = 本层父指令是不是 `== None` / `!= None`。
 ///
 /// 那个形态要的是**位置**（「这个成员有没有值」），不是它的值。把解引用读成

@@ -238,6 +238,25 @@ runtimec_status_t runtimec_kvspace_access_checkpoint(
 runtimec_status_t runtimec_kvspace_access_write_program_counter(
     runtimec_kvspace_access_t *access, runtimec_string_view_t vthread,
     runtimec_program_counter_t counter, runtimec_error_t *error);
+/*
+ * 读 `‥pc`：与 `write_program_counter` 同一种编码（`[2]int32`，body 8 字节小端）。
+ *
+ * 键缺失**不是错误**：`*output_present = false`、counter 置 NONE。键存在但 body
+ * 不是 8 字节是 INVALID——那是坏槽，不是「没有位置」；两者修法不同。
+ */
+runtimec_status_t runtimec_kvspace_access_read_program_counter(
+    runtimec_kvspace_access_t *access, runtimec_string_view_t vthread,
+    runtimec_program_counter_t *output_counter, bool *output_present,
+    runtimec_error_t *error);
+/*
+ * 读 `ensure_frame` 写入的 `<frame_path>/‥lib`：返回函数 key 文本，NUL 结尾。
+ *
+ * `frame_path` 必须是 `/vthread/<vid>/[<segment>]` 形状的绝对路径；本层不拼
+ * vid 或 segment。键缺失是 UNSUPPORTED（帧没有建立），不是空字符串。
+ */
+runtimec_status_t runtimec_kvspace_access_read_frame_library(
+    runtimec_kvspace_access_t *access, runtimec_key_view_t frame_path,
+    char *output_text, size_t output_capacity, runtimec_error_t *error);
 runtimec_status_t runtimec_kvspace_access_handoff(
     runtimec_kvspace_access_t *access,
     const runtimec_handoff_request_t *request, runtimec_error_t *error);

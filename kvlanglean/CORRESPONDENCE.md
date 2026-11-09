@@ -111,3 +111,29 @@ lake build
 工具链：`leanprover/lean4:v4.8.0`。本批只使用 Lean 核心库（`List` / `Nat` / `Option` / `ByteArray`），未引入 Mathlib 或其它第三方证明。
 
 **Mathlib 决策（2026-11-07 架构师裁定）**：不接入，保持零依赖。#572 的「不引第三方证明（Mathlib 标准）」是允许而非必需；本批只用核心库即可证完，离线可复现优先。`lakefile.lean` 里保留 `require mathlib` 的注释位置，不删。
+
+## 七、融合步骨架与判据（2026-11-08 新增，本轮不证）
+
+文件：`Proof/Fusion.lean`（模型与 T1/T2/T3）、`Proof/FusionTest.lean`（Lean 判据测试）；执行判据：`layout/src/fusion.rs` + `layout/tests/fusion_block_check.rs`。
+
+### 7.1 定理与 sorry
+
+| 定理 | 状态 | 缺口 / 下一步 |
+|---|---|---|
+| T1 `fusion_refines_sequence` | **本轮不证**（sorry） | 缺一条索引引理，把 `runFuel` 的 pc 步进与 `List.foldl` 按序应用对齐；当前模型没有「pc 偏移 = 列表下标」的桥。等 coding5 的 K 扫描数据、步定义改成「周期块」后再补。 |
+| T2 `block_replay_atomic_of_closed` | **本轮不证**（sorry） | 缺：对 `instrs` 的归纳；逐指令调用 `atomic_commit_of_disjoint`（依赖 §4.1 的 `ReadsDetermined` / `EffectWritesOnly`）；从 C1* 推后向读恢复；从 C2 推未写 key 不变；`Reachable` 完备性。同样等「周期块」步定义。 |
+| T3 `commit_schedule_consistency` | 已证（0 axiom） | **边界（显式未完成项）**：只证「给定同一份 `starts`，vmkv/vmbin/JIT 提交点一致」；`binrwircompiler` 是否对三执行体产出同一份 `starts` 不在骨架内，论文不得读成「三执行体同步已证完」。 |
+
+C1 = `BlockNonInplace`；C1* = `LaterWriteRecovered`；C1'（保守近似）= `NoFutureRead`；C2 = `ExternalReadsStable`；C3 = `CommitOrdered`。C2/C3 目前是前提谓词：C3 的 `effectsBeforeCommit` / `alignedAtomicPcWrite` 在模型里是 `True` 占位，需在 runtime/编译器模型里细化。
+
+### 7.2 可执行判据
+
+- `layout/src/fusion.rs` 提供 `per_instruction_ok`（C1）、`no_future_read`（C1'）、`later_write_recovered`（C1*）、`block_admissible`（C1 ∧ C1*）。**任何融合实现都必须调用 `block_admissible`**，不满足即退回 Δ=1，不允许「尽力而为」。
+- `layout/tests/fusion_block_check.rs` 用 `[b = a; a = 1]` 断言：逐指令检查放过、块级检查拒绝；另加正例 `[a = 1; b = a; a = 2]` 与 inplace 反例。运行：`cd layout && cargo test --test fusion_block_check`（当前 4/4 通过）。
+
+### 7.3 未完成项清单
+
+1. T1/T2 本轮不证；步定义等「周期块」重写后再补。
+2. T3 的 compiler 侧 `starts` 产出未证。
+3. C2/C3 的模型细化（外部读稳定的执行器判定、提交顺序的 pc/内存序语义）。
+4. inplace 进融合块的切块规则（走 P2c 上溯）尚未接到本骨架。
