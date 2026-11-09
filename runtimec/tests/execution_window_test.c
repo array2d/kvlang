@@ -38,6 +38,7 @@
 #include "binrwir/execution_exit.h"
 #include "binrwir/instruction.h"
 #include "binrwir/operation_identifiers.h"
+#include "binrwir/registry.h"
 #include "binrwir/binfunc.h"
 #include "binrwir/signature.h"
 #include "binrwir_compiler/compiler.h"

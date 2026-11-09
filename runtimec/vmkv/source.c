@@ -244,9 +244,21 @@ static vmkv_source_slot_t *vmkv_source_take_slot(
     return &function->slots[function->slot_count++];
 }
 
-/* 参数定义键 body：`name NUL def-langtype`。 */
+/* True when the type text ends with " inplace" after a non-empty type. */
+static bool vmkv_source_has_inplace_suffix(const char *type_name,
+                                           size_t type_size) {
+    static const char inplace_suffix[] = " inplace";
+    const size_t inplace_suffix_size = sizeof(inplace_suffix) - 1U;
+    return type_size > inplace_suffix_size &&
+           memcmp(type_name + (type_size - inplace_suffix_size),
+                  inplace_suffix, inplace_suffix_size) == 0;
+}
+
+/* Param key body: `name NUL langtype[ inplace]`; the suffix only on write params. */
 static bool vmkv_source_parse_parameter_definition(
-    const uint8_t *body, size_t body_size, vmkv_param_definition_t *output) {
+    const uint8_t *body, size_t body_size, bool read_side,
+    vmkv_param_definition_t *output) {
+    const size_t inplace_suffix_size = sizeof(" inplace") - 1U;
     *output = (vmkv_param_definition_t){0};
     size_t name_size = 0U;
     while (name_size < body_size && body[name_size] != 0U) {
@@ -255,14 +267,32 @@ static bool vmkv_source_parse_parameter_definition(
     if (name_size == 0U || name_size == body_size) {
         return false;
     }
-    const size_t type_size = body_size - name_size - 1U;
+    size_t type_size = body_size - name_size - 1U;
+    if (type_size == 0U) {
+        return false;
+    }
+    const char *type_name =
+        (const char *)(const void *)(body + name_size + 1U);
+    bool inplace = false;
+    if (vmkv_source_has_inplace_suffix(type_name, type_size)) {
+        if (read_side) {
+            return false;
+        }
+        type_size -= inplace_suffix_size;
+        inplace = true;
+        /* A doubled suffix is malformed. */
+        if (vmkv_source_has_inplace_suffix(type_name, type_size)) {
+            return false;
+        }
+    }
     if (type_size == 0U) {
         return false;
     }
     output->name = (const char *)(const void *)body;
     output->name_size = name_size;
-    output->type_name = (const char *)(const void *)(body + name_size + 1U);
+    output->type_name = type_name;
     output->type_name_size = type_size;
+    output->inplace = inplace;
     output->present = true;
     return true;
 }
@@ -344,7 +374,7 @@ static runtimec_status_t vmkv_source_read_parameter_key(
     if (table[index - 1U].present) {
         return RUNTIMEC_STATUS_SUCCESS;
     }
-    if (!vmkv_source_parse_parameter_definition(body, body_size,
+    if (!vmkv_source_parse_parameter_definition(body, body_size, read_side,
                                                 &table[index - 1U])) {
         return vmkv_source_fail(error, RUNTIMEC_STATUS_ERROR,
                                 VMKV_DIAG_MALFORMED_VALUE,
@@ -426,7 +456,7 @@ static runtimec_status_t vmkv_source_accept_listed_key(
                                     VMKV_DIAG_MALFORMED_KEY,
                                     "vmkv source: duplicate parameter key");
         }
-        if (!vmkv_source_parse_parameter_definition(body, body_size,
+        if (!vmkv_source_parse_parameter_definition(body, body_size, column < 0,
                                                     &table[index - 1U])) {
             return vmkv_source_fail(
                 error, RUNTIMEC_STATUS_ERROR, VMKV_DIAG_MALFORMED_VALUE,

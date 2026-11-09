@@ -45,6 +45,7 @@
 #include "contract/kvspace_access.h"
 #include "vmkv/rwir.h"
 #include "vmkv/source.h"
+#include "vmkv/vmkv_internal.h"
 
 #define EXPECT(condition)                                                      \
     do {                                                                       \
@@ -195,6 +196,9 @@ enum {
     TREE_EMPTY_OPCODE = 5,
     TREE_NO_PARAMETER = 6,
     TREE_BAD_PARAMETER = 7,
+    TREE_READ_INPLACE = 8,
+    TREE_DUP_INPLACE = 9,
+    TREE_QUOTED_SPACE = 10,
 };
 
 static void store_free(test_store_t *store) {
@@ -246,8 +250,25 @@ static void build_tree(test_store_t *store, int flags) {
         store_put(store, "/lib/sum.[0,-2]", (const uint8_t *)"n\0int64", 7U,
                   "def langtype");
     }
-    store_put(store, "/lib/sum.[0,1]", (const uint8_t *)"R\0int64", 7U,
-              "def langtype");
+    store_put(store, "/lib/sum.[0,1]",
+              (const uint8_t *)"R\0int64 inplace", 15U, "def langtype");
+    if (flags == TREE_READ_INPLACE) {
+        store_put(store, "/lib/sum.[0,-1]",
+                  (const uint8_t *)"a\0[]int64 inplace", 17U, "def langtype");
+    } else if (flags == TREE_DUP_INPLACE) {
+        store_put(store, "/lib/sum.[0,1]",
+                  (const uint8_t *)"R\0int64 inplace inplace", 23U,
+                  "def langtype");
+    } else if (flags == TREE_QUOTED_SPACE) {
+        /* Quoted types may contain spaces; only a trailing " inplace" is a modifier. */
+        static const char read_body[] = "a\0'[int64, int64]'[]char/utf32";
+        static const char write_body[] =
+            "R\0'[int64, int64]'[]char/utf32 inplace";
+        store_put(store, "/lib/sum.[0,-1]", (const uint8_t *)read_body,
+                  sizeof(read_body) - 1U, "def langtype");
+        store_put(store, "/lib/sum.[0,1]", (const uint8_t *)write_body,
+                  sizeof(write_body) - 1U, "def langtype");
+    }
     if (flags != TREE_BAD_PARAMETER) {
         /* 上面的参数已写好；BAD_PARAMETER 用无 NUL 的 body 覆盖第一条。 */
     } else {
@@ -449,6 +470,42 @@ static void test_happy_path(void) {
     store_free(&store);
 }
 
+/* A quoted type containing a space opens; the write param keeps its inplace flag. */
+static void test_quoted_type_with_space(void) {
+    test_store_t store = {0};
+    if (!store_open(&store)) {
+        fprintf(stderr, "SKIP: cannot connect kvspace\n");
+        return;
+    }
+    build_tree(&store, TREE_QUOTED_SPACE);
+    runtimec_kvspace_access_t *services = NULL;
+    runtimec_error_t error;
+    runtimec_error_reset(&error);
+    EXPECT(init_services(&store, NULL, &services, &error));
+    runtimec_snapshot_t snapshot;
+    vmkv_function_source_t *function = NULL;
+    const runtimec_string_view_t path =
+        RUNTIMEC_STRING_VIEW_LITERAL("/lib/sum");
+    const runtimec_status_t open_status = vmkv_source_open_function(
+        services, path, &function, &snapshot, &error);
+    EXPECT(open_status == RUNTIMEC_STATUS_SUCCESS);
+    if (open_status == RUNTIMEC_STATUS_SUCCESS && function != NULL) {
+        static const char quoted[] = "'[int64, int64]'[]char/utf32";
+        const size_t quoted_size = sizeof(quoted) - 1U;
+        const vmkv_param_definition_t *read = &function->read_parameters[0];
+        const vmkv_param_definition_t *write = &function->write_parameters[0];
+        EXPECT(read->present && !read->inplace);
+        EXPECT(read->type_name_size == quoted_size &&
+               memcmp(read->type_name, quoted, quoted_size) == 0);
+        EXPECT(write->present && write->inplace);
+        EXPECT(write->type_name_size == quoted_size &&
+               memcmp(write->type_name, quoted, quoted_size) == 0);
+        EXPECT(vmkv_source_close_function(function) == RUNTIMEC_STATUS_SUCCESS);
+    }
+    (void)runtimec_kvspace_access_destroy(services, &error);
+    store_free(&store);
+}
+
 typedef struct malformed_case {
     int flags;
     runtimec_status_t expected_status;
@@ -465,6 +522,8 @@ static void test_malformed(void) {
         {TREE_BAD_ANCHOR, RUNTIMEC_STATUS_ERROR, 5},
         {TREE_NO_PARAMETER, RUNTIMEC_STATUS_ERROR, 7},
         {TREE_BAD_PARAMETER, RUNTIMEC_STATUS_ERROR, 5},
+        {TREE_READ_INPLACE, RUNTIMEC_STATUS_ERROR, 5},
+        {TREE_DUP_INPLACE, RUNTIMEC_STATUS_ERROR, 5},
         {TREE_NO_OPCODE, RUNTIMEC_STATUS_ERROR, 8},
         {TREE_MISSING_READ_SLOT, RUNTIMEC_STATUS_ERROR, 9},
         {TREE_EMPTY_OPCODE, RUNTIMEC_STATUS_ERROR, 10},
@@ -577,6 +636,7 @@ static void test_invalid_request(void) {
 int main(void) {
     test_happy_path();
     test_malformed();
+    test_quoted_type_with_space();
     test_host_read_failure();
     test_invalid_request();
     if (failures != 0) {

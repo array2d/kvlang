@@ -947,6 +947,30 @@ pub fn sig_lookup<'a>(sigs: &'a SigTable, op: &str) -> Option<&'a ast::FuncSig> 
         .or_else(|| native_rwir_signatures().get(key))
 }
 
+/// Signature of a native rwir from the generated declaration table.
+pub fn native_rwir_sig(name: &str) -> Option<&'static ast::FuncSig> {
+    native_rwir_signatures().get(name)
+}
+
+/// Operator names runtimec implements (`myrwircaps.c` is the single name-level source).
+const NATIVE_CATALOG: &str = include_str!("../../runtimec/specification/myrwircaps.c");
+
+/// Whether `name` is a runtimec catalog operator.
+pub fn native_catalog_has(name: &str) -> bool {
+    static NAMES: std::sync::OnceLock<HashSet<String>> = std::sync::OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            /* rows look like `{"name", RUNTIMEC_MYRWIRCAPS_ORIGIN_...},` */
+            NATIVE_CATALOG
+                .lines()
+                .filter_map(|line| line.trim().strip_prefix("{\""))
+                .filter_map(|rest| rest.split_once("\", RUNTIMEC_MYRWIRCAPS_ORIGIN_"))
+                .map(|(name, _)| name.to_string())
+                .collect()
+        })
+        .contains(name)
+}
+
 /// 将函数体中 if/while 控制流降级为 ScopeStmt + br/goto，展开复合表达式。
 /// Parser reports invalid control flow with source positions; this falls back to `Err` without panicking.
 /*
@@ -5224,171 +5248,304 @@ fn check_one_call_shape(
 /// `*acc + d -> *acc` 拆成 `_1 = *[0,1]; *[0,1] = add(_1, d)`——读与写落在**两条**
 /// 指令上，第 3 条判据就永远不成立。用源级 AST 判，读参 `*acc` 与写槽 `*acc` 都在
 /// 同一条语句里，判据才是它字面上的意思。
-pub fn check_inplace_parameters(fn_: &Func, diags: &mut Vec<Diagnostic>) {
-    let inplace_names: Vec<(String, String)> = fn_
-        .sig
-        .returns
+///
+/// A call whose callee marks write position j `inplace` reads and writes slot j. Same-unit
+/// rwfuncs earn that credit only once their own marks verify (least fixpoint, so recursion
+/// never justifies itself); see [`InplaceCallee`].
+pub fn check_inplace_unit(
+    facts: &[InplaceFacts],
+    resolve: &dyn Fn(&str) -> InplaceCallee,
+) -> Vec<Vec<Diagnostic>> {
+    let resolved: Vec<Vec<InplaceCallee>> = facts
+        .iter()
+        .map(|f| f.calls.iter().map(|(callee, _)| resolve(callee)).collect())
+        .collect();
+    /* (read, written, same instruction) for `name` under the current credits. */
+    let judge = |fi: usize, name: &str, credited: &[Vec<bool>]| -> (bool, bool, bool) {
+        let f = &facts[fi];
+        let delegated = f.calls.iter().zip(&resolved[fi]).any(|((_, slots), callee)| {
+            slots.iter().enumerate().any(|(j, slot)| {
+                slot == name
+                    && match callee {
+                        InplaceCallee::Unit(g) => credited[*g].get(j).copied().unwrap_or(false),
+                        InplaceCallee::Marks(marks) => marks.get(j).copied().unwrap_or(false),
+                        InplaceCallee::Unknown => false,
+                    }
+            })
+        });
+        (
+            f.reads.contains(name) || delegated,
+            f.writes.contains(name),
+            f.same.contains(name) || delegated,
+        )
+    };
+    let mut credited: Vec<Vec<bool>> = facts.iter().map(|f| vec![false; f.nwrites]).collect();
+    loop {
+        let mut changed = false;
+        for (fi, f) in facts.iter().enumerate() {
+            for (name, k) in &f.marks {
+                if !credited[fi][*k] && judge(fi, name, &credited) == (true, true, true) {
+                    credited[fi][*k] = true;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    facts
         .iter()
         .enumerate()
-        .filter(|(_, p)| p.inplace)
-        .map(|(index, p)| (p.name.clone(), format!("*[0,{}]", index + 1)))
-        .collect();
-    if inplace_names.is_empty() {
+        .map(|(fi, f)| {
+            let mut diags = Vec::new();
+            for (name, k) in &f.marks {
+                if credited[fi][*k] {
+                    continue;
+                }
+                let (read, written, _) = judge(fi, name, &credited);
+                let message = if !read {
+                    format!("inplace 写参 `{name}` 在函数体内从未被读；`inplace` 要求「同一指令内既读又写」")
+                } else if !written {
+                    format!("inplace 写参 `{name}` 在函数体内从未被写；`inplace` 要求「同一指令内既读又写」")
+                } else {
+                    format!(
+                        "inplace 写参 `{name}` 只是「先读后写」或「先写后读」，没有**同一条指令**同时读写它——那不是 inplace，请去掉修饰符"
+                    )
+                };
+                push_write_diag(&mut diags, message);
+            }
+            diags
+        })
+        .collect()
+}
+
+/// How a callee's `inplace` marks count in [`check_inplace_unit`].
+#[derive(Clone)]
+pub enum InplaceCallee {
+    /// Index of a same-unit rwfunc: credited per mark once that mark verifies.
+    Unit(usize),
+    /// rwir declaration (unit, store or native) or store rwfunc: marks as declared.
+    Marks(Vec<bool>),
+    Unknown,
+}
+
+/// Source-level operand names of one function, normalized to parameter names.
+pub struct InplaceFacts {
+    marks: Vec<(String, usize)>,
+    nwrites: usize,
+    reads: HashSet<String>,
+    writes: HashSet<String>,
+    same: HashSet<String>,
+    /// (callee, normalized write slots) per instruction with an operator.
+    calls: Vec<(String, Vec<String>)>,
+}
+
+impl InplaceFacts {
+    pub fn callees(&self) -> impl Iterator<Item = &str> {
+        self.calls.iter().map(|(callee, _)| callee.as_str())
+    }
+}
+
+pub fn inplace_facts(fn_: &Func) -> InplaceFacts {
+    let mut coords: HashMap<String, String> = HashMap::new();
+    for (k, p) in fn_.sig.params.iter().enumerate() {
+        coords.insert(format!("[0,-{}]", k + 1), p.name.clone());
+    }
+    for (k, p) in fn_.sig.returns.iter().enumerate() {
+        coords.insert(format!("[0,{}]", k + 1), p.name.clone());
+    }
+    let mut facts = InplaceFacts {
+        marks: fn_
+            .sig
+            .returns
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.inplace)
+            .map(|(k, p)| (p.name.clone(), k))
+            .collect(),
+        nwrites: fn_.sig.returns.len(),
+        reads: HashSet::new(),
+        writes: HashSet::new(),
+        same: HashSet::new(),
+        calls: Vec::new(),
+    };
+    let mut positions: HashMap<String, String> = HashMap::new();
+    walk_inplace_usage(&fn_.body, &coords, &mut positions, &mut facts);
+    facts
+}
+
+/// Base name of an operand: members, subscripts, parens and `*` stripped; coordinates map to
+/// parameter names and `*_pN` (dynamic member write position) to the member's base.
+fn usage_name(
+    text: &str,
+    coords: &HashMap<String, String>,
+    positions: &HashMap<String, String>,
+) -> String {
+    let base = inplace_slot_base(text);
+    let bare = base.trim_start_matches('*');
+    if let Some(name) = coords.get(bare) {
+        return name.clone();
+    }
+    if text.trim_start().trim_start_matches('(').starts_with('*') {
+        if let Some(name) = positions.get(bare) {
+            return name.clone();
+        }
+    }
+    bare.to_string()
+}
+
+/// Slot base: cut at `·` and non-coordinate `[...]`, then `normalize_slot_name`.
+fn inplace_slot_base(text: &str) -> String {
+    let base = text.split(keytree::MEMBER_SEP).next().unwrap_or(text).trim();
+    let trimmed_star = base.trim_start_matches('*').trim();
+    let base = if !trimmed_star.starts_with('[') {
+        base.split('[').next().unwrap_or(base).trim()
+    } else {
+        base
+    };
+    normalize_slot_name(base).0
+}
+
+/// Operand names read by an expression; quoted literals (incl. static member keys) and jump
+/// labels are not reads.
+fn collect_operand_names(e: &Expr, out: &mut Vec<String>) {
+    if e.is_leaf() {
+        if e.quote == 0 && !e.val.is_empty() {
+            out.push(e.val.clone());
+        }
         return;
     }
-    let mut read_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut write_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut same_instruction: std::collections::HashSet<String> = std::collections::HashSet::new();
-    walk_inplace_usage(
-        &fn_.body,
-        &mut read_names,
-        &mut write_names,
-        &mut same_instruction,
-    );
-    for (name, coordinate) in &inplace_names {
-        /*
-         * 名字在源级 AST 里有三种写法，全部归一到裸名后比较：
-         *   `acc`      裸名（值读）
-         *   `*acc`     解引用（读或写）
-         *   `*(acc)`   解引用带括号（`flat()` 对复合基座的写法）
-         * 以及 lowering 之后的坐标形态 `*[0,+k]`。
-         *
-         * **归一用 `normalize_slot_name`**（既有唯一判据），不在这里另写剥括号。
-         */
-        let hit = |set: &std::collections::HashSet<String>| {
-            set.iter().any(|entry| {
-                let (bare, _) = normalize_slot_name(entry);
-                bare == name.as_str() || entry == coordinate
-            })
-        };
-        if !hit(&read_names) {
-            push_write_diag(
-                diags,
-                format!("inplace 写参 `{name}` 在函数体内从未被读；`inplace` 要求「同一指令内既读又写」"),
-            );
+    for (i, arg) in e.args.iter().enumerate() {
+        if e.op == "goto" || (e.op == "br" && i > 0) {
             continue;
         }
-        if !hit(&write_names) {
-            push_write_diag(
-                diags,
-                format!("inplace 写参 `{name}` 在函数体内从未被写；`inplace` 要求「同一指令内既读又写」"),
-            );
-            continue;
-        }
-        if !hit(&same_instruction) {
-            push_write_diag(
-                diags,
-                format!(
-                    "inplace 写参 `{name}` 只是「先读后写」或「先写后读」，没有**同一条指令**同时读写它——那不是 inplace，请去掉修饰符"
-                ),
-            );
-        }
+        collect_operand_names(arg, out);
     }
 }
 
-/// 递归收集一个表达式里出现的全部操作数名字（裸名、`*name`、`*(name)` 都算）。
-fn collect_operand_names(e: &Expr) -> Vec<String> {
-    if e.is_leaf() {
-        return if e.val.is_empty() {
-            Vec::new()
-        } else {
-            vec![e.val.clone()]
-        };
+/// Record one instruction's reads, writes and calls for the inplace check.
+fn record_inst_inplace_usage(
+    inst: &Instruction,
+    coords: &HashMap<String, String>,
+    positions: &mut HashMap<String, String>,
+    facts: &mut InplaceFacts,
+) {
+    /* Walk the expression tree: `flat()` returns "" for compound bases like `*(acc)`. */
+    let mut raw = Vec::new();
+    if let Some(e) = &inst.expr {
+        collect_operand_names(e, &mut raw);
     }
-    let mut names = Vec::new();
-    for arg in &e.args {
-        names.extend(collect_operand_names(arg));
+    let reads: Vec<String> = raw.iter().map(|r| usage_name(r, coords, positions)).collect();
+    let writes: Vec<String> = inst
+        .writes
+        .iter()
+        .map(|w| usage_name(w, coords, positions))
+        .collect();
+    if let Some(e) = &inst.expr {
+        /* `base·*k` writes desugar to `_pN := resolveptr(base, k); v -> *_pN`. */
+        if e.op == "kvspace/key·resolveptr" && inst.writes.len() == 1 {
+            let mut root = e;
+            while root.op == "kvspace/key·resolveptr" && !root.args.is_empty() {
+                root = &root.args[0];
+            }
+            /* Root is a leaf, or `(*m)` once `format` output is parsed again. */
+            let mut names = Vec::new();
+            collect_operand_names(root, &mut names);
+            if let [only] = names.as_slice() {
+                let base = usage_name(only, coords, positions);
+                positions.insert(inst.writes[0].clone(), base);
+            }
+        }
+        if !e.is_leaf() {
+            facts.calls.push((e.op.clone(), writes.clone()));
+        }
     }
-    names
+    /* Rule 3: this instruction reads and writes the same base (`acc`, `*acc`,
+     * `(*acc)·x` and `*[0,+k]` all normalize to it). */
+    for r in reads.iter().filter(|r| !r.is_empty()) {
+        facts.reads.insert(r.clone());
+        if writes.contains(r) {
+            facts.same.insert(r.clone());
+        }
+    }
+    for w in writes.iter().filter(|w| !w.is_empty()) {
+        facts.writes.insert(w.clone());
+    }
 }
 
-/// 扫一遍函数体，收集「被读过」「被写过」「同一条指令里既读又写」三种名字集合。
+/// Collect names read, written, and read+written by one instruction, plus calls.
 fn walk_inplace_usage(
     body: &[Stmt],
-    read_names: &mut std::collections::HashSet<String>,
-    write_names: &mut std::collections::HashSet<String>,
-    same_instruction: &mut std::collections::HashSet<String>,
+    coords: &HashMap<String, String>,
+    positions: &mut HashMap<String, String>,
+    facts: &mut InplaceFacts,
 ) {
     for st in body {
         match st {
-            Stmt::Instruction(inst) => {
-                /* 走**表达式树**而不是 `flat()`：`flat()` 对 `*(acc)` 这类复合基座
-                 * 返回空串（实测 `["d", ""]`），用它会漏掉解引用读参。 */
-                let reads: Vec<String> = inst
-                    .expr
-                    .as_ref()
-                    .map(collect_operand_names)
-                    .unwrap_or_default();
-                for r in &reads {
-                    read_names.insert(r.clone());
-                }
-                for w in &inst.writes {
-                    write_names.insert(w.clone());
-                }
-                /*
-                 * 第 3 条的判据：**本条指令**的 reads 与 writes 指向同一个名字。
-                 *
-                 * 两边**先归一再比**：读参在表达式树里是 `acc`，写槽在 `writes` 里
-                 * 是 `*acc` / `*[0,+k]`——字符串不等但指的是同一个形参。判据是
-                 * 「同一个名字」，不是「同一串字符」。
-                 */
-                for r in &reads {
-                    let (read_bare, _) = normalize_slot_name(r);
-                    for w in &inst.writes {
-                        let (write_bare, _) = normalize_slot_name(w);
-                        if read_bare == write_bare {
-                            same_instruction.insert(read_bare.clone());
-                        }
-                    }
-                }
-            }
-            Stmt::Scope(s) => walk_inplace_usage(
-                &s.body,
-                read_names,
-                write_names,
-                same_instruction,
-            ),
+            Stmt::Instruction(inst) => record_inst_inplace_usage(inst, coords, positions, facts),
+            Stmt::Scope(s) => walk_inplace_usage(&s.body, coords, positions, facts),
             Stmt::If(s) => {
                 if let Some(c) = &s.cond {
-                    let reads = c.flat().1;
-                    for r in &reads {
-                        read_names.insert(r.clone());
-                    }
-                    for w in &c.writes {
-                        write_names.insert(w.clone());
-                    }
-                    for r in &reads {
-                        if c.writes.iter().any(|w| w == r) {
-                            same_instruction.insert(r.clone());
-                        }
-                    }
+                    record_inst_inplace_usage(c, coords, positions, facts);
                 }
-                walk_inplace_usage(&s.then_, read_names, write_names, same_instruction);
-                walk_inplace_usage(&s.else_, read_names, write_names, same_instruction);
+                walk_inplace_usage(&s.then_, coords, positions, facts);
+                walk_inplace_usage(&s.else_, coords, positions, facts);
             }
             Stmt::While(s) => {
                 if let Some(c) = &s.cond {
-                    let reads = c.flat().1;
-                    for r in &reads {
-                        read_names.insert(r.clone());
-                    }
-                    for w in &c.writes {
-                        write_names.insert(w.clone());
-                    }
-                    for r in &reads {
-                        if c.writes.iter().any(|w| w == r) {
-                            same_instruction.insert(r.clone());
-                        }
-                    }
+                    record_inst_inplace_usage(c, coords, positions, facts);
                 }
-                walk_inplace_usage(&s.body, read_names, write_names, same_instruction);
+                walk_inplace_usage(&s.body, coords, positions, facts);
             }
             Stmt::For(s) => {
-                walk_inplace_usage(&s.body, read_names, write_names, same_instruction)
+                let mut raw = Vec::new();
+                collect_operand_names(&s.iter, &mut raw);
+                for r in raw {
+                    facts.reads.insert(usage_name(&r, coords, positions));
+                }
+                walk_inplace_usage(&s.body, coords, positions, facts);
             }
             _ => {}
         }
     }
+}
+
+/// A `for` variable named like a parameter would be emitted as that parameter's slot.
+pub fn check_for_shadowing(fn_: &Func, diags: &mut Vec<Diagnostic>) {
+    fn walk(body: &[Stmt], names: &HashSet<&str>, diags: &mut Vec<Diagnostic>) {
+        for st in body {
+            match st {
+                Stmt::For(s) => {
+                    if names.contains(s.var.as_str()) {
+                        push_write_diag(
+                            diags,
+                            format!(
+                                "for-loop variable `{}` shadows a parameter of the same name; rename it",
+                                s.var
+                            ),
+                        );
+                    }
+                    walk(&s.body, names, diags);
+                }
+                Stmt::Scope(s) => walk(&s.body, names, diags),
+                Stmt::If(s) => {
+                    walk(&s.then_, names, diags);
+                    walk(&s.else_, names, diags);
+                }
+                Stmt::While(s) => walk(&s.body, names, diags),
+                _ => {}
+            }
+        }
+    }
+    let names: HashSet<&str> = fn_
+        .sig
+        .params
+        .iter()
+        .chain(&fn_.sig.returns)
+        .map(|p| p.name.as_str())
+        .collect();
+    walk(&fn_.body, &names, diags);
 }
 
 pub fn validate_writes(

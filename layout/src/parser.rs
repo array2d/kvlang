@@ -816,10 +816,6 @@ impl Parser {
     /// `T $name` 标量值复制。**类型在前、`$name` 在后**；`$` 只是声明的标记，
     /// 解析后剥掉——函数体内的引用写裸名（指针参数写 `*name`）。
     /// 旧写法 `name: type` 不再接受。
-    fn parse_param_list(&mut self, stop: Kind) -> Vec<Param> {
-        self.parse_param_list_side(stop, false)
-    }
-
     /// `is_read_side` = 本次解析的是读参列表（`(` 那一侧）还是写参列表（`-> (` 那一侧）。
     fn parse_param_list_side(&mut self, stop: Kind, is_read_side: bool) -> Vec<Param> {
         let mut params = Vec::new();
@@ -925,7 +921,7 @@ impl Parser {
                         warn: false,
                         info: false,
                         message: format!(
-                            "`inplace` 只能修饰 rwfunc 的写参；读参 `{name}` 不得标记"
+                            "`inplace` 只能修饰 rwfunc 或 rwir 的写参；读参 `{name}` 不得标记"
                         ),
                         source: String::new(),
                         src_file: String::new(),

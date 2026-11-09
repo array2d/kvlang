@@ -32,38 +32,23 @@ pub fn init_dirs(kv: &mut Kv) -> Result<(), String> {
 /// 裸顶层语句 → `init`），供消费方按 lib 声明驱动 init（非文件系统路径推导）。
 pub fn compile(kv: &mut Kv, src: &str) -> Result<Vec<String>, String> {
     // Run all pure checks first (shared with `vet`) so errors never leave partial writes.
-    let checked = analyze_file(src)?;
+    let checked = analyze_file(src, &mut |name| store_callee(kv, name))?;
     let file = &checked.file;
 
     let mut inits: Vec<String> = Vec::new();
-    let local_funcs: HashSet<String> = file
-        .funcs
-        .iter()
-        .map(|f| {
-            let pkg = if f.pkg.is_empty() {
-                &file.package
-            } else {
-                &f.pkg
-            };
-            if pkg.is_empty() {
-                f.sig.name.clone()
-            } else {
-                format!("{pkg}{}{name}", keytree::MEMBER_SEP, name = f.sig.name)
-            }
-        })
-        .collect();
-    // Write order: struct decls -> rwfuncs -> rwir decls -> top-level init.
+    let local_funcs = unit_func_names(file);
+    // Write order: struct decls -> rwir decls -> rwfuncs -> top-level init.
     for decl in &file.structs {
         write_struct_decl(kv, decl)?;
+    }
+    for decl in &file.rwir_decls {
+        write_rwir_decl(kv, decl)?;
     }
     for a in &checked.funcs {
         write_func(kv, a, &local_funcs, &checked.structs)?;
         if a.is_init {
             inits.push(init_fn_name(&a.pkg));
         }
-    }
-    for decl in &file.rwir_decls {
-        write_rwir_decl(kv, decl)?;
     }
     if let Some(a) = &checked.top_init {
         write_func(kv, a, &local_funcs, &checked.structs)?;
@@ -88,7 +73,10 @@ pub struct AnalyzedFunc {
     /// 该函数的 crash/resume 判定（`layout/src/crash_resume.rs`）。
     /// **只读产物**：不参与代码生成，只随 layout 结果一起外送，
     /// 供 dump 与驱动判定「这个函数崩溃后能不能重放」。
-    crash_resume: crash_resume::Resumability,
+    /// Filled by `analyze_file` once the whole unit is analyzed.
+    crash_resume: Option<crash_resume::Resumability>,
+    /// Slot langtype per write position of `seq` (crash/resume kill and member rules).
+    slot_types: Vec<Vec<String>>,
 }
 
 /// Output of [`analyze_file`]: parsed AST plus analyzed rwfuncs and optional top-level init.
@@ -152,7 +140,216 @@ fn collect_struct_table(file: &ast::File) -> lower::StructTable {
     structs
 }
 
-fn analyze_file(src: &str) -> Result<CheckedFile, String> {
+/// A callee laid out earlier into the store: `inplace` per write position.
+pub enum StoreCallee {
+    Rwfunc(Vec<bool>),
+    DefRwir(Vec<bool>),
+}
+
+/// Store lookup mirroring `opcode_value`: an rwfunc directory wins over a `def rwir`.
+fn store_callee(kv: &mut Kv, op: &str) -> Option<StoreCallee> {
+    let name = op.strip_prefix("/lib/").unwrap_or(op);
+    if name.is_empty() {
+        return None;
+    }
+    let dir = format!("/lib/{name}/");
+    if kvkind::kind(&kv.get_one(&dir), &kv.langtype_of(&dir)) == kvkind::KIND_RWFUNC {
+        let (nr, nw, dynamic) = kvkind::counts(&kv.get_one(&format!("{dir}[0,0]")));
+        let sig = reconstruct_sig(kv, &dir, name, nr, nw, dynamic);
+        return Some(StoreCallee::Rwfunc(sig.returns.iter().map(|p| p.inplace).collect()));
+    }
+    let decl = keytree::rwir(name);
+    let value = kv.get_one(&decl);
+    if kvkind::kind(&value, &kv.langtype_of(&decl)) == kvkind::KIND_DEF_RWIR {
+        let (_, nw, _) = kvkind::counts(&value);
+        let marks = (1..=nw)
+            .map(|k| {
+                kvkind::def_langtype_full(&kv.get_one(&format!("{decl}/[0,{k}]")))
+                    .is_some_and(|(_, inplace)| inplace)
+            })
+            .collect();
+        return Some(StoreCallee::DefRwir(marks));
+    }
+    None
+}
+
+/// Call names this compile unit defines.
+struct UnitNames {
+    funcs: HashMap<String, usize>,
+    rwirs: HashMap<String, Vec<bool>>,
+}
+
+impl UnitNames {
+    fn new(file: &ast::File) -> Self {
+        let qualify = |pkg: &str, name: &str| {
+            if pkg.is_empty() {
+                name.to_string()
+            } else {
+                format!("{pkg}{}{name}", keytree::MEMBER_SEP)
+            }
+        };
+        /* Last definition wins, as in the store (writes happen in file order). */
+        let mut funcs = HashMap::new();
+        for (i, f) in file.funcs.iter().enumerate() {
+            let pkg = if f.pkg.is_empty() { &file.package } else { &f.pkg };
+            funcs.insert(qualify(pkg, &f.sig.name), i);
+            funcs.insert(qualify(&f.pkg, &f.sig.name), i);
+        }
+        let mut rwirs = HashMap::new();
+        for d in &file.rwir_decls {
+            rwirs.insert(
+                qualify(&d.pkg, &d.sig.name),
+                d.sig.returns.iter().map(|p| p.inplace).collect(),
+            );
+        }
+        UnitNames { funcs, rwirs }
+    }
+}
+
+/// Memoized store lookups for one `analyze_file` run.
+struct Externals<'a> {
+    lookup: &'a mut dyn FnMut(&str) -> Option<StoreCallee>,
+    cache: HashMap<String, Option<StoreCallee>>,
+}
+
+impl Externals<'_> {
+    fn get(&mut self, name: &str) -> Option<&StoreCallee> {
+        if !self.cache.contains_key(name) {
+            let found = (self.lookup)(name);
+            self.cache.insert(name.to_string(), found);
+        }
+        self.cache.get(name).and_then(Option::as_ref)
+    }
+}
+
+fn inplace_callee(name: &str, unit: &UnitNames, ext: &mut Externals) -> lower::InplaceCallee {
+    let name = name.strip_prefix("/lib/").unwrap_or(name);
+    if let Some(&i) = unit.funcs.get(name) {
+        return lower::InplaceCallee::Unit(i);
+    }
+    /* Emitted as the builtin even if an rwir decl reuses the word. */
+    if is_operator_word(name) {
+        return lower::InplaceCallee::Unknown;
+    }
+    if let Some(marks) = unit.rwirs.get(name) {
+        return lower::InplaceCallee::Marks(marks.clone());
+    }
+    match ext.get(name) {
+        Some(StoreCallee::Rwfunc(marks) | StoreCallee::DefRwir(marks)) => {
+            return lower::InplaceCallee::Marks(marks.clone())
+        }
+        None => {}
+    }
+    match lower::native_rwir_sig(name) {
+        Some(sig) => lower::InplaceCallee::Marks(sig.returns.iter().map(|p| p.inplace).collect()),
+        None => lower::InplaceCallee::Unknown,
+    }
+}
+
+/// Callee of a lowered step, in `opcode_value` order: operator, unit rwfunc, store rwfunc,
+/// then rwirs. A verified runtimec op wins over any declaration of the same name.
+fn step_callee(
+    inst: &Instruction,
+    op: &str,
+    unit: &UnitNames,
+    ext: &mut Externals,
+) -> crash_resume::Callee {
+    use crash_resume::Callee;
+    if matches!(op, "" | "goto" | "br" | "return") {
+        return Callee::None;
+    }
+    let verified = |name: &str| match crash_resume::op_spec(name) {
+        Some(spec) => Callee::Op(spec),
+        None => Callee::Unverified(name.to_string()),
+    };
+    if inst.operator || op == "=" {
+        return verified(op);
+    }
+    let name = op.strip_prefix("/lib/").unwrap_or(op);
+    if let Some(&i) = unit.funcs.get(name) {
+        return Callee::Unit(i);
+    }
+    if let Some(StoreCallee::Rwfunc(_)) = ext.get(name) {
+        return Callee::Store(name.to_string());
+    }
+    if let Some(spec) = crash_resume::op_spec(name) {
+        return Callee::Op(spec);
+    }
+    let declared = unit.rwirs.contains_key(name)
+        || matches!(ext.get(name), Some(StoreCallee::DefRwir(_)))
+        || lower::native_rwir_sig(name).is_some()
+        || lower::native_catalog_has(name);
+    if declared {
+        return Callee::Unverified(name.to_string());
+    }
+    Callee::Unknown(name.to_string())
+}
+
+/// Slot type of every local from its write slots; disagreeing writes leave it unknown.
+fn local_slot_types(a: &AnalyzedFunc) -> HashMap<String, String> {
+    let mut types: HashMap<String, String> = HashMap::new();
+    for (inst, slot_types) in a.seq.iter().zip(&a.slot_types) {
+        for (w, ty) in inst.writes.iter().zip(slot_types) {
+            if ty.is_empty() || !w.chars().all(|c| c == '_' || c.is_alphanumeric()) {
+                continue;
+            }
+            match types.get(w) {
+                Some(seen) if seen != ty => {
+                    types.insert(w.clone(), String::new());
+                }
+                Some(_) => {}
+                None => {
+                    types.insert(w.clone(), ty.clone());
+                }
+            }
+        }
+    }
+    types
+}
+
+fn crash_resume_input(
+    a: &AnalyzedFunc,
+    unit: &UnitNames,
+    ext: &mut Externals,
+) -> crash_resume::FunctionInput {
+    let sig = &a.func.sig;
+    /* What one deref of the bound storage yields: `**T` a pointer, `*T`/`T` a T. */
+    let param = |p: &Param| crash_resume::ParamInfo {
+        name: p.name.clone(),
+        inplace: p.inplace,
+        value: !p.by_ref.contains('@')
+            && (p.by_ref.len() >= 2 || crash_resume::value_type(&p.ty)),
+    };
+    crash_resume::FunctionInput {
+        name: sig.name.clone(),
+        reads: sig.params.iter().map(param).collect(),
+        writes: sig.returns.iter().map(param).collect(),
+        steps: a
+            .seq
+            .iter()
+            .zip(&a.slot_types)
+            .map(|(inst, slot_types)| {
+                let (op, reads) = inst.flat();
+                let callee = step_callee(inst, &op, unit, ext);
+                crash_resume::StepInput {
+                    op,
+                    reads,
+                    writes: inst.writes.clone(),
+                    write_types: slot_types.clone(),
+                    callee,
+                }
+            })
+            .collect(),
+        label_starts: a.labels.values().map(|&start| (start.max(1) - 1) as usize).collect(),
+        local_types: local_slot_types(a),
+    }
+}
+
+/// `store` resolves callees laid out earlier (`|_| None` for store-free vetting).
+fn analyze_file(
+    src: &str,
+    store: &mut dyn FnMut(&str) -> Option<StoreCallee>,
+) -> Result<CheckedFile, String> {
     let (file, mut diags) = parser::parse_code(src)?;
     let structs = collect_struct_table(&file);
     for f in subscript_check_funcs(&file) {
@@ -184,6 +381,23 @@ fn analyze_file(src: &str) -> Result<CheckedFile, String> {
         sigs.entry(qual).or_insert_with(|| d.sig.clone());
     }
     let structs = collect_struct_table(&file);
+    let unit = UnitNames::new(&file);
+    let mut ext = Externals {
+        lookup: store,
+        cache: HashMap::new(),
+    };
+    /* `inplace` deep check over the whole unit (callee credit is a least fixpoint). */
+    let facts: Vec<lower::InplaceFacts> = file.funcs.iter().map(lower::inplace_facts).collect();
+    let mut credit: HashMap<String, lower::InplaceCallee> = HashMap::new();
+    for name in facts.iter().flat_map(|f| f.callees()) {
+        if !credit.contains_key(name) {
+            credit.insert(name.to_string(), inplace_callee(name, &unit, &mut ext));
+        }
+    }
+    let mut inplace_diags = lower::check_inplace_unit(&facts, &|name| {
+        credit.get(name).cloned().unwrap_or(lower::InplaceCallee::Unknown)
+    })
+    .into_iter();
     let mut funcs: Vec<AnalyzedFunc> = Vec::new();
     for func in &file.funcs {
         let pkg = if func.pkg.is_empty() {
@@ -191,7 +405,8 @@ fn analyze_file(src: &str) -> Result<CheckedFile, String> {
         } else {
             func.pkg.clone()
         };
-        funcs.push(analyze_func(func, pkg, &structs, &sigs)?);
+        let own = inplace_diags.next().unwrap_or_default();
+        funcs.push(analyze_func(func, pkg, &structs, &sigs, own)?);
     }
     let mut body = file.init_body.clone();
     for c in &file.top_level_calls {
@@ -209,7 +424,16 @@ fn analyze_file(src: &str) -> Result<CheckedFile, String> {
             body,
             pkg: String::new(),
         };
-        top_init = Some(analyze_func(&init_fn, String::new(), &structs, &sigs)?);
+        top_init = Some(analyze_func(&init_fn, String::new(), &structs, &sigs, Vec::new())?);
+    }
+    let inputs: Vec<crash_resume::FunctionInput> = funcs
+        .iter()
+        .chain(top_init.iter())
+        .map(|a| crash_resume_input(a, &unit, &mut ext))
+        .collect();
+    let verdicts = crash_resume::analyze_unit(&inputs);
+    for (a, verdict) in funcs.iter_mut().chain(top_init.iter_mut()).zip(verdicts) {
+        a.crash_resume = Some(verdict);
     }
     if funcs.is_empty()
         && top_init.is_none()
@@ -232,6 +456,7 @@ fn analyze_func(
     pkg: String,
     structs: &lower::StructTable,
     sigs: &lower::SigTable,
+    inplace_diags: Vec<crate::scanner::Diagnostic>,
 ) -> Result<AnalyzedFunc, String> {
     // Annotate call-site return types from `sigs` before lowering.
     let mut src = func.clone();
@@ -243,9 +468,10 @@ fn analyze_func(
     // 形状校验必须在 lower **之前**：`flatten_expr` 会把 `f([1,2,3,4])` 的实参
     // 物化成临时槽，此后容器字面量不复存在，形状再也比不了。
     let mut shape_diags = lower::check_call_shapes(&src, sigs);
-    /* `inplace` 的深度校验同样必须在 lower **之前**（见 `check_inplace_parameters`
-     * 的注释：lowering 会把读写拆到两条指令上）。 */
-    lower::check_inplace_parameters(&src, &mut shape_diags);
+    /* The inplace check runs on source ASTs before lowering, per compile unit;
+     * the caller passes its result in. */
+    shape_diags.extend(inplace_diags);
+    lower::check_for_shadowing(&src, &mut shape_diags);
     let mut fn_ = lower::lower_func(&src, structs)?;
     let type_map = lower::infer_types(&fn_, structs);
     // 合成表：形参行是 Value 形态、写槽行是源级形态；优先级见
@@ -293,6 +519,7 @@ fn analyze_func(
      * 而不是让 `specialize` 自己去补查——那会造出第二个查询面。 */
     /* 形参坐标表：名字 → `*[0,±k]`。`(*p)·v` 摊出的临时槽承接的是**坐标形态**
      * `[0,-1]`，而各类型表的键是形参名——反查要靠这张表（见 `value_type_of`）。 */
+    let mut slot_types: Vec<Vec<String>> = Vec::with_capacity(seq.len());
     let mut slot_coord: HashMap<String, String> = HashMap::new();
     for (index, parameter) in fn_.sig.params.iter().enumerate() {
         slot_coord.insert(parameter.name.clone(), format!("*[0,-{}]", index + 1));
@@ -342,6 +569,27 @@ fn analyze_func(
             &declared,
             &stable,
         );
+        /* Same resolver `write_func` uses for slot langtypes. */
+        for inst in &seq {
+            slot_types.push(
+                (0..inst.writes.len())
+                    .map(|j| {
+                        write_slot_type(
+                            inst,
+                            j,
+                            &inst.writes[j],
+                            &param_langtype,
+                            &source_langtypes,
+                            &declared,
+                            &declared_source,
+                            &type_sets,
+                            structs,
+                            &stable,
+                        )
+                    })
+                    .collect(),
+            );
+        }
     }
     // Validate instruction arity before touching kvspace (shared by `vet` and `compile`).
     for inst in &seq {
@@ -352,24 +600,6 @@ fn analyze_func(
         check_sub_arity(&op, reads.len(), inst.writes.len())
             .map_err(|e| format!("{}: {e}", fn_.sig.name))?;
     }
-    let crash_resume = crash_resume::analyze(&crash_resume::FunctionFlow {
-        name: fn_.sig.name.clone(),
-        nodes: seq
-            .iter()
-            .enumerate()
-            .map(|(index, inst)| {
-                let (operator, reads, writes) = crash_resume_slots(inst);
-                crash_resume::RwirNode {
-                    identifier: index,
-                    inplace: crash_resume::is_inplace_node(&operator, &reads, &writes),
-                    operator,
-                    reads,
-                    writes,
-                }
-            })
-            .collect(),
-        written_globals: Default::default(),
-    });
     Ok(AnalyzedFunc {
         is_init: func.sig.name == "init",
         pkg,
@@ -379,25 +609,9 @@ fn analyze_func(
         stable,
         seq,
         labels,
-        crash_resume,
+        slot_types,
+        crash_resume: None,
     })
-}
-
-/// 从一条指令取出 (算子名, 读槽名集, 写槽名集)，供 crash/resume 分析用。
-///
-/// **只取槽名文本**：本分析判的是「读写是否同槽」，不关心类型与 key 形状。
-/// 写槽直接用 `writes`；读槽取表达式里的叶子名（复合表达式取不到名字 ⇒ 空，
-/// 由 `is_inplace_node` 按保守处理）。
-fn crash_resume_slots(inst: &Instruction) -> (String, Vec<String>, Vec<String>) {
-    let (operator, reads) = inst.flat();
-    let mut read_slots: Vec<String> = Vec::new();
-    for read in &reads {
-        let name = read.trim_start_matches('*').to_string();
-        if !name.is_empty() {
-            read_slots.push(name);
-        }
-    }
-    (operator, read_slots, inst.writes.clone())
 }
 
 /// 待做 `[]` 下标校验的函数集合：显式 funcs + init_body/top_level_calls 合成的 init。
@@ -452,7 +666,7 @@ pub fn format(src: &str) -> Result<String, String> {
 /// 的算子，在 `vet` 下与 `compile` 下会给出**相反**的结论。
 pub fn vet(src: &str) -> Result<(), String> {
     // Shares `analyze_file` with `compile`; state-dependent checks run only in `compile`.
-    analyze_file(src).map(|_| ())
+    analyze_file(src, &mut |_| None).map(|_| ())
 }
 
 /// 带 store 的校验：在 [`vet`] 的纯检查之上，再跑一遍与 `compile` **同一条**调用名检查。
@@ -460,24 +674,16 @@ pub fn vet(src: &str) -> Result<(), String> {
 /// `store` 里必须有被调算子的声明（如 runtime boot 时发布的 `def rwir`），
 /// 否则结论与 `compile` 相同——两者用同一个 `check_call_names`，不另立判据。
 pub fn vet_with_store(kv: &mut Kv, src: &str) -> Result<(), String> {
-    let checked = analyze_file(src)?;
-    let file = &checked.file;
-    let local_funcs: HashSet<String> = file
-        .funcs
-        .iter()
-        .map(|f| {
-            let pkg = if f.pkg.is_empty() {
-                &file.package
-            } else {
-                &f.pkg
-            };
-            if pkg.is_empty() {
-                f.sig.name.clone()
-            } else {
-                format!("{pkg}{}{name}", keytree::MEMBER_SEP, name = f.sig.name)
-            }
-        })
-        .collect();
+    let checked = analyze_file(src, &mut |name| store_callee(kv, name))?;
+    /* `compile` writes rwir decls before rwfuncs, so its store check sees them. */
+    let mut local_funcs = unit_func_names(&checked.file);
+    local_funcs.extend(
+        checked
+            .file
+            .rwir_decls
+            .iter()
+            .map(|d| qualify_name(&d.pkg, &d.sig.name)),
+    );
     for a in &checked.funcs {
         check_call_names(kv, &a.pkg, &a.seq, &local_funcs)?;
     }
@@ -485,6 +691,25 @@ pub fn vet_with_store(kv: &mut Kv, src: &str) -> Result<(), String> {
         check_call_names(kv, "", &a.seq, &local_funcs)?;
     }
     Ok(())
+}
+
+fn qualify_name(pkg: &str, name: &str) -> String {
+    if pkg.is_empty() {
+        name.to_string()
+    } else {
+        format!("{pkg}{}{name}", keytree::MEMBER_SEP)
+    }
+}
+
+/// Qualified names of this unit's rwfuncs, as calls name them.
+fn unit_func_names(file: &ast::File) -> HashSet<String> {
+    file.funcs
+        .iter()
+        .map(|f| {
+            let pkg = if f.pkg.is_empty() { &file.package } else { &f.pkg };
+            qualify_name(pkg, &f.sig.name)
+        })
+        .collect()
 }
 
 /// printlib：把 /lib 子树重构为可运行的 kvlang 源码（**只看 layout 结果，不读 `.src`**：
@@ -519,7 +744,9 @@ pub fn printlib(kv: &mut Kv, lib: &str) -> String {
         // 虚拟 pkg：func dir 以 prefix 为前缀（`/lib/foo` 匹配 `/lib/foo·*` 与 `/lib/foo/*`）。
         collect_funcs(kv, "/lib/", "", &mut funcs, &mut decls);
         let under = |dir: &str| {
-            dir.starts_with(&format!("{prefix}·")) || dir.starts_with(&format!("{prefix}/"))
+            dir == prefix
+                || dir.starts_with(&format!("{prefix}·"))
+                || dir.starts_with(&format!("{prefix}/"))
         };
         funcs.retain(|f| under(&f.dir));
         decls.retain(|d| {
@@ -589,9 +816,13 @@ fn collect_funcs(
         } else {
             format!("{pkg}/{base}")
         };
-        // 函数目录（含 [0,0] 签名槽）→ 重建源码；普通目录 → 递归；成员容器（· 结尾）→ 递归；否则声明叶。
+        // Function dir ([0,0]) -> source; def rwir -> decl and slots; dir or member container -> recurse; else leaf decl.
         let dir_sub = format!("{prefix}{base}/");
         let mem_sub = format!("{prefix}{base}·");
+        let key = format!("{prefix}{base}");
+        let v = kv.get_one(&key);
+        let is_rwir_decl =
+            !v.is_empty() && kvkind::kind(&v, &kv.langtype_of(&key)) == kvkind::KIND_DEF_RWIR;
         if is_func_dir(kv, &dir_sub) {
             let (fpkg, name) = func_identity(pkg, &base);
             let text = reconstruct(kv, &dir_sub, &name);
@@ -604,21 +835,34 @@ fn collect_funcs(
                 slots,
                 dir: dir_sub,
             });
+        } else if is_rwir_decl {
+            decls.push(format!(
+                "{key} {}",
+                sanitize(&kvkind::display(&v, &kv.langtype_of(&key)))
+            ));
+            for slot in kv.list(&dir_sub, false, true) {
+                if !slot.ends_with('/') {
+                    let skey = format!("{dir_sub}{slot}");
+                    let sv = kv.get_one(&skey);
+                    decls.push(format!(
+                        "{skey} {}",
+                        sanitize(&kvkind::display(&sv, &kv.langtype_of(&skey)))
+                    ));
+                }
+            }
         } else if !kv.list(&dir_sub, false, true).is_empty() {
             collect_funcs(kv, &dir_sub, &sub_pkg, funcs, decls);
         } else if !kv.list(&mem_sub, false, true).is_empty() {
             collect_funcs(kv, &mem_sub, &sub_pkg, funcs, decls);
         } else {
-            let key = format!("{prefix}{base}");
-            let v = kv.get_one(&key);
             decls.push(format!("{key} {}", sanitize(&kvkind::display(&v, &kv.langtype_of(&key)))));
         }
     }
 }
 
-/// 目录是否为函数目录（含 [0,0] 签名槽）。lib 目录只有子函数/子 lib，无 [ 槽位。
+/// A function dir has a non-empty `[0,0]`; lib and def rwir dirs have none.
 fn is_func_dir(kv: &mut Kv, dir: &str) -> bool {
-    kv.list(dir, false, true).iter().any(|c| c.starts_with('['))
+    !kv.get_one(&format!("{dir}[0,0]")).is_empty()
 }
 
 /// 目录名 → (pkg, name)。扁平后端（fs）目录名含 `·`（`<pkg尾段>·<name>`）需拆；
@@ -743,14 +987,15 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
         }
     }
     for k in 1..=nw {
-        if let Some((rname, rty)) = kvkind::def_param_parts(&kv.get_one(&format!("{base}.[0,{k}]")))
+        if let Some((rname, rty, r_inplace)) =
+            kvkind::def_param_full(&kv.get_one(&format!("{base}.[0,{k}]")))
         {
             returns[(k - 1) as usize] = Param {
                 name: rname,
                 ty: rty,
                 by_ref: String::new(),
                 has_ty: true,
-                inplace: false,
+                inplace: r_inplace,
             };
         }
     }
@@ -1115,7 +1360,11 @@ pub fn write_func(
         pairs.push((
             format!("{func_dir}.[0,{}]", i + 1),
             kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_param(&r.name, &param_types[nr as usize + i])?,
+            kvkind::new_def_param_with_inplace(
+                &r.name,
+                &param_types[nr as usize + i],
+                r.inplace,
+            )?,
         ));
     }
 
@@ -1232,8 +1481,8 @@ pub fn write_func(
      * 写在这里而不是执行期算，因为判据只依赖静态数据流（读参集/写参集/inplace），
      * 编译期一次算完，执行期零成本。
      */
-    {
-        let (text, langtype) = crash_resume_record(&a.crash_resume);
+    if let Some(resumability) = &a.crash_resume {
+        let (text, langtype) = crash_resume_record(resumability);
         let key = format!("{func_dir}/{}{}", keytree::RUNTIME_MEMBER_SEP,
                           keytree::SEG_CRASH_RESUME);
         kv.set(&[(key, langtype, ffi::new_char_byte(text.as_bytes())?)])
@@ -1245,34 +1494,9 @@ pub fn write_func(
     Ok(())
 }
 
-/// `Resumability` → (`‥crash_resume` 的 body 文本, langtype)。
-///
-/// 三态**逐字写全**，不用缩写：读 dump 的人要能一眼分清
-/// `ALWAYS` / `CONDITIONALLY` / `NOT`，而不是解一个单字母。
+/// `Resumability` -> (`‥crash_resume` body, langtype); format: its `Display`.
 fn crash_resume_record(resumability: &crash_resume::Resumability) -> (String, String) {
-    match resumability {
-        crash_resume::Resumability::AlwaysResumable => {
-            ("ALWAYS_RESUMABLE".to_string(), "char/utf8".to_string())
-        }
-        crash_resume::Resumability::ConditionallyResumable { replay_from } => {
-            let points: Vec<String> = replay_from
-                .iter()
-                .map(|(inplace, anchor)| format!("{inplace}<-{anchor}"))
-                .collect();
-            (
-                format!("CONDITIONALLY_RESUMABLE:{}", points.join(",")),
-                "char/utf8".to_string(),
-            )
-        }
-        crash_resume::Resumability::NotResumable {
-            instruction,
-            global_key,
-            ..
-        } => (
-            format!("NOT_RESUMABLE:{instruction}:{global_key}"),
-            "char/utf8".to_string(),
-        ),
-    }
+    (resumability.to_string(), "[]char/utf8".to_string())
 }
 
 /// Store field types under the prototype and defaults under member keys.
@@ -1380,7 +1604,10 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
         pairs.push((
             format!("{base}/[0,{}]", i + 1),
             kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_langtype(&param_types[nr as usize + i])?,
+            kvkind::new_def_langtype_with_inplace(
+                &param_types[nr as usize + i],
+                decl.sig.returns[i].inplace,
+            )?,
         ));
     }
     kv.set(&pairs)
@@ -2342,10 +2569,7 @@ fn check_call_names(
             }
         }
         // 语言算子（含 word 形式 add/eq/…、逻辑词、cast）不是函数调用。
-        if crate::builtin::num_op(&op)
-            || matches!(op.as_str(), "and" | "or" | "not")
-            || is_cast_name(&op)
-        {
+        if is_operator_word(&op) {
             continue;
         }
         // 其余裸名：既不是全局函数、也未声明 rwir、也不是本包函数 → 明确报错，
@@ -2357,6 +2581,11 @@ fn check_call_names(
 
 fn undefined_call(op: &str) -> String {
     format!("未定义函数 {op}：未给出被调函数的完整路径（写 `包名·函数名` 或 `/lib/包名·函数名`）")
+}
+
+/// Language operator words (arithmetic/compare words, logic words, casts).
+fn is_operator_word(op: &str) -> bool {
+    crate::builtin::num_op(op) || matches!(op, "and" | "or" | "not") || is_cast_name(op)
 }
 
 fn is_cast_name(op: &str) -> bool {

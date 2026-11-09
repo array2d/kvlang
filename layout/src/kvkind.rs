@@ -286,29 +286,83 @@ pub fn new_defrwir(nr: i32, nw: i32, dynamic: bool) -> Result<Vec<u8>, String> {
     ffi::xvalue_to_wire(KIND_DEF_RWIR, &counts_body(nr, nw, dynamic)?, 1)
 }
 
+/// `inplace` mark appended to a write param's langtype, mirroring `*T $name inplace`.
+pub const INPLACE_SUFFIX: &str = " inplace";
+
 /// 签名行 [0,x] 槽：一个参数的类型定义，body=该参数完整 langtype 串。
 pub fn new_def_langtype(langtype: &str) -> Result<Vec<u8>, String> {
     ffi::xvalue_to_wire(KIND_DEF_LANGTYPE, langtype.as_bytes(), 1)
 }
 
+/// def rwir write slot `[0,+x]`, with an optional ` inplace` suffix (idempotent).
+pub fn new_def_langtype_with_inplace(langtype: &str, inplace: bool) -> Result<Vec<u8>, String> {
+    let clean = langtype.strip_suffix(INPLACE_SUFFIX).unwrap_or(langtype);
+    if inplace {
+        let mut raw = String::with_capacity(clean.len() + INPLACE_SUFFIX.len());
+        raw.push_str(clean);
+        raw.push_str(INPLACE_SUFFIX);
+        ffi::xvalue_to_wire(KIND_DEF_LANGTYPE, raw.as_bytes(), 1)
+    } else {
+        new_def_langtype(clean)
+    }
+}
+
+/// def rwir slot body `langtype[ inplace]` -> (langtype, inplace).
+pub fn def_langtype_full(data: &[u8]) -> Option<(String, bool)> {
+    if data.is_empty() || ffi::xh_is_none(data) {
+        return None;
+    }
+    let b = body(data);
+    if b.is_empty() {
+        return None;
+    }
+    let raw = String::from_utf8_lossy(b);
+    match raw.strip_suffix(INPLACE_SUFFIX) {
+        Some(ty) => Some((ty.to_string(), true)),
+        None => Some((raw.into_owned(), false)),
+    }
+}
+
 /// rwfunc 参数定义键（点后缀 .[0,-k]）：body=名字\x00类型串，langtype=def langtype。
 pub fn new_def_param(name: &str, langtype: &str) -> Result<Vec<u8>, String> {
-    let mut body = name.as_bytes().to_vec();
+    new_def_param_with_inplace(name, langtype, false)
+}
+
+/// rwfunc write param key `.[0,+k]`: body `name\x00langtype[ inplace]`.
+pub fn new_def_param_with_inplace(
+    name: &str,
+    langtype: &str,
+    inplace: bool,
+) -> Result<Vec<u8>, String> {
+    let clean = langtype.strip_suffix(INPLACE_SUFFIX).unwrap_or(langtype);
+    let suffix = if inplace { INPLACE_SUFFIX.as_bytes() } else { &[][..] };
+    let mut body = Vec::with_capacity(name.len() + 1 + clean.len() + suffix.len());
+    body.extend_from_slice(name.as_bytes());
     body.push(0);
-    body.extend_from_slice(langtype.as_bytes());
+    body.extend_from_slice(clean.as_bytes());
+    body.extend_from_slice(suffix);
     ffi::xvalue_to_wire(KIND_DEF_LANGTYPE, &body, 1)
 }
 
-/// 解析参数定义键 body（名字\x00类型串）→ (名字, 类型)。
-pub fn def_param_parts(data: &[u8]) -> Option<(String, String)> {
-    if data.is_empty() {
+/// Param key body `name\x00langtype[ inplace]` -> (name, langtype, inplace).
+pub fn def_param_full(data: &[u8]) -> Option<(String, String, bool)> {
+    if data.is_empty() || ffi::xh_is_none(data) {
         return None;
     }
     let b = body(data);
     let nul = b.iter().position(|&x| x == 0)?;
     let name = String::from_utf8_lossy(&b[..nul]).into_owned();
-    let ty = String::from_utf8_lossy(&b[nul + 1..]).into_owned();
-    Some((name, ty))
+    let raw_ty = String::from_utf8_lossy(&b[nul + 1..]);
+    let (ty, inplace) = match raw_ty.strip_suffix(INPLACE_SUFFIX) {
+        Some(stripped) => (stripped.to_string(), true),
+        None => (raw_ty.into_owned(), false),
+    };
+    Some((name, ty, inplace))
+}
+
+/// 解析参数定义键 body（名字\x00类型串）→ (名字, 类型)。
+pub fn def_param_parts(data: &[u8]) -> Option<(String, String)> {
+    def_param_full(data).map(|(name, ty, _)| (name, ty))
 }
 
 pub fn new_struct() -> Result<Vec<u8>, String> {

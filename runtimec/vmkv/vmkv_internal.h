@@ -47,12 +47,13 @@ typedef struct vmkv_allocation {
     size_t alignment;
 } vmkv_allocation_t;
 
-/* 参数定义键 `.[0,±j]`：body = 参数名 NUL def-langtype 串。 */
+/* Param key `.[0,±j]`: body = name NUL langtype[ inplace]. */
 typedef struct vmkv_param_definition {
     const char *name;
     size_t name_size;
     const char *type_name;
     size_t type_name_size;
+    bool inplace;
     bool present;
 } vmkv_param_definition_t;
 
