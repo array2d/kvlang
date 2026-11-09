@@ -120,8 +120,9 @@ extern "C" {
 
 // ── 原位 head 访问（16 字节固定头：长度全在 head 里，attr 区无前缀）──
 
-/// wire: [bodylen:u64 @0-7][attrslen:u32 @8-11][storetype@12][ptr@13][pad@14-15]
-/// [body][attr records]；body 偏移恒 = 16。总长 = 16 + bodylen + attrslen。
+/// wire: [bodylen:u64 @0-7][attrslen:u16 @8-9][reserved:u16 @10-11]
+/// [layout@12][padding@13-15][body][attr records]；body 偏移恒 = 16。
+/// 总长 = 16 + bodylen + attrslen。reserved 必须为零。
 pub const PREFIX: usize = 16;
 
 const OFF_ATTRSLEN: usize = 8;
@@ -141,11 +142,11 @@ pub fn xh_len(data: &[u8]) -> u64 {
         None => 0,
     }
 }
-/// attr 区字节数（u32 小端 @8-11）；data 过短 → 0。
+/// attr 区字节数（u16 小端 @8-9）；data 过短 → 0。
 #[inline]
-pub fn xh_attrs_len(data: &[u8]) -> u32 {
-    match data.get(OFF_ATTRSLEN..OFF_ATTRSLEN + 4) {
-        Some(b) => u32::from_le_bytes([b[0], b[1], b[2], b[3]]),
+pub fn xh_attrs_len(data: &[u8]) -> u16 {
+    match data.get(OFF_ATTRSLEN..OFF_ATTRSLEN + 2) {
+        Some(b) => u16::from_le_bytes([b[0], b[1]]),
         None => 0,
     }
 }
@@ -438,19 +439,21 @@ pub fn with_langtype(wire: &[u8], langtype: &str) -> Vec<u8> {
     }
     let mut out = wire[..body_end].to_vec();
     let attr_len_pos = OFF_ATTRSLEN;
+    out[attr_len_pos + 2..attr_len_pos + 4].fill(0); // reserved
     if langtype.is_empty() {
-        out[attr_len_pos..attr_len_pos + 4].copy_from_slice(&0u32.to_le_bytes());
+        out[attr_len_pos..attr_len_pos + 2].copy_from_slice(&0u16.to_le_bytes());
         return out;
     }
     let l = langtype.len();
-    if l > usize::from(u16::MAX) {
+    if l > usize::from(u16::MAX) - 3 {
         return wire.to_vec();
     }
     let mut attr = Vec::with_capacity(3 + l);
     attr.push(1u8); // tag = langtype
     attr.extend_from_slice(&(l as u16).to_le_bytes());
     attr.extend_from_slice(langtype.as_bytes());
-    out[attr_len_pos..attr_len_pos + 4].copy_from_slice(&(attr.len() as u32).to_le_bytes());
+    let alen = u16::try_from(attr.len()).expect("attr region fits u16");
+    out[attr_len_pos..attr_len_pos + 2].copy_from_slice(&alen.to_le_bytes());
     out.extend_from_slice(&attr);
     out
 }
@@ -504,7 +507,16 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>,
 /// 按 wire 字节原位填 head 视图（16 字节固定头）。
 /// langtype 不在 head 的结构体视图里——调用方若已知道类型可传入；否则留空，
 /// 由 `langtype_from_wire` 从 attr 区取。
-/// padding 必须为零（head ABI 的一部分，非零即非法）。
+/// reserved（offset 10-11）与 padding（offset 13-15）必须为零：head ABI 的
+/// 一部分，非零即非法。
+#[inline]
+fn xh_reserved_is_zero(data: &[u8]) -> bool {
+    match data.get(10..12) {
+        Some(p) => p == [0, 0],
+        None => false,
+    }
+}
+
 #[inline]
 fn xh_padding_is_zero(data: &[u8]) -> bool {
     match data.get(13..16) {
@@ -518,7 +530,11 @@ fn xh_padding_is_zero(data: &[u8]) -> bool {
 /// attr 区自描述：`[tag:u8][len:u16][data]`，紧跟 body 之后，长度由 head 的
 /// `attrslen` 给出（**没有**独立长度前缀）。几何全部取自 head，不写偏移算术。
 pub fn wire_langtype(wire: &[u8]) -> Option<String> {
-    if wire.len() < PREFIX || !xh_padding_is_zero(wire) || xh_layout(wire) > 1 {
+    if wire.len() < PREFIX
+        || !xh_reserved_is_zero(wire)
+        || !xh_padding_is_zero(wire)
+        || xh_layout(wire) > 1
+    {
         return None;
     }
     let body_len = xh_len(wire) as usize;

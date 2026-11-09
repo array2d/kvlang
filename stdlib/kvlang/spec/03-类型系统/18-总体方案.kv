@@ -7,11 +7,12 @@ lib kvlang/spec/类型系统/总体方案 {
 
 每个 XValue 落入 kvspace 时，head 固定 16 字节、body 紧随其后：
 
-	head = [bodylen:u64 LE][attrslen:u32 LE][layout:u8][padding:3]
+	head = [bodylen:u64 LE][attrslen:u16 LE][reserved:u16 LE][layout:u8][padding:3]
 	body = head + 16
 
 - **`bodylen`（偏移 0-7）** — body 字节数；或容量（见 `layout`）。
-- **`attrslen`（偏移 8-11）** — attr 区字节数（无长度前缀，记录自描述）。
+- **`attrslen`（偏移 8-9）** — attr 区字节数（无长度前缀，记录自描述）；上限 `UINT16_MAX`。
+- **`reserved`（偏移 10-11）** — 必须为零；旧格式 `attrslen` 的高 2 字节落在这里。
 - **`layout`（偏移 12）** — `0` = bodylen 是有效长度；`1` = bodylen 是容量、有效长度在 attr tag 2。
   其余取值保留且必须为零。
 - **`padding`（偏移 13-15）** — 必须为零；它是 ABI 的一部分，不是可填字段。

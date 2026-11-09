@@ -2,8 +2,10 @@
 lib kvlang/spec/类型系统/已敲定 {
 	r####"# 已敲定（2026-11-06）
 
-- 线格式为固定 **16 字节** head `[bodylen:u64 LE][attrslen:u32 LE][layout:u8][padding:3]`，
-  body 偏移恒 16，`padding` 必须为零。类型（langtype）不在 head——存于 body 之后的值内 attr 区。
+- 线格式为固定 **16 字节** head
+  `[bodylen:u64 LE][attrslen:u16 LE][reserved:u16 LE][layout:u8][padding:3]`，
+  body 偏移恒 16，`reserved` 与 `padding` 必须为零。类型（langtype）不在 head——存于 body
+  之后的值内 attr 区。
 - `layout`：0 = bodylen 是有效长度；1 = bodylen 是容量，有效长度在 attr tag 2。其余取值必须为零。
 - **没有 storetype 与 ptr 字段**：存储形态由 langtype 推；指针与扩展分别是 langtype 的 `*` / `@`
   前缀，**原样写入 wire langtype**，任何一层都不剥。

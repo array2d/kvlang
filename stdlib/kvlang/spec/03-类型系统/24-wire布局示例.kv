@@ -2,7 +2,8 @@
 lib kvlang/spec/类型系统/wire布局示例 {
 	r####"# wire 布局示例
 
-head `H = [bodylen:u64 LE][attrslen:u32 LE][layout:u8][padding:3]`，body 偏移恒为 16。
+head `H = [bodylen:u64 LE][attrslen:u16 LE][reserved:u16 LE][layout:u8][padding:3]`，
+body 偏移恒为 16；`reserved` 必须为零。
 类型存值内 attr 区（tag 1 记录）；`A` 表示该值 attr 区的总字节数（langtype 记录 = `1 + 2 + len`），
 `layout = 0` 时 bodylen 是有效长度，`layout = 1` 时 bodylen 是容量、有效长度在 attr tag 2。
 
