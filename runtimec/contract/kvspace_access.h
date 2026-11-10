@@ -270,18 +270,19 @@ runtimec_value_body_address_t runtimec_xvalue_body_address(
 runtimec_xvalue_address_t runtimec_value_body_xvalue_address(
     runtimec_value_body_address_t body_address);
 /*
- * 值体的**有效长度**（storetype 4 取 attr tag 2 的 `reallen`，其它取 `bodylen`）。
+ * 值体的**有效长度**：attr 区有 tag 2 取 `reallen`，否则取 head 的 `bodylen`。
  *
- * **无错误通道**：不可信 wire（零地址/下溢/storetype 不认识/超 uint32/缺 tag 2/
- * tag 2 畸形或重复/`reallen > bodylen`）与「长度本来就是 0」**都返回 0**。
+ * head 里的 `bodylen` 是容量还是有效长度由 langtype 判（bufferarray ⇒ 容量），
+ * 存储层不看 langtype，只认 attr 区里有没有 tag 2——这是 head 侧能独立断定的
+ * 唯一判据。
  *
- * ⇒ **任何「读一个 storetype 4 值并需要知道它是不是空」的新消费方，必须走
- * 带状态码的路径，不能用本函数判断空值。** 第一个这样的消费方是 `‥status`（J-5）：
+ * **无错误通道**：不可信 wire（零地址/下溢/超 uint32/padding 非零/tag 2 畸形或
+ * 重复/`reallen > bodylen`）与「长度本来就是 0」**都返回 0**。
+ *
+ * ⇒ **任何「读一个容量形态的值并需要知道它是不是空」的新消费方，必须走带状态码
+ * 的路径，不能用本函数判断空值。** 第一个这样的消费方是 `‥status`（J-5）：
  * 实现 J-5 时必须先补一条能区分「空」与「坏」的入口，否则 status 损坏会被当成
  * 「未设置」。
- *
- * 现在没有 storetype 4 的生产者，所以这条歧义没有活的危险；一旦 J-5 成为第一个
- * 消费者就会立刻变成真问题——在消费者出现之前把约束写死，比事后补便宜。
  */
 uint32_t runtimec_value_body_length(runtimec_value_body_address_t body_address);
 /*

@@ -897,7 +897,7 @@ static runtimec_status_t vmbin_value_access_create_member(
      * 值的 langtype 是它自己的。
      */
     if (kvspaceXvalueHeadNewSlack(value.data, (uint64_t)value.size,
-                                  (uint64_t)value.size, langtype_text, &wire,
+                                  langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         return vmbin_value_access_fail(
@@ -1091,7 +1091,7 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
             "local slot key cannot be built");
     }
     if (kvspaceXvalueHeadNewSlack(value.data, (uint64_t)value.size,
-                                  (uint64_t)value.size, langtype_text, &wire,
+                                  langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         return vmbin_value_access_fail(
@@ -1184,7 +1184,7 @@ static runtimec_status_t vmbin_value_access_create_static_target(
             "static write value has no bytes");
     }
     if (kvspaceXvalueHeadNewSlack(value.data, (uint64_t)value.size,
-                                  (uint64_t)value.size, langtype_text, &wire,
+                                  langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         return vmbin_value_access_fail(
@@ -1415,7 +1415,7 @@ static runtimec_status_t vmbin_value_access_create_dereference_target(
     memcpy(langtype_text, declared.data, declared.size);
     langtype_text[declared.size] = '\0';
     if (kvspaceXvalueHeadNewSlack(value.data, (uint64_t)value.size,
-                                  (uint64_t)value.size, langtype_text, &wire,
+                                  langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         return vmbin_value_access_fail(

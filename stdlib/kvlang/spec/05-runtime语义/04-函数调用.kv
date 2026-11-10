@@ -7,7 +7,7 @@ lib kvlang/spec/runtime语义/函数调用 {
 调用也写全路径，不存在包内回退，名字不等于目标 key 即 layout 报错（见 [[函数]]）。layout
 根据已知目标将 opcode 槽写成 `rwfunc`；runtime 从 KVSpace 读取函数的 `[0,0]` 锚点及参数定义。
 
-调用时在 `/vthread/<vid>/[depth]` 创建子帧，使用 storetype 3 扩展定位叠加函数目录的只读指令树。帧内 `‥lib`、`‥callpc`、`‥returnpc` 都写在 KVSpace；PC 也只存于 KVSpace。每条指令边界重新读取 PC 和状态。
+调用时在 `/vthread/<vid>/[depth]` 创建子帧，用 `@` 前缀的扩展定位叠加函数目录的只读指令树。帧内 `‥lib`、`‥callpc`、`‥returnpc` 都写在 KVSpace；PC 也只存于 KVSpace。每条指令边界重新读取 PC 和状态。
 
 ## 实参求值顺序
 

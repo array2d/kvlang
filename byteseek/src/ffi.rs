@@ -23,7 +23,8 @@ pub fn value_langtype(wire: &[u8]) -> String {
     let mut len: u16 = 0;
     let rc = unsafe {
         kvspaceXvalueHeadScan(wire.as_ptr(), wire.len() as u64,
-                              &mut lt, &mut len, std::ptr::null_mut())
+                              &mut lt, &mut len, std::ptr::null_mut(),
+                              std::ptr::null_mut())
     };
     if rc != 0 || lt.is_null() || len == 0 {
         return String::new();
@@ -31,7 +32,8 @@ pub fn value_langtype(wire: &[u8]) -> String {
     String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(lt, len as usize) }).into_owned()
 }
 
-/// 值的**有效** body 长度。`layout=1` 时 head 的 `bodylen` 是容量，必须走这条。
+/// 值的**有效** body 长度。容量形态（bufferarray）下 head 的 `bodylen` 是容量，
+/// 必须走这条取 tag 2 的 reallen。
 pub fn value_effective_len(wire: &[u8]) -> Option<usize> {
     let mut out: u64 = 0;
     let rc = unsafe { kvspaceXvalueHeadEffectiveLen(wire.as_ptr(), wire.len() as u64, &mut out) };
@@ -305,8 +307,9 @@ unsafe extern "C" {
         out: *mut *const u8,
         out_len: *mut u16,
         out_reallen: *mut u64,
+        out_has_reallen: *mut c_int,
     ) -> c_int;
-    /// 有效长度：layout=0 是 bodylen；layout=1 是 attr tag 2 的 reallen。
+    /// 有效长度：有 attr tag 2 取 reallen，否则取 bodylen。
     pub fn kvspaceXvalueHeadEffectiveLen(
         wire: *const u8,
         wire_len: u64,

@@ -52,7 +52,7 @@ fn has_error_at(src: &str, line: i32, col: i32, needle: &str) -> bool {
 }
 
 fn body(data: &[u8]) -> Vec<u8> {
-    data.to_vec()
+    kvkind::body(data).to_vec()
 }
 
 /// Decode slot text: `int64` -> decimal, `rwir`/`rwfunc` -> name (stripping trailing `\0<langtype>`).

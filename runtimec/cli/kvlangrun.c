@@ -296,7 +296,6 @@ static bool allocate_vthread_identifier(void *kvspace_handle, char *output,
     uint8_t *new_wire = NULL;
     uint64_t new_wire_size = 0U;
     if (kvspaceXvalueHeadNewSlack((const uint8_t *)text,
-                                  (uint64_t)text_length,
                                   (uint64_t)text_length, "[]char/utf8",
                                   &new_wire, &new_wire_size) != 0 ||
         new_wire == NULL || new_wire_size > UINT32_MAX) {

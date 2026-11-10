@@ -352,7 +352,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
     }
     memcpy(langtype_buffer, declared.data, declared.size);
     langtype_buffer[declared.size] = '\0';
-    if (kvspaceXvalueHeadNewSlack(bytes, (uint64_t)length, (uint64_t)length,
+    if (kvspaceXvalueHeadNewSlack(bytes, (uint64_t)length,
                                   langtype_buffer, &wire, &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,

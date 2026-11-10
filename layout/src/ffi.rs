@@ -83,7 +83,6 @@ extern "C" {
     fn kvspaceXvalueHeadNewSlack(
         data: *const u8,
         data_len: u64,
-        cap: u64,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
@@ -100,7 +99,6 @@ extern "C" {
     fn kvspaceXvalueHeadNewCode(
         body: *const u8,
         body_len: u64,
-        cap: u64,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
@@ -120,19 +118,18 @@ extern "C" {
 
 // ── 原位 head 访问（16 字节固定头：长度全在 head 里，attr 区无前缀）──
 
-/// wire: [bodylen:u64 @0-7][attrslen:u16 @8-9][reserved:u16 @10-11]
-/// [layout@12][padding@13-15][body][attr records]；body 偏移恒 = 16。
-/// 总长 = 16 + bodylen + attrslen。reserved 必须为零。
+/// wire: [bodylen:u64 @0-7][attrslen:u16 @8-9][padding:6 @10-15][body][attr records]；
+/// body 偏移恒 = 16。总长 = 16 + bodylen + attrslen。padding 必须为零。
+///
+/// **head 只描述「字节怎么读」**（`kvspace/include/kvspace/xvalue_head.h`）：
+/// bodylen 是 body 区字节数，它是容量还是有效长度由 **langtype** 判（bufferarray ⇒
+/// 容量，定长数组/标量 ⇒ 有效长度），head 不承载。`storetype` / `ptr` / `layout`
+/// 三个字段先后作废，现在头里只有两个字段加 padding。
 pub const PREFIX: usize = 16;
 
 const OFF_ATTRSLEN: usize = 8;
-/// `layout`：bodylen 的语义（0 = 有效长度，1 = 容量；有效长度在 attr tag 2）。
-///
-/// **head 里已经没有 `storetype` 与 `ptr` 字段**（`kvspace/include/kvspace/xvalue_head.h`）：
-/// 存储形态与引用性都从 **langtype** 推出，head 只描述「字节怎么读」。
-/// 所以原来按 offset 12/13 读 storetype/ptr 的做法全部作废——那个位置现在是
-/// `layout` 与 padding 的前两字节。
-const OFF_LAYOUT: usize = 12;
+/// padding 的起始偏移（6 字节，到 15 为止）。
+const OFF_PADDING: usize = 10;
 
 /// body 长度（u64 小端 @0-7）。data 过短 → 0。
 #[inline]
@@ -150,10 +147,10 @@ pub fn xh_attrs_len(data: &[u8]) -> u16 {
         None => 0,
     }
 }
-/// `layout`（offset 12）：0 = bodylen 是有效长度，1 = bodylen 是容量。
+/// padding（offset 10-15）必须为零：head ABI 的一部分，非零即非法。
 #[inline]
-pub fn xh_layout(data: &[u8]) -> u8 {
-    data.get(OFF_LAYOUT).copied().unwrap_or(0)
+pub fn xh_padding(data: &[u8]) -> Option<&[u8]> {
+    data.get(OFF_PADDING..PREFIX)
 }
 /// 指针性**从 langtype 推**，不再读 head 位。
 ///
@@ -164,10 +161,11 @@ pub fn xh_layout(data: &[u8]) -> u8 {
 pub fn langtype_is_pointer(langtype: &str) -> bool {
     langtype.starts_with('*')
 }
-/// None：空字节，或固定头 len=0 且非容量形。
+/// None：空字节，或固定头 bodylen=0。容量形态由 langtype 判而不在头里，所以
+/// 「len=0」就是唯一可从 head 独立断定的 None 判据。
 #[inline]
 pub fn xh_is_none(data: &[u8]) -> bool {
-    data.is_empty() || (data.len() >= PREFIX && xh_len(data) == 0 && xh_layout(data) == 0)
+    data.is_empty() || (data.len() >= PREFIX && xh_len(data) == 0)
 }
 
 /// body 切片（偏移恒 = PREFIX，长度 = head 的 bodylen）；越界 → 空。
@@ -439,7 +437,7 @@ pub fn with_langtype(wire: &[u8], langtype: &str) -> Vec<u8> {
     }
     let mut out = wire[..body_end].to_vec();
     let attr_len_pos = OFF_ATTRSLEN;
-    out[attr_len_pos + 2..attr_len_pos + 4].fill(0); // reserved
+    out[OFF_PADDING..PREFIX].fill(0); // padding 恒为零
     if langtype.is_empty() {
         out[attr_len_pos..attr_len_pos + 2].copy_from_slice(&0u16.to_le_bytes());
         return out;
@@ -474,7 +472,6 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>,
             kvspaceXvalueHeadNewSlack(
                 raw.as_ptr(),
                 raw.len() as u64,
-                raw.len() as u64,
                 empty,
                 out,
                 out_len,
@@ -492,7 +489,6 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>,
             kvspaceXvalueHeadNewCode(
                 raw.as_ptr(),
                 raw.len() as u64,
-                raw.len() as u64,
                 empty,
                 out,
                 out_len,
@@ -507,22 +503,9 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>,
 /// 按 wire 字节原位填 head 视图（16 字节固定头）。
 /// langtype 不在 head 的结构体视图里——调用方若已知道类型可传入；否则留空，
 /// 由 `langtype_from_wire` 从 attr 区取。
-/// reserved（offset 10-11）与 padding（offset 13-15）必须为零：head ABI 的
-/// 一部分，非零即非法。
-#[inline]
-fn xh_reserved_is_zero(data: &[u8]) -> bool {
-    match data.get(10..12) {
-        Some(p) => p == [0, 0],
-        None => false,
-    }
-}
-
 #[inline]
 fn xh_padding_is_zero(data: &[u8]) -> bool {
-    match data.get(13..16) {
-        Some(p) => p == [0, 0, 0],
-        None => false,
-    }
+    xh_padding(data).is_some_and(|p| p.iter().all(|&byte| byte == 0))
 }
 
 /// 从一条 wire 里取 langtype 文本（attr tag 1）；没有该记录 → None。
@@ -530,11 +513,7 @@ fn xh_padding_is_zero(data: &[u8]) -> bool {
 /// attr 区自描述：`[tag:u8][len:u16][data]`，紧跟 body 之后，长度由 head 的
 /// `attrslen` 给出（**没有**独立长度前缀）。几何全部取自 head，不写偏移算术。
 pub fn wire_langtype(wire: &[u8]) -> Option<String> {
-    if wire.len() < PREFIX
-        || !xh_reserved_is_zero(wire)
-        || !xh_padding_is_zero(wire)
-        || xh_layout(wire) > 1
-    {
+    if wire.len() < PREFIX || !xh_padding_is_zero(wire) {
         return None;
     }
     let body_len = xh_len(wire) as usize;
@@ -577,7 +556,6 @@ pub fn new_char(kind: &str, s: &str) -> Result<Vec<u8>, String> {
     call_codec64("HeadNewSlack", |out, out_len| unsafe {
         kvspaceXvalueHeadNewSlack(
             raw.as_ptr(),
-            raw.len() as u64,
             raw.len() as u64,
             empty,
             out,
