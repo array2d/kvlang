@@ -4102,7 +4102,7 @@ pub(crate) fn member_chain_type(start: &str, tail: &str, structs: &StructTable) 
         /*
          * **中间段是指针值 ⇒ 跟随一跳**（`t·1·left·val`：`t·1` 是 `N`、`left` 是
          * `*N`，再 `·val` 要落到 `N` 上）。参考实现里有这段
-         * （`runtime/src/rwir_kv.c` 的「Follow intermediate Ptr segments」）。
+         * （`oldhero/oldgo/runtime/src/rwir_kv.c` 的「Follow intermediate Ptr segments」）。
          *
          * **但第 1 段的基座不剥**：`p·val`（`p` 本身是 `*N`）是 spec 16-ptr
          * 禁止的**隐式解引用**，必须写 `(*p)·val`，由 `check_implicit_deref_member`

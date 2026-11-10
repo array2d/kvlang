@@ -15,7 +15,7 @@
 
 use std::ffi::CStr;
 use std::fs;
-use std::os::raw::c_char;
+use std::os::raw::{c_char, c_int};
 use std::panic::catch_unwind;
 
 use crate::{compile, format, init_dirs, kvkind, printlib, printstack, vet, Kv};
@@ -294,6 +294,165 @@ fn parse_kindexpr(s: &str) -> Option<kvlangKindexpr> {
     }
     out.kind[..kb.len()].copy_from_slice(kb);
     Some(out)
+}
+
+/// 声明一个 rwir 扩展的签名，写进 `dsn` 指向的 kvspace。
+///
+/// 与 `kvlangLayoutCode` 那类入口不同，本函数**不经过 .kv 文本**：调用方直接给
+/// 算子名与参数类型数组，省掉「拼源码字符串再解析」那一跳。
+///
+/// 构造完全委托 `code::write_rwir_decl`——defrwir 的 wire 字节布局唯一真相在
+/// `kvkind.rs`，这里一个字节都不自己拼。
+///
+/// 成功返回 0；失败返回 -1 并写 err。panic 兜为 -1（与其它 capi 入口一致）。
+#[no_mangle]
+pub extern "C" fn kvlangLayoutDefineRwir(
+    dsn: *const c_char,
+    opcode: *const c_char,
+    read_langtypes: *const *const c_char,
+    read_count: u32,
+    write_langtypes: *const *const c_char,
+    write_count: u32,
+    write_inplace: *const u8,
+    variadic: c_int,
+    err_out: *mut c_char,
+    err_cap: u32,
+) -> c_int {
+    let dsn = cstr(dsn).to_string();
+    let opcode = cstr(opcode).to_string();
+    /* 指针数组按调用方给的计数读；计数>0 却给 NULL 是调用方 bug，明确拒绝而不是
+     * 当成 0 处理——后者会让「我声明了三个读参」静默变成「零个」。 */
+    /* 指针先就地取出来：闭包里不能再碰原始指针，且这里要能在进 catch_unwind
+     * 之前把「计数与数组不匹配」这种调用方错误直接判掉。 */
+    let (reads, writes) = match (
+        collect_langtypes(read_langtypes, read_count),
+        collect_langtypes(write_langtypes, write_count),
+    ) {
+        (Some(r), Some(w)) => (r, w),
+        (None, _) => {
+            write_out(err_out, err_cap,
+                      "define rwir: read_count > 0 but read_langtypes is NULL");
+            return -1;
+        }
+        (_, None) => {
+            write_out(err_out, err_cap,
+                      "define rwir: write_count > 0 but write_langtypes is NULL");
+            return -1;
+        }
+    };
+    let inplace: Vec<bool> = if write_inplace.is_null() {
+        vec![false; write_count as usize]
+    } else {
+        (0..write_count as usize)
+            .map(|i| unsafe { *write_inplace.add(i) } != 0)
+            .collect()
+    };
+
+    let r = catch_unwind(|| {
+        define_rwir_core(&dsn, &opcode, reads, writes, inplace, variadic != 0)
+    });
+    match r {
+        Ok(Ok(())) => 0,
+        Ok(Err(e)) => {
+            write_out(err_out, err_cap, &e);
+            -1
+        }
+        Err(_) => {
+            write_out(err_out, err_cap, "define rwir panicked (invalid input)");
+            -1
+        }
+    }
+}
+
+/// 读一个 `*const *const c_char` + 计数，转成 `Vec<String>`。
+/// 计数>0 却给 NULL → 空 vec 并让上层按「计数不符」报错（见 `define_rwir_core`）。
+/// 计数>0 却给 NULL 是真错误，返回 None 让上层拒绝：静默当 0 会让「我声明了
+/// 三个读参」变成「零个」，wire 里少三条签名槽，运行期才以「参数不匹配」炸出来。
+fn collect_langtypes(ptr: *const *const c_char, count: u32) -> Option<Vec<String>> {
+    if count == 0 {
+        return Some(Vec::new());
+    }
+    if ptr.is_null() {
+        return None;
+    }
+    Some(
+        (0..count as usize)
+            .map(|i| cstr(unsafe { *ptr.add(i) }).to_string())
+            .collect(),
+    )
+}
+
+/// [`kvlangLayoutDefineRwir`] 的纯 Rust 核心：把参数装成 `RwirDecl` 交给
+/// `code::write_rwir_decl`。分开是为了能在测试里直接调、不必跨 FFI 边界。
+fn define_rwir_core(
+    dsn: &str,
+    opcode: &str,
+    reads: Vec<String>,
+    writes: Vec<String>,
+    inplace: Vec<bool>,
+    variadic: bool,
+) -> Result<(), String> {
+    if opcode.is_empty() {
+        return Err("define rwir: opcode is empty".to_string());
+    }
+    if opcode.contains('/') {
+        return Err(format!(
+            "define rwir {opcode}: opcode must not contain '/'; use `·` for package separation"
+        ));
+    }
+    /* write_inplace 的长度由 write_count 定（C 侧只传裸指针，没有独立长度），
+     * 所以「长度不符」在 ABI 层不可表达——这里只需保证内部一致性。真正的风险
+     * 是**调用方给的位图比 write_count 短**，那在 C 读越界，ABI 无法自检；
+     * 头文件已写明「长度 = write_count」。 */
+    if inplace.len() != writes.len() {
+        return Err(format!(
+            "define rwir {opcode}: internal write_inplace/write_count mismatch \
+             ({} vs {})",
+            inplace.len(),
+            writes.len()
+        ));
+    }
+    /* 变参标记只有落在**末读参**上才有意义（`FuncSig::dynamic` 看的就是它）。 */
+    if variadic && reads.is_empty() {
+        return Err(format!(
+            "define rwir {opcode}: variadic requires at least one read parameter"
+        ));
+    }
+    let mut params: Vec<crate::ast::Param> = reads
+        .into_iter()
+        .map(|ty| param(ty, false))
+        .collect();
+    if variadic {
+        let last = params.len() - 1;
+        params[last].ty.push_str("...");
+    }
+    let returns: Vec<crate::ast::Param> = writes
+        .into_iter()
+        .zip(inplace)
+        .map(|(ty, ip)| param(ty, ip))
+        .collect();
+    let decl = crate::ast::RwirDecl {
+        comments: Vec::new(),
+        sig: crate::ast::FuncSig {
+            name: opcode.to_string(),
+            params,
+            returns,
+        },
+        pkg: String::new(), /* opcode 已是全名；不在这里拼 pkg */
+    };
+    let mut kv = Kv::conn(dsn);
+    init_dirs(&mut kv)?;
+    crate::code::write_rwir_decl(&mut kv, &decl)
+}
+
+fn param(ty: String, inplace: bool) -> crate::ast::Param {
+    crate::ast::Param {
+        name: String::new(),
+        ty,
+        by_ref: String::new(),
+        has_ty: true,
+        inplace,
+    }
 }
 
 #[cfg(test)]

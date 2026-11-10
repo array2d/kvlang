@@ -16,55 +16,55 @@ extern "C" {
     /// codec 产出为 frontend malloc 缓冲，调用方以 libc free 释放（无 kvspaceBytesFree）。
     fn free(p: *mut c_void);
 
-    /// 借用读：*out 指向后端常驻/回收空间，调用方不得 free。resolve=1 穿透 link。
-    fn kvspaceGet(
+    // 新存储 ABI：读走 Resolve + 进程内基址，写走 Realloc + 直写，枚举走 Listlen + List。
+    // 旧 ABI 的 Get/SetValue/Del/ListLen/ListAt/DelTree 已从库里删除，不再声明。
+
+    /// key → 偏移。0 是合法偏移，错误由返回码表达（不用 0/-1 当哨兵）。
+    fn kvspaceResolve(
         h: Handle,
         key: *const c_char,
-        resolve: c_int,
-        out: *mut *mut u8,
-        out_len: *mut u32,
+        parent_key_anchor: u64,
+        out_value_offset: *mut u64,
+        err: *mut c_char,
+        err_cap: u32,
     ) -> c_int;
-    fn kvspaceSetValue(
+    /// 唯一写原语：不存在则创建（清零），存在则调整容量。
+    fn kvspaceRealloc(
         h: Handle,
         key: *const c_char,
-        value: *const u8,
-        value_len: u32,
+        body_length: u64,
+        attr_length: u64,
+        out_value_offset: *mut u64,
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    fn kvspaceDel(
+    /// 删除 key 的值并释放 box；空索引连索引节点一起删。
+    fn kvspaceFree(h: Handle, key: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
+    /// 进程内值区基址。地址 = 基址 + offset；非映射后端（durable）返回 NULL。
+    fn kvspaceXvalueInProcessAddress(h: Handle) -> *mut u8;
+    /// 直接子项数 N 与最长子项名字节数 M；非索引返回 NOT_INDEX，空索引 N=M=0。
+    fn kvspaceListlen(
         h: Handle,
-        keys: *const *const c_char,
-        nkeys: u32,
+        key: *const c_char,
+        out_count: *mut i64,
+        out_max_name_length: *mut u32,
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    /// 前缀遍历：listlen 定计数，逐 idx 取名（借用回收缓冲，不得 free），不一次性返回整段名单。
-    fn kvspaceListLen(
+    /// 一次取全部直接子项名（NUL 分隔，后端顺序、不排序）。
+    fn kvspaceList(
         h: Handle,
-        prefix: *const c_char,
-        expand_ext: c_int,
-        resolve: c_int,
-        out_count: *mut i32,
-    ) -> c_int;
-    fn kvspaceListAt(
-        h: Handle,
-        prefix: *const c_char,
-        expand_ext: c_int,
-        resolve: c_int,
-        idx: i32,
-        buf: *mut u8,
-        buf_cap: u32,
-        out_len: *mut u32,
-    ) -> c_int;
-    fn kvspaceDelTree(h: Handle, prefix: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
-    fn kvspaceMkindex(
-        h: Handle,
-        path: *const c_char,
-        capacity: u32,
+        key: *const c_char,
+        out_names: *mut c_char,
+        out_capacity: u32,
+        out_length: *mut u32,
+        out_count: *mut u32,
+        out_generation: *mut u64,
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
+    fn kvspaceDeltree(h: Handle, key: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
+    fn kvspaceMkindex(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
     /// 固定 16 字节 head 构造器（直接 memcpy struct + body + attr 区；langtype 空 = 空 attr）。
     fn kvspaceXvalueHeadNewNone(out: *mut *mut u8, out_len: *mut u64) -> c_int;
     /// **没有 `storetype` 形参**：head 的 storetype 由构造器按 kind 自己定，
@@ -229,17 +229,6 @@ fn call_codec64(what: &str, f: impl FnOnce(*mut *mut u8, *mut u64) -> c_int) -> 
     Ok(bytes)
 }
 
-/// 借用调用：*out 指向后端常驻/回收空间，拷出自持（借用只需活到本次拷贝），不 free。
-fn call_borrow(f: impl FnOnce(*mut *mut u8, *mut u32) -> c_int) -> Vec<u8> {
-    let mut out: *mut u8 = std::ptr::null_mut();
-    let mut out_len: u32 = 0;
-    f(&mut out, &mut out_len);
-    if out.is_null() || out_len == 0 {
-        return Vec::new();
-    }
-    unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec()
-}
-
 // ── 安全句柄 ─────────────────────────────────────────────────────────
 
 fn connect_or_panic(dsn: &str) -> Handle {
@@ -294,32 +283,93 @@ impl Kv {
         Ok(())
     }
 
+    /// 写一条完整 wire（含 head + body + attr）：realloc 出空间，再把 body/attr
+    /// 从 wire 里原样搬过去，**不重写 head**——head 已由构造器成形，这里只是搬运。
+    ///
+    /// 为什么必须先查 base 再写：durable 没有进程内值区，`kvspaceRealloc` 返回
+    /// UNSUPPORTED、`kvspaceXvalueInProcessAddress` 返回 NULL。那种后端上写不了，
+    /// 必须给出可读错误而不是拿 NULL 去做指针算术。
     fn set_one(&mut self, key: &str, xvalue: &[u8]) -> Result<(), String> {
         let ck = CString::new(key).expect("no NUL in key");
         let mut err: [c_char; 256] = [0; 256];
-        let is_none = xvalue.is_empty(); // None 恒空字节（8 字节空头 = 目录 marker 等真值）
-        let ret = if is_none {
-            let key_ptr = ck.as_ptr();
-            unsafe { kvspaceDel(self.h, &key_ptr, 1, err.as_mut_ptr(), err.len() as u32) }
-        } else {
-            unsafe {
-                kvspaceSetValue(
-                    self.h,
-                    ck.as_ptr(),
-                    xvalue.as_ptr(),
-                    xvalue.len() as u32,
-                    err.as_mut_ptr(),
-                    err.len() as u32,
-                )
-            }
+
+        // wire 空字节 = None → 删该 key。
+        if xvalue.is_empty() {
+            let ret = unsafe { kvspaceFree(self.h, ck.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
+            return err_ret(&mut err, ret);
+        }
+        if xvalue.len() < 16 {
+            return Err(format!("{key}: wire shorter than 16-byte head"));
+        }
+        // head 里的两个长度就是这次要写的 body/attr 字节数，直接读，不重算。
+        let body_len = u64::from_le_bytes(xvalue[0..8].try_into().unwrap());
+        let attr_len = u16::from_le_bytes([xvalue[8], xvalue[9]]) as u64;
+        let want = 16u64
+            .checked_add(body_len)
+            .and_then(|v| v.checked_add(attr_len))
+            .ok_or_else(|| format!("{key}: wire length overflow"))?;
+        if (xvalue.len() as u64) < want {
+            return Err(format!(
+                "{key}: wire truncated (head says {want} bytes, got {})",
+                xvalue.len()
+            ));
+        }
+
+        let mut off: u64 = 0;
+        let ret = unsafe {
+            kvspaceRealloc(self.h, ck.as_ptr(), body_len, attr_len, &mut off,
+                           err.as_mut_ptr(), err.len() as u32)
         };
-        err_ret(&mut err, ret)
+        if ret != 0 {
+            return err_ret(&mut err, ret);
+        }
+        let base = unsafe { kvspaceXvalueInProcessAddress(self.h) };
+        if base.is_null() {
+            return Err(format!(
+                "{key}: backend has no in-process address space (durable cannot be written \
+                 through the new ABI); write via a mapped backend"
+            ));
+        }
+        unsafe {
+            let dst = base.add(off as usize + 16);
+            if body_len > 0 {
+                std::ptr::copy_nonoverlapping(xvalue[16..].as_ptr(), dst, body_len as usize);
+            }
+            if attr_len > 0 {
+                std::ptr::copy_nonoverlapping(
+                    xvalue[16 + body_len as usize..].as_ptr(),
+                    dst.add(body_len as usize),
+                    attr_len as usize,
+                );
+            }
+        }
+        Ok(())
     }
 
-    /// 单点读（借用后拷出自持）：None 返回空字节。resolve=1 穿透 link。
+    /// 单点读：resolve 拿 offset，再从进程内基址拷出整条 wire（自持）。
+    /// 不存在 / 后端非映射 → 空字节（调用方按「没有这个值」处理）。
     pub fn get_one(&mut self, key: &str) -> Vec<u8> {
         let c = CString::new(key).expect("no NUL in key");
-        call_borrow(|out, out_len| unsafe { kvspaceGet(self.h, c.as_ptr(), 0, out, out_len) })
+        let mut off: u64 = 0;
+        let mut err: [c_char; 256] = [0; 256];
+        let ret = unsafe {
+            kvspaceResolve(self.h, c.as_ptr(), 0, &mut off, err.as_mut_ptr(), err.len() as u32)
+        };
+        if ret != 0 {
+            return Vec::new();
+        }
+        let base = unsafe { kvspaceXvalueInProcessAddress(self.h) };
+        if base.is_null() {
+            return Vec::new();
+        }
+        unsafe {
+            // 整条 wire 的长度由 head 自己算出：16 + bodylen + attrslen。
+            let head = std::slice::from_raw_parts(base.add(off as usize), 16);
+            let body_len = u64::from_le_bytes(head[0..8].try_into().unwrap()) as usize;
+            let attrs_len = u16::from_le_bytes([head[8], head[9]]) as usize;
+            let total = 16 + body_len + attrs_len;
+            std::slice::from_raw_parts(base.add(off as usize), total).to_vec()
+        }
     }
 
     /// 读 key 的完整 langtype；无该 key / 无 langtype 记录 → 空串。
@@ -333,49 +383,49 @@ impl Kv {
         wire_langtype(&wire).unwrap_or_default()
     }
 
-    pub fn list(&mut self, prefix: &str, expand_ext: bool, resolve: bool) -> Vec<String> {
+    /// 直接子项名（后端顺序、**不排序**）。`expand_ext` / `resolve` 两个旧参数
+    /// 已无对应语义：新 ABI 的 List 只列物理直接子项，不展开 extindex、不解析 Ptr。
+    /// 参数保留是为了不动调用点签名，实现忽略它们。
+    pub fn list(&mut self, prefix: &str, _expand_ext: bool, _resolve: bool) -> Vec<String> {
         let c = CString::new(prefix).expect("no NUL in prefix");
-        let mut count: i32 = 0;
-        if unsafe {
-            kvspaceListLen(
-                self.h,
-                c.as_ptr(),
-                expand_ext as c_int,
-                resolve as c_int,
-                &mut count,
-            )
-        } != 0
-            || count <= 0
-        {
+        let mut count: i64 = 0;
+        let mut max_name: u32 = 0;
+        let mut err: [c_char; 256] = [0; 256];
+        let ret = unsafe {
+            kvspaceListlen(self.h, c.as_ptr(), &mut count, &mut max_name,
+                           err.as_mut_ptr(), err.len() as u32)
+        };
+        if ret != 0 || count <= 0 {
             return Vec::new();
         }
-        let mut v = Vec::with_capacity(count as usize);
-        for i in 0..count {
-            let mut buf = [0u8; 1024];
-            let mut out_len: u32 = 0;
-            let ok = unsafe {
-                kvspaceListAt(
-                    self.h,
-                    c.as_ptr(),
-                    expand_ext as c_int,
-                    resolve as c_int,
-                    i,
-                    buf.as_mut_ptr(),
-                    buf.len() as u32,
-                    &mut out_len,
-                )
-            } == 0;
-            if ok && out_len > 0 {
-                v.push(String::from_utf8_lossy(&buf[..out_len as usize]).into_owned());
-            }
+        // listlen 给出的 N 和 M 就是为了这一次分配：N*(M+1) 必然装得下全部名字。
+        let cap = (count as usize).saturating_mul(max_name as usize + 1);
+        if cap == 0 {
+            return Vec::new();
         }
-        v
+        let mut buf = vec![0u8; cap];
+        let mut length: u32 = 0;
+        let mut listed: u32 = 0;
+        let mut generation: u64 = 0;
+        let ret = unsafe {
+            kvspaceList(self.h, c.as_ptr(), buf.as_mut_ptr() as *mut c_char,
+                        cap as u32, &mut length, &mut listed, &mut generation,
+                        err.as_mut_ptr(), err.len() as u32)
+        };
+        if ret != 0 {
+            return Vec::new();
+        }
+        buf[..length as usize]
+            .split(|&b| b == 0)
+            .filter(|s| !s.is_empty())
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .collect()
     }
 
     pub fn del_tree(&mut self, prefix: &str) -> Result<(), String> {
         let c = CString::new(prefix).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
-        let ret = unsafe { kvspaceDelTree(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
+        let ret = unsafe { kvspaceDeltree(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
         err_ret(&mut err, ret)
     }
 
@@ -383,7 +433,7 @@ impl Kv {
         let c = CString::new(path).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
         let ret =
-            unsafe { kvspaceMkindex(self.h, c.as_ptr(), 0, err.as_mut_ptr(), err.len() as u32) };
+            unsafe { kvspaceMkindex(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
         err_ret(&mut err, ret)
     }
 }

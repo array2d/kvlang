@@ -2330,6 +2330,17 @@ fn write_linear_inst(
     local_funcs: &HashSet<String>,
 ) -> Result<(), String> {
     let (opcode, mut reads) = s.flat();
+    /* 输出算子在这里编成**十进制 opid**：runtimec 的 encoder 只按「槽名全为数字
+     * 即 opid」处理，一个算子名也不认识（见 builtin::output_opid 的注释）。
+     * 非输出算子原样保留名字——扩展 rwir 仍走声明 ABI，不经这条路。
+     *
+     * 位置只此一处：`write_linear_inst` 是编译方向**唯一**把算子写进指令槽的地方。
+     * （`build_inst` 是反方向的 KV→源码重建，改那里不影响编译产物——早先改错过
+     * 一次，产物仍是算子名。） */
+    let opcode = match builtin::output_opid(&opcode) {
+        Some(identifier) => identifier.to_string(),
+        None => opcode,
+    };
     // Already validated by `check_jumps`; still return `Result` to avoid panic paths.
     match opcode.as_str() {
         "goto" if reads.len() == 1 => {
