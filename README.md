@@ -88,10 +88,9 @@ Cross-process handoff uses the queue `/lib/<opcode>/vids/<vtid> = pc`: the calli
 
 ```
 kvlang/
-├── runtime/              runtime-c, the core interpreter (C11)
+├── runtimec/             runtimec, the C runtime (the new target of #622)
 ├── layout/               layout, the o0 compiler (Rust)
 ├── byteseek/             byteseek, the reference host and CLI (Rust)
-├── runtimec2/            C++20 rewrite of runtime-c (draft, not the default runtime)
 ├── stdlib/               standard library; stdlib/kvlang/spec/ is the specification
 ├── tutorial/             examples, which double as the conformance suite
 ├── error_cases/          expected-diagnostic cases
@@ -100,7 +99,9 @@ kvlang/
 ├── extruntime_tutorial/  example extension runtimes: json (Go), numpy (Python)
 ├── extensions/kvlang/    VS Code language support for .kv files
 ├── site/                 source of kvlang.com
-├── oldhero/              the original Go implementation (archived)
+├── oldhero/              archived implementations: oldhero/oldgo (original Go
+│                         implementation, plus the retired runtime/ C runtime and
+│                         runtimec2/ C++20 rewrite under oldgo/)
 ├── docs/                 logo and architecture figures
 ├── article/              design essays
 └── ci/  tools/           dependency fetch and single-binary staging scripts

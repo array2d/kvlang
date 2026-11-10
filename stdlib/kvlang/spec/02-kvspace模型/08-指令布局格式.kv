@@ -3,13 +3,13 @@ lib kvlang/spec/kvspace模型/指令布局格式 {
 	r####"# 指令布局格式
 
 本章界定函数经 layout 后在 `/lib` 下的 KV 布局：指令如何以坐标键落入 kvspace、签名与命名参数如何编
-码、调用如何经 extindex 复用指令树、参数如何经 kvlang 指针链解析。
+码、调用如何复用指令树、参数如何经 kvlang 指针链解析。
 
 ## 空间布局，非线性字节码
 
 传统 VM 编译产线性字节码，调用即压返回地址后跳入口。kvlang 的 layout 不产线性序列，而是**空间布局
 **：每条指令展开为一组 `[s0,s1]` 坐标键，可逐槽按普通 key 读或 `kvspace·listlen`/`kvspace·listat` 寻址，无需反汇编器。函数体永不被
-复制——调用时经 extindex 令帧根指向 `/lib` 下同一份指令树（见下 [[调用extindex]] 调用机制）。
+复制——调用时帧根直接以 `/lib` 下同一份指令树为来源（见下 [[调用extindex]] 历史说明）。
 
 ## 坐标键 `[s0,s1]`
 
@@ -63,7 +63,7 @@ opcode 槽由 layout 按目标写 `rwir` 或 `rwfunc`；两者的 body 均为 5 
 
 `/lib` 中的读写槽是共享的布局模板。runtime 首次解码执行帧的 `[s0,±j]` 时，在同坐标写入物理
 `*T` XValue，body 为目标 KV key；此后从执行帧读取该 kvlang 指针并回读目标值。**内联字面量不落执行
-帧**：它没有槽也没有 kvlang 指针，runtime 直接取模板该槽的值作为读参。帧内槽覆盖 extindex 的读取
+帧**：它没有槽也没有 kvlang 指针，runtime 直接取模板该槽的值作为读参。帧内槽优先于共享模板的读取
 结果，不修改共享模板；opcode `[s0,0]` 仍从 `/lib` 读取。
 
 **`rwir` 值的 body 格式（唯一）**：`counts` = `[nr:u16 LE][nw:u16 LE][dynamic:u8]`（5 字节，指令槽恒

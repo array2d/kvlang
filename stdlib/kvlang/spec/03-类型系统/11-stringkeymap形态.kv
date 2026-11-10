@@ -14,6 +14,8 @@ names:'[int64]'[]char/utf32 = {"apple", "banana", "cherry"}   // 变长字符串
 layout 报错；`{}` 尤其无法推断（空字面量不含任何成员）。
 
 散 key 元素以坐标段 `base·[i]` 访问（经普通 key 读），或以 `for-in` / `kvspace·listlen` / `kvspace·listat` 遍历。
+`kvspace·listat` 的「第 i 个」是**语言层**按 `cmp_coord` 排序后的秩——存储层 `list` 不排序，
+排序由上层实现并缓存（见 [[存储层ABI]]）。
 坐标段支持多值键（含小数）：`geo·[39.9,116.4] = "Beijing"`，物理以字符串格式落 key（见
 `tutorial/runtimec/04-ndarray/geo_coord.kv`）。
 

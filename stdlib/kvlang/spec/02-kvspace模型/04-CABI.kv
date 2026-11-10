@@ -7,7 +7,25 @@ camelCase）——kvspace 层前缀 `kvspace`（`kvspaceGet` / `kvspaceWriteInPl
 `kvlang`（`kvlangRuntimeConnect` / `kvlangLangtypeParse`）。禁止下划线分词（不写 `kvspace_get` /
 `kvlang_runtime_connect`），头文件名可用下划线（`kvlang_runtime.h`），导出符号一律无下划线。
 
-访问 kvspace 的唯一 C ABI 由前端 dispatch 静态导出（`kvspace/include/kvspace/kvspace.h`）。读写采用
+> **公共头迁移（2026-11-10）：`kvspace.h` 这个名字换了主人。**
+>
+> 现在必须按**两个身份**区分，不能只看到一个文件名就下结论：
+>
+> | 身份 | 现状 |
+> |---|---|
+> | **旧公共头**（声明 `kvspaceNew*`、`kvspaceGetHead` 等旧 ABI 的一整份） | **已删除**，内容迁到各仓库私有的 legacy 头里 |
+> | **新存储层 ABI 头**（本文档描述的 9 个操作） | 原名 `storage.h`，现已**正式改名为 `include/kvspace/kvspace.h`**；`storage.h` **不保留** |
+>
+> 即：**同一条路径 `kvspace/include/kvspace/kvspace.h`，现在装的是新的存储层 ABI**，不是被删掉的旧 ABI。
+> 「旧头被删」指的是**那份旧声明合集**从公共位置消失，不是这个文件名消失。
+>
+> **旧 ABI 符号已删除，不设过渡导出。** 生产后端只导出新存储层 ABI 的符号；`kvspaceGet`、
+> `kvspaceSetValue`、`kvspaceWriteInPlace`、`kvspaceWriteNewPlace`、`kvspaceListLen`、
+> `kvspaceListAt`、`kvspaceDel*`、`kvspaceWatch`、`kvspaceView*` 等**全部不存在**。
+> 旧消费者只有两条路：**迁移到新 ABI，或退出构建**。删除是彻底的——没有「过渡期保留导出」
+> 这一档，任何依赖旧符号的代码都编不过、链不上。
+
+访问 kvspace 的唯一 C ABI 由前端 dispatch 静态导出。读写采用
 **借用二进制指针模型**：读返回指向后端常驻空间的二进制指针，调用方不得释放；寿命到该 key 被写/删或
 handle close（没有指令边界回收调用）。写返回 body 偏移的二进制指针供调用方直接填。
 
@@ -128,28 +146,34 @@ box 退役进垃圾环；释放发生在屏障轮（`kvspaceViewSweep` 同步跑
 | `kvspaceGet` | 借用读：`*out` 指向后端常驻空间；`resolve=1` 穿透 link；不存在/空值 → `*out=NULL`、返回 0 |
 | `kvspaceSlotView` | shm-only slot view：返回映射内 `head/body/cap/body_cap`；只读或 owned 直写；不支持后端返回 `-2` |
 | `kvspaceWriteInPlace` | 就地写：key 已存在、kind 不变、body 长度不变；返回原 box body 偏移的二进制指针，违反前置条件即报错，绝不静默重分配 |
-| `kvspaceWriteNewPlace` | 新位置写：按 `(ref, body_len, body_cap, langtype)` 分配新 box、写 head 与 tag 1 langtype 记录，返回 body 偏移的二进制指针。用于新建或 kind/尺寸变化。`bodylen` 记 `body_len`（有效字节数）；`body_cap` 只作后端物理分配下界，**不进 wire**；`ref` 转成 langtype 的 `*`/`@` 前缀。**`storetype` 形参保留只为 ABI 稳定，不携带信息：实现不得对它分支或校验**（见 `kvspace.h` 注释） |
+| `kvspaceWriteNewPlace` | 新位置写：按 `(ref, body_len, body_cap, langtype)` 分配新 box、写 head 与 tag 1 langtype 记录，返回 body 偏移的二进制指针。用于新建或 kind/尺寸变化。`bodylen` 记 `body_len`（有效字节数）；`body_cap` 只作后端物理分配下界，**不进 wire**；`ref` 转成 langtype 的 `*`/`@` 前缀。**`storetype` 形参保留只为 ABI 稳定，不携带信息：实现不得对它分支或校验**（见旧 ABI 私有 legacy 头的注释） |
 | `kvspaceSetValue` | 整值写：给定完整 xvalue 字节，由后端编码 head 并写入。runtime 侧的写出口走它，而非上面的偏移二进制指针原语 |
 | `kvspaceListLen` | 返回前缀下直接子项计数 |
 | `kvspaceListAt` | 取前缀下第 `idx` 个子项名，写入调用方自备缓冲；配合 `kvspaceListLen` 遍历 |
 | `kvspaceDel` | 批量删除给定 key 数组 |
 | `kvspaceDelTree` | 删除前缀子树 |
 | `kvspaceCp` / `kvspaceCpTree` / `kvspaceCpList` | 复制单值 / 子树 / 直接子项 |
-| `kvspaceMkindex` | 建目录，带 `capacity` 预留容量 |
-| `kvspaceMkindexExt` / `kvspaceRmindexExt` | 建立 / 撤销 extindex 叠加层 |
+| `kvspaceMkindex` | 旧 ABI：建目录，带 `capacity` 预留容量。新 ABI **同名但签名已变**——`（h, key, err, cap)` 无 capacity（见 [[存储层ABI]]） |
 | `kvspaceClear` | 清空 |
 | `kvspaceWatch` | 一次性等待某 key 变为目标值 |
+
+> **旧 ABI 与存储层 ABI 的关系**（2026-11-10 起）：上表是**旧 ABI，已删除**——
+> 声明从公共头消失，**符号也不再导出**；下面的条目只作历史记录，不是可用接口。
+> 新存储层 ABI 见 [[存储层ABI]]——9 个操作
+> （`resolve`/`realloc`/`free`/`cp`/`makeindex`/`deltree`/`cpdir`/`listlen`/`list`），
+> **不提供 extindex**（`kvspaceMkindexExt`/`kvspaceRmIndexExt` 不存在）。
 
 无句柄的 XValue 构造/读取（前端静态导出，byte-identical）：head 固定 **16 字节**、无 encode/decode 层——
 构造走 `kvspaceXvalueHeadNewNone`/`NewScalar`/`NewSlack`/`NewTensor`/`NewPtr`/`NewExt`/`NewCode`/`Reserve`
 （`kvspaceXvalueHead` struct 为 `bodylen:u64 @0`、`attrslen:u16 @8`、`padding:6 @10-15`，
-body 偏移恒 16），读一律走 `xvalue_head.h` 的 inline 访问器（字段的唯一定义点）；langtype 不在 head——
+body 偏移恒 16），读一律走 inline 访问器（字段的唯一定义点）；langtype 不在 head——
 落值内 attr 区（tag 1 记录），随单 key 一次写整体落下。标准标量构造器保留：`kvspaceNewPtr`（存目标完整 langtype +
 目标 key）、`kvspaceNewChar` / `kvspaceNewBool` / `kvspaceNewInt64` / `kvspaceNewFloat64`（签名各增
 langtype 参数，写入 attr 区）。
 
-读写各带 `resolve` 参数：`resolve=1` 时透明穿透 langtype 以 `*` 开头的 kvlang 指针（link）；`kvspaceListLen`/`kvspaceListAt`
-另有 `expand_ext` 参数控制是否展开 extindex 子项。head 线格式与 langtype 编码见 [[键系统与数组访
+读写各带 `resolve` 参数：`resolve=1` 时透明穿透 langtype 以 `*` 开头的 kvlang 指针（link）。旧 ABI 的
+`kvspaceListLen`/`kvspaceListAt` 另带 `expand_ext` 参数（展开 extindex 子项），**新存储层 ABI 已删除
+该语义**：`listlen`/`list` 只列物理直接子项，无叠加层。head 线格式与 langtype 编码见 [[键系统与数组访
 问]]。
 
 **写侧不穿透整键（normative）**：`kvspaceWriteInPlace` / `kvspaceWriteNewPlace` / `kvspaceDel` /

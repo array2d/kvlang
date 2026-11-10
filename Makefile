@@ -67,6 +67,15 @@ runtime:
 	cmake -S oldhero/oldgo/runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/runtime --target kvlang_runtime -j
 
+# runtimec 语料/基准驱动（TASK-044 后 `kvlangrun` 已删，`kv_runner` 是唯一入口）。
+# 产物落 build/runtimec/kv_runner，再拷到 bin/。
+runtimec_runner:
+	cmake -S runtimec -B build/runtimec -DCMAKE_BUILD_TYPE=Release \
+	  -DRUNTIMEC_KVSPACE_LIBRARY_DIRECTORY="$(CURDIR)/$(LIB)"
+	cmake --build build/runtimec --target kv_runner -j
+	mkdir -p $(BIN)
+	cp build/runtimec/kv_runner $(BIN)/
+
 runtimec2:
 	cmake -S oldhero/oldgo/runtimec2 -B build/runtimec2 -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/runtimec2 --target kvlang_runtimec2 binircompiler -j
@@ -171,6 +180,10 @@ layout:
 	cp layout/target/release/$(LAYOUT_LIB) $(LIB)/
 
 # json 扩展（extruntime_tutorial/go/json）→ bin/json-rwirext。
+#
+# **不归档**：它是扩展 runtime 实现，只是升级优先级靠后。**当前不在 all 里**
+# （见上面 all 的注释），需要时显式 `make json`。
+#
 # **当前预期失败**：源码仍调 13 处旧 kvspace 符号（WriteInPlace/WriteNewPlace/
 # Get/SetValue/ListLen/ListAt/Del/DelTree/Mkindex/NewChar），且 cgo LDFLAGS 链
 # -lkvlang_runtimec2——该 .so 已随 c2 归档从 bin/ 删除，不会伪造恢复。

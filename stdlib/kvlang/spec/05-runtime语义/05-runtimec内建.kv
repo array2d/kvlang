@@ -66,9 +66,14 @@ stringkeymap 散列容器；跨形态 TypeError。`compactarray·set` 仅同槽 
   `as_seconds`、`as_minutes`、`as_hours`、`add`、`sub`、`before`、`after`。
 - `random·`：`uint64`、`int63`、`intn`。
 - `kvspace·`：`del`、`deltree`、`cp`、`cpdir`、`cplist`、`listlen`、`listat`、`mkindex`、
-  `extindex`、`delextindex`、`watch`（11 个。`get`/`set` 已按「读 key 只读、写 key 只写」
-  删除——写目标只能以写参出现）。完整 rwir 定义（读参、写参、结果类型、失败封闭）见
+  `watch`（9 个。`get`/`set` 已按「读 key 只读、写 key 只写」删除——写目标只能以写参出现；
+  `extindex`/`delextindex` 随存储层 ABI 收敛删除，见 [[存储层ABI]]）。完整 rwir 定义
+  （读参、写参、结果类型、失败封闭）见
   `runtimec/specification/kvspace-family.md`，以那份表为准。
+
+  **`kvspace·mkindex` 只有一个读参 `(key)`，没有 capacity。** capacity 是存储分配属性，
+  不是语言签名的一部分（见 [[存储层ABI]]）。多传一个实参属于 arity 不符，由 arity 校验拒绝，
+  不是「可选参数被忽略」。
 - `kvspace/key·`：`tostr`（值 → 成员键文本）、`resolveptr`（base + 键值 → 位置 Ptr）、
   `abs`（取址；`&x ≡ kvspace/key·abs(x)`）。本族负责**计算 key**：三者都只算位置、不读写值，
   读写由显式 `*` 完成。动态键的两步展开见 [[动态键]]。

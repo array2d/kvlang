@@ -88,10 +88,9 @@ kvspace 是核心的寻址空间与内存空间；语言本体是小核心 runti
 
 ```
 kvlang/
-├── runtime/              runtime-c，核心解释器（C11）
+├── runtimec/             runtimec，C 版 runtime（#622 的新落点）
 ├── layout/               layout，o0 编译器（Rust）
 ├── byteseek/             byteseek，参考宿主与 CLI（Rust）
-├── runtimec2/            runtime-c 的 C++20 重写（草稿，不是默认 runtime）
 ├── stdlib/               标准库；stdlib/kvlang/spec/ 即规范
 ├── tutorial/             示例，同时是一致性测试套件
 ├── error_cases/          期望诊断用例
@@ -100,7 +99,8 @@ kvlang/
 ├── extruntime_tutorial/  扩展 runtime 示例：json（Go）、numpy（Python）
 ├── extensions/kvlang/    .kv 的 VS Code 语言支持
 ├── site/                 kvlang.com 源码
-├── oldhero/              最初的 Go 实现（已归档）
+├── oldhero/              已归档实现：oldhero/oldgo（最初的 Go 实现，以及
+│                         退役的 runtime/ C runtime 与 runtimec2/ C++20 重写）
 ├── docs/                 logo 与架构图
 ├── article/              设计随笔
 └── ci/  tools/           依赖拉取与单文件二进制打包脚本
