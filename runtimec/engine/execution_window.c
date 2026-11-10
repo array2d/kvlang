@@ -13,14 +13,15 @@
  */
 
 #include "engine/execution_window.h"
+#include "contract/kvspace_interface.h"
 #include "contract/diagnostic_band.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <kvspace/kvspace.h>
-#include <kvspace/xvalue_head.h>
+#include <kvspace/kvlang_xvalue.h>
+#include <kvspace/kvspace_xvalue.h>
 
 #include "binrwir/binvthread_frame.h"
 #include "binrwir/frame_bindings.h"
@@ -211,9 +212,9 @@ static runtimec_status_t runtimec_execution_window_materialize_parameter_pointer
         return RUNTIMEC_STATUS_ERROR;
     }
     message[0] = '\0';
-    if (kvspaceSetValue(host->handle, slot_key_text, wire,
-                        (uint32_t)wire_size, message,
-                        (uint32_t)sizeof(message)) != 0) {
+    if (!runtimec_kvspace_write_wire(host->handle, slot_key_text, wire,
+                                   (uint32_t)wire_size, message,
+                                   sizeof(message))) {
         free(wire);
         *output_detail = RUNTIMEC_EXECUTION_WINDOW_DIAG_BINDING_FAILED;
         return RUNTIMEC_STATUS_ERROR;
@@ -1274,7 +1275,7 @@ runtimec_status_t runtimec_execution_window_execute(
      * 绑定表里每条绑定记的是「绑它那一刻的存储代次」；`bindings_get` 拿
      * `frame->snapshot_generation` 去比。REUSED 时本次没有重绑，现取的代次与
      * 表里那批可能已经不同（物化过写、地址搬过），一比就全判 `UNBOUND_SLOT`
-     * （`println` 因此报 `0x4501`）。所以这里统一用状态里记下的那一代；重绑分支
+     * （`输出算子` 因此报 `0x4501`）。所以这里统一用状态里记下的那一代；重绑分支
      * 结束后再把它更新成重绑结果。
      */
     binding_generation = frame_state->generation;
@@ -1416,9 +1417,9 @@ runtimec_status_t runtimec_execution_window_execute(
              * `runtimec_kvspace_access_handoff` 只知道「没人来认领」，它看不到
              * 算子名；而名字在这一层已经查到了（上面的 `operation`，来自 opcode
              * 槽——layout 写进去的就是源码里的算子名）。不用它就是让失败丢掉
-             * 唯一能定位的事实：曾经 Release 树缺 `RUNTIMEC_TEMP_PRINTLN`，
-             * `println` 被编成 FOREIGN，现场报的是「handoff was not claimed in
-             * time」——**一个字都没提 println**，一圈人查了 UB / dangling /
+             * 唯一能定位的事实：曾经 Release 树缺 `RUNTIMEC_TEMP_OUTPUT`，
+             * `输出算子` 被编成 FOREIGN，现场报的是「handoff was not claimed in
+             * time」——**一个字都没提 输出算子**，一圈人查了 UB / dangling /
              * 编码期才回到构建配置。
              *
              * 末句「is a handler missing from this build?」是有用的提示：那次的

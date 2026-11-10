@@ -75,6 +75,48 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_create(
             error, RUNTIMEC_STATUS_INVALID,
             "invalid runtimec create request");
     }
+    /*
+     * **尺寸先于任何其它读取**：它就是为了「在按任何偏移读之前知道对方按哪个
+     * 布局填的」。所以这条放在最前，且不向后兼容——按 p5，老调用方按旧尺寸
+     * 传入直接拒绝，不猜字段位置。
+     */
+    if (request->structure_size != sizeof(kvlang_runtime_create_request_t)) {
+        return kvlang_runtime_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            "runtimec create request has an unexpected structure_size");
+    }
+    /* 扩展表逐项校验：尺寸、opid 合法性、handler 非空。 */
+    for (size_t module = 0U; module < request->extension_count; ++module) {
+        const kvlang_runtime_extension_module_t *entry_module =
+            &request->extensions[module];
+        if (entry_module->module_name == NULL ||
+            entry_module->module_name[0] == '\0' ||
+            entry_module->entries == NULL || entry_module->entry_count == 0U) {
+            return kvlang_runtime_fail(
+                error, RUNTIMEC_STATUS_INVALID,
+                "runtimec extension module is incomplete");
+        }
+        for (size_t item = 0U; item < entry_module->entry_count; ++item) {
+            const kvlang_runtime_extension_entry_t *entry =
+                &entry_module->entries[item];
+            /* 结构漂移由 size 拦截，不靠约定。 */
+            if (entry->structure_size != sizeof(kvlang_runtime_extension_entry_t)) {
+                return kvlang_runtime_fail(
+                    error, RUNTIMEC_STATUS_INVALID,
+                    "runtimec extension entry has an unexpected structure_size");
+            }
+            if (entry->handler == NULL) {
+                return kvlang_runtime_fail(
+                    error, RUNTIMEC_STATUS_INVALID,
+                    "runtimec extension entry has no handler");
+            }
+        }
+    }
+    if (request->extension_count != 0U && request->extensions == NULL) {
+        return kvlang_runtime_fail(
+            error, RUNTIMEC_STATUS_INVALID,
+            "runtimec extension table is missing");
+    }
     runtimec_session_options_t options;
     /* 结构体一次填满：engine 会校验 structure_size，缺省路径不留未初始化字节。 */
     options.structure_size = sizeof(options);
@@ -90,6 +132,9 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_create(
      */
     options.machine_code_capacity = 0U;
     options.enable_jit = false;
+    /* 扩展表原样透传给 session；它不认识「扩展」这个概念，只负责交给 registry。 */
+    options.extension_modules = request->extensions;
+    options.extension_count = request->extension_count;
 
     runtimec_platform_session_t *platform_session = NULL;
     runtimec_error_t engine_error;

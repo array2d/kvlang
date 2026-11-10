@@ -13,12 +13,13 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
 #include "contract/kvspace_access.h"
 /* 线格式只有一份：None 字面量的判据走公共头的访问器，本文件不写偏移算术。 */
-#include "kvspace/xvalue_head.h"
+#include <kvspace/kvspace_xvalue.h>
 
 #define BINRWIR_BINFUNC_INITIAL_CAPACITY 4U
 
@@ -411,7 +412,7 @@ static int binrwir_binfunc_local_symbol_is_untyped(
  *   **无类型**局部符号下标。
  *
  * 为什么需要一张表而不是逐条指令判：写侧的那一格（`绝对 key -> 局部`）只说明
- * 「这个槽的类型将来由运行期定」，而 `println("dst:", d1)` 这样的**读**发生在
+ * 「这个槽的类型将来由运行期定」，而 `输出算子("dst:", d1)` 这样的**读**发生在
  * 另一条指令上——逐条判看不到「它被 STATIC 写过」，于是读会被误拒。
  *
  * **判据是写来源，不是读位置**：集合里放的是「被谁写过」，读在哪条指令不参与。
@@ -1468,6 +1469,27 @@ runtimec_status_t binrwir_binfunc_builder_add_alias_rule(
     *output_alias_rule_identifier = (uint32_t)builder->alias_rule_count;
     builder->alias_rule_count += 1U;
     return RUNTIMEC_STATUS_SUCCESS;
+}
+
+runtimec_status_t binrwir_binfunc_builder_find_symbol(
+    const binrwir_binfunc_builder_t *builder, runtimec_string_view_t name,
+    uint16_t *output_symbol_index) {
+    if (output_symbol_index != NULL) {
+        *output_symbol_index = BINRWIR_SYMBOL_INDEX_NONE;
+    }
+    if (builder == NULL || output_symbol_index == NULL || name.size == 0U ||
+        name.data == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    for (size_t ordinal = 0U; ordinal < builder->symbol_count; ++ordinal) {
+        if (builder->symbols[ordinal].name.size == name.size &&
+            memcmp(builder->symbols[ordinal].name.data, name.data,
+                   name.size) == 0) {
+            *output_symbol_index = (uint16_t)ordinal;
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+    }
+    return RUNTIMEC_STATUS_INVALID;
 }
 
 runtimec_status_t binrwir_binfunc_builder_add_symbol(

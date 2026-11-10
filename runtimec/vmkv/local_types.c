@@ -316,7 +316,7 @@ runtimec_status_t vmkv_local_types_collect(
              * `materialize_locals` 建槽」——那条已作废，原因正是下面这个失效链：
              *
              *   帧准备建零值并绑定地址 → `struct·new` 克隆整棵子树 →
-             *   那具地址作废 → 后续 `println(p·x)` 读到旧地址上的 0
+             *   那具地址作废 → 后续 `输出算子(p·x)` 读到旧地址上的 0
              *   （期望 3），而按 key 读 `/vthread/1/[1]/p·x` 是 3。
              *
              * ⇒ **帧准备阶段既建又绑**会造出一个在克隆时必然失效的地址；

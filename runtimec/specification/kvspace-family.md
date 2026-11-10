@@ -43,6 +43,15 @@
 
 ## 二、完整定义表
 
+**权威从属关系**：本表是给人读的入口，**参数角色以 catalog 为唯一权威**——
+`generate_rwir_catalog.py` 的 `FamilyRow.read_roles` / `write_roles`（渲染进
+`specification/rwir_catalog.def`）才是机器读取的那份。两者不一致时以 catalog 为准，
+本表跟着改。
+
+角色的作用是决定编码形态：`key` 位置上的字符串字面量编成 **STATIC 引用**（符号池里
+一条 key），而不是内联 `LITERAL`；其余位置（空 = ANY）维持字面量。这条判据是
+`0x4603` 的修法，实现在 `vmkv/encoder.c` 的 `vmkv_encoder_map_argument`。
+
 | rwir key | 读参（按序） | 写参 | 结果类型 | 一句话语义 |
 |---|---|---|---|---|
 | `kvspace·del` | 1：base | 0 | 无 | 删单个键 |
@@ -52,7 +61,7 @@
 | `kvspace·cplist` | 1：src base| 1 dst base | 同读参| 按清单复制 |
 | `kvspace·listlen` | 1：base | 1 | `int64` | 前缀下直接子项数 |
 | `kvspace·listat` | 2：base，index `int64` | 1 | `char/utf8` | 第 index 个子项名 |
-| `kvspace·mkindex` | 2：base，capacity `int64` | 0 | 无 | 为前缀建索引 |
+| `kvspace·mkindex` | 1：base | 0 | 无 | 为前缀建索引 |
 | `kvspace·extindex` | 2：base，ext base | 0 | 无 | 挂扩展索引 |
 | `kvspace·delextindex` | 1：base | 0 | 无 | 摘扩展索引 |
 | `kvspace·watch` | 2：base，expected 任意 | 1 | **目标头**（运行期定型） | 等 key 变成 expected，返回观察值 |
@@ -80,10 +89,15 @@
   那是 p1 禁止的「以奇怪的方式成功」。
 - index 参数必须是 8 字节整数体；长度不符 ⇒ 失败封闭。
 
-### `kvspace·mkindex(path, capacity)`
+### `kvspace·mkindex(key)`
 
-- 第二个读参是**标量容量**不是路径；`prepare_call` 只解析第一个，第二个单独按 8 字节整数读。
+- **只有一个读参**：索引路径本身。没有 capacity——容量是存储分配属性，写侧按需增长，
+  语言层不暴露一个从不影响可存 key 的「提示」（`final-plan.md` §4.3.5）。
+- 新 ABI 的 `kvspaceMakeindex(void*, const char *key, char *err, uint32_t err_cap)`
+  同样没有 capacity 形参；`contract/storage_abi.h` 按需声明它，避免与旧 `kvspace.h`
+  在同一翻译单元里共存。
 - 索引只影响「空前缀的可见性」，不改变任何值的读写语义。
+- 多传一个读参 ⇒ `prepare_call` 的 arity 校验直接拒绝，不是静默忽略。
 
 ### `kvspace·cp` / `cpdir` / `cplist`
 

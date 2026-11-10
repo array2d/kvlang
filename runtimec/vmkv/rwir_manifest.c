@@ -16,8 +16,10 @@ static const vmkv_rwir_capability_t vmkv_rwir_capabilities
  * 形参一旦与字段同名，designator 就会被参数文本吃掉。
  */
 #define RUNTIMEC_RWIR_OPERATION(identifier, operation_name, numeric_identifier, \
-                                read_mask, write_mask, constraint_value,        \
-                                result_value, alias_value, decisions)           \
+                                read_mask, write_mask,                         \
+                                read_roles, write_roles,                       \
+                                constraint_value, result_value, alias_value,    \
+                                decisions)                                      \
     [identifier] = {                                                            \
         .operator_name = {operation_name, sizeof(operation_name) - 1U},          \
         .behavior_decisions = {decisions, sizeof(decisions) - 1U},              \
@@ -27,6 +29,8 @@ static const vmkv_rwir_capability_t vmkv_rwir_capabilities
         .constraint = constraint_value,                                         \
         .result_rule = result_value,                                            \
         .alias_policy = alias_value,                                            \
+        .read_parameter_roles = {read_roles, sizeof(read_roles) - 1U},          \
+        .write_parameter_roles = {write_roles, sizeof(write_roles) - 1U},       \
     },
 #include "specification/rwir_catalog.def"
 #undef RUNTIMEC_RWIR_OPERATION

@@ -22,7 +22,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <kvspace/xvalue_head.h>
+#include <kvspace/kvspace_xvalue.h>
 
 #include "contract/allocator.h"
 #include "contract/checkpoint.h"
@@ -64,7 +64,7 @@ _Static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 16U,
                "V.body must start 16 bytes after the XValue base");
 #endif
 
-/* 一条 XValue 的头部（16 字节，见 kvspace 的 xvalue_head.h）。 */
+/* 一条 XValue 的头部（16 字节，见 kvspace 的 kvspace_xvalue.h）。 */
 typedef struct runtimec_kvspace_value_header {
     uint64_t value_size;
     uint64_t value_revision;
@@ -110,6 +110,16 @@ typedef struct runtimec_kvspace_access {
     size_t resolved_address_capacity; /* 槽数（2 的幂） */
     uint64_t generation;
     bool generation_started;
+    /*
+     * 目录枚举的排序缓存（见 `contract/key_directory.h`）。存储接口不再排序，
+     * 「第 i 个有序子项」由本进程按 `cmp_coord` 重建；缓存以 `kvspaceList` 的
+     * generation 失效。
+     *
+     * **只有一份**，不按目录建多份：runtimec 的目录枚举是一次性遍历（把子项交给
+     * 访问者/数个数），不存在「同时持有两个目录的有序视图」的场景。多份缓存需要
+     * 一个淘汰策略，而没有使用场景的淘汰策略只会长出 bug。
+     */
+    struct runtimec_key_directory *directory;
 } runtimec_kvspace_access_t;
 
 typedef struct runtimec_kvspace_access_request {
@@ -150,11 +160,6 @@ runtimec_status_t runtimec_kvspace_access_list(
     runtimec_kvspace_access_t *access, const runtimec_snapshot_t *snapshot,
     runtimec_key_view_t prefix,
     runtimec_kvspace_list_visitor_function_t visitor, void *visitor_context,
-    runtimec_error_t *error);
-runtimec_status_t runtimec_kvspace_access_watch(
-    runtimec_kvspace_access_t *access, const runtimec_snapshot_t *snapshot,
-    runtimec_key_view_t key, runtimec_bytes_view_t expected,
-    uint64_t timeout_nanoseconds, runtimec_bytes_buffer_t *observed,
     runtimec_error_t *error);
 runtimec_status_t runtimec_kvspace_access_signal(
     runtimec_kvspace_access_t *access, runtimec_key_view_t key,

@@ -218,7 +218,7 @@ def handlers_table_files(source_root: Path):
     handlers_root = source_root / HANDLERS_DIRECTORY
     if handlers_root.is_dir():
         yield from sorted(handlers_root.glob("*.c"))
-    temporary = source_root / "runtimec/vmbin/temp_println.c"
+    temporary = source_root / "runtimec/vmbin/temp_output.c"
     if temporary.is_file():
         yield temporary
 

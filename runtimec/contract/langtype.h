@@ -16,7 +16,7 @@
  *   |---|---|
  *   | `vmbin/handlers/scalar.c` | 数值算子取类型 |
  *   | `vmbin/handlers/container.c` | 容器元素宽 |
- *   | `vmbin/temp_println.c` | 打印取类 |
+ *   | `vmbin/temp_output.c` | 打印取类 |
  *   | `contract/kvspace_access.c` | 零值宽度 |
  *
  * 本文件是**唯一真相的候选 home**。随后的统一任务把上面四份改成调它、然后删掉

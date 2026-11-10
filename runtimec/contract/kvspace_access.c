@@ -9,15 +9,27 @@
  *       路径先清零输出再返回明确状态。
  */
 
+/* nanosleep 是 POSIX：本工程用 C11（`-std=c11` 关闭扩展），必须显式要 POSIX。
+ * 放在**所有** include 之前——特性宏晚于系统头就无效。 */
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "contract/kvspace_access.h"
 
+#include <errno.h>
+#include <time.h>
 #include <stdalign.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <kvspace/kvspace.h>
-#include <kvspace/xvalue_head.h>
+
+#include "contract/key_directory.h"
+#include "contract/kvspace_interface.h"
+#include "contract/kvspace_interface.h"
+#include <kvspace/kvlang_xvalue.h>
+#include <kvspace/kvspace_xvalue.h>
 
 /* `RUNTIMEC_KVSPACE_KEY_CAPACITY` 现在定义在 `contract/kvspace_access.h`：
  * 地址账本的 key 槽与建 key 的缓冲必须共用同一个上界。 */
@@ -73,6 +85,126 @@ static bool runtimec_kvspace_access_key_text(runtimec_key_view_t key,
     return true;
 }
 
+/*
+ * 读一个 key 的整条 wire：**读写路径的唯一读入口**。
+ *
+ * 新接口只给 offset，地址要自己算：`kvspaceXvalueInProcessAddress(h) + offset`。
+ * 返回的 `output_wire` 是**借用**——下一次对该 key 的 `Realloc`/`Free` 之前有效，
+ * 跨写持有属于未定义（`kvspace.h` 头部的生命周期条款）。
+ *
+ * 三条判据（与旧 `kvspaceGet` 同语义，不因换接口而放宽）：
+ *   - 键不存在 → `output_wire = NULL`，返回 SUCCESS（「没有」不是「坏」）；
+ *   - 键存在但零字节 → `output_wire` 非 NULL、`output_size = 0`；
+ *   - 后端不支持映射（durable）→ `kvspaceXvalueInProcessAddress` 返回 NULL，
+ *     本函数报 `UNSUPPORTED`——不猜、不退化成旧接口。
+ */
+static runtimec_status_t runtimec_kvspace_access_read_wire(
+    runtimec_kvspace_access_t *adapter, const char *key_text,
+    const uint8_t **output_wire, uint32_t *output_size,
+    runtimec_error_t *error) {
+    if (output_wire != NULL) {
+        *output_wire = NULL;
+    }
+    if (output_size != NULL) {
+        *output_size = 0U;
+    }
+    if (adapter == NULL || key_text == NULL) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, 3, "invalid read request");
+    }
+    char error_text[256];
+    error_text[0] = '\0';
+    uint64_t value_offset = 0U;
+    const int status = kvspaceResolve(adapter->handle, key_text, 0U,
+                                      &value_offset, error_text,
+                                      (uint32_t)sizeof(error_text));
+    if (status != 0) {
+        /* 键不存在是**观察**不是故障：旧接口也是 0 + NULL。 */
+        if (status == KVSPACE_MISSING) {
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_ERROR, 3, "kvspace read failed");
+    }
+    const uint8_t *base = kvspaceXvalueInProcessAddress(adapter->handle);
+    if (base == NULL) {
+        /* 非映射后端没有进程内值区。读写路径按裁决「durable 先不管」尚未迁移，
+         * 这里明确报告不支持，而不是拿一个 NULL 基址去算地址。 */
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED, 3,
+            "the backend does not expose an in-process value area");
+    }
+    const uint8_t *wire = base + value_offset;
+    const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)(const void *)wire;
+    /* padding 非零即非法：它是 head ABI 的一部分。总长也要能算出来。 */
+    const uint64_t total = kvspaceXvalueHeadTotalLen(head);
+    if (total == 0U || total > UINT32_MAX) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_ERROR, 4, "value head is malformed");
+    }
+    if (output_wire != NULL) {
+        *output_wire = wire;
+    }
+    if (output_size != NULL) {
+        *output_size = (uint32_t)total;
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
+/*
+ * 写一个 key：**读写路径的唯一写入口**。
+ *
+ * `wire` 是调用方用 `kvspaceXvalueHeadNew*` 造好的**完整 wire**（构造点不变）。
+ * 本函数把它拆成 body/attr 两段交给 `kvspaceRealloc`——`Realloc` 只分配并写 head，
+ * body 与 attr 由本函数填。head 绝不在这里写第二遍。
+ *
+ * 拆段只在这里做：body 偏移算术与 attr 长度的定义点都在本文件，两处各算一次
+ * 迟早会不一致（「head 说 bodylen=8、实际拷了 12」）。
+ */
+static runtimec_status_t runtimec_kvspace_access_write_wire(
+    runtimec_kvspace_access_t *adapter, const char *key_text,
+    const uint8_t *wire, uint32_t wire_size, runtimec_error_t *error) {
+    if (adapter == NULL || key_text == NULL || wire == NULL ||
+        wire_size < KVSPACE_XVALUE_HEAD_LEN) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, 3, "invalid write request");
+    }
+    const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)(const void *)wire;
+    const uint64_t body_length = kvspaceXvalueHeadLen(head);
+    const uint64_t attr_length = (uint64_t)kvspaceXvalueHeadAttrsLen(head);
+    if (KVSPACE_XVALUE_HEAD_LEN + body_length + attr_length != (uint64_t)wire_size) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_INVALID, 4, "wire length does not match its head");
+    }
+    char error_text[256];
+    error_text[0] = '\0';
+    uint64_t value_offset = 0U;
+    if (kvspaceRealloc(adapter->handle, key_text, body_length, attr_length,
+                       &value_offset, error_text,
+                       (uint32_t)sizeof(error_text)) != 0) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_ERROR, 5, "kvspace write failed");
+    }
+    uint8_t *base = kvspaceXvalueInProcessAddress(adapter->handle);
+    if (base == NULL) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED, 5,
+            "the backend does not expose an in-process value area");
+    }
+    /* head 由 Realloc 写好了；这里只填 body 与 attr。 */
+    uint8_t *slot = base + value_offset;
+    if (body_length != 0U) {
+        memcpy(slot + KVSPACE_XVALUE_HEAD_LEN, wire + KVSPACE_XVALUE_HEAD_LEN,
+               (size_t)body_length);
+    }
+    if (attr_length != 0U) {
+        memcpy(slot + KVSPACE_XVALUE_HEAD_LEN + body_length,
+               wire + KVSPACE_XVALUE_HEAD_LEN + body_length,
+               (size_t)attr_length);
+    }
+    return RUNTIMEC_STATUS_SUCCESS;
+}
+
 runtimec_status_t runtimec_kvspace_access_read(
     runtimec_kvspace_access_t *access, const runtimec_snapshot_t *snapshot,
     runtimec_key_view_t key, runtimec_bytes_buffer_t *output,
@@ -90,18 +222,18 @@ runtimec_status_t runtimec_kvspace_access_read(
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_INVALID, 2, "invalid key view");
     }
-    uint8_t *value = NULL;
-    uint32_t value_size = 0U;
     /*
-     * **resolve = 0**：runtimec 的解引用只走显式 `*`（见 16-ptr.kv），
-     * 读接口拿的是 key 本身的值。resolve=1 会把「`*T` + 空 body」的空引用
-     * 当成指向空路径的指针去跟随，结果读回 0 字节——与「key 不存在」撞在
-     * 一起，编码器因此把合法的 None 操作数判成畸形。
+     * **不跟 Ptr**：runtimec 的解引用只走显式 `*`（见 16-ptr.kv），读接口拿的是
+     * key 本身的值。`kvspaceResolve` 契约就是「不跟 Ptr」，与旧接口 resolve=0 同义。
      */
-    if (kvspaceGet(adapter->handle, key_text, 0, &value,
-                                      &value_size) != 0) {
-        return runtimec_kvspace_access_fail(
-            error, RUNTIMEC_STATUS_ERROR, 3, "kvspace read failed");
+    const uint8_t *value = NULL;
+    uint32_t value_size = 0U;
+    {
+        const runtimec_status_t read_status = runtimec_kvspace_access_read_wire(
+            adapter, key_text, &value, &value_size, error);
+        if (read_status != RUNTIMEC_STATUS_SUCCESS) {
+            return read_status;
+        }
     }
     /*
      * 两件事必须分开报，**判据是 value 是不是 NULL**：
@@ -145,13 +277,15 @@ runtimec_status_t runtimec_kvspace_access_read_header(
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_INVALID, 7, "invalid key view");
     }
-    uint8_t *value = NULL;
+    /* 不跟 Ptr：理由同 `runtimec_kvspace_access_read`。 */
+    const uint8_t *value = NULL;
     uint32_t value_size = 0U;
-    /* resolve = 0：理由同 `runtimec_kvspace_access_read`。 */
-    if (kvspaceGet(adapter->handle, key_text, 0, &value,
-                                      &value_size) != 0) {
-        return runtimec_kvspace_access_fail(
-            error, RUNTIMEC_STATUS_ERROR, 8, "kvspace read failed");
+    {
+        const runtimec_status_t read_status = runtimec_kvspace_access_read_wire(
+            adapter, key_text, &value, &value_size, error);
+        if (read_status != RUNTIMEC_STATUS_SUCCESS) {
+            return read_status;
+        }
     }
     /* 缺少该 key 是真实观察：value_size = 0，由调用方判定为畸形或缺失。 */
     output->value_size = (value == NULL) ? 0U : (uint64_t)value_size;
@@ -183,16 +317,8 @@ runtimec_status_t runtimec_kvspace_access_write(
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_INVALID, 11, "value is too large");
     }
-    char error_text[256];
-    error_text[0] = '\0';
-    if (kvspaceSetValue(
-            adapter->handle, key_text, value.data, (uint32_t)value.size,
-            error_text, (uint32_t)sizeof(error_text)) != 0) {
-        return runtimec_kvspace_access_fail(
-            error, RUNTIMEC_STATUS_ERROR, 12,
-            error_text[0] != '\0' ? error_text : "kvspace write failed");
-    }
-    return RUNTIMEC_STATUS_SUCCESS;
+    return runtimec_kvspace_access_write_wire(adapter, key_text, value.data,
+                                              (uint32_t)value.size, error);
 }
 
 runtimec_status_t runtimec_kvspace_access_write_partial(
@@ -217,15 +343,29 @@ runtimec_status_t runtimec_kvspace_access_write_partial(
             error, RUNTIMEC_STATUS_INVALID, 15,
             "partial write is outside the addressable range");
     }
+    /*
+     * 原地写 body 的一段：`Resolve` 拿偏移 → `base + offset + 头长 + 段偏移`。
+     * 比旧 `kvspaceSetPart` 更直接——那条接口内部也是这个算法，只是不给调用方
+     * 基址。**不改 head**：本接口的前提是「值已存在且容量不变」，head 里的
+     * bodylen/attrslen 由先前那次写定下。
+     */
     char error_text[256];
     error_text[0] = '\0';
-    if (kvspaceSetPart(
-            adapter->handle, key_text, (uint32_t)offset, value.data,
-            (uint32_t)value.size, error_text,
-            (uint32_t)sizeof(error_text)) != 0) {
+    uint64_t value_offset = 0U;
+    if (kvspaceResolve(adapter->handle, key_text, 0U, &value_offset, error_text,
+                       (uint32_t)sizeof(error_text)) != 0) {
         return runtimec_kvspace_access_fail(
-            error, RUNTIMEC_STATUS_ERROR, 16,
-            error_text[0] != '\0' ? error_text : "kvspace partial write failed");
+            error, RUNTIMEC_STATUS_ERROR, 16, "kvspace partial write failed");
+    }
+    uint8_t *base = kvspaceXvalueInProcessAddress(adapter->handle);
+    if (base == NULL) {
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_UNSUPPORTED, 16,
+            "the backend does not expose an in-process value area");
+    }
+    uint8_t *slot = base + value_offset + KVSPACE_XVALUE_HEAD_LEN;
+    if (value.size != 0U) {
+        memcpy(slot + offset, value.data, (size_t)value.size);
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }
@@ -245,12 +385,12 @@ runtimec_status_t runtimec_kvspace_access_remove(
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_INVALID, 18, "invalid key view");
     }
-    const char *keys[1];
-    keys[0] = key_text;
+    /* 单键删除：旧 `kvspaceDel` 一次删 n 个，新接口 `kvspaceFree` 一次一个。
+     * 这里本来就只有一个键，直接调，不造批量包装。 */
     char error_text[256];
     error_text[0] = '\0';
-    if (kvspaceDel(adapter->handle, keys, 1U, error_text,
-                                      (uint32_t)sizeof(error_text)) != 0) {
+    if (kvspaceFree(adapter->handle, key_text, error_text,
+                    (uint32_t)sizeof(error_text)) != 0) {
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_ERROR, 19,
             error_text[0] != '\0' ? error_text : "kvspace remove failed");
@@ -261,7 +401,51 @@ runtimec_status_t runtimec_kvspace_access_remove(
 /* 一个目录最多递归的层数：超过即视为损坏的 key 树，直接失败。 */
 #define RUNTIMEC_KVSPACE_LIST_DEPTH_LIMIT 32U
 
-/* 把一个目录前缀下的直接子项交给访问者；遇到子目录（名字带尾斜杠）继续下钻。 */
+/* 排序缓存的 source 绑定：存储接口的 `kvspaceList` + 句柄。 */
+static runtimec_status_t runtimec_kvspace_access_directory_source(
+    void *context, const char *directory, char *names, uint32_t capacity,
+    uint32_t *output_length, uint32_t *output_count,
+    uint64_t *output_generation);
+
+/*
+ * 目录枚举的 source：直接调 `kvspaceList`，把返回码翻成 runtimec 状态。
+ *
+ * `context` 就是 adapter 自己——缓存挂在 adapter 上，source 只需要句柄；多包一个
+ * 结构体只是多一层间接。错误文本写进栈上缓冲后丢弃：诊断由调用方的具名 fail 给，
+ * 后端 err 在这里没有更具体的去处。
+ */
+static runtimec_status_t runtimec_kvspace_access_directory_source(
+    void *context, const char *directory, char *names, uint32_t capacity,
+    uint32_t *output_length, uint32_t *output_count,
+    uint64_t *output_generation) {
+    runtimec_kvspace_access_t *adapter = (runtimec_kvspace_access_t *)context;
+    if (adapter == NULL) {
+        return RUNTIMEC_STATUS_INVALID;
+    }
+    char error_text[256];
+    error_text[0] = '\0';
+    const int status = kvspaceList(adapter->handle, directory, names, capacity,
+                                   output_length, output_count,
+                                   output_generation, error_text,
+                                   (uint32_t)sizeof(error_text));
+    if (status == 0) {
+        return RUNTIMEC_STATUS_SUCCESS;
+    }
+    /* 容量不足是新接口**唯一**允许重试的失败，且它已写出所需长度与个数。 */
+    if (status == -ENOSPC) {
+        return RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY;
+    }
+    return RUNTIMEC_STATUS_ERROR;
+}
+
+/*
+ * 把一个目录前缀下的直接子项交给访问者；遇到子目录（名字带尾斜杠）继续下钻。
+ *
+ * **顺序来自本进程**：存储接口的 `kvspaceList` 明确「后端顺序、不排序」，所以这里
+ * 经 `runtimec_key_directory` 按 `cmp_coord` 排好再按 index 取。旧实现依赖后端
+ * `ListAt` 已排序，语义等价（`runtimec_key_compare_directory_entry` 与后端
+ * `child_cmp` 逐项对齐，见 `tests/key_order_test.c`）。
+ */
 static runtimec_status_t runtimec_kvspace_access_list_directory(
     runtimec_kvspace_access_t *adapter, const char *directory,
     size_t directory_size, const char *prefix, size_t prefix_size,
@@ -271,22 +455,33 @@ static runtimec_status_t runtimec_kvspace_access_list_directory(
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_ERROR, 20, "key tree is too deep");
     }
-    int32_t entry_count = 0;
-    if (kvspaceListLen(adapter->handle, directory, 0, 1,
-                                            &entry_count) != 0) {
+    /*
+     * **每层一个独立缓存**：递归时外层还在用自己那份 `at()` 取项，共用一份会
+     * 让子目录的 refresh 把外层正在遍历的目录换掉——实测拼出 `/lib/test/test/`
+     * 这种重复前缀，之后整条链失败。栈上分配，深度上限 32，代价可忽略。
+     */
+    runtimec_key_directory_t level;
+    runtimec_key_directory_reset(&level, &adapter->allocator, adapter,
+                                 runtimec_kvspace_access_directory_source);
+    runtimec_status_t refresh = runtimec_key_directory_refresh(&level, directory);
+    if (refresh != RUNTIMEC_STATUS_SUCCESS) {
+        (void)runtimec_key_directory_destroy(&level);
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_ERROR, 21, "kvspace list failed");
     }
-    for (int32_t index = 0; index < entry_count; index++) {
-        uint8_t name[256];
+    const uint32_t entry_count = level.count;
+    for (uint32_t index = 0U; index < entry_count; index++) {
+        const char *name = NULL;
         uint32_t name_size = 0U;
-        if (kvspaceListAt(
-                adapter->handle, directory, 0, 1, index, name,
-                (uint32_t)sizeof(name), &name_size) != 0) {
+        if (runtimec_key_directory_at(&level, index, &name,
+                                      &name_size) != RUNTIMEC_STATUS_SUCCESS ||
+            name == NULL) {
+            (void)runtimec_key_directory_destroy(&level);
             return runtimec_kvspace_access_fail(
                 error, RUNTIMEC_STATUS_ERROR, 22, "kvspace list entry failed");
         }
         if (directory_size + (size_t)name_size >= RUNTIMEC_KVSPACE_KEY_CAPACITY) {
+            (void)runtimec_key_directory_destroy(&level);
             return runtimec_kvspace_access_fail(
                 error, RUNTIMEC_STATUS_ERROR, 23, "listed key is too long");
         }
@@ -304,27 +499,40 @@ static runtimec_status_t runtimec_kvspace_access_list_directory(
                 adapter, full_key, full_size, prefix, prefix_size, visitor,
                 visitor_context, depth + 1U, error);
             if (status != RUNTIMEC_STATUS_SUCCESS) {
+                (void)runtimec_key_directory_destroy(&level);
                 return status;
             }
             continue;
         }
         /* 目录不带尾斜杠时也要下钻：后端只在显式建索引时给尾斜杠，不能据此
-         * 判断是否有子项。空子目录的 list_size 为 0，因此这次下钻是廉价的。 */
+         * 判断是否有子项。空子目录的 list_size 为 0，因此这次下钻是廉价的。
+         *
+         * **探测必须用独立缓存**：`adapter->directory` 正被外层这轮循环使用
+         * （`at()` 每次都要读它）。拿它去 refresh 子目录，就把外层正在遍历的
+         * 目录换成了子目录——下一次 `at()` 便在子目录上取项，拼出来的 key
+         * 是 `/lib/test/test/`，refresh 立刻失败。
+         */
         if (full_size + 1U < RUNTIMEC_KVSPACE_KEY_CAPACITY) {
             char child_directory[RUNTIMEC_KVSPACE_KEY_CAPACITY];
             memcpy(child_directory, full_key, full_size);
             child_directory[full_size] = '/';
             child_directory[full_size + 1U] = '\0';
-            int32_t child_count = 0;
-            if (kvspaceListLen(
-                    adapter->handle, child_directory, 0, 1, &child_count) == 0 &&
-                child_count > 0) {
+            runtimec_key_directory_t probe;
+            runtimec_key_directory_reset(&probe, &adapter->allocator, adapter,
+                                         runtimec_kvspace_access_directory_source);
+            const bool has_children =
+                runtimec_key_directory_refresh(&probe, child_directory) ==
+                    RUNTIMEC_STATUS_SUCCESS &&
+                probe.count > 0U;
+            (void)runtimec_key_directory_destroy(&probe);
+            if (has_children) {
                 runtimec_status_t status =
                     runtimec_kvspace_access_list_directory(
                         adapter, child_directory, full_size + 1U, prefix,
                         prefix_size, visitor, visitor_context, depth + 1U,
                         error);
                 if (status != RUNTIMEC_STATUS_SUCCESS) {
+                    (void)runtimec_key_directory_destroy(&level);
                     return status;
                 }
             }
@@ -333,9 +541,11 @@ static runtimec_status_t runtimec_kvspace_access_list_directory(
             visitor_context, runtimec_key_view_make(full_key, full_size),
             error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
+            (void)runtimec_key_directory_destroy(&level);
             return status;
         }
     }
+    (void)runtimec_key_directory_destroy(&level);
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
@@ -389,56 +599,6 @@ runtimec_status_t runtimec_kvspace_access_list(
         visitor, visitor_context, 0U, error);
 }
 
-runtimec_status_t runtimec_kvspace_access_watch(
-    runtimec_kvspace_access_t *access, const runtimec_snapshot_t *snapshot,
-    runtimec_key_view_t key, runtimec_bytes_view_t expected,
-    uint64_t timeout_nanoseconds, runtimec_bytes_buffer_t *observed,
-    runtimec_error_t *error) {
-    (void)snapshot;
-    runtimec_kvspace_access_t *adapter = access;
-    if (adapter == NULL || !runtimec_bytes_view_is_valid(expected) ||
-        !runtimec_bytes_buffer_is_valid(observed) || error == NULL) {
-        return runtimec_kvspace_access_fail(
-            error, RUNTIMEC_STATUS_INVALID, 27, "invalid watch request");
-    }
-    char key_text[RUNTIMEC_KVSPACE_KEY_CAPACITY];
-    if (!runtimec_kvspace_access_key_text(key, key_text, sizeof(key_text),
-                                           NULL)) {
-        return runtimec_kvspace_access_fail(
-            error, RUNTIMEC_STATUS_INVALID, 28, "invalid key view");
-    }
-    if (expected.size > UINT32_MAX) {
-        return runtimec_kvspace_access_fail(
-            error, RUNTIMEC_STATUS_INVALID, 29, "watch target is too large");
-    }
-    uint8_t *value = NULL;
-    uint32_t value_size = 0U;
-    /* 阻塞点：作废派生视图并声明静默；返回后立刻放开。 */
-    (void)kvspaceViewQuiesce(adapter->handle, 1);
-    int watch_status = kvspaceWatch(
-        adapter->handle, key_text, expected.data, (uint32_t)expected.size,
-        timeout_nanoseconds, &value, &value_size);
-    (void)kvspaceViewQuiesce(adapter->handle, 0);
-    uint32_t epoch = 0U;
-    (void)kvspaceViewAck(adapter->handle, &epoch);
-    if (watch_status != 0) {
-        return runtimec_kvspace_access_fail(
-            error, RUNTIMEC_STATUS_ERROR, 30, "kvspace watch failed");
-    }
-    if (value == NULL || value_size == 0U) {
-        return runtimec_kvspace_access_fail(
-            error, RUNTIMEC_STATUS_ERROR, 31, "watch returned no value");
-    }
-    observed->size = value_size;
-    if (observed->capacity < (size_t)value_size || observed->data == NULL) {
-        return runtimec_kvspace_access_fail(
-            error, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY, 32,
-            "observed value does not fit the caller buffer");
-    }
-    memcpy(observed->data, value, value_size);
-    return RUNTIMEC_STATUS_SUCCESS;
-}
-
 runtimec_status_t runtimec_kvspace_access_signal(
     runtimec_kvspace_access_t *access, runtimec_key_view_t key, runtimec_error_t *error) {
     (void)access;
@@ -473,10 +633,13 @@ static bool runtimec_kvspace_access_read_source_generation(
            runtimec_kvspace_member_source_revision, member_size);
     key_text[function_size + 1U + separator_size + member_size] = '\0';
 
-    uint8_t *value = NULL;
+    /* 不跟 Ptr（`Resolve` 的契约即如此）；这一处旧 resolve=1 的跟跳语义
+     * 由需要它的调用方用 `contract/key_resolution` 显式做。 */
+    const uint8_t *value = NULL;
     uint32_t value_size = 0U;
-    if (kvspaceGet(adapter->handle, key_text, 1, &value,
-                                      &value_size) != 0 ||
+    if (runtimec_kvspace_access_read_wire(adapter, key_text, &value,
+                                          &value_size, NULL) !=
+            RUNTIMEC_STATUS_SUCCESS ||
         value == NULL || value_size < KVSPACE_XVALUE_HEAD_LEN) {
         return false;
     }
@@ -572,23 +735,34 @@ runtimec_status_t runtimec_kvspace_access_source_revision(
             index += 1U; /* 空槽 */
             continue;
         }
-        uint8_t *value = NULL;
-        uint32_t value_size = 0U;
         char record_key[RUNTIMEC_KVSPACE_KEY_CAPACITY];
         memcpy(record_key, record->key, record->key_size);
         record_key[record->key_size] = '\0';
+        /*
+         * 账本记的是**地址**；新接口给的是 offset，所以这里按
+         * 「基址 + offset」求当前地址再比。基址在进程内稳定（`kvspace.h`：
+         * 预留 VA + MAP_FIXED），偏移才是会变的那一项——超容量搬移后它变，
+         * 容量内原地则不变，正好对上「offset 变化 = 该 key 缓存失效」。
+         */
+        char record_error[128];
+        record_error[0] = '\0';
+        uint64_t record_offset = 0U;
         const int read_status =
-            kvspaceGet(adapter->handle, record_key, 0, &value, &value_size);
-        const bool stale =
-            read_status != 0 || value == NULL ||
-            (uint64_t)(uintptr_t)value != record->address ||
-            (uint64_t)value_size != record->observed_size;
+            kvspaceResolve(adapter->handle, record_key, 0U, &record_offset,
+                           record_error, (uint32_t)sizeof(record_error));
+        const uint8_t *base = kvspaceXvalueInProcessAddress(adapter->handle);
+        const uint64_t current_address =
+            (read_status == 0 && base != NULL)
+                ? (uint64_t)(uintptr_t)(base + record_offset)
+                : 0U;
+        const bool stale = read_status != 0 || base == NULL ||
+                           current_address != record->address;
         if (!stale) {
             index += 1U;
             continue;
         }
         changed = true;
-        if (read_status != 0 || value == NULL) {
+        if (read_status != 0 || base == NULL) {
             /*
              * key 已不存在：**清空该槽**。开放寻址不能像稠密数组那样把尾元素
              * 搬进来——那样会破坏探测链，让另一个 key 的槽永远找不到。清空后
@@ -600,8 +774,7 @@ runtimec_status_t runtimec_kvspace_access_source_revision(
             continue;
         }
         /* 仍在，只是被搬了：就地刷新，下一轮同一个 key 就不会再被判为失效。 */
-        record->address = (uint64_t)(uintptr_t)value;
-        record->observed_size = (uint64_t)value_size;
+        record->address = current_address;
         index += 1U;
     }
     /*
@@ -809,12 +982,14 @@ static runtimec_status_t runtimec_kvspace_access_resolve_address(
     runtimec_kvspace_access_t *adapter, const char *key_text, bool record,
     runtimec_xvalue_address_t *output_xvalue_address,
     runtimec_error_t *error) {
-    uint8_t *value = NULL;
+    const uint8_t *value = NULL;
     uint32_t value_size = 0U;
-    if (kvspaceGet(adapter->handle, key_text, 0, &value,
-                                      &value_size) != 0) {
-        return runtimec_kvspace_access_fail(
-            error, RUNTIMEC_STATUS_ERROR, 40, "kvspace read failed");
+    {
+        const runtimec_status_t read_status = runtimec_kvspace_access_read_wire(
+            adapter, key_text, &value, &value_size, error);
+        if (read_status != RUNTIMEC_STATUS_SUCCESS) {
+            return read_status;
+        }
     }
     if (value == NULL || value_size < KVSPACE_XVALUE_HEAD_LEN) {
         /* 尚未分配或没有值：不是错误，但也不能交地址。 */
@@ -972,9 +1147,10 @@ static runtimec_status_t runtimec_kvspace_access_write_system_member(
     }
     char error_text[256];
     error_text[0] = '\0';
-    int set_status = kvspaceSetValue(
+    const bool wrote = runtimec_kvspace_write_wire(
         adapter->handle, key_text, wire, (uint32_t)wire_size, error_text,
         (uint32_t)sizeof(error_text));
+    const int set_status = wrote ? 0 : 1;
     free(wire);
     if (set_status != 0) {
         return runtimec_kvspace_access_fail(
@@ -1286,9 +1462,8 @@ runtimec_status_t runtimec_kvspace_access_ensure_frame(
 
     char kvspace_error[256];
     kvspace_error[0] = '\0';
-    if (kvspaceMkindex(
-            adapter->handle, directory_text, 0U, kvspace_error,
-            (uint32_t)sizeof(kvspace_error)) != 0) {
+    if (kvspaceMkindex(adapter->handle, directory_text, kvspace_error,
+                       (uint32_t)sizeof(kvspace_error)) != 0) {
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_ERROR, 74,
             kvspace_error[0] != '\0' ? kvspace_error
@@ -1318,10 +1493,11 @@ runtimec_status_t runtimec_kvspace_access_ensure_frame(
      * 长度取**值头声明的 body 长度**，不是 wire 总长——wire 还带 attr（系统键是
      * 两字节 `[02 00]`），拿总长比会把每个已存在且相同的值都判成「指向别的函数」。
      */
-    uint8_t *existing = NULL;
+    const uint8_t *existing = NULL;
     uint32_t existing_size = 0U;
-    if (kvspaceGet(adapter->handle, library_key, 1,
-                                      &existing, &existing_size) == 0 &&
+    if (runtimec_kvspace_access_read_wire(adapter, library_key, &existing,
+                                          &existing_size, error) ==
+            RUNTIMEC_STATUS_SUCCESS &&
         existing != NULL) {
         const size_t head_size = KVSPACE_XVALUE_HEAD_LEN;
         if (existing_size >= head_size) {
@@ -1349,9 +1525,10 @@ runtimec_status_t runtimec_kvspace_access_ensure_frame(
             error, RUNTIMEC_STATUS_ERROR, 78, "library value encoding failed");
     }
     kvspace_error[0] = '\0';
-    int set_status = kvspaceSetValue(
+    const bool wrote = runtimec_kvspace_write_wire(
         adapter->handle, library_key, wire, (uint32_t)wire_size, kvspace_error,
         (uint32_t)sizeof(kvspace_error));
+    const int set_status = wrote ? 0 : 1;
     free(wire);
     if (set_status != 0) {
         return runtimec_kvspace_access_fail(
@@ -1476,10 +1653,11 @@ runtimec_status_t runtimec_kvspace_access_ensure_zero_value(
      *   变长 —— **成功**。变长槽没有「应有的宽度」可对，存在即合法；它的 body
      *           长度由内容决定，不是声明决定。
      */
-    uint8_t *existing = NULL;
+    const uint8_t *existing = NULL;
     uint32_t existing_size = 0U;
-    if (kvspaceGet(adapter->handle, key_text, 1, &existing,
-                                      &existing_size) == 0 &&
+    if (runtimec_kvspace_access_read_wire(adapter, key_text, &existing,
+                                          &existing_size, error) ==
+            RUNTIMEC_STATUS_SUCCESS &&
         existing != NULL) {
         if (existing_size < KVSPACE_XVALUE_HEAD_LEN) {
             return runtimec_kvspace_access_fail(
@@ -1538,9 +1716,10 @@ runtimec_status_t runtimec_kvspace_access_ensure_zero_value(
     }
     char kvspace_error[256];
     kvspace_error[0] = '\0';
-    const int set_status = kvspaceSetValue(
+    const bool wrote = runtimec_kvspace_write_wire(
         adapter->handle, key_text, wire, (uint32_t)wire_size, kvspace_error,
         (uint32_t)sizeof(kvspace_error));
+    const int set_status = wrote ? 0 : 1;
     free(wire);
     if (set_status != 0) {
         return runtimec_kvspace_access_fail(
@@ -1617,9 +1796,10 @@ runtimec_status_t runtimec_kvspace_access_write_program_counter(
     }
     char error_text[256];
     error_text[0] = '\0';
-    int set_status = kvspaceSetValue(
+    const bool wrote = runtimec_kvspace_write_wire(
         adapter->handle, key_text, wire, (uint32_t)wire_size, error_text,
         (uint32_t)sizeof(error_text));
+    const int set_status = wrote ? 0 : 1;
     free(wire);
     if (set_status != 0) {
         return runtimec_kvspace_access_fail(
@@ -1674,9 +1854,10 @@ runtimec_status_t runtimec_kvspace_access_read_program_counter(
             "counter key formatting failed");
     }
 
-    uint8_t *wire = NULL;
+    const uint8_t *wire = NULL;
     uint32_t wire_size = 0U;
-    if (kvspaceGet(adapter->handle, key_text, 1, &wire, &wire_size) != 0 ||
+    if (runtimec_kvspace_access_read_wire(adapter, key_text, &wire, &wire_size,
+                                          NULL) != RUNTIMEC_STATUS_SUCCESS ||
         wire == NULL) {
         return RUNTIMEC_STATUS_SUCCESS;
     }
@@ -1752,9 +1933,11 @@ runtimec_status_t runtimec_kvspace_access_read_frame_library(
             "library key formatting failed");
     }
 
-    uint8_t *wire = NULL;
+    const uint8_t *wire = NULL;
     uint32_t wire_size = 0U;
-    if (kvspaceGet(adapter->handle, library_key, 1, &wire, &wire_size) != 0 ||
+    if (runtimec_kvspace_access_read_wire(adapter, library_key, &wire,
+                                          &wire_size, error) !=
+            RUNTIMEC_STATUS_SUCCESS ||
         wire == NULL) {
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_UNSUPPORTED, 104,
@@ -1827,6 +2010,22 @@ runtimec_status_t runtimec_kvspace_access_checkpoint(
  * 值变化时唤醒 watcher，删除（目标 None）不触发唤醒，会一直等到超时。轮询
  * 间隔 1ms，条目消失即返回，行为与「等它被删除」一致而不会被拖满 30 秒。
  */
+/*
+ * 睡一段。handoff 轮询用它代替旧的 `kvspaceWatch`——存储接口没有等待原语，
+ * 而这里需要的就是「等一个间隔再查一次」。POSIX 的 `nanosleep` 在 C11 严格模式
+ * 下要显式声明特性宏（与 `vmbin/handlers/host.c` 的做法一致）。
+ */
+static void runtimec_kvspace_access_sleep(uint64_t duration_nanoseconds) {
+    if (duration_nanoseconds == 0U) {
+        return;
+    }
+    const struct timespec interval = {
+        .tv_sec = (time_t)(duration_nanoseconds / UINT64_C(1000000000)),
+        .tv_nsec = (long)(duration_nanoseconds % UINT64_C(1000000000)),
+    };
+    nanosleep(&interval, NULL);
+}
+
 runtimec_status_t runtimec_kvspace_access_handoff(
     runtimec_kvspace_access_t *access, const runtimec_handoff_request_t *request,
     runtimec_error_t *error) {
@@ -1879,9 +2078,10 @@ runtimec_status_t runtimec_kvspace_access_handoff(
     }
     char error_text[256];
     error_text[0] = '\0';
-    int set_status = kvspaceSetValue(
+    const bool wrote = runtimec_kvspace_write_wire(
         adapter->handle, queue_key, wire, (uint32_t)wire_size, error_text,
         (uint32_t)sizeof(error_text));
+    const int set_status = wrote ? 0 : 1;
     free(wire);
     if (set_status != 0) {
         return runtimec_kvspace_access_fail(
@@ -1891,28 +2091,27 @@ runtimec_status_t runtimec_kvspace_access_handoff(
     uint64_t waited_nanoseconds = 0U;
     while (waited_nanoseconds <
            RUNTIMEC_KVSPACE_HANDOFF_DEADLINE_NANOSECONDS) {
-        uint8_t *observed = NULL;
+        const uint8_t *observed = NULL;
         uint32_t observed_size = 0U;
-        if (kvspaceGet(adapter->handle, queue_key, 1,
-                                          &observed, &observed_size) != 0) {
+        if (runtimec_kvspace_access_read_wire(adapter, queue_key, &observed,
+                                              &observed_size, error) !=
+            RUNTIMEC_STATUS_SUCCESS) {
             return runtimec_kvspace_access_fail(
                 error, RUNTIMEC_STATUS_ERROR, 57, "handoff queue read failed");
         }
         if (observed == NULL || observed_size == 0U) {
             return RUNTIMEC_STATUS_SUCCESS;
         }
-        uint8_t *unchanged = NULL;
-        uint32_t unchanged_size = 0U;
-        (void)kvspaceViewQuiesce(adapter->handle, 1);
-        /* 值变化时后端会立即唤醒；超时上限设为单个轮询间隔，使这一等既不会
-         * 提前返回，也不会把删除拖成整段超时。 */
-        (void)kvspaceWatch(
-            adapter->handle, queue_key, observed, observed_size,
-            RUNTIMEC_KVSPACE_HANDOFF_POLL_NANOSECONDS, &unchanged,
-            &unchanged_size);
-        (void)kvspaceViewQuiesce(adapter->handle, 0);
-        uint32_t epoch = 0U;
-        (void)kvspaceViewAck(adapter->handle, &epoch);
+        /*
+         * 纯轮询，不再 `kvspaceWatch`：存储接口没有等待原语（架构师裁决
+         * 2026-11-10，`kvspace·watch` 语言算子同时停用）。完成条件本来就
+         * 是「条目被认领方删除」，轮询 `Get` 判定与阻塞等待的判据一致——
+         * 之前用 watch 只是拿它当「睡一个间隔」，现在直接睡。
+         *
+         * 同理不再 `ViewQuiesce`/`ViewAck`：新接口没有视图/epoch，
+         * `offset` 的生命周期由「下一次对该 key 的 Realloc/Free」界定。
+         */
+        runtimec_kvspace_access_sleep(RUNTIMEC_KVSPACE_HANDOFF_POLL_NANOSECONDS);
         waited_nanoseconds += RUNTIMEC_KVSPACE_HANDOFF_POLL_NANOSECONDS;
     }
     return runtimec_kvspace_access_fail(
@@ -1957,6 +2156,25 @@ runtimec_status_t runtimec_kvspace_access_create(
     access->allocator = request->allocator;
     access->handle = request->borrowed_kvspace_handle;
     access->instance_identifier = request->instance_identifier;
+    /*
+     * 排序缓存随 adapter 一起分配。它必须在这里建好：`list_directory` 拿不到它
+     * 就无法枚举，而「第一次 list 时才懒建」会把一次分配失败拖到执行热路径上，
+     * 那时没有干净的错误通道。
+     */
+    access->directory = runtimec_allocator_allocate(
+        &request->allocator, sizeof(*access->directory),
+        alignof(runtimec_key_directory_t));
+    if (access->directory == NULL) {
+        runtimec_status_t cleanup = runtimec_allocator_deallocate(
+            &request->allocator, access, sizeof(*access),
+            alignof(runtimec_kvspace_access_t));
+        (void)cleanup;
+        return runtimec_kvspace_access_fail(
+            error, RUNTIMEC_STATUS_OUT_OF_MEMORY, 59,
+            "directory cache allocation failed");
+    }
+    runtimec_key_directory_reset(access->directory, &request->allocator, access,
+                                 runtimec_kvspace_access_directory_source);
     *output = access;
     return RUNTIMEC_STATUS_SUCCESS;
 }
@@ -1970,6 +2188,19 @@ runtimec_status_t runtimec_kvspace_access_destroy(
             "invalid kvspace access destroy request");
     }
     const runtimec_allocator_t allocator = access->allocator;
+    if (access->directory != NULL) {
+        runtimec_status_t released =
+            runtimec_key_directory_destroy(access->directory);
+        runtimec_allocator_deallocate(&allocator, access->directory,
+                                      sizeof(*access->directory),
+                                      alignof(runtimec_key_directory_t));
+        access->directory = NULL;
+        if (released != RUNTIMEC_STATUS_SUCCESS) {
+            return runtimec_kvspace_access_fail(
+                error, RUNTIMEC_STATUS_ERROR, 61,
+                "directory cache deallocation violated the allocator contract");
+        }
+    }
     if (access->resolved_addresses != NULL) {
         runtimec_status_t status = runtimec_allocator_deallocate(
             &allocator, access->resolved_addresses,

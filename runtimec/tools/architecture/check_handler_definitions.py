@@ -172,7 +172,7 @@ def audit(root: Path) -> tuple[list[Finding], int]:
 SELFTEST_REGISTRY = """\
 static const kvlangRwirCap myrwircaps[] = {
     {"add", kvlangBuiltinAdd, false},
-    {"println", kvlangBuiltinPrintln, false},
+    {"输出算子", kvlangBuiltinPrintln, false},
     {NULL, kvlangKvcpuRoute, false},
 };
 """
@@ -207,7 +207,7 @@ def run_selftest() -> int:
             failures.append(
                 f"definition scan: expected only kvlangBuiltinAdd, got {sorted(defined)}")
 
-        # println 已注册但无实现 → 必须报；声明式原型不得被当成实现。
+        # 输出算子 已注册但无实现 → 必须报；声明式原型不得被当成实现。
         findings, checked = audit(root)
         check("registered-without-implementation",
               {finding.rule for finding in findings},

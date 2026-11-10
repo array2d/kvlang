@@ -131,6 +131,15 @@ VOID_LIFECYCLE_PATTERN = re.compile(
     r"\s*\([^;{}]*\)\s*(?:;|\{)",
     re.IGNORECASE | re.DOTALL,
 )
+# 上游 ABI 的 void 生命周期声明：`extern void kvspaceClose(void *)`。
+# **两个条件同时满足**才跳过——带 `extern`（声明而非本仓定义），且函数名以
+# 上游前缀 `kvspace` 开头。本仓自己的 `void foo_close(...)` 仍然报错：那条规则
+# 治的正是「本仓的生命周期函数吞掉失败」，给外部签名开口子不该顺手放过自己。
+EXTERNAL_VOID_LIFECYCLE_PATTERN = re.compile(
+    r"\bextern\s+void\s+(kvspace[A-Za-z0-9_]*(?:destroy|close)[A-Za-z0-9_]*)"
+    r"\s*\([^;{}]*\)\s*;",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 @dataclass(frozen=True, order=True)
@@ -331,7 +340,16 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
             continue
         if path.suffix in {".c", ".h"}:
             code = c_code_without_comments_or_literals(text)
+            # 上游 ABI 的 void 生命周期声明先登记豁免位置，再逐个判其余命中；
+            # 用**位置**而不是名字排除：同一个名字在本仓又被定义一次时，那处仍要报。
+            exempt_spans = [
+                (match.start(), match.end())
+                for match in EXTERNAL_VOID_LIFECYCLE_PATTERN.finditer(code)
+            ]
             for match in VOID_LIFECYCLE_PATTERN.finditer(code):
+                if any(start <= match.start() and match.end() <= end
+                       for start, end in exempt_spans):
+                    continue
                 findings.append(Finding(
                     display,
                     code.count("\n", 0, match.start()) + 1,
@@ -382,6 +400,19 @@ SELFTEST_CASES = (
                       "}\n", ()),
     ("own-uppercase-abbreviation", "#define OUR_PTR_LIMIT 4\n",
      ("abbreviation-ptr-use-pointer",)),
+    # 外部 ABI 的 void 生命周期声明可以放行，但口子必须钉窄：
+    # `extern` 与 `kvspace` 前缀**两条同时满足**才豁免。
+    ("external-void-lifecycle-is-allowed",
+     "extern void kvspaceClose(void *handle);\n", ()),
+    ("local-void-lifecycle-is-still-rejected",
+     "static void probe_close(void *handle) { (void)handle; }\n",
+     ("void-lifecycle-function",)),
+    ("extern-without-upstream-prefix-is-rejected",
+     "extern void local_close(void *handle);\n",
+     ("void-lifecycle-function",)),
+    ("upstream-name-without-extern-is-rejected",
+     "void kvspaceClose(void *handle);\n",
+     ("void-lifecycle-function",)),
     # 产品源不得直写标准输出；测试可以（它们是正当的失败信息）。
     ("stdout-write", "static void probe(void) {\n"
                      '    fprintf(stderr, "boom");\n'

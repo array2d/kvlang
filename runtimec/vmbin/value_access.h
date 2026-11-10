@@ -55,7 +55,7 @@ typedef enum vmbin_value_access_diagnostic {
  * 段断言：本模块的码必须落在自己的段内。
  *
  * 迁移前五个模块各自从 1 开始编号，同一个 `3` 同时是「解释器的指令非法」与
- * 「println 的值格式非法」。那造成过一整晚的误判——**不是细心能解决的，是
+ * 「输出算子 的值格式非法」。那造成过一整晚的误判——**不是细心能解决的，是
  * 命名空间缺失**。这两条断言把「漏加偏移」变成编译期错误。
  */
 _Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST, RUNTIMEC_DIAGNOSTIC_BAND_VALUE_ACCESS),
@@ -215,7 +215,7 @@ runtimec_status_t vmbin_value_access_write_whole_value(
  * **值的形态**：普通值 / 指针 / 扩展。
  *
  * 只有这三种；它们由 **langtype 首字符**（`*` / `@` / 其它）决定——head 里已经
- * 没有 ptr 字节了（见 kvspace `xvalue_head.h` 的新布局）。所以这里不读任何 head
+ * 没有 ptr 字节了（见 kvspace `kvspace_xvalue.h` 的新布局）。所以这里不读任何 head
  * 字段，也不引用 kvspace 的 `KVSPACE_REF_*` 常量（它们随 head 一起退役）。
  */
 typedef enum vmbin_value_access_form {

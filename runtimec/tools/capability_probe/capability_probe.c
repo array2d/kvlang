@@ -23,10 +23,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "contract/kvspace_interface.h"
 #include "contract/kvspace_access.h"
 #include "engine/execution_window.h"
 #include "engine/session.h"
-#include <kvspace/kvspace.h>
 
 #define CAPABILITY_PROBE_TEMPLATE_CAPACITY 512U
 #define CAPABILITY_PROBE_CAPTURE_CAPACITY 512U
@@ -100,8 +100,10 @@ int main(int argument_count, char **arguments) {
     const char *dsn = NULL;
     const char *capability = NULL;
     const char *source_path = NULL;
-    const char *kvspace_library = getenv("RUNTIMEC_KVSPACE_LIBRARY");
-    const char *layout_library = getenv("KVLANG_LAYOUT_LIBRARY");
+    /* 库路径一律走命令行：kvlang 只允许 `KVSPACE` 一个环境变量（用户裁决），
+     * 探针的两个路径没有任何「非 env 不可」的场景——它们是每次调用的输入。 */
+    const char *kvspace_library = NULL;
+    const char *layout_library = NULL;
     char template_buffer[CAPABILITY_PROBE_TEMPLATE_CAPACITY];
     char source_buffer[CAPABILITY_PROBE_TEMPLATE_CAPACITY];
     char entry[128];
@@ -131,11 +133,11 @@ int main(int argument_count, char **arguments) {
     if (dsn == NULL || capability == NULL) {
         fprintf(stderr,
                 "usage: capability_probe <dsn> <capability> [source.kv] "
-                "[--kvspace <lib>] [--layout <lib>]\n");
+                "--kvspace <lib> --layout <lib>\n");
         return 2;
     }
     if (kvspace_library == NULL || layout_library == NULL) {
-        fprintf(stderr, "missing library path (--kvspace/--layout or env)\n");
+        fprintf(stderr, "missing library path: --kvspace and --layout are required\n");
         return 2;
     }
 

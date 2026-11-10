@@ -37,7 +37,7 @@ typedef uint16_t binrwir_operation_identifier_t;
  * layout 的 irseq、不是 Program 内下标——所以 Program 重新编码后标记仍然有效。
  *
  * 保留区占用记账（0xFF00–0xFFFF）：
- *   0xFF00–0xFF03  临时 println 三条（print / println / cerr，见 vmbin/temp_println.h）
+ *   0xFF00–0xFF03  临时 输出算子 三条（print / 输出算子 / cerr，见 vmbin/temp_output.h）
  *   0xFFFE         FOREIGN
  *   0xFFFF         NONE（非法指令头）
  */

@@ -82,14 +82,17 @@
 /* 长度未定的一维（`[]T`，等价 `[.]T`）。解析时记成它，**不是** 0 或 1：
  * 需要确定长度的调用方（多维下标线性化）看到它必须失败，不能猜一个值。 */
 #define RUNTIMEC_CONTAINER_DIMENSION_UNBOUNDED INT64_C(-1)
+#include <kvspace/kvspace_xvalue.h>
+
 #include "contract/diagnostic_band.h"
+#include "contract/kvspace_interface.h"
 #include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "contract/error.h"
 #include "contract/status.h"
 #include "contract/view.h"
-#include "kvspace/kvspace.h"
-#include "kvspace/xvalue_head.h"
+#include <kvspace/kvlang_xvalue.h>
+#include <kvspace/kvspace_xvalue.h>
 #include "vmbin/frame_target_key.h"
 #include "vmbin/value_access.h"
 
@@ -378,8 +381,9 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
         sizeof(key_buffer), &error);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         message[0] = '\0';
-        if (kvspaceSetValue(frame->kvspace_handle, key_buffer, wire,
-                            (uint32_t)wire_size, message, sizeof(message)) != 0) {
+        if (!runtimec_kvspace_write_wire(frame->kvspace_handle, key_buffer, wire,
+                                         (uint32_t)wire_size, message,
+                                         sizeof(message))) {
             status = RUNTIMEC_STATUS_ERROR;
         }
     }
@@ -1261,6 +1265,18 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
                    ? output_exit->status                                           \
                    : RUNTIMEC_STATUS_SUCCESS;                                      \
     }
+
+/*
+ * handler 层写一个 key：`value` 必须是**完整 wire**（head+body+attr）。
+ *
+ * 为什么单独一层：handler 拿不到 `runtimec_kvspace_access_t`（那是 engine 持有的），
+ * 只有裸句柄。本函数把「拆段 + Realloc + 填两段」这一串收在一处，避免每个 handler
+ * 各写一遍——那种重复迟早在某一处漏掉 attr，症状是「值能读出来但没有类型」。
+ *
+ * 失败只返回 false 并写 `*message`，由调用方决定诊断码（各 handler 的 diag 不同）。
+ */
+/* 读写 wire 的两个入口在 `contract/kvspace_interface.h`（engine 也要用，而 engine
+ * 不依赖 vmbin）。本头已经 include 它，handler 直接用那两个名字。 */
 
 #ifdef __cplusplus
 }

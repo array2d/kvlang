@@ -9,7 +9,10 @@
 #include <string.h>
 
 #include "contract/view.h"
-#include "kvspace/kvspace.h"
+#include <kvspace/kvlang_xvalue.h>
+#include <kvspace/kvspace_xvalue.h>
+
+#include "contract/kvspace_interface.h"
 
 runtimec_status_t runtimec_vthread_status_handle(
     const binrwir_binvthread_frame_t *frame, void **output_handle) {
@@ -76,7 +79,6 @@ static runtimec_status_t runtimec_vthread_status_fail(
 runtimec_status_t runtimec_vthread_status_write(
     void *kvspace_handle, const char *status_key, runtimec_bytes_view_t status) {
     char message[256];
-    uint8_t *body = NULL;
 
     if (kvspace_handle == NULL || status_key == NULL ||
         status_key[0] == '\0') {
@@ -91,19 +93,36 @@ runtimec_status_t runtimec_vthread_status_write(
     }
     message[0] = '\0';
     /*
-     * 用 `kvspaceWriteNewPlace` 而不是 `kvspaceSetValue`：前者能直接指定
-     * ref 与 body_cap（物理容量下界 80），正是「固定档」要求的那几项；
-     * 后者按值自算容量，算出来的可能小于规范下限。
+     * 写路径用 `kvspaceRealloc`：它只收 body/attr 两段长度并返回偏移，
+     * **物理容量由后端自己分配**——「状态槽物理容量 ≥80」这条按裁决已删除
+     * （`final-plan.md` §4.3；架构师裁决 2026-11-10：不扩 ABI 表达容量）。
+     *
+     * attr 区要带 langtype（状态槽是 `[]char/utf8`）：先拼出 attr 记录长度，
+     * 再让 Realloc 分配 head+body+attr，最后由本函数填两段。head 由 Realloc 写，
+     * 这里不再碰它——写两遍会出现「head 说 bodylen=8、实际拷了 12」。
      */
-    if (kvspaceWriteNewPlace(kvspace_handle, status_key, KVSPACE_REF_INLINE,
-                             KVSPACE_STORETYPE_SLACK, (uint32_t)status.size,
-                             RUNTIMEC_VTHREAD_STATUS_CAPACITY,
-                             RUNTIMEC_VTHREAD_STATUS_LANGTYPE, &body, message,
-                             sizeof(message)) != 0) {
+    const size_t langtype_length = strlen(RUNTIMEC_VTHREAD_STATUS_LANGTYPE);
+    const uint64_t attr_length = 3U + (uint64_t)langtype_length;
+    uint64_t value_offset = 0U;
+    if (kvspaceRealloc(kvspace_handle, status_key, (uint64_t)status.size,
+                       attr_length, &value_offset, message,
+                       (uint32_t)sizeof(message)) != 0) {
         return RUNTIMEC_STATUS_ERROR;
     }
+    const uint8_t *base = kvspaceXvalueInProcessAddress(kvspace_handle);
+    if (base == NULL) {
+        return RUNTIMEC_STATUS_UNSUPPORTED;
+    }
+    uint8_t *slot = (uint8_t *)(uintptr_t)(base + value_offset);
     if (status.size != 0U) {
-        memcpy(body, status.data, status.size);
+        memcpy(slot + KVSPACE_XVALUE_HEAD_LEN, status.data, status.size);
+    }
+    {
+        uint8_t *attr = slot + KVSPACE_XVALUE_HEAD_LEN + (uint64_t)status.size;
+        attr[0] = (uint8_t)KVSPACE_XVALUE_ATTR_TAG_LANGTYPE;
+        attr[1] = (uint8_t)(langtype_length & 0xFFU);
+        attr[2] = (uint8_t)((langtype_length >> 8U) & 0xFFU);
+        memcpy(attr + 3, RUNTIMEC_VTHREAD_STATUS_LANGTYPE, langtype_length);
     }
     return RUNTIMEC_STATUS_SUCCESS;
 }
@@ -117,7 +136,7 @@ runtimec_status_t runtimec_vthread_status_write(
 runtimec_status_t runtimec_vthread_status_read(
     void *kvspace_handle, const char *status_key,
     runtimec_string_view_t *output_text, runtimec_error_t *error) {
-    uint8_t *wire = NULL;
+    const uint8_t *wire = NULL;
     uint32_t wire_length = 0U;
     const uint8_t *body = NULL;
     uint64_t effective_length = 0U;
@@ -136,9 +155,10 @@ runtimec_status_t runtimec_vthread_status_read(
      * 不走快照——所以这里拿到的是当前值，不是某次快照的值。
      *
      * **头一律自己解**：库已不再提供取头函数（那种「解码结构体」是
-     * 第二份字段真相），布局判据只有 `kvspace/xvalue_head.h` 一份。
+     * 第二份字段真相），布局判据只有 `kvspace/kvspace_xvalue.h` 一份。
      */
-    if (kvspaceGet(kvspace_handle, status_key, 0, &wire, &wire_length) != 0) {
+    if (!runtimec_kvspace_read_wire(kvspace_handle, status_key, &wire,
+                                    &wire_length)) {
         return runtimec_vthread_status_fail(
             error, RUNTIMEC_STATUS_ERROR, 4, "status read failed");
     }

@@ -1,7 +1,9 @@
 # runtimec 架构与实现总纲
 
 > 当前状态：目录、数据结构、函数边界和失败封闭骨架已经建立；语言执行语义尚未实现。
-> `scaffold` 产物名必须保留到真实语义通过验收，防止骨架被误当成可发布实现。
+> 产物名 `libkvlang_runtime`（用户裁决 2026-11-10，TASK-059）。
+> 注意：产物名不再带 `scaffold` 后缀，但**语言执行语义仍未全部通过验收**——名字
+> 变了不等于骨架成了可发布实现，验收判据见各 issue 与 `workspace/` 下的报告。
 
 `runtimec/` 是 kvlang 的全新 C11 运行时底座。它只允许一条从语言规范到执行的主干：
 kvspace 中的明文 RWIR 先被解析并解引用为进程内 canonical BinRWIR，再由顶层 BinRWIR
@@ -442,7 +444,7 @@ ctest --test-dir /tmp/kvlang-runtimec-build --output-on-failure
 ```
 
 语义实现后按 shared memory → benchmark quick → benchmark full → tutorial 的顺序验证。
-当前 scaffold 没有执行语义，不运行 benchmark 或 tutorial。
+当前产物尚未通过完整的执行语义验收，不运行 benchmark 或 tutorial。
 
 ## 14. 后续实现合同
 

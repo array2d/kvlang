@@ -317,7 +317,7 @@ static bool runtimec_float_format_write_fixed(const char *digits, int exponent,
  * 与「非有限值固定串」，但那两段今天是 `static`。开出口比复制一份好——复制就是
  * 同一规则的两处真相，两边迟早漂开，而漂开的表现是「同一个值在两处显示不同」。
  *
- * 本文件的 `shortest` 与两个 `static` 一行未改：改它们的门禁是「println 输出
+ * 本文件的 `shortest` 与两个 `static` 一行未改：改它们的门禁是「输出算子 输出
  * 零变化」，那要用 ctest 证明，不是顺手重构。
  */
 bool runtimec_float_format_core(double value, runtimec_float_domain_t domain,

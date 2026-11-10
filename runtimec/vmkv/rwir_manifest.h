@@ -90,9 +90,16 @@ typedef enum runtimec_rwir_alias_policy {
 
 /* 能力行 identifier 的枚举：值直接来自 .def 的书写顺序，只在本组件内使用。 */
 typedef enum vmkv_rwir_capability_identifier {
-#define RUNTIMEC_RWIR_OPERATION(identifier, operator_name, operation_identifier, \
-                                read_type_set, write_type_set, constraint,      \
-                                result_rule, alias_policy, behavior_decisions)  \
+/* 枚举只需要第一个形参，其余显式列出并丢弃。
+ *
+ * 为什么不用 `#define X(a, ...) a,`：变参不引用时 GCC 仍把实参里的逗号留在
+ * 展开结果中（`A, 0, 0, 0U, (..), ..`），形成逗号表达式并触发
+ * `-Wunused-value`。显式列出每个形参、宏体只引用 `identifier`，实参就整体消失。 */
+#define RUNTIMEC_RWIR_OPERATION(identifier, operation_name, numeric_identifier, \
+                                read_mask, write_mask,                         \
+                                read_roles, write_roles,                       \
+                                constraint_value, result_value, alias_value,    \
+                                decisions)                                      \
     identifier,
 #include "specification/rwir_catalog.def"
 #undef RUNTIMEC_RWIR_OPERATION
@@ -109,6 +116,10 @@ typedef struct vmkv_rwir_capability {
     runtimec_rwir_constraint_t constraint;
     runtimec_rwir_result_rule_t result_rule;
     runtimec_rwir_alias_policy_t alias_policy;
+    /* 按位置的角色，逗号分隔的文本（`"key"`、`"key,"`、空）。空 = 全部 ANY。
+     * 用文本而不是位集：预处理器传不了带逗号的小列表，而字符串里逗号无特殊含义。 */
+    runtimec_string_view_t read_parameter_roles;
+    runtimec_string_view_t write_parameter_roles;
 } vmkv_rwir_capability_t;
 
 /* 一条别名记录：surface 名 → 能力行，不携带类型。 */

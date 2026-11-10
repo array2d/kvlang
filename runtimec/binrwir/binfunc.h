@@ -112,7 +112,7 @@ runtimec_status_t binrwir_binfunc_destroy(binrwir_binfunc_t *program);
  * **判据不是「谁声明的」，而是「它是不是一段路径」**（`vmkv/rwir.h` 早有此条，
  * 只是 `materialize_locals` 与绑定路径没照它执行）。此前帧准备给成员符号建零值
  * 并绑死地址，而 `struct·new` 的 `kvspaceCpTree` 会整体重建子树 ⇒ 绑定表里留着
- * 一具已不存在的 box，`println(p·x)` 读到 0 ——**写侧完全正确、读侧读旧地址**。
+ * 一具已不存在的 box，`输出算子(p·x)` 读到 0 ——**写侧完全正确、读侧读旧地址**。
  *
  * ── 为什么按完整字节序列匹配 ────────────────────────────────────────
  * 只判首字节 `0xC2` 会把任何以它开头的其他字符也当成成员符；只判「含 `·`」又会
@@ -173,6 +173,20 @@ runtimec_status_t binrwir_binfunc_builder_add_alias_rule(
  * 才可复用）；而 add_symbol 返回的下标只在 builder 内有效——拿到直接填进参数项，
  * 不要在 finalize 之后还拿它跟 Program 里的 slot 比对。
  */
+/*
+ * 按**名字**查已登记的符号，不比较类型。
+ *
+ * 与 `add_symbol` 的区别：那条按「同名同类型」做幂等、同名异型即冲突。这里只
+ * 回答「这个名字在池里吗」，给**key 位置**用——同一个物理 key 既可能是写槽
+ * （登记成 `int64`）、又可能是某个算子的 key 实参（它的类型不该由字面量决定）。
+ * 两个视角看同一个 key，符号只该有一条。
+ *
+ * 找不到返回 INVALID（`*output_symbol_index` 置 NONE）。
+ */
+runtimec_status_t binrwir_binfunc_builder_find_symbol(
+    const binrwir_binfunc_builder_t *builder, runtimec_string_view_t name,
+    uint16_t *output_symbol_index);
+
 runtimec_status_t binrwir_binfunc_builder_add_symbol(
     binrwir_binfunc_builder_t *builder, runtimec_string_view_t name,
     runtimec_string_view_t langtype, uint16_t *output_symbol_index);

@@ -1,8 +1,8 @@
 /*
- * 组件：vmbin/temp_println 的实现（**临时**）
+ * 组件：vmbin/temp_output 的实现（**临时**）
  *
  * 正式实现归 byteseek 扩展 runtime（issue #622 决策 D）。这里只为让 tutorial 的
- * runtimec 分组能被 runtimec 自己跑通。整体由 `RUNTIMEC_TEMP_PRINTLN` 开关控制，
+ * runtimec 分组能被 runtimec 自己跑通。整体由 `RUNTIMEC_TEMP_OUTPUT` 开关控制，
  * 默认 OFF；关闭时本文件不参与编译，三个算子回到「未知算子 → FOREIGN」原行为。
  *
  * 只支持最小类型集，其余**失败封闭报 UNSUPPORTED**：
@@ -16,9 +16,13 @@
  *   完整格式化归 byteseek，这里不扩展。
  */
 
-#ifdef RUNTIMEC_TEMP_PRINTLN
+/*
+ * **渲染核心已脱离编译宏。** 它现在有两个消费者：本文件的条目表（受
+ * `RUNTIMEC_TEMP_OUTPUT` 控制）与驱动侧的 `tools/driver_output`（恒在）。
+ * 把渲染关进宏里会让后者链接失败——实测过。
+ */
 
-#include "temp_println.h"
+#include "temp_output.h"
 #include "contract/diagnostic_band.h"
 
 #include <float.h>
@@ -35,22 +39,22 @@
 #include "contract/status.h"
 #include "vmbin/value_access.h"
 
-#define RUNTIMEC_TEMP_PRINTLN_SCRATCH_CAPACITY 64U
+#define RUNTIMEC_TEMP_OUTPUT_SCRATCH_CAPACITY 64U
 
-typedef enum runtimec_temp_println_diagnostic {
-    RUNTIMEC_TEMP_PRINTLN_DIAG_VALUE_ACCESS = RUNTIMEC_DIAGNOSTIC_BAND_TEMP_PRINTLN + 1U,
-    RUNTIMEC_TEMP_PRINTLN_DIAG_UNSUPPORTED_TYPE = RUNTIMEC_DIAGNOSTIC_BAND_TEMP_PRINTLN + 2U,
-    RUNTIMEC_TEMP_PRINTLN_DIAG_MALFORMED_VALUE = RUNTIMEC_DIAGNOSTIC_BAND_TEMP_PRINTLN + 3U
-} runtimec_temp_println_diagnostic_t;
+typedef enum runtimec_temp_output_diagnostic {
+    RUNTIMEC_TEMP_OUTPUT_DIAG_VALUE_ACCESS = RUNTIMEC_DIAGNOSTIC_BAND_TEMP_OUTPUT + 1U,
+    RUNTIMEC_TEMP_OUTPUT_DIAG_UNSUPPORTED_TYPE = RUNTIMEC_DIAGNOSTIC_BAND_TEMP_OUTPUT + 2U,
+    RUNTIMEC_TEMP_OUTPUT_DIAG_MALFORMED_VALUE = RUNTIMEC_DIAGNOSTIC_BAND_TEMP_OUTPUT + 3U
+} runtimec_temp_output_diagnostic_t;
 
 _Static_assert(
-    RUNTIMEC_DIAGNOSTIC_IN_BAND(RUNTIMEC_TEMP_PRINTLN_DIAG_VALUE_ACCESS,
-                                RUNTIMEC_DIAGNOSTIC_BAND_TEMP_PRINTLN),
-    "temp_println diagnostics must stay in its own band");
+    RUNTIMEC_DIAGNOSTIC_IN_BAND(RUNTIMEC_TEMP_OUTPUT_DIAG_VALUE_ACCESS,
+                                RUNTIMEC_DIAGNOSTIC_BAND_TEMP_OUTPUT),
+    "temp_output diagnostics must stay in its own band");
 
-static runtimec_status_t runtimec_temp_println_fail(
+static runtimec_status_t runtimec_temp_output_fail(
     binrwir_execution_exit_t *output_exit, runtimec_status_t status,
-    runtimec_temp_println_diagnostic_t detail, uint32_t source_counter) {
+    runtimec_temp_output_diagnostic_t detail, uint32_t source_counter) {
     *output_exit = (binrwir_execution_exit_t){0};
     output_exit->kind = BINRWIR_EXECUTION_EXIT_ERROR;
     output_exit->status = status;
@@ -64,7 +68,7 @@ static runtimec_status_t runtimec_temp_println_fail(
  * 参数项的声明 langtype 走 `vmbin_value_access_langtype`——那是唯一取类型的
  * 入口，本文件不再留私有副本。取不到就是空视图，调用方据此失败封闭。
  */
-static runtimec_string_view_t runtimec_temp_println_langtype(
+static runtimec_string_view_t runtimec_temp_output_langtype(
     const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument) {
     runtimec_string_view_t langtype = runtimec_string_view_make(NULL, 0U);
@@ -85,7 +89,7 @@ static runtimec_string_view_t runtimec_temp_println_langtype(
  * 是裸种类（`char/utf32`、`int64`）。这里剥掉前导 `[dims]` 再比，**不做其它
  * 归一化**——`[]char/utf8` 这类变长形态的 dims 在方括号里，剥完后同样是基种类。
  */
-static int runtimec_temp_println_is(runtimec_string_view_t langtype,
+static int runtimec_temp_output_type_is(runtimec_string_view_t langtype,
                                     const char *text) {
     const size_t size = strlen(text);
     size_t offset = 0U;
@@ -135,7 +139,7 @@ static int runtimec_temp_println_is(runtimec_string_view_t langtype,
  * 这里只做一件事：把 float32 的**窄化 + 域选择**拼好交给合同。值本身以 double
  * 传入（float32 的每个值都能精确表示为 double，不引入舍入），**往返域由宽度决定**。
  */
-static int runtimec_temp_println_render_float(double value, int is_float32,
+static int runtimec_temp_output_render_float(double value, int is_float32,
                                               char *scratch, size_t capacity,
                                               size_t *output_length) {
     return runtimec_float_format_shortest(
@@ -155,13 +159,13 @@ static int runtimec_temp_println_render_float(double value, int is_float32,
  * 真正原因——值有 200 字节而缓冲只有 64——一个字都没有。三种原因分开之后，
  * 每条失败都指向自己那一行。
  */
-typedef enum runtimec_temp_println_render_result {
-    RUNTIMEC_TEMP_PRINTLN_RENDER_OK = 0,
+typedef enum runtimec_temp_output_render_result {
+    RUNTIMEC_TEMP_OUTPUT_RENDER_OK = 0,
     /* 类型不在本临时实现的支持集内（含窄整数以外的未知 kind）。 */
-    RUNTIMEC_TEMP_PRINTLN_RENDER_UNSUPPORTED_TYPE,
+    RUNTIMEC_TEMP_OUTPUT_RENDER_UNSUPPORTED_TYPE,
     /* 类型认识，但 body 的字节数与该类型对不上（标量宽度不符）。 */
-    RUNTIMEC_TEMP_PRINTLN_RENDER_MALFORMED,
-} runtimec_temp_println_render_result_t;
+    RUNTIMEC_TEMP_OUTPUT_RENDER_MALFORMED,
+} runtimec_temp_output_render_result_t;
 
 /*
  * 窄整数：langtype → 宽度与符号性。
@@ -171,13 +175,13 @@ typedef enum runtimec_temp_println_render_result {
  * MALFORMED_VALUE。**判据是 name，不是宽度**：`uint8` 与 `int8` 同宽，符号性
  * 只存在于名字里。
  */
-typedef struct runtimec_temp_println_integer {
+typedef struct runtimec_temp_output_integer {
     size_t width;
     int is_signed;
-} runtimec_temp_println_integer_t;
+} runtimec_temp_output_integer_t;
 
-static int runtimec_temp_println_integer_of(runtimec_string_view_t langtype,
-                                            runtimec_temp_println_integer_t *output) {
+static int runtimec_temp_output_integer_of(runtimec_string_view_t langtype,
+                                            runtimec_temp_output_integer_t *output) {
     static const struct {
         const char *name;
         size_t width;
@@ -189,7 +193,7 @@ static int runtimec_temp_println_integer_of(runtimec_string_view_t langtype,
     };
     for (size_t ordinal = 0U; ordinal < sizeof(table) / sizeof(table[0]);
          ++ordinal) {
-        if (runtimec_temp_println_is(langtype, table[ordinal].name)) {
+        if (runtimec_temp_output_type_is(langtype, table[ordinal].name)) {
             output->width = table[ordinal].width;
             output->is_signed = table[ordinal].is_signed;
             return 1;
@@ -199,7 +203,7 @@ static int runtimec_temp_println_integer_of(runtimec_string_view_t langtype,
 }
 
 /* 小端读一个至多 8 字节的无符号整数；拓宽到 uint64_t 后按符号位还原。 */
-static uint64_t runtimec_temp_println_load_unsigned(const uint8_t *body,
+static uint64_t runtimec_temp_output_load_unsigned(const uint8_t *body,
                                                     size_t width) {
     uint64_t value = 0U;
 
@@ -209,17 +213,17 @@ static uint64_t runtimec_temp_println_load_unsigned(const uint8_t *body,
     return value;
 }
 
-static int runtimec_temp_println_render_integer(
+static int runtimec_temp_output_render_integer(
     runtimec_string_view_t langtype, const uint8_t *body, size_t size,
     char *scratch, size_t capacity, size_t *output_length) {
-    runtimec_temp_println_integer_t integer;
+    runtimec_temp_output_integer_t integer;
     int written;
 
-    if (!runtimec_temp_println_integer_of(langtype, &integer) ||
+    if (!runtimec_temp_output_integer_of(langtype, &integer) ||
         size != integer.width) {
         return 0;
     }
-    const uint64_t raw = runtimec_temp_println_load_unsigned(body, integer.width);
+    const uint64_t raw = runtimec_temp_output_load_unsigned(body, integer.width);
     if (integer.is_signed != 0) {
         /* 按宽度符号扩展：`int8` 的 0xFF 是 -1，不是 255。 */
         const unsigned shift = (unsigned)(64U - 8U * integer.width);
@@ -244,7 +248,7 @@ static int runtimec_temp_println_render_integer(
  * `INSUFFICIENT_CAPACITY`——而那个 status 又被包装成 VALUE_ACCESS，报出来的
  * 是「访问值出错」，与真实原因（值太长）毫无关系。
  */
-static int runtimec_temp_println_write_direct(const uint8_t *body, size_t size,
+static int runtimec_temp_output_write_direct(const uint8_t *body, size_t size,
                                               FILE *stream) {
     if (size != 0U) {
         fwrite(body, 1U, size, stream);
@@ -258,7 +262,7 @@ static int runtimec_temp_println_write_direct(const uint8_t *body, size_t size,
  * 不能按字节切——切在码点中间会产出半个序列。所以以 `capacity - 1` 为上限
  * 尽量多装完整码点，编码一块、写一块、清一块。零分配：视图直接借用值体。
  */
-static int runtimec_temp_println_write_utf32(const uint8_t *body, size_t size,
+static int runtimec_temp_output_write_utf32(const uint8_t *body, size_t size,
                                              char *scratch, size_t capacity,
                                              FILE *stream) {
     size_t offset = 0U;
@@ -297,90 +301,90 @@ static int runtimec_temp_println_write_utf32(const uint8_t *body, size_t size,
  * 支持集：`char/utf8`、`char/utf32`、八个整数宽度、`bool`、`float32`、`float64`。
  * 其余一律 UNSUPPORTED（不许静默打十六进制——那让输出看起来正常、实际是错的）。
  */
-static runtimec_temp_println_render_result_t runtimec_temp_println_render(
+static runtimec_temp_output_render_result_t runtimec_temp_output_render(
     runtimec_string_view_t langtype, const uint8_t *body, size_t size,
     char *scratch, size_t capacity, FILE *stream) {
-    if (runtimec_temp_println_is(langtype, "char/utf8")) {
-        if (!runtimec_temp_println_write_direct(body, size, stream)) {
-            return RUNTIMEC_TEMP_PRINTLN_RENDER_MALFORMED;
+    if (runtimec_temp_output_type_is(langtype, "char/utf8")) {
+        if (!runtimec_temp_output_write_direct(body, size, stream)) {
+            return RUNTIMEC_TEMP_OUTPUT_RENDER_MALFORMED;
         }
-        return RUNTIMEC_TEMP_PRINTLN_RENDER_OK;
+        return RUNTIMEC_TEMP_OUTPUT_RENDER_OK;
     }
-    if (runtimec_temp_println_is(langtype, "char/utf32")) {
-        if (!runtimec_temp_println_write_utf32(body, size, scratch, capacity,
+    if (runtimec_temp_output_type_is(langtype, "char/utf32")) {
+        if (!runtimec_temp_output_write_utf32(body, size, scratch, capacity,
                                                stream)) {
-            return RUNTIMEC_TEMP_PRINTLN_RENDER_MALFORMED;
+            return RUNTIMEC_TEMP_OUTPUT_RENDER_MALFORMED;
         }
-        return RUNTIMEC_TEMP_PRINTLN_RENDER_OK;
+        return RUNTIMEC_TEMP_OUTPUT_RENDER_OK;
     }
-    if (runtimec_temp_println_is(langtype, "bool")) {
+    if (runtimec_temp_output_type_is(langtype, "bool")) {
         static const char true_text[] = "true";
         static const char false_text[] = "false";
         const char *text;
         size_t length;
 
         if (size != 1U) {
-            return RUNTIMEC_TEMP_PRINTLN_RENDER_MALFORMED;
+            return RUNTIMEC_TEMP_OUTPUT_RENDER_MALFORMED;
         }
         text = body[0] != 0U ? true_text : false_text;
         length = body[0] != 0U ? sizeof(true_text) - 1U : sizeof(false_text) - 1U;
         if (length >= capacity) {
-            return RUNTIMEC_TEMP_PRINTLN_RENDER_MALFORMED;
+            return RUNTIMEC_TEMP_OUTPUT_RENDER_MALFORMED;
         }
         memcpy(scratch, text, length);
         fwrite(scratch, 1U, length, stream);
-        return RUNTIMEC_TEMP_PRINTLN_RENDER_OK;
+        return RUNTIMEC_TEMP_OUTPUT_RENDER_OK;
     }
     /* 浮点两种宽度走**同一个**格式化实现，只差 memcpy 的目标类型。 */
-    if (runtimec_temp_println_is(langtype, "float64")) {
+    if (runtimec_temp_output_type_is(langtype, "float64")) {
         double value = 0.0;
         size_t length = 0U;
 
         if (size != sizeof(value)) {
-            return RUNTIMEC_TEMP_PRINTLN_RENDER_MALFORMED;
+            return RUNTIMEC_TEMP_OUTPUT_RENDER_MALFORMED;
         }
         memcpy(&value, body, sizeof(value));
-        if (!runtimec_temp_println_render_float(value, 0, scratch, capacity,
+        if (!runtimec_temp_output_render_float(value, 0, scratch, capacity,
                                                 &length)) {
-            return RUNTIMEC_TEMP_PRINTLN_RENDER_MALFORMED;
+            return RUNTIMEC_TEMP_OUTPUT_RENDER_MALFORMED;
         }
         fwrite(scratch, 1U, length, stream);
-        return RUNTIMEC_TEMP_PRINTLN_RENDER_OK;
+        return RUNTIMEC_TEMP_OUTPUT_RENDER_OK;
     }
-    if (runtimec_temp_println_is(langtype, "float32")) {
+    if (runtimec_temp_output_type_is(langtype, "float32")) {
         float narrow = 0.0f;
         size_t length = 0U;
 
         if (size != sizeof(narrow)) {
-            return RUNTIMEC_TEMP_PRINTLN_RENDER_MALFORMED;
+            return RUNTIMEC_TEMP_OUTPUT_RENDER_MALFORMED;
         }
         memcpy(&narrow, body, sizeof(narrow));
         /* 窄化到 double 是**保值**的（float32 的每个值都能精确表示为 double），
          * 所以这里不引入额外舍入。 */
-        if (!runtimec_temp_println_render_float((double)narrow, 1, scratch,
+        if (!runtimec_temp_output_render_float((double)narrow, 1, scratch,
                                                 capacity, &length)) {
-            return RUNTIMEC_TEMP_PRINTLN_RENDER_MALFORMED;
+            return RUNTIMEC_TEMP_OUTPUT_RENDER_MALFORMED;
         }
         fwrite(scratch, 1U, length, stream);
-        return RUNTIMEC_TEMP_PRINTLN_RENDER_OK;
+        return RUNTIMEC_TEMP_OUTPUT_RENDER_OK;
     }
     {
         size_t length = 0U;
 
-        if (runtimec_temp_println_integer_of(langtype, &(runtimec_temp_println_integer_t){0, 0})) {
-            if (!runtimec_temp_println_render_integer(langtype, body, size,
+        if (runtimec_temp_output_integer_of(langtype, &(runtimec_temp_output_integer_t){0, 0})) {
+            if (!runtimec_temp_output_render_integer(langtype, body, size,
                                                       scratch, capacity,
                                                       &length)) {
-                return RUNTIMEC_TEMP_PRINTLN_RENDER_MALFORMED;
+                return RUNTIMEC_TEMP_OUTPUT_RENDER_MALFORMED;
             }
             fwrite(scratch, 1U, length, stream);
-            return RUNTIMEC_TEMP_PRINTLN_RENDER_OK;
+            return RUNTIMEC_TEMP_OUTPUT_RENDER_OK;
         }
     }
-    return RUNTIMEC_TEMP_PRINTLN_RENDER_UNSUPPORTED_TYPE;
+    return RUNTIMEC_TEMP_OUTPUT_RENDER_UNSUPPORTED_TYPE;
 }
 
-static runtimec_status_t runtimec_temp_println_run(
+runtimec_status_t runtimec_temp_output_run(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, const char *separator,
     int use_stderr, int trailing_newline,
@@ -395,7 +399,7 @@ static runtimec_status_t runtimec_temp_println_run(
         const binrwir_argument_t *argument =
             &instruction->read_arguments.data[ordinal];
         const runtimec_string_view_t langtype =
-            runtimec_temp_println_langtype(frame, argument);
+            runtimec_temp_output_langtype(frame, argument);
         /*
          * **零拷贝取 body**：`vmbin_value_access_locate_body` 给只读视图（字面量
          * 指向池内、局部指向存储），不像 `read_body` 那样要求调用方先备一块装得下
@@ -404,21 +408,21 @@ static runtimec_status_t runtimec_temp_println_run(
          * VALUE_ACCESS 报出来。
          */
         vmbin_value_location_t location;
-        char scratch[RUNTIMEC_TEMP_PRINTLN_SCRATCH_CAPACITY];
+        char scratch[RUNTIMEC_TEMP_OUTPUT_SCRATCH_CAPACITY];
 
         if (langtype.size == 0U) {
             /* 取不到类型 = 本临时实现答不出，失败封闭而不是猜。 */
-            return runtimec_temp_println_fail(
+            return runtimec_temp_output_fail(
                 output_exit, RUNTIMEC_STATUS_UNSUPPORTED,
-                RUNTIMEC_TEMP_PRINTLN_DIAG_UNSUPPORTED_TYPE, source_counter);
+                RUNTIMEC_TEMP_OUTPUT_DIAG_UNSUPPORTED_TYPE, source_counter);
         }
         const runtimec_status_t status =
             vmbin_value_access_locate_body(frame, argument, &location, &error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             /* **原样上报**：容量、形状、解析各有各的 status，不许一律抹成
              * VALUE_ACCESS——那样报出来的原因与真实成因无关。 */
-            return runtimec_temp_println_fail(
-                output_exit, status, RUNTIMEC_TEMP_PRINTLN_DIAG_VALUE_ACCESS,
+            return runtimec_temp_output_fail(
+                output_exit, status, RUNTIMEC_TEMP_OUTPUT_DIAG_VALUE_ACCESS,
                 source_counter);
         }
         if (ordinal != 0U && separator[0] != '\0') {
@@ -427,7 +431,7 @@ static runtimec_status_t runtimec_temp_println_run(
         /*
          * **打印一个指针值 = 打印它指向的 key 路径**，不查类型渲染表。
          *
-         * `println(p)`（p 是 `*int64`）要的是**指针自己的值**，而指针的值就是
+         * `输出算子(p)`（p 是 `*int64`）要的是**指针自己的值**，而指针的值就是
          * 目标路径文本（spec 03-类型系统/03-种类：Ptr 的 body 是目标键）。
          * 按 langtype 查渲染表必然查不到 `*int64`——那不是缺陷，是问错了表：
          * 指针不是标量，它没有「数值形态」可言。
@@ -436,8 +440,8 @@ static runtimec_status_t runtimec_temp_println_run(
          * 与解引用、ptreq 用的是同一条；我**不另判首字符**，那会是第二份规则。
          *
          * `argument->dereference != 0` 的不进这支：那种参数要的是跟过一跳之后的
-         * 值，不是指针本身。实测 `println(*p)` 根本走不到这里——layout 先发一条
-         * copy 把 `*p` 落进临时槽，println 拿到的是那个槽（所以 println 上的
+         * 值，不是指针本身。实测 `输出算子(*p)` 根本走不到这里——layout 先发一条
+         * copy 把 `*p` 落进临时槽，输出算子 拿到的是那个槽（所以 输出算子 上的
          * dereference 位恒为 0，这是正常形态，不是断裂）。留着这个条件是因为
          * 「跟一跳后仍打印指针」在别的路径上仍可能成立，那时该走解引用语义。
          *
@@ -457,20 +461,20 @@ static runtimec_status_t runtimec_temp_println_run(
                 continue;
             }
         }
-        switch (runtimec_temp_println_render(langtype, location.read_bytes,
+        switch (runtimec_temp_output_render(langtype, location.read_bytes,
                                              location.size, scratch,
                                              sizeof(scratch), stream)) {
-            case RUNTIMEC_TEMP_PRINTLN_RENDER_OK:
+            case RUNTIMEC_TEMP_OUTPUT_RENDER_OK:
                 break;
-            case RUNTIMEC_TEMP_PRINTLN_RENDER_UNSUPPORTED_TYPE:
-                return runtimec_temp_println_fail(
+            case RUNTIMEC_TEMP_OUTPUT_RENDER_UNSUPPORTED_TYPE:
+                return runtimec_temp_output_fail(
                     output_exit, RUNTIMEC_STATUS_UNSUPPORTED,
-                    RUNTIMEC_TEMP_PRINTLN_DIAG_UNSUPPORTED_TYPE, source_counter);
+                    RUNTIMEC_TEMP_OUTPUT_DIAG_UNSUPPORTED_TYPE, source_counter);
             default:
                 /* 支持的类型但形状不符（标量宽度不对、非 UTF-32 边界）。 */
-                return runtimec_temp_println_fail(
+                return runtimec_temp_output_fail(
                     output_exit, RUNTIMEC_STATUS_ERROR,
-                    RUNTIMEC_TEMP_PRINTLN_DIAG_MALFORMED_VALUE, source_counter);
+                    RUNTIMEC_TEMP_OUTPUT_DIAG_MALFORMED_VALUE, source_counter);
         }
     }
     if (trailing_newline != 0) {
@@ -481,19 +485,18 @@ static runtimec_status_t runtimec_temp_println_run(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-static runtimec_status_t runtimec_temp_println_handler(
-    binrwir_binvthread_frame_t *frame,
-    const binrwir_instruction_view_t *instruction,
-    binrwir_execution_exit_t *output_exit) {
-    return runtimec_temp_println_run(frame, instruction, " ", 0, 1,
-                                     output_exit);
-}
+/*
+ * 以下三条（handler + 条目表 + 查询函数）受 `RUNTIMEC_TEMP_OUTPUT` 控制：
+ * 它们是「runtimec **库**自带输出算子」这条旧路径，TASK-051 会整段删除。
+ * 渲染核心不受宏控制——驱动侧的 `tools/driver_output` 恒需要它。
+ */
+#ifdef RUNTIMEC_TEMP_OUTPUT
 
 static runtimec_status_t runtimec_temp_print_handler(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
-    return runtimec_temp_println_run(frame, instruction, "", 0, 0,
+    return runtimec_temp_output_run(frame, instruction, "", 0, 0,
                                      output_exit);
 }
 
@@ -501,15 +504,20 @@ static runtimec_status_t runtimec_temp_cerr_handler(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
-    return runtimec_temp_println_run(frame, instruction, " ", 1, 1,
+    return runtimec_temp_output_run(frame, instruction, " ", 1, 1,
                                      output_exit);
 }
 
-/* 三条条目的唯一定义点；开关关闭时整个文件不参与编译。 */
-static const binrwir_registry_entry_t runtimec_temp_println_entry_table[] = {
-    {.operation_identifier = RUNTIMEC_TEMP_PRINTLN_OPERATION_IDENTIFIER,
-     .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
-     .handler = runtimec_temp_println_handler},
+/*
+ * **只剩 print / cerr 两条。**
+ *
+ * `输出算子` 已按用户裁决彻底摘除（TASK-044）——它是 benchmark 专供的临时实现，
+ * 而计时行现在由 `kv_runner` 从结果槽读出后在 C 侧打印，不再经语言层。
+ *
+ * TASK-051 会连这两条一起删（byteseek 自带 `term.rs` 的 print/cerr，runtimec
+ * 最终不实现任何输出算子）。
+ */
+static const binrwir_registry_entry_t runtimec_temp_output_entry_table[] = {
     {.operation_identifier = RUNTIMEC_TEMP_PRINT_OPERATION_IDENTIFIER,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
      .handler = runtimec_temp_print_handler},
@@ -518,22 +526,15 @@ static const binrwir_registry_entry_t runtimec_temp_println_entry_table[] = {
      .handler = runtimec_temp_cerr_handler},
 };
 
-const binrwir_registry_entry_t *runtimec_temp_println_entries(
+const binrwir_registry_entry_t *runtimec_temp_output_entries(
     size_t *output_count) {
     if (output_count != NULL) {
-        *output_count = sizeof(runtimec_temp_println_entry_table) /
-                        sizeof(runtimec_temp_println_entry_table[0]);
+        *output_count = sizeof(runtimec_temp_output_entry_table) /
+                        sizeof(runtimec_temp_output_entry_table[0]);
     }
-    return runtimec_temp_println_entry_table;
+    return runtimec_temp_output_entry_table;
 }
 
-#else
-/*
- * 开关关闭时留一个内部链接的占位声明：ISO C 禁止空翻译单元（-Wpedantic 会报错），
- * 而这里确实什么也不该产出。static 符号不出现在任何产物符号表里。
- */
-typedef int runtimec_temp_println_disabled_t;
-/* 只用类型、不建对象：类型声明不产生符号，也满足「非空翻译单元」。 */
-typedef runtimec_temp_println_disabled_t
-    runtimec_temp_println_disabled_unused_t;
-#endif /* RUNTIMEC_TEMP_PRINTLN */
+#endif /* RUNTIMEC_TEMP_OUTPUT */
+
+

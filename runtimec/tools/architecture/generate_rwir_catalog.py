@@ -229,6 +229,9 @@ class Row:
     # 名字而不是宽度。空串 = 该行不声明，由 `/lib/<op>` 的安装签名给出。
     read_langtypes: tuple[str, ...] = ()
     write_langtypes: tuple[str, ...] = ()
+    # 按位置的语义角色（`ROLE_*`）。空元组 = 全部 ANY。
+    read_roles: tuple[str, ...] = ()
+    write_roles: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------------------
@@ -352,6 +355,17 @@ VALUE_ROWS = (
 # signature slots, which mapping rule 1 forbids duplicating here. Rows that produce or
 # rewrite a *category* value state that category bit explicitly.
 # ---------------------------------------------------------------------------------------
+# 参数**位置**的语义角色。与类型（`read_mask`/`write_mask`）是两个维度：
+# 类型说「这个参数能装什么」，角色说「这个位置的字节怎么解释」。目前只有
+# 「key」一种——`kvspace·*` 一族的路径参数：那里的字符串是**键**，要编成
+# STATIC 引用而不是内联字面量。空串 = ANY（不限定）。
+#
+# 只保留真正用到的值：`ROLE_VALUE` 之类「必须是值、不能是 key」的需求不存在，
+# 凭空加一个没用上的枚举值就是死代码。
+ROLE_ANY = ""
+ROLE_KEY = "key"
+PARAMETER_ROLES = (ROLE_ANY, ROLE_KEY)
+
 SCALAR_KINDS = ("int8", "int16", "int32", "int64", "uint8", "uint16",
                 "uint32", "uint64", "float32", "float64")
 CAST_TARGETS = SCALAR_KINDS + ("bool", "char/utf8", "char/utf32", "char/ascii")
@@ -365,6 +379,9 @@ class FamilyRow:
     decision: str
     read_mask: int = 0
     write_mask: int = 0
+    # 按位置的角色，逗号分隔；空 = 全部 ANY。与 mask 是两个维度，故独立字段。
+    read_roles: str = ""
+    write_roles: str = ""
     alias_policy: str = "FORBIDDEN"
     # 名字型类型：`time` / `time/duration` 没有对应的 TypeSet 位（它们是 langtype 的名字，
     # 不是宽度），用逗号分隔的 langtype 名表达。缺省为空 = 该行不声明签名，
@@ -481,17 +498,37 @@ FAMILY_ROWS = (
     #   `03-control/for`、`04-ndarray/array_slice_hole`、`08-leetcode/{100,104}`、
     #   `12-struct/10-member-chain` 五条从 blocked 变 fail（layout 内部发起的调用把
     #   容器/structref 传给 argument0）。decls 表只收无前因的常量类型，本族不属于它。
-    FamilyRow("kvspace", "del", 0x0172, "kvspace-set-write-scope"),
-    FamilyRow("kvspace", "deltree", 0x0173, "kvspace-set-write-scope"),
-    FamilyRow("kvspace", "cp", 0x0174, "kvspace-copy-semantics"),
-    FamilyRow("kvspace", "cpdir", 0x0175, "kvspace-copy-semantics"),
-    FamilyRow("kvspace", "cplist", 0x0176, "kvspace-copy-semantics"),
-    FamilyRow("kvspace", "listlen", 0x0177, "kvspace-list-ordering"),
-    FamilyRow("kvspace", "listat", 0x0178, "kvspace-list-ordering"),
-    FamilyRow("kvspace", "mkindex", 0x0179, "kvspace-index-capacity"),
-    FamilyRow("kvspace", "extindex", 0x017A, "kvspace-extension-index"),
-    FamilyRow("kvspace", "delextindex", 0x017B, "kvspace-extension-index"),
-    FamilyRow("kvspace", "watch", 0x017C, "kvspace-watch-blocking"),
+    # `kvspace·*` 的路径参数是**键**，不是内联值数据：源码里写成 `"…"` 的字符串
+    # 在这个位置上要编成 STATIC 引用（符号池里的一条 key），而不是 LITERAL。
+    # 位置与 `kvspace-family.md` §二 的签名表逐项对应；`listat` 的第 1 个读参是
+    # index（`int64`），不是 key，所以角色串是 `key,`（第 2 位留空 = ANY）。
+    # `cp`/`cpdir`/`cplist` 的写参也是目标键，故 write_roles 同样是 `key`。
+    FamilyRow("kvspace", "del", 0x0172, "kvspace-set-write-scope",
+              read_roles="key"),
+    FamilyRow("kvspace", "deltree", 0x0173, "kvspace-set-write-scope",
+              read_roles="key"),
+    # **写参不标 key**：`kvspace·cp("/src") -> /dst:int64` 的 dst 是**写槽**，
+    # 它由写参机制承载（`vmbin_value_access_argument_key`），不是「键位置上的字符串
+    # 实参」。标成 key 会让编码器拿它的 langtype 去登记符号，与读参的同名/异型符号
+    # 冲突（实测 `code=34 program builder rejected a symbol`）。
+    FamilyRow("kvspace", "cp", 0x0174, "kvspace-copy-semantics",
+              read_roles="key"),
+    FamilyRow("kvspace", "cpdir", 0x0175, "kvspace-copy-semantics",
+              read_roles="key"),
+    FamilyRow("kvspace", "cplist", 0x0176, "kvspace-copy-semantics",
+              read_roles="key"),
+    FamilyRow("kvspace", "listlen", 0x0177, "kvspace-list-ordering",
+              read_roles="key"),
+    FamilyRow("kvspace", "listat", 0x0178, "kvspace-list-ordering",
+              read_roles="key,"),
+    FamilyRow("kvspace", "mkindex", 0x0179, "kvspace-index-no-capacity",
+              read_roles="key"),
+    FamilyRow("kvspace", "extindex", 0x017A, "kvspace-extension-index",
+              read_roles="key,key"),
+    FamilyRow("kvspace", "delextindex", 0x017B, "kvspace-extension-index",
+              read_roles="key"),
+    FamilyRow("kvspace", "watch", 0x017C, "kvspace-watch-blocking",
+              read_roles="key,"),
     # vthread：签名来自参考实现 `runtime/src/rwir_vthread.c`（**逐函数核对，不是推断**）。
     #   每个 `kvlangBuiltinVthread*` 开头都有一句
     #   `kvlangBuiltinReadInputs(f, in, 1)` + 类型检查，下面逐个对应：
@@ -722,6 +759,25 @@ def _split_langtypes(text: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in text.split(",") if part.strip())
 
 
+# 角色串 → 元组。**逐项保留位置**：`"key,"` 是「第 0 个是 key，第 1 个是 ANY」，
+# 不能用 `_split_langtypes` 那种「丢掉空项」的解析——那会把位置整体左移，静默错位。
+# 角色元组 → **字符串字面量**（`"key"`、`"key,"`、`""`）。
+#
+# 为什么传字符串而不是 C 初始化式：预处理器传不了「带逗号的小列表」——花括号里的
+# 逗号会被当成实参分隔符，圆括号又会被原样保留成逗号表达式。字符串里逗号没有
+# 特殊含义，一个参数槽就够了。运行期解析一次（表是静态的），代价可忽略。
+def render_roles(roles: tuple[str, ...]) -> str:
+    if not roles:
+        return '""'
+    return '"' + ",".join(roles) + '"'
+
+
+def _split_roles(text: str) -> tuple[str, ...]:
+    if not text:
+        return ()
+    return tuple(part.strip() for part in text.split(","))
+
+
 def build_rows() -> list[Row]:
     rows: list[Row] = []
     for (identifier, operator, opid, read_mask, write_mask, constraint,
@@ -739,7 +795,9 @@ def build_rows() -> list[Row]:
                         "NONE", "IDENTITY", alias_policy, (family_row.decision,),
                         "parameterized",
                         _split_langtypes(family_row.read_langtypes),
-                        _split_langtypes(family_row.write_langtypes)))
+                        _split_langtypes(family_row.write_langtypes),
+                        _split_roles(family_row.read_roles),
+                        _split_roles(family_row.write_roles)))
     return rows
 
 
@@ -860,6 +918,28 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
                 findings.append(
                     f"{row.identifier}: {name} mask sets any_single together with "
                     f"concrete kinds; the marker must be exclusive")
+        # 角色自检三条：枚举合法、位置数不超参数数、只允许 parameterized 通道。
+        for name in ("read", "write"):
+            roles = row.read_roles if name == "read" else row.write_roles
+            if not roles:
+                continue
+            if row.channel != "parameterized":
+                findings.append(
+                    f"{row.identifier}: {name} roles are only meaningful on "
+                    f"parameterized rows (channel is {row.channel})")
+            for position, role in enumerate(roles):
+                if role not in PARAMETER_ROLES:
+                    findings.append(
+                        f"{row.identifier}: {name} role {position} is {role!r}, "
+                        f"not one of {PARAMETER_ROLES}")
+            # 位置数不能超过该行声明的参数个数。角色是**按位置**的，多出来的位置
+            # 一定是笔误（写多了一个逗号就会多一项），不能静默忽略。
+            declared = (len(row.read_langtypes) if name == "read"
+                        else len(row.write_langtypes))
+            if declared != 0 and len(roles) > declared:
+                findings.append(
+                    f"{row.identifier}: {name} declares {len(roles)} roles for "
+                    f"{declared} parameters")
         for decision in row.decisions:
             if decision not in decisions:
                 findings.append(f"{row.identifier}: unknown behavior decision {decision}")
@@ -1137,6 +1217,10 @@ def render_catalog(rows: list[Row], aliases: list[tuple[str, str]],
             f'RUNTIMEC_RWIR_OPERATION({row.identifier}, "{row.operator}", 0x{row.opid:04X},')
         lines.append(
             f'                        0x{row.read_mask:08X}, 0x{row.write_mask:08X},')
+        # 角色按位置：第 i 项对第 i 个参数。C 侧宏把它们摊成枚举常量串。
+        lines.append(
+            f'                        {render_roles(row.read_roles)}, '
+            f'{render_roles(row.write_roles)},')
         lines.append(
             f'                        RUNTIMEC_RWIR_CONSTRAINT_{row.constraint},')
         lines.append(

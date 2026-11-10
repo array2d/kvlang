@@ -22,7 +22,7 @@
  *
  * 1. **DSN 只从 `KVSPACE` 读**，不读默认 6379。DSN 决定状态落在哪个后端；
  *    默认值会把「忘了设」变成「连到了另一个后端」。
- * 2. **run 的 stdout 原样透传**被跑程序的 `println`；驱动自己的诊断一律走
+ * 2. **run 的 stdout 原样透传**被跑程序的 `输出算子`；驱动自己的诊断一律走
  *    stderr。create 的 stdout 只有 vid。
  * 3. **`--no-stdlib` 接受但当前无作用**：runtimec 这条链不装载 stdlib。
  *
@@ -35,6 +35,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
+#include "contract/kvspace_interface.h"
 #include <dlfcn.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -43,8 +44,12 @@
 #include <string.h>
 #include <unistd.h>
 
-#include <kvspace/kvspace.h>
-#include <kvspace/xvalue_head.h>
+#include <kvspace/kvlang_xvalue.h>
+#include <kvspace/kvspace_xvalue.h>
+
+#include "tools/driver_output.h"
+
+#include "vmbin/directory_walk.h"
 
 #include "contract/checkpoint.h"
 #include "contract/kvspace_access.h"
@@ -97,15 +102,22 @@ static int usage_failure(const char *message) {
     return 2;
 }
 
+/* `--operators=a,b` 的值（见 `layout_capabilities_and_file` 的说明）。 */
+static const char *g_runner_operators_argument = NULL;
+
+/* `--layout-lib=` 的值。**不用环境变量**：kvlang 只允许 `KVSPACE` 一个 env
+ * （用户裁决），库路径是「每次调用的输入」，本来就该走命令行。 */
+static const char *g_layout_library_argument = NULL;
+
 /*
  * 定位 layout 库。
  *
- * 环境变量 `KVLANG_LAYOUT_LIBRARY` 可以显式指定；否则按「与本二进制同目录」
- * 找 `libkvlanglayout.so` / `.dylib`——repo 的两级布局就是 bin/ 与 lib/，
- * 驱动自己的路径推不出来源，所以由调用方给（run.py 会通过环境变量传）。
+ * `--layout-lib=` 可显式指定；否则按「与本二进制同目录」找 `libkvlanglayout.so`
+ * / `.dylib`——repo 的两级布局就是 bin/ 与 lib/，驱动自己的路径推不出来源，
+ * 所以由调用方给。
  */
 static void *open_layout_library(char *output_path, size_t output_capacity) {
-    const char *explicit_path = getenv("KVLANG_LAYOUT_LIBRARY");
+    const char *explicit_path = g_layout_library_argument;
 
     if (explicit_path != NULL && explicit_path[0] != '\0') {
         snprintf(output_path, output_capacity, "%s", explicit_path);
@@ -143,14 +155,14 @@ static void *open_layout_library(char *output_path, size_t output_capacity) {
         }
     }
     snprintf(output_path, output_capacity,
-             "libkvlanglayout.so (set KVLANG_LAYOUT_LIBRARY)");
+             "libkvlanglayout.so (pass --layout-lib=<path>)");
     return NULL;
 }
 
 /*
  * 声明外部能力并 layout 用户的 .kv 文件。
  *
- * 先声明 `println`/`print`：用例里写 `println(...)`，layout 的 `check_call_names`
+ * 先声明 `输出算子`/`print`：用例里写 `输出算子(...)`，layout 的 `check_call_names`
  * 会把未定义的裸名当拼错的函数拒掉（那条规则不能为驱动放宽）。真实部署里这些
  * 名字由扩展在装载期声明；这里用 layout 自己的 `rwir` 声明语法走同一条路径，
  * 不手工拼 kvspace 字节。临时文件只是 layout 的输入，不是产物。
@@ -174,9 +186,37 @@ static bool layout_capabilities_and_file(const char *dsn,
     char declarations_path[256];
     snprintf(declarations_path, sizeof(declarations_path),
              "/tmp/kvlangrun-capabilities-%d.kv", (int)getpid());
-    static const char declarations[] =
-        "rwir println(*[]char/utf32 $s...)\n"
-        "rwir print(*[]char/utf32 $s...)\n";
+    /*
+     * **名字来自 `--operators=a,b`，源码里不写死任何一个**——runtimec 目录必须
+     * 精确 grep 为 0（TASK-044 的验收口径：runtimec 不认识任何输出算子）。而
+     * layout 的 `check_call_names` 又需要先看到名字才放行，所以名字属于**调用方
+     * 的输入**：跑语料的人给，不是 runtimec 的知识。
+     *
+     * 与 `kv_runner` 同款（那边的 `runner_operator_names` 是同一个道理与同一份
+     * 格式），两处不合并共用是因为它们分属两个可执行文件、没有共享 TU。
+     */
+    char declarations[512];
+    declarations[0] = '\0';
+    if (g_runner_operators_argument != NULL) {
+        const char *cursor = g_runner_operators_argument;
+        while (*cursor != '\0') {
+            const char *comma = strchr(cursor, ',');
+            const size_t size =
+                comma != NULL ? (size_t)(comma - cursor) : strlen(cursor);
+            const size_t used = strlen(declarations);
+            if (size != 0U && used < sizeof(declarations) &&
+                snprintf(declarations + used, sizeof(declarations) - used,
+                         "rwir %.*s(*[]char/utf32 $s...)\n", (int)size,
+                         cursor) <= 0) {
+                fprintf(stderr, "kvlangrun: cannot format capability declarations\n");
+                return false;
+            }
+            if (comma == NULL) {
+                break;
+            }
+            cursor = comma + 1;
+        }
+    }
     FILE *declaration_file = fopen(declarations_path, "wb");
     if (declaration_file == NULL) {
         fprintf(stderr, "kvlangrun: cannot write capability declarations\n");
@@ -270,11 +310,11 @@ static void environment_close(kvlangrun_environment_t *environment) {
  */
 static bool allocate_vthread_identifier(void *kvspace_handle, char *output,
                                         size_t output_capacity) {
-    uint8_t *wire = NULL;
+    const uint8_t *wire = NULL;
     uint32_t wire_size = 0U;
     long long sequence = 0;
-    if (kvspaceGet(kvspace_handle, kvlangrun_sequence_key, 1, &wire,
-                   &wire_size) == 0 &&
+    if (runtimec_kvspace_read_wire(kvspace_handle, kvlangrun_sequence_key,
+                                   &wire, &wire_size) &&
         wire != NULL && wire_size >= KVSPACE_XVALUE_HEAD_LEN) {
         kvspaceXvalueHead head;
         memcpy(&head, wire, sizeof(head));
@@ -304,9 +344,10 @@ static bool allocate_vthread_identifier(void *kvspace_handle, char *output,
     }
     char error_text[256];
     error_text[0] = '\0';
-    const int set_status = kvspaceSetValue(
+    const bool wrote = runtimec_kvspace_write_wire(
         kvspace_handle, kvlangrun_sequence_key, new_wire,
         (uint32_t)new_wire_size, error_text, (uint32_t)sizeof(error_text));
+    const int set_status = wrote ? 0 : 1;
     free(new_wire);
     if (set_status != 0) {
         fprintf(stderr, "kvlangrun: cannot allocate a vthread identifier: %s\n",
@@ -460,23 +501,30 @@ static bool locate_frame_path(void *kvspace_handle,
     if (prefix_length <= 0 || (size_t)prefix_length >= sizeof(prefix)) {
         return false;
     }
-    int32_t child_count = 0;
-    if (kvspaceListLen(kvspace_handle, prefix, 0, 1, &child_count) != 0) {
+    int64_t child_count = 0;
+    runtimec_directory_walk_t walk;
+    if (!runtimec_directory_walk_open(&walk, NULL, kvspace_handle, prefix,
+                                      /*resolve_pointer=*/true,
+                                      /*expand_extension=*/false) ||
+        !runtimec_directory_walk_count(&walk, &child_count)) {
+        (void)runtimec_directory_walk_close(&walk);
         return false;
     }
     char found[128];
     size_t found_length = 0U;
     size_t matches = 0U;
-    for (int32_t index = 0; index < child_count; ++index) {
-        char name[128];
-        uint32_t name_length = 0U;
-        if (kvspaceListAt(kvspace_handle, prefix, 0, 1, index,
-                          (uint8_t *)name, (uint32_t)sizeof(name),
-                          &name_length) != 0 ||
-            name_length == 0U || name_length >= sizeof(name) ||
-            name[0] != '[') {
+    for (int64_t index = 0; index < child_count; ++index) {
+        const char *entry_name = NULL;
+        uint32_t entry_length = 0U;
+        if (!runtimec_directory_walk_at(&walk, index, &entry_name,
+                                        &entry_length) ||
+            entry_name == NULL || entry_length == 0U ||
+            entry_length >= sizeof(found) || entry_name[0] != '[') {
             continue;
         }
+        char name[128];
+        memcpy(name, entry_name, entry_length);
+        const uint32_t name_length = entry_length;
         size_t cursor = 1U;
         int32_t depth = 0;
         bool has_digits = false;
@@ -497,6 +545,7 @@ static bool locate_frame_path(void *kvspace_handle,
             found_length = name_length;
         }
     }
+    (void)runtimec_directory_walk_close(&walk);
     if (matches != 1U) {
         fprintf(stderr,
                 "kvlangrun: cannot locate the frame for stack %d "
@@ -590,6 +639,35 @@ static int command_run(const char *vthread_identifier) {
     /* 不开 JIT 时机器码容量**必须为 0**：session 把两者不一致判为非法请求。 */
     options.machine_code_capacity = 0U;
     options.enable_jit = false;
+    /*
+     * **注册驱动自带的输出算子**（0xFF01–0xFF03）。
+     *
+     * 不注册的后果是 `detail=0x4103`（interpreter 的 INVALID_INSTRUCTION）：
+     * 登记表里查不到那个 opid。**现场看起来像「算子没实现」，实际是「驱动没注册」**
+     * ——两者修法完全不同，所以这里必须显式注册。
+     */
+    {
+        size_t driver_output_entry_count = 0U;
+        const binrwir_registry_entry_t *driver_entries =
+            runtimec_driver_output_entries(&driver_output_entry_count);
+        static runtimec_extension_entry_view_t entry_views[3];
+        static runtimec_extension_module_view_t output_module;
+        if (driver_output_entry_count <= 3U) {
+            for (size_t at = 0U; at < driver_output_entry_count; ++at) {
+                entry_views[at].structure_size =
+                    (uint32_t)sizeof(runtimec_extension_entry_view_t);
+                entry_views[at].operation_identifier =
+                    driver_entries[at].operation_identifier;
+                entry_views[at].flags = driver_entries[at].flags;
+                entry_views[at].handler = driver_entries[at].handler;
+            }
+            output_module.module_name = "driver_output";
+            output_module.entries = entry_views;
+            output_module.entry_count = driver_output_entry_count;
+            options.extension_modules = &output_module;
+            options.extension_count = 1U;
+        }
+    }
     runtimec_session_t *session = NULL;
     runtimec_error_reset(&error);
     if (runtimec_session_create(environment.kvspace_access, &options, &session,
@@ -607,7 +685,7 @@ static int command_run(const char *vthread_identifier) {
     }
 
     /*
-     * **不重定向 stdout**：被跑程序的 println 直接落到进程 stdout，这正是
+     * **不重定向 stdout**：被跑程序的 输出算子 直接落到进程 stdout，这正是
      * run.py 解析 `__bench_ns:` / `__bench_input:` 所需。
      */
     binrwir_execution_exit_t exit_state;
@@ -684,10 +762,30 @@ done:
 int main(int argument_count, char **arguments) {
     if (argument_count < 3) {
         fprintf(stderr,
-                "usage: kvlangrun create <file.kv> [--no-stdlib]\n"
-                "       kvlangrun run <vid>\n");
+                "usage: kvlangrun create <file.kv> [--no-stdlib] --operators=a,b "
+                "[--layout-lib=<path>]\n"
+                "       kvlangrun run <vid> --operators=a,b [--layout-lib=<path>]\n");
         return 2;
     }
+    /* `--layout-lib=<path>` 与 `--operators=a,b` 可在任意位置出现，先摘掉再交给
+     * 子命令解析。**用独立缓冲，不原地覆盖 `arguments`**：指针值复制到独立数组，
+     * `argv` 本身不动，避免「提取出的指针指向被覆盖过的槽」这类耦合。 */
+    char *filtered[64];
+    int filtered_count = 0;
+    for (int at = 0; at < argument_count && filtered_count < 64; ++at) {
+        if (at > 0 && strncmp(arguments[at], "--layout-lib=", 13) == 0) {
+            g_layout_library_argument = arguments[at] + 13;
+            continue;
+        }
+        if (at > 0 && strncmp(arguments[at], "--operators=", 12) == 0) {
+            g_runner_operators_argument = arguments[at] + 12;
+            continue;
+        }
+        filtered[filtered_count] = arguments[at];
+        ++filtered_count;
+    }
+    argument_count = filtered_count;
+    arguments = filtered;
     const char *command = arguments[1];
     if (strcmp(command, "create") == 0) {
         const char *file_path = NULL;

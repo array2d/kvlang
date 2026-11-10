@@ -12,7 +12,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "kvspace/xvalue_head.h"
+#include <kvspace/kvlang_xvalue.h>
+#include <kvspace/kvspace_xvalue.h>
 #include "vmkv/vmkv_internal.h"
 
 /* `[s0,s1]` / `.[0,±j]` 两种后缀的最大解析长度：足够容纳 10 位 s0 与 11 位
