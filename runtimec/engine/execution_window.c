@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <kvspace/kvlang_xvalue.h>
+#include <kvlang/xvalue.h>
 #include <kvspace/kvspace_xvalue.h>
 
 #include "binrwir/binvthread_frame.h"
@@ -204,7 +204,7 @@ static runtimec_status_t runtimec_execution_window_materialize_parameter_pointer
     if (langtype_text[0] != '*') {
         return RUNTIMEC_STATUS_SUCCESS;
     }
-    if (kvspaceXvalueHeadNewPtr(
+    if (kvlangXvalueHeadNewPtr(
             (const uint8_t *)caller_key->data, (uint32_t)caller_key->size,
             langtype_text, &wire, &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {

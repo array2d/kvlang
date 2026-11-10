@@ -3,7 +3,7 @@
 
 同一算法四份逻辑等价实现（cases/<name>/<name>.{kv,py,rs,c}）。
 kvlang 是被测对象，分别在三个 kvspace 后端上跑，各占一列：
-    kvlang_shm    —— kvspace-c 共享内存（shm://，内存态地板）
+    kvlang_shm    —— libkvspace 共享内存（shm://，内存态地板）
     kvlang_fs     —— kvspace-durable 文件后端（fs://）
     kvlang_redis  —— kvspace-durable redis 后端（redis://）
 python / rust / c 与后端无关，作原生/脚本基线各一列。

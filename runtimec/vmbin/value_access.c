@@ -20,7 +20,7 @@
 #include "binrwir/frame_bindings.h"
 #include "frame_slot.h"
 #include "frame_target_key.h"
-#include <kvspace/kvlang_xvalue.h>
+#include <kvlang/xvalue.h>
 #include <kvspace/kvspace_xvalue.h>
 
 static runtimec_status_t vmbin_value_access_fail(
@@ -897,7 +897,7 @@ static runtimec_status_t vmbin_value_access_create_member(
      * langtype 用**声明类型**（`declared`），不用值自带的：槽类型是成员类型，
      * 值的 langtype 是它自己的。
      */
-    if (kvspaceXvalueHeadNewSlack(value.data, (uint64_t)value.size,
+    if (kvlangXvalueHeadNewSlack(value.data, (uint64_t)value.size,
                                   langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
@@ -1061,7 +1061,7 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
                 "carries no readable head");
         }
         const uint8_t *head_langtype_bytes = NULL;
-        const uint16_t head_langtype_size = kvspaceXvalueHeadLangtypeBounded(
+        const uint16_t head_langtype_size = kvlangXvalueHeadLangtypeBounded(
             value.data, (uint64_t)value.size, &head_langtype_bytes);
         const runtimec_string_view_t head_langtype =
             head_langtype_size != 0U && head_langtype_bytes != NULL
@@ -1092,7 +1092,7 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
             error, RUNTIMEC_STATUS_INVALID, VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
             "local slot key cannot be built");
     }
-    if (kvspaceXvalueHeadNewSlack(value.data, (uint64_t)value.size,
+    if (kvlangXvalueHeadNewSlack(value.data, (uint64_t)value.size,
                                   langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
@@ -1186,7 +1186,7 @@ static runtimec_status_t vmbin_value_access_create_static_target(
             VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
             "static write value has no bytes");
     }
-    if (kvspaceXvalueHeadNewSlack(value.data, (uint64_t)value.size,
+    if (kvlangXvalueHeadNewSlack(value.data, (uint64_t)value.size,
                                   langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
@@ -1418,7 +1418,7 @@ static runtimec_status_t vmbin_value_access_create_dereference_target(
     }
     memcpy(langtype_text, declared.data, declared.size);
     langtype_text[declared.size] = '\0';
-    if (kvspaceXvalueHeadNewSlack(value.data, (uint64_t)value.size,
+    if (kvlangXvalueHeadNewSlack(value.data, (uint64_t)value.size,
                                   langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
@@ -1872,7 +1872,7 @@ runtimec_status_t vmbin_value_access_form(
                 "value head is not a well-formed XValue");
         }
         const uint8_t *langtype = NULL;
-        const uint16_t langtype_size = kvspaceXvalueHeadLangtypeBounded(
+        const uint16_t langtype_size = kvlangXvalueHeadLangtypeBounded(
             wire, total, &langtype);
         if (langtype != NULL && langtype_size != 0U) {
             if (langtype[0] == '*') {

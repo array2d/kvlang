@@ -100,7 +100,7 @@ int runtimec_key_compare_coord(const char *left, size_t left_size,
         right, right_size, right_values, RUNTIMEC_KEY_COORD_COMPONENT_LIMIT);
 
     /* **不是「整数优先」**：只有两边都能整数解析才比数值；一边可解析一边不可
-     * （或都不可）一律字典序。这与后端 `kvspaceCoordCmp` 的 `na < 0 || nb < 0`
+     * （或都不可）一律字典序。这与后端 `kvlangCoordCmp` 的 `na < 0 || nb < 0`
      * 分支同语义——判据是「比较能不能做成数值比较」，不是「谁是整数」。 */
     if (left_count != 0U && right_count != 0U) {
         const size_t common = left_count < right_count ? left_count : right_count;

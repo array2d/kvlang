@@ -91,7 +91,7 @@
 #include "contract/error.h"
 #include "contract/status.h"
 #include "contract/view.h"
-#include <kvspace/kvlang_xvalue.h>
+#include <kvlang/xvalue.h>
 #include <kvspace/kvspace_xvalue.h>
 #include "vmbin/frame_target_key.h"
 #include "vmbin/value_access.h"
@@ -324,7 +324,7 @@ static inline void vmbin_handler_fail(binrwir_execution_exit_t *output_exit,
  * ——类型本来就存在，只是没被传下来。
  *
  * 分配归存储层：`kvspaceSetValue` 收完整 wire，容量它说了算；本函数只用
- * `kvspaceXvalueHeadNewSlack` 临时产一条，传完即还。
+ * `kvlangXvalueHeadNewSlack` 临时产一条，传完即还。
  *
  * **判据**：创建型 handler 里出现 `LOCATE_WRITE` + `memcpy(write_bytes, …)` 就是
  * 走错了路。用一条用例钉住——对一个从未写过的局部变量调 `new` 必须成功。
@@ -355,7 +355,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
     }
     memcpy(langtype_buffer, declared.data, declared.size);
     langtype_buffer[declared.size] = '\0';
-    if (kvspaceXvalueHeadNewSlack(bytes, (uint64_t)length,
+    if (kvlangXvalueHeadNewSlack(bytes, (uint64_t)length,
                                   langtype_buffer, &wire, &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,

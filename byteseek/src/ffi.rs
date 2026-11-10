@@ -5,7 +5,7 @@
 //! 过一份 8 字节 head 的手写实现（`XH_PREFIX` / `xh_*` / `attr_bytes` /
 //! `with_langtype`），上游改成 16 字节后那份没跟上，编译绿而读值是错的。
 //! 禁止再复制：需要读/造值就调公共头的 `kvspaceXvalueGetAttr` /
-//! `kvspaceXvalueHeadEffectiveLen` 与 `kvspaceXvalueHeadNew*`。
+//! `kvspaceXvalueHeadEffectiveLen` 与 `kvlangXvalueHeadNew*`。
 //! （`kvspaceXvalueHeadScan` 已随新 ABI 删除，attr 区读入口只剩 GetAttr。）
 
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
@@ -18,7 +18,7 @@ use std::ffi::{c_char, c_int, c_void, CStr, CString};
 /// `KVSPACE_XVALUE_HEAD_LEN`：head 定长 16。**唯一允许出现在本文件里的偏移常量**。
 pub const HEAD_LEN: usize = 16;
 
-/// `KVSPACE_XVALUE_ATTR_TAG_LANGTYPE`：attr 区里 langtype 记录的 tag。
+/// `KVLANG_XVALUE_ATTR_TAG_LANGTYPE`：attr 区里 langtype 记录的 tag。
 pub const KVSPACE_ATTR_TAG_LANGTYPE: u8 = 1;
 
 /// 值的完整 langtype 串（含 `[dims]` 与 `*`/`@` 前缀）；无/坏 → 空串。
@@ -137,7 +137,7 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
         let d: Vec<u64> = dims.iter().map(|&x| x as u64).collect();
         return build_checked(
             |out, out_len| unsafe {
-                kvspaceXvalueHeadNewTensor(d.as_ptr(), d.len() as u32,
+                kvlangXvalueHeadNewTensor(d.as_ptr(), d.len() as u32,
                                            raw.as_ptr(), raw.len() as u64,
                                            c_lt.as_ptr(), out, out_len)
             },
@@ -146,7 +146,7 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
     if kind == "char" || kind.starts_with("char/") {
         return build_checked(
             |out, out_len| unsafe {
-                kvspaceXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64,
+                kvlangXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64,
                                           raw.len() as u64, c_lt.as_ptr(),
                                           out, out_len)
             },
@@ -155,7 +155,7 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
     if kind == "rwir" || kind == "def langtype" || (kind == "rwfunc" && !raw.is_empty()) {
         return build_checked(
             |out, out_len| unsafe {
-                kvspaceXvalueHeadNewCode(raw.as_ptr(), raw.len() as u64,
+                kvlangXvalueHeadNewCode(raw.as_ptr(), raw.len() as u64,
                                          raw.len() as u64, c_lt.as_ptr(),
                                          out, out_len)
             },
@@ -163,7 +163,7 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
     }
     build_checked(
         |out, out_len| unsafe {
-            kvspaceXvalueHeadNewScalar(raw.as_ptr(), raw.len() as u32,
+            kvlangXvalueHeadNewScalar(raw.as_ptr(), raw.len() as u32,
                                        c_lt.as_ptr(), out, out_len)
         },
         &lt, raw.len())
@@ -177,7 +177,7 @@ pub fn xvalue_to_wire_untyped(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
         let d: Vec<u64> = dims.iter().map(|&x| x as u64).collect();
         return build_checked(
             |out, out_len| unsafe {
-                kvspaceXvalueHeadNewTensor(d.as_ptr(), d.len() as u32,
+                kvlangXvalueHeadNewTensor(d.as_ptr(), d.len() as u32,
                                            raw.as_ptr(), raw.len() as u64,
                                            empty.as_ptr(), out, out_len)
             },
@@ -186,7 +186,7 @@ pub fn xvalue_to_wire_untyped(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
     if kind == "char" || kind.starts_with("char/") {
         return build_checked(
             |out, out_len| unsafe {
-                kvspaceXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64,
+                kvlangXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64,
                                           raw.len() as u64, empty.as_ptr(),
                                           out, out_len)
             },
@@ -194,7 +194,7 @@ pub fn xvalue_to_wire_untyped(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
     }
     build_checked(
         |out, out_len| unsafe {
-            kvspaceXvalueHeadNewScalar(raw.as_ptr(), raw.len() as u32,
+            kvlangXvalueHeadNewScalar(raw.as_ptr(), raw.len() as u32,
                                        empty.as_ptr(), out, out_len)
         },
         "", raw.len())
@@ -202,7 +202,7 @@ pub fn xvalue_to_wire_untyped(kind: &str, raw: &[u8], dims: &[i32]) -> Vec<u8> {
 
 /// `None` 值（空 body、无 langtype）。
 pub fn none_wire() -> Vec<u8> {
-    build_checked(|out, out_len| unsafe { kvspaceXvalueHeadNewNone(out, out_len) },
+    build_checked(|out, out_len| unsafe { kvlangXvalueHeadNewNone(out, out_len) },
                   "", 0)
 }
 
@@ -213,7 +213,7 @@ pub fn ptr_wire(base_langtype: &str, path: &[u8]) -> Vec<u8> {
     let want = format!("*{base_langtype}");
     build_checked(
         |out, out_len| unsafe {
-            kvspaceXvalueHeadNewPtr(path.as_ptr(), path.len() as u32,
+            kvlangXvalueHeadNewPtr(path.as_ptr(), path.len() as u32,
                                     c_lt.as_ptr(), out, out_len)
         },
         &want, path.len())
@@ -225,7 +225,7 @@ pub fn ext_wire(base_langtype: &str, locator: &[u8]) -> Vec<u8> {
     let want = format!("@{base_langtype}");
     build_checked(
         |out, out_len| unsafe {
-            kvspaceXvalueHeadNewExt(locator.as_ptr(), locator.len() as u32,
+            kvlangXvalueHeadNewExt(locator.as_ptr(), locator.len() as u32,
                                     c_lt.as_ptr(), out, out_len)
         },
         &want, locator.len())
@@ -447,7 +447,7 @@ unsafe extern "C" {
     ) -> c_int;
     // 固定 16 字节 head 构造器（`kvspace/include/kvspace/xvalue_head.h` 唯一实现）。
     // langtype 空 = 空 attr；out_len 为 u64。
-    pub fn kvspaceXvalueHeadNewNone(out: *mut *mut u8, out_len: *mut u64) -> c_int;
+    pub fn kvlangXvalueHeadNewNone(out: *mut *mut u8, out_len: *mut u64) -> c_int;
     /// 扫 attr 区取 tag=1（langtype）与 tag=2（reallen）。**返回 langtype 长度**，
     /// 0 = 缺失/坏值。`out` 被置为指向 wire 内部的借用指针（存活到 wire 失效）。
     /// attr 区唯一读入口：取 tag 的 data 起址与长度。返回 0 找到，-1 缺失/畸形。
@@ -464,14 +464,14 @@ unsafe extern "C" {
         wire_len: u64,
         out: *mut u64,
     ) -> c_int;
-    pub fn kvspaceXvalueHeadNewScalar(
+    pub fn kvlangXvalueHeadNewScalar(
         raw: *const u8,
         raw_len: u32,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
-    pub fn kvspaceXvalueHeadNewSlack(
+    pub fn kvlangXvalueHeadNewSlack(
         data: *const u8,
         data_len: u64,
         cap: u64,
@@ -479,7 +479,7 @@ unsafe extern "C" {
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
-    pub fn kvspaceXvalueHeadNewTensor(
+    pub fn kvlangXvalueHeadNewTensor(
         dims: *const u64,
         ndim: u32,
         raw: *const u8,
@@ -488,7 +488,7 @@ unsafe extern "C" {
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
-    pub fn kvspaceXvalueHeadNewCode(
+    pub fn kvlangXvalueHeadNewCode(
         body: *const u8,
         body_len: u64,
         cap: u64,
@@ -496,14 +496,14 @@ unsafe extern "C" {
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
-    pub fn kvspaceXvalueHeadNewPtr(
+    pub fn kvlangXvalueHeadNewPtr(
         path: *const u8,
         path_len: u32,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
-    pub fn kvspaceXvalueHeadNewExt(
+    pub fn kvlangXvalueHeadNewExt(
         locator: *const u8,
         locator_len: u32,
         langtype: *const c_char,

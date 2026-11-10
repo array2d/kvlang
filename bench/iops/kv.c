@@ -62,7 +62,7 @@ static int set_xvalue(void *h, const char *key, uint8_t *xvalue, uint32_t tlen,
         snprintf(ltkey, sizeof ltkey, "%s\xE2\x80\xA5" "langtype", key);
         uint8_t *lv = NULL;
         uint64_t lvn = 0;
-        if (kvspaceXvalueHeadNewSlack((const uint8_t *)"int64", 5, 5, &lv, &lvn) != 0 ||
+        if (kvlangXvalueHeadNewSlack((const uint8_t *)"int64", 5, 5, &lv, &lvn) != 0 ||
             lvn > 0xffffffffu)
             return 1;
         int rc = kvspaceSetValue(h, ltkey, lv, (uint32_t)lvn, err, err_cap);
@@ -96,7 +96,7 @@ int main(void) {
 
     uint8_t *xvalue = NULL;
     uint32_t tlen = 0;
-    if (kvspaceNewInt64(0, &xvalue, &tlen) != 0 || !xvalue) {
+    if (kvlangXvalueNewInt64(0, &xvalue, &tlen) != 0 || !xvalue) {
         fprintf(stderr, "NewInt64 0 failed\n");
         return 1;
     }
@@ -134,7 +134,7 @@ int main(void) {
         a += 1;
         xvalue = NULL;
         tlen = 0;
-        if (kvspaceNewInt64(a, &xvalue, &tlen) != 0) {
+        if (kvlangXvalueNewInt64(a, &xvalue, &tlen) != 0) {
             fprintf(stderr, "NewInt64 failed\n");
             return 1;
         }

@@ -990,14 +990,14 @@ static runtimec_status_t runtimec_host_vthread_pc(
  * 三条判据：
  *   1. **键从值访问层取**（`vmbin_value_access_argument_key`：LOCAL 拼帧路径、
  *      STATIC 用符号池文本）。本文件不拼 key——拼了就成第二份地址解析。
- *   2. **结果必须是指针形态**：`kvspaceNewPtr` 把 `*` 写进 **langtype**（不再有
+ *   2. **结果必须是指针形态**：`kvlangXvalueNewPtr` 把 `*` 写进 **langtype**（不再有
  *      head ptr 位）、body=目标路径、
  *      attr 带 target kindexpr。不手拼 wire。
  *   3. **不可寻址即失败**：字面量、函数引用、算出来的表达式都没有位置可言，
  *      返回具名诊断，不猜一个 key 出来。
  */
 /*
- * 按取址操作的读参造一条 Ptr wire：`*` + 目标类型（`kvspaceNewPtr` 自补 `*`）。
+ * 按取址操作的读参造一条 Ptr wire：`*` + 目标类型（`kvlangXvalueNewPtr` 自补 `*`）。
  *
  * 单独成函数的原因：handler 只负责「取 key → 造 wire → 走创建型写」这条编排，
  * 而「类型怎么取、前缀怎么剥」是另一件事，两者的失败出口也不同。
@@ -1045,7 +1045,7 @@ static runtimec_status_t runtimec_host_build_pointer_wire(
     /* 新构造器把 `*` 前缀补进 langtype，body 是目标路径——正是这里算好的
      * `kindexpr`（剥过 `*`/`@` 的基类型）与 `target`（寻址面 utf8 key）。 */
     uint64_t wire_size = 0U;
-    if (kvspaceXvalueHeadNewPtr((const uint8_t *)target,
+    if (kvlangXvalueHeadNewPtr((const uint8_t *)target,
                                 (uint32_t)strlen(target), kindexpr, output_wire,
                                 &wire_size) != 0 ||
         *output_wire == NULL || wire_size > UINT32_MAX) {

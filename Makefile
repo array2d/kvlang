@@ -67,14 +67,20 @@ runtime:
 	cmake -S oldhero/oldgo/runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/runtime --target kvlang_runtime -j
 
-# runtimec 语料/基准驱动（TASK-044 后 `kvlangrun` 已删，`kv_runner` 是唯一入口）。
-# 产物落 build/runtimec/kv_runner，再拷到 bin/。
+# runtimec 的两个命令行入口，**并存且分工不同**：
+#   kv_runner  —— 吃语料目录，批量编/跑（tools/ 下的诊断与回归用）
+#   kvlangrun  —— 单文件 `create <src>` / `run <vid>` 两阶段驱动，
+#                 benchmark/run.py 默认调的就是它（`--kvlang-bin` 可覆盖）
+# 两个都要拷进 bin/：只拷 kv_runner 会让 benchmark 捡到 bin/ 里的陈旧二进制。
 runtimec_runner:
+	@$(call kvspace_require,KVSPACE_SRC,runtimec_runner,kvspace)
 	cmake -S runtimec -B build/runtimec -DCMAKE_BUILD_TYPE=Release \
+	  -DKVSPACE_INCLUDE_DIRECTORY="$(KVSPACE_INCLUDE_DIRECTORY)" \
 	  -DRUNTIMEC_KVSPACE_LIBRARY_DIRECTORY="$(CURDIR)/$(LIB)"
-	cmake --build build/runtimec --target kv_runner -j
+	cmake --build build/runtimec --target kv_runner kvlangrun -j
 	mkdir -p $(BIN)
 	cp build/runtimec/kv_runner $(BIN)/
+	cp build/runtimec/kvlangrun $(BIN)/
 
 runtimec2:
 	cmake -S oldhero/oldgo/runtimec2 -B build/runtimec2 -DCMAKE_BUILD_TYPE=Release
@@ -104,55 +110,87 @@ $(BYTESEEK_BINARY): $(BYTESEEK_STDLIB_SOURCES) byteseek/Cargo.toml
 #   make kvspace-libs   构建三库 + 重出 layout/byteseek/kvspace CLI + 探针验证
 #   make check-kvspace-head   只跑探针（不改任何文件）
 #
-# 三个源仓库按约定是 kvlang 的兄弟目录；缺任何一个就明确失败，不静默跳过。
-KVSPACE_SRC    ?= ../kvspace
-KVSPACE_C_SRC  ?= ../kvspace-c
-KVSPACE_DUR_SRC ?= ../kvspace-durable
+# 两个源仓库**必填，没有默认值**：兄弟目录布局是开发者本地的偶然状态，不是契约。
+# 它已经制造过三类事故——CMake 静默命中兄弟仓里非 pin 的版本、CI 把仓库 clone 到
+# 相邻目录之后就再也不敢动目录结构、pod 重建后路径全失效而报错不指向真因。
+# 默认值一旦存在，正确路径就变成「没被默认值遮住的那条」，而没有人会去验它。
+#
+#   make kvspace-libs KVSPACE_SRC=/path/to/kvspace KVSPACE_DUR_SRC=/path/to/kvspace-durable
+#
+# KVSPACE_INCLUDE_DIRECTORY 派生于**显式传入的** KVSPACE_SRC（同一个仓，不是猜的
+# 兄弟路径）；想指向别处的头（比如已安装的 /usr/include）就显式覆盖它。
+KVSPACE_INCLUDE_DIRECTORY ?= $(if $(strip $(KVSPACE_SRC)),$(KVSPACE_SRC)/include,)
 
-kvspace-libs: kvspace-frontend kvspace-backend kvspace-durable-lib
+# 变量在**引用时**检查：只用 kvlang-xvalue / check-kvspace-head 这类
+# 不碰兄弟仓的目标时不必提供。
+kvspace_require = $(if $(strip $($(1))),,$(error 缺少 $(1)：兄弟仓库不是默认值，请显式传入。例：make $(2) $(1)=/path/to/$(3)))
+
+kvspace-libs: kvspace-frontend kvlang-xvalue kvspace-durable-lib
 	$(MAKE) layout byteseek
 	$(MAKE) kvspace-cli
 	$(MAKE) check-kvspace-head
 
 kvspace-frontend:
-	@test -d "$(KVSPACE_SRC)" || { \
-	  echo "缺少 kvspace 源仓库：$(KVSPACE_SRC)（用 KVSPACE_SRC=... 指定）"; exit 1; }
-	cmake -S "$(KVSPACE_SRC)" -B build/kvspace -DCMAKE_BUILD_TYPE=Release
+	@$(call kvspace_require,KVSPACE_SRC,kvspace-frontend,kvspace)
+	@test -f "$(LIB)/libkvlang_xvalue.a" || { \
+	  echo "缺少 $(LIB)/libkvlang_xvalue.a：先跑 make kvlang-xvalue"; exit 1; }
+	# kvspace 的 CLI 造值要用语言层构造器，故配置期就要知道 .a 在哪（TASK-082）。
+	cmake -S "$(KVSPACE_SRC)" -B build/kvspace -DCMAKE_BUILD_TYPE=Release \
+	  -DKVLANG_XVALUE_LIBRARY_PATH="$(CURDIR)/$(LIB)/libkvlang_xvalue.a"
 	cmake --build build/kvspace -j
 	mkdir -p $(LIB)
 	cp -P build/kvspace/libkvspace.so* $(LIB)/
 
-kvspace-backend:
-	@test -d "$(KVSPACE_C_SRC)" || { \
-	  echo "缺少 kvspace-c 源仓库：$(KVSPACE_C_SRC)（用 KVSPACE_C_SRC=... 指定）"; exit 1; }
-	cmake -S "$(KVSPACE_C_SRC)" -B build/kvspace-c -DCMAKE_BUILD_TYPE=Release
-	cmake --build build/kvspace-c -j
-	mkdir -p $(BACKEND)
-	cp -P build/kvspace-c/libkvspace-c.so* $(BACKEND)/
+# 语言层静态库（kvlangXvalueHeadNew* / kvlangXvalueNew* / kvlangCoordCmp /
+# kvlangConstLanguage）：TASK-082 从 kvspace 搬来，layout / runtimec / byteseek / CLI
+# 都链它。**先于** kvspace 的后端与 CLI 构建——CLI 造值要用这里的构造器。
+#
+# 这一条故意**不**依赖兄弟仓：kvspace 的头来自 $(LIB) 旁边的 kvspace 构建产物，
+# 用参数指向它而不是「推一条相对路径」。
+kvlang-xvalue:
+	@$(call kvspace_require,KVSPACE_SRC,kvlang-xvalue,kvspace)
+	cmake -S xvalue -B build/kvlang-xvalue -DCMAKE_BUILD_TYPE=Release \
+	  -DBUILD_TESTING=OFF \
+	  -DKVLANG_KVSPACE_INCLUDE_DIRECTORY="$(KVSPACE_INCLUDE_DIRECTORY)" \
+	  -DKVLANG_KVSPACE_LIB_DIRECTORY="$(CURDIR)/$(LIB)"
+	cmake --build build/kvlang-xvalue -j
+	mkdir -p $(LIB)
+	cp build/kvlang-xvalue/libkvlang_xvalue.a $(LIB)/
+
+# kvspace-c 已冻结：shm 引擎并入 kvspace 仓，随 kvspace-frontend 一起产出 libkvspace。
+# 该仓现在只有一条 FATAL_ERROR 桩，保留 target 等于留一条必断的依赖边。
 
 kvspace-durable-lib:
-	@test -d "$(KVSPACE_DUR_SRC)" || { \
-	  echo "缺少 kvspace-durable 源仓库：$(KVSPACE_DUR_SRC)（用 KVSPACE_DUR_SRC=... 指定）"; exit 1; }
+	@$(call kvspace_require,KVSPACE_DUR_SRC,kvspace-durable-lib,kvspace-durable)
 	cargo build --release --manifest-path "$(KVSPACE_DUR_SRC)/Cargo.toml"
 	mkdir -p $(BACKEND)
 	cp -P "$(KVSPACE_DUR_SRC)/target/release/libkvspace_durable.so" $(BACKEND)/libkvspace_durable.so.1
 
 # kvspace CLI 由前端仓的 CMake 目标产出（cli/ 独立 Cargo 项目），装到 bin/。
 kvspace-cli: kvspace-frontend
+	@$(call kvspace_require,KVSPACE_SRC,kvspace-cli,kvspace)
 	mkdir -p $(BIN)
 	cp "$(KVSPACE_SRC)/cli/target/release/kvspace" $(BIN)/kvspace
 
-# 探针：从**已装**的 libkvspace 里产一个 XValue，检查 head 是 16 字节、字段落在
-# 正确偏移。装错版本时在构建期就报错，而不是等到测试期看到一片 invalid XValue。
+# 探针：从**已装**的两个库产一个 XValue，检查 head 是 16 字节、字段落在正确偏移。
+# 装错版本时在构建期就报错，而不是等到测试期看到一片 invalid XValue。
+#
+# 两个库缺一不可：构造器（kvlangXvalueHeadNewScalar）在 kvlang 的 libkvlang_xvalue.a
+# （TASK-082 从 kvspace 搬出），head 布局与字节访问器在 libkvspace。只链其中一个，
+# 探到的就不是「两者对同一份格式的理解」——那正是要防的那种错误。
 check-kvspace-head:
+	@$(call kvspace_require,KVSPACE_SRC,check-kvspace-head,kvspace)
+	@test -f "$(LIB)/libkvlang_xvalue.a" || { \
+	  echo "缺少 $(LIB)/libkvlang_xvalue.a：先构建 kvlang/xvalue"; exit 1; }
 	@tmp=$$(mktemp -d); \
 	printf '%s\n' \
-	  '#include <kvspace/xvalue_head.h>' \
+	  '#include <kvspace/kvspace_xvalue.h>' \
+	  '#include <kvlang/xvalue.h>' \
 	  '#include <stdio.h>' \
 	  '#include <stdlib.h>' \
 	  'int main(void) {' \
 	  '  uint8_t *o = NULL; uint64_t n = 0;' \
-	  '  if (kvspaceXvalueHeadNewScalar(' \
+	  '  if (kvlangXvalueHeadNewScalar(' \
 	  '        (const uint8_t *)"\x2a\0\0\0\0\0\0\0", 8, "int64",' \
 	  '        &o, &n) != 0) { puts("ctor failed"); return 1; }' \
 	  '  int bad = 0;' \
@@ -160,15 +198,16 @@ check-kvspace-head:
 	  '  if (n != 16 + 8 + 1 + 2 + 5) { printf("total=%llu, want 32\\n", (unsigned long long)n); bad = 1; }' \
 	  '  if (o[0] != 8 || o[1] != 0) { puts("bodylen != 8"); bad = 1; }' \
 	  '  if (o[8] != 8 || o[9] != 0 || o[10] != 0 || o[11] != 0) { puts("attrslen != 8"); bad = 1; }' \
-	  '  if (o[12] != 0) { puts("layout != 0"); bad = 1; }' \
+	  '  if (o[12] != 0) { puts("padding@12 != 0"); bad = 1; }' \
 	  '  if (o[13] != 0 || o[14] != 0 || o[15] != 0) { puts("padding != 0"); bad = 1; }' \
 	  '  free(o);' \
 	  '  if (bad) return 1;' \
-	  '  puts("head: 16 bytes, bodylen@0 attrslen@8 layout@12 padding@13..15 = 0");' \
+	  '  puts("head: 16 bytes, bodylen@0 attrslen@8 padding@10..15 = 0");' \
 	  '  return 0;' \
 	  '}' > $$tmp/probe.c; \
-	cc $$tmp/probe.c -o $$tmp/probe -I"$(KVSPACE_SRC)/include" \
-	  -L"$(LIB)" -lkvspace -Wl,-rpath,"$(CURDIR)/$(LIB)" || { rm -rf $$tmp; exit 1; }; \
+	cc $$tmp/probe.c -o $$tmp/probe -I"$(KVSPACE_SRC)/include" -I"$(CURDIR)/include" \
+	  -L"$(LIB)" -lkvspace "$(LIB)/libkvlang_xvalue.a" \
+	  -Wl,-rpath,"$(CURDIR)/$(LIB)" || { rm -rf $$tmp; exit 1; }; \
 	$$tmp/probe; rc=$$?; rm -rf $$tmp; \
 	if [ $$rc -ne 0 ]; then echo "kvspace 库的 head 布局不是 16 字节——先跑 make kvspace-libs"; fi; \
 	exit $$rc

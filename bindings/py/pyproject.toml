@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kvspace"
+version = "0.1.0"
+description = "Python ctypes wrapper for libkvspace.so (public 12-symbol storage ABI)"
+requires-python = ">=3.9"
+
+[tool.setuptools.packages.find]
+where = ["."]

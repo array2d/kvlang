@@ -8,12 +8,25 @@ kvlang 与 Python / Rust / C 的跨语言性能基准。每个 case 是同一算
 逐步逼近 Python 的水平。这套版本化快照的核心用途，正是把每一版的耗时钉在同一规模点上，
 **逐版本量出 kvlang 的加速曲线**——今天与 Python 的差距，是用来被后续版本收窄的基线。
 
+> **执行模型分代（跨版本比较的前提）**：`results/` 里的历史行混着**两代执行模型**，而 CSV
+> schema 相同（用户已裁定不加列），所以「同名同列」不等于「可比」：
+> - `v0.3.31` 及更早——**c2 + JIT**（`libkvlang_runtimec2` + binircompiler）；
+> - `v0.3.32` 起——**runtimec 解释器**（`libkvlang_runtime`，纯解释、无 JIT）。
+>
+> 分界点写成 `v0.3.32` 而不是 `v0.3.33`，是因为 **`v0.3.32` 这个 tag 被重打过**：
+> 旧树上的 `v0.3.32` 从未产出过可用的 release 与 CSV，用户裁定把新树直接标成 `v0.3.32`，
+> 不再引入 `v0.3.33`。因此 **只认 `version` + `commit` 两列**——同是 `v0.3.32`，commit 不同
+> 就是不同的树；`results/` 里没有旧的 `v0.3.32` 行，不存在同号歧义。
+>
+> 同一个 `(cpu, case, input)` 跨这两段**不可直接比较**，耗时差里既有实现进步也有执行模型换代。
+> 分代比较只在段内做；要跨代，须注明两行的版本落在哪一侧。
+
 kvlang 是被测对象，**分别在三个 kvspace 后端上各跑一遍，占三列**；Python/Rust/C 与后端无关，
 作原生/脚本基线各一列。三后端量的是「同一份 kvlang 程序在不同存储介质下每操作往返的真实代价」：
 
 | 列 | 后端 | DSN | 量什么 |
 |----|------|-----|--------|
-| `kvlang_shm` | kvspace-c 共享内存 | `shm://<path>` | 纯内存态地板性能（无 I/O） |
+| `kvlang_shm` | libkvspace 共享内存 | `shm://<path>` | 纯内存态地板性能（无 I/O） |
 | `kvlang_fs` | kvspace-durable 文件 | `fs://<dir>` | 每 KV 往返落文件系统的代价 |
 | `kvlang_redis` | kvspace-durable redis | `redis://<host:port>` | 每 KV 往返走 TCP 的代价 |
 

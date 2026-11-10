@@ -9,7 +9,10 @@ package json
 #cgo LDFLAGS: -L${SRCDIR}/../../../lib -L${SRCDIR}/../../../bin -lkvlang_runtimec2 -lkvspace -Wl,-rpath,${SRCDIR}/../../../lib -Wl,-rpath,${SRCDIR}/../../../bin
 #include "kvlang_runtime.h"
 #include <kvspace/kvspace.h>
-#include <kvspace/xvalue_head.h>
+#include <kvspace/kvspace_xvalue.h>
+#include <kvlang/xvalue.h>
+#include <kvspace/const.h>
+#include <kvlang/const.h>
 #include <stdint.h>
 #include <stdlib.h>
 */
@@ -203,9 +206,9 @@ func writeBody(c unsafe.Pointer, key string, ref, storetype C.uint8_t, langtype 
 		if len(body) > 0 {
 			bp = (*C.uint8_t)(unsafe.Pointer(&body[0]))
 		}
-		rc = C.kvspaceXvalueHeadNewPtr(bp, n, cl, &wire, &wireLen)
+		rc = C.kvlangXvalueHeadNewPtr(bp, n, cl, &wire, &wireLen)
 	} else if ref == 0 && storetype == 0 && len(body) == 0 && langtype == "" {
-		rc = C.kvspaceXvalueHeadNewNone(&wire, &wireLen)
+		rc = C.kvlangXvalueHeadNewNone(&wire, &wireLen)
 	} else {
 		rc = C.kvspaceXvalueHeadReserve(storetype, C.uint64_t(len(body)), C.uint64_t(len(body)), cl, &wire, &wireLen)
 		if rc == 0 && wire != nil && len(body) > 0 {
@@ -367,17 +370,17 @@ func encodeXValue(kind string, raw []byte, dims []int32) []byte {
 	var ol C.uint64_t
 	var rc C.int
 	if (kind == "" || kind == "None") && len(raw) == 0 && len(dims) == 0 {
-		rc = C.kvspaceXvalueHeadNewNone(&out, &ol)
+		rc = C.kvlangXvalueHeadNewNone(&out, &ol)
 	} else if kind == "char" || strings.HasPrefix(kind, "char/") {
-		rc = C.kvspaceXvalueHeadNewSlack((*C.uint8_t)(buf), C.uint64_t(len(raw)), C.uint64_t(len(raw)), clt, &out, &ol)
+		rc = C.kvlangXvalueHeadNewSlack((*C.uint8_t)(buf), C.uint64_t(len(raw)), C.uint64_t(len(raw)), clt, &out, &ol)
 	} else if len(dims) > 0 && kind != kindMap && !strings.Contains(kind, sep) && !strings.HasPrefix(kind, "/") {
 		udims := make([]C.uint64_t, len(dims))
 		for i, d := range dims {
 			udims[i] = C.uint64_t(d)
 		}
-		rc = C.kvspaceXvalueHeadNewTensor(&udims[0], C.uint32_t(len(dims)), (*C.uint8_t)(buf), C.uint64_t(len(raw)), clt, &out, &ol)
+		rc = C.kvlangXvalueHeadNewTensor(&udims[0], C.uint32_t(len(dims)), (*C.uint8_t)(buf), C.uint64_t(len(raw)), clt, &out, &ol)
 	} else {
-		rc = C.kvspaceXvalueHeadNewScalar(C.KVSPACE_XVALUE_ST_SHORT, (*C.uint8_t)(buf), C.uint32_t(len(raw)), clt, &out, &ol)
+		rc = C.kvlangXvalueHeadNewScalar(C.KVSPACE_XVALUE_ST_SHORT, (*C.uint8_t)(buf), C.uint32_t(len(raw)), clt, &out, &ol)
 	}
 	if rc != 0 || out == nil || ol == 0 || ol > 0xffffffff {
 		if out != nil {
@@ -412,7 +415,7 @@ func constructChar(raw []byte) []byte {
 	defer C.free(unsafe.Pointer(clt))
 	var out *C.uint8_t
 	var ol C.uint32_t
-	if C.kvspaceNewChar((*C.uint8_t)(buf), C.uint32_t(len(raw)), clt, &out, &ol) != 0 || out == nil {
+	if C.kvlangXvalueNewChar((*C.uint8_t)(buf), C.uint32_t(len(raw)), clt, &out, &ol) != 0 || out == nil {
 		return nil
 	}
 	defer C.free(unsafe.Pointer(out))
@@ -590,10 +593,10 @@ func init() {
 	sep = cconst("KVSPACE_MEMBER_SEP")
 	runtimeSep = cconst("KVSPACE_RUNTIME_MEMBER_SEP")
 	dirSuf = cconst("KVSPACE_DIR_INDEX_SUF")
-	kindMap = cconst("KVSPACE_KIND_MAP")
-	kindInt64 = cconst("KVSPACE_KIND_INT64")
-	kindFloat64 = cconst("KVSPACE_KIND_FLOAT64")
-	kindBool = cconst("KVSPACE_KIND_BOOL")
+	kindMap = cconst("KVLANG_KIND_MAP")
+	kindInt64 = cconst("KVLANG_KIND_INT64")
+	kindFloat64 = cconst("KVLANG_KIND_FLOAT64")
+	kindBool = cconst("KVLANG_KIND_BOOL")
 
 	myrwircaps = []op{
 		{"json" + sep + "to", []string{"*"}, []string{"*"}},
@@ -601,14 +604,23 @@ func init() {
 	}
 }
 
+// 常量查询分两层两个入口（TASK-082）：路径分隔符这类**存储**常量在 libkvspace 的
+// kvspaceConstStorage，kind 串这类**语言**常量在 kvlang 的 kvlangConstLanguage。
+// 一个函数返回两种层的东西，等于让调用方猜「这个名字属于哪层」——所以按名字前缀
+// 分派，前缀就是层归属的判据。
 func cconst(name string) string {
 	cn := cstr(name)
 	defer C.free(unsafe.Pointer(cn))
-	s := C.kvspaceConst(cn)
+	var s *C.char
+	if strings.HasPrefix(name, "KVLANG_") {
+		s = C.kvlangConstLanguage(cn)
+	} else {
+		s = C.kvspaceConstStorage(cn)
+	}
 	if s == nil {
 		return ""
 	}
-	// kvspaceConst 返回静态字符串，不得 free。
+	// 两个入口都返回静态字符串，不得 free。
 	return C.GoString(s)
 }
 

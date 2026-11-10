@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <kvspace/kvlang_xvalue.h>
+#include <kvlang/xvalue.h>
 #include <kvspace/kvspace_xvalue.h>
 #include "vmkv/vmkv_internal.h"
 
@@ -108,7 +108,7 @@ bool vmkv_source_split_wire(const uint8_t *wire, size_t wire_size,
      */
     const uint8_t *langtype = NULL;
     const uint16_t langtype_size =
-        kvspaceXvalueHeadLangtypeBounded(wire, (uint64_t)wire_size, &langtype);
+        kvlangXvalueHeadLangtypeBounded(wire, (uint64_t)wire_size, &langtype);
     *output_body = wire + KVSPACE_XVALUE_HEAD_LEN;
     *output_body_size = (size_t)kvspaceXvalueHeadLen(head);
     if (langtype_size != 0U && langtype != NULL) {

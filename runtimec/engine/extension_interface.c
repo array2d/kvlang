@@ -28,7 +28,7 @@
 #include "contract/extension_interface.h"
 #include "contract/kvspace_access.h"
 
-#include <kvspace/kvlang_xvalue.h>
+#include <kvlang/xvalue.h>
 #include <kvspace/kvspace_xvalue.h>
 
 #include "binrwir/binvthread_frame.h"
@@ -353,7 +353,7 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_make_pointer(
     }
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
-    if (kvspaceXvalueHeadNewPtr((const uint8_t *)target_key,
+    if (kvlangXvalueHeadNewPtr((const uint8_t *)target_key,
                                 (uint32_t)target_size, target_langtype, &wire,
                                 &wire_size) != 0 ||
         wire == NULL) {
@@ -389,7 +389,7 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_dereference_pointer(
     }
     const uint8_t *langtype = NULL;
     const uint16_t langtype_size =
-        kvspaceXvalueHeadLangtypeBounded(wire, (uint64_t)size, &langtype);
+        kvlangXvalueHeadLangtypeBounded(wire, (uint64_t)size, &langtype);
     /* 判据是 langtype 首字节 `*`——head 里没有 ptr 字段。 */
     if (langtype == NULL || langtype_size == 0U || langtype[0] != '*') {
         return RUNTIMEC_STATUS_INVALID;

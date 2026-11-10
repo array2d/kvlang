@@ -273,6 +273,11 @@ def resolve_include(
         runtimec_root / token,
         runtimec_root / "include" / token,
         *(runtimec_root / directory / token for directory in INTERNAL_PREFIXES),
+        # kvlang 仓**自己**的 include/（`include/kvlang/xvalue.h`、`const.h` 等，
+        # TASK-082 从 kvspace 搬来的语言层头）。不列这一项时 `<kvlang/xvalue.h>`
+        # 解析不到，会退到按 token 前缀猜、猜成 runtimec 的 public 层——实测报
+        # 9 条假的 forbidden-layer-edge。
+        repository_root / "include" / token,
         repository_root / token,
         # kvspace 头只有 kvspace 仓自己的 include/ 一个定义点；kvlang/include 下
         # 的同名副本早已删除，构建对它还有 FATAL_ERROR 守卫，所以这里不再列它。
@@ -743,6 +748,10 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                         resolved.relative_to(runtimec_root.resolve()).as_posix()
                     )
                 except ValueError:
+                    # 解析到 runtimec 之外（kvlang 仓根的 `include/`、`../kvspace/`）
+                    # 是**外部头**，不参与内部分层约束，直接跳过。判据是**真实文件
+                    # 位置**而不是 token 前缀：按前缀判会把 `<kvlang/xvalue.h>`
+                    # （kvlang 仓提供）误当 runtimec 的 public 头。
                     continue
                 target_layer = layer_for_relative(target_relative)
             else:

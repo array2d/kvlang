@@ -30,7 +30,7 @@ fi
 rm -rf "$OUT"
 mkdir -p "$OUT/kvspace"
 # runtimec2 已归档：kvlang/lib 里若还残留旧 .so，**不能**再打进 payload——那正是
-# 「启动即崩」的来源（旧签名调 kvspaceXvalueHeadNewCode）。缺失即显式失败，
+# 「启动即崩」的来源（旧签名调 kvlangXvalueHeadNewCode）。缺失即显式失败，
 # 不静默降级成「少带一个 runtime、运行时找不到」。
 if [ ! -f "$ROOT/lib/libkvlang_runtimec2.so" ]; then
     echo "stage_embed: libkvlang_runtimec2.so 已归档（TASK-041），embed 暂不可用" >&2

@@ -28,7 +28,7 @@
 #include "contract/key_directory.h"
 #include "contract/kvspace_interface.h"
 #include "contract/kvspace_interface.h"
-#include <kvspace/kvlang_xvalue.h>
+#include <kvlang/xvalue.h>
 #include <kvspace/kvspace_xvalue.h>
 
 /* `RUNTIMEC_KVSPACE_KEY_CAPACITY` 现在定义在 `contract/kvspace_access.h`：
@@ -154,7 +154,7 @@ static runtimec_status_t runtimec_kvspace_access_read_wire(
 /*
  * 写一个 key：**读写路径的唯一写入口**。
  *
- * `wire` 是调用方用 `kvspaceXvalueHeadNew*` 造好的**完整 wire**（构造点不变）。
+ * `wire` 是调用方用 `kvlangXvalueHeadNew*` 造好的**完整 wire**（构造点不变）。
  * 本函数把它拆成 body/attr 两段交给 `kvspaceRealloc`——`Realloc` 只分配并写 head，
  * body 与 attr 由本函数填。head 绝不在这里写第二遍。
  *
@@ -1138,7 +1138,7 @@ static runtimec_status_t runtimec_kvspace_access_write_system_member(
     }
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
-    if (kvspaceXvalueHeadNewSlack(
+    if (kvlangXvalueHeadNewSlack(
             (const uint8_t *)text.data, text.size,
             RUNTIMEC_KVSPACE_SYSTEM_LANGTYPE, &wire, &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
@@ -1517,7 +1517,7 @@ runtimec_status_t runtimec_kvspace_access_ensure_frame(
 
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
-    if (kvspaceXvalueHeadNewSlack(
+    if (kvlangXvalueHeadNewSlack(
             (const uint8_t *)function_key.data, function_key.size,
             RUNTIMEC_KVSPACE_SYSTEM_LANGTYPE, &wire, &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
@@ -1706,7 +1706,7 @@ runtimec_status_t runtimec_kvspace_access_ensure_zero_value(
     }
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
-    const int encode_status = kvspaceXvalueHeadNewSlack(
+    const int encode_status = kvlangXvalueHeadNewSlack(
         zero_body, body_length, langtype_text, &wire, &wire_size);
     free(zero_body);
     if (encode_status != 0 || wire == NULL || wire_size > UINT32_MAX) {
@@ -1788,7 +1788,7 @@ runtimec_status_t runtimec_kvspace_access_write_program_counter(
      * （`03-类型系统/10-compact形态.kv`：源级 `[]T`，落盘 `[N]T`）。
      * 丢了「恰好 2 个元素」这个事实，读方就无从校验 body 8 字节与 langtype 一致。
      */
-    if (kvspaceXvalueHeadNewSlack(body, sizeof(body),
+    if (kvlangXvalueHeadNewSlack(body, sizeof(body),
                                             "[2]int32", &wire, &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         return runtimec_kvspace_access_fail(
@@ -2069,7 +2069,7 @@ runtimec_status_t runtimec_kvspace_access_handoff(
     }
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
-    if (kvspaceXvalueHeadNewSlack(
+    if (kvlangXvalueHeadNewSlack(
             (const uint8_t *)target_text, (uint64_t)target_size,
             "char/utf8", &wire, &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {

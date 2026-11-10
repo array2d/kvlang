@@ -49,7 +49,7 @@ static void test_compare(void) {
     check(compare("abc", "abd") < 0, "plain names use lexicographic order");
 
     /* **不是「整数优先」**：一边可解析、一边不可时按字典序——与后端
-     * `kvspaceCoordCmp`（`na < 0 || nb < 0` → strcmp）逐项一致。
+     * `kvlangCoordCmp`（`na < 0 || nb < 0` → strcmp）逐项一致。
      * 字典序里 '3' < 'a'，所以 [3] 在前；换成 [z] 结论就反过来。 */
     check(compare("[3]", "[a]") < 0, "[3] vs [a]: lexicographic, '3' < 'a'");
     check(compare("[z]", "[1]") > 0, "[z] vs [1]: lexicographic, 'z' > '1'");

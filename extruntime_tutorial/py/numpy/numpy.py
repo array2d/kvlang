@@ -14,7 +14,7 @@
     算子（reshape/matmul/…）产出并按 [dims]dtype 存回 kvspace。
   - Uses kvspace v2 single-key wire format (8B head + trailing attr):
     reads via kvspaceGet + kvspaceGetHead across shm:// and fs://;
-    writes via kvspaceXvalueHeadNewTensor / kvspaceXvalueHeadNewScalar.
+    writes via kvlangXvalueHeadNewTensor / kvlangXvalueHeadNewScalar.
   - Resolves opcode and operands via kvlangRwirextParams, reading ndarray slots by path first
     and falling back to kvlangRwirextResolveRead; resolves write slots via kvlangRwirextResolveWrite.
   - numpy·print writes directly to this process's stdout.
@@ -99,21 +99,21 @@ def _bind():
     _ks.kvspaceDel.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_uint32,
                                ctypes.c_char_p, ctypes.c_uint32]
     _ks.kvspaceDel.restype = ctypes.c_int
-    _ks.kvspaceNewChar.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32, ctypes.c_char_p,
+    _ks.kvlangXvalueNewChar.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32, ctypes.c_char_p,
                                    ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
                                    ctypes.POINTER(ctypes.c_uint32)]
-    _ks.kvspaceNewChar.restype = ctypes.c_int
-    _ks.kvspaceXvalueHeadNewScalar.argtypes = [ctypes.c_uint8, ctypes.POINTER(ctypes.c_uint8),
+    _ks.kvlangXvalueNewChar.restype = ctypes.c_int
+    _ks.kvlangXvalueHeadNewScalar.argtypes = [ctypes.c_uint8, ctypes.POINTER(ctypes.c_uint8),
                                                ctypes.c_uint32, ctypes.c_char_p,
                                                ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
                                                ctypes.POINTER(ctypes.c_uint64)]
-    _ks.kvspaceXvalueHeadNewScalar.restype = ctypes.c_int
-    _ks.kvspaceXvalueHeadNewTensor.argtypes = [ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint32,
+    _ks.kvlangXvalueHeadNewScalar.restype = ctypes.c_int
+    _ks.kvlangXvalueHeadNewTensor.argtypes = [ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint32,
                                                ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint64,
                                                ctypes.c_char_p,
                                                ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
                                                ctypes.POINTER(ctypes.c_uint64)]
-    _ks.kvspaceXvalueHeadNewTensor.restype = ctypes.c_int
+    _ks.kvlangXvalueHeadNewTensor.restype = ctypes.c_int
     # rwirext ABI（kvspace 不提供的 runtime 语义）：句柄传扩展自连的 kvspace
     for fn in ("kvlangRwirextParams", "kvlangRwirextResolveRead", "kvlangRwirextResolveReadPath",
                "kvlangRwirextResolveWrite", "kvlangRwirextNextPc"):
@@ -257,7 +257,7 @@ class Engine:
         buf = (ctypes.c_uint8 * max(len(b), 1))()
         if b:
             ctypes.memmove(buf, b, len(b))
-        if _ks.kvspaceNewChar(buf, len(b), lt, ctypes.byref(out), ctypes.byref(ol)) != 0:
+        if _ks.kvlangXvalueNewChar(buf, len(b), lt, ctypes.byref(out), ctypes.byref(ol)) != 0:
             return
         try:
             self._set_wire(key, out, ol.value)
@@ -324,10 +324,10 @@ class Engine:
         out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint64()
         if ndim > 0:
             dims = (ctypes.c_uint64 * ndim)(*shape)
-            rc = _ks.kvspaceXvalueHeadNewTensor(dims, ndim, buf, len(raw), lt,
+            rc = _ks.kvlangXvalueHeadNewTensor(dims, ndim, buf, len(raw), lt,
                                                 ctypes.byref(out), ctypes.byref(ol))
         else:
-            rc = _ks.kvspaceXvalueHeadNewScalar(0, buf, len(raw), lt,
+            rc = _ks.kvlangXvalueHeadNewScalar(0, buf, len(raw), lt,
                                                 ctypes.byref(out), ctypes.byref(ol))
         if rc != 0 or not out:
             raise RuntimeError(f"xvalue encode failed: {key}")
@@ -349,7 +349,7 @@ class Engine:
         if not self.kv_exists(SHARED_VIDS):
             out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint64()
             dummy = (ctypes.c_uint8 * 1)()
-            if _ks.kvspaceXvalueHeadNewScalar(0, dummy, 0, SHARED_VIDS_TYPE.encode(),
+            if _ks.kvlangXvalueHeadNewScalar(0, dummy, 0, SHARED_VIDS_TYPE.encode(),
                                               ctypes.byref(out), ctypes.byref(ol)) == 0 and out:
                 try:
                     self._set_wire(SHARED_VIDS, out, ol.value)
@@ -357,12 +357,12 @@ class Engine:
                     _libc.free(ctypes.cast(out, ctypes.c_void_p))
         vids_key = f"/lib/{op}/vids"
         if not self.kv_exists(vids_key):
-            _ks.kvspaceNewPtr.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
+            _ks.kvlangXvalueNewPtr.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
                                           ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
                                           ctypes.POINTER(ctypes.c_uint32)]
-            _ks.kvspaceNewPtr.restype = ctypes.c_int
+            _ks.kvlangXvalueNewPtr.restype = ctypes.c_int
             out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
-            if _ks.kvspaceNewPtr(SHARED_VIDS_TYPE.encode(), SHARED_VIDS.encode(),
+            if _ks.kvlangXvalueNewPtr(SHARED_VIDS_TYPE.encode(), SHARED_VIDS.encode(),
                                  ctypes.byref(out), ctypes.byref(ol)) == 0 and out:
                 try:
                     self._set_wire(vids_key, out, ol.value)
