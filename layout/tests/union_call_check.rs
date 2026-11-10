@@ -26,11 +26,7 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
 }
 
 fn dsn(tag: &str) -> String {
-    format!(
-        "fs:///tmp/kvlanglayout_unionmsg_{}_{}",
-        tag,
-        std::process::id(),
-    )
+    kvlanglayout::ffi::test_dsn(&format!("unionmsg_{tag}"))
 }
 
 /// store 守卫：离开作用域时删目录。必须**先于 `Kv` 声明**，
@@ -39,18 +35,14 @@ struct TempStore(String);
 
 impl Drop for TempStore {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(self.0.trim_start_matches("fs://"));
+        kvlanglayout::ffi::remove_test_store(&self.0);
     }
 }
 
 fn fresh_kv(tag: &str) -> (TempStore, Kv) {
-    let dsn = format!(
-        "fs:///tmp/kvlanglayout_union_{}_{}",
-        tag,
-        std::process::id()
-    );
+    let dsn = kvlanglayout::ffi::test_dsn(&format!("union_{tag}"));
     let store = TempStore(dsn.clone());
-    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+    kvlanglayout::ffi::remove_test_store(&dsn);
 
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
@@ -116,5 +108,5 @@ fn union_mismatch_reports_both_sides() {
         "stderr: {err}"
     );
     let _ = std::fs::remove_file(&file);
-    let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
+    kvlanglayout::ffi::remove_test_store(&db);
 }

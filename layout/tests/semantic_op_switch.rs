@@ -26,11 +26,7 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
 }
 
 fn dsn(tag: &str) -> String {
-    format!(
-        "fs:///tmp/kvlanglayout_semop_{}_{}",
-        tag,
-        std::process::id(),
-    )
+    kvlanglayout::ffi::test_dsn(&format!("semop_{tag}"))
 }
 
 fn slot_text(kv: &mut Kv, key: &str) -> String {
@@ -74,7 +70,7 @@ fn dump_ops(tag: &str, src: &str) -> (String, Vec<String>) {
     // 用完即清：`.kv` 与 fs store 都删，反复跑不留残骸。
     drop(kv);
     let _ = std::fs::remove_file(&file);
-    let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
+    kvlanglayout::ffi::remove_test_store(&db);
     (opcode, operands)
 }
 
@@ -127,5 +123,5 @@ fn semantic_operator_never_resolves_as_call() {
     );
     drop(kv);
     let _ = std::fs::remove_file(&file);
-    let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
+    kvlanglayout::ffi::remove_test_store(&db);
 }

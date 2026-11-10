@@ -55,11 +55,11 @@ fn fresh_kv() -> (TempStore, Kv) {
      * 别的会话的残留目录会让本仓测试红绿颠倒（实测过一次 8 红 / 清目录后全绿）。
      * `workspace/` 已 gitignore，且 `/home` 跨 pod 持久。 */
     let dsn = format!(
-        "fs://{}/../workspace/tmp/layout-tests/i116_{}_{seq}",
+        "shm://{}/../workspace/tmp/layout-tests/i116_{}_{seq}",
         env!("CARGO_MANIFEST_DIR"),
         std::process::id()
     );
-    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+    kvlanglayout::ffi::remove_test_store(&dsn);
 
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
@@ -74,7 +74,7 @@ fn fresh_kv() -> (TempStore, Kv) {
         .unwrap();
     }
     let store = TempStore {
-        dir: dsn.trim_start_matches("fs://").to_string(),
+        dir: dsn.trim_start_matches("shm://").to_string(),
     };
     (store, kv)
 }

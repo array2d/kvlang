@@ -98,7 +98,7 @@ fn literal_and_result_slots_use_promoted_kind() {
     let dir = temp_dir("layout");
     let file = dir.join("p.kv");
     std::fs::write(&file, LAYOUT_SRC).unwrap();
-    let db = format!("fs://{}", dir.join("db").display());
+    let db = format!("shm://{}", dir.join("db").display());
     let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();
     assert!(
         out.status.success(),

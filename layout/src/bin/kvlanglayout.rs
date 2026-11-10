@@ -50,6 +50,25 @@ fn read_src(path: &str) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| die(&format!("read {path}: {e}")))
 }
 
+/// DSN **必填**，缺失即报错退出——**不回落任何默认值**。
+///
+/// 曾经这里 `unwrap_or("redis://127.0.0.1:6379")`：不给 DSN 就静默连本机 redis。
+/// 那种默认值的危害不在它存在，而在它没人记得自己存在——单库化之后 `libkvspace`
+/// 只服务 `shm://`，那个默认值根本连不上，却要等到连的时候才炸，报错也不指向这里。
+///
+/// 报错给一条能直接照抄的命令，而不是只说「缺 DSN」。
+fn require_dsn(arg: Option<&str>) -> String {
+    match arg {
+        Some(v) if !v.is_empty() => v.to_string(),
+        _ => {
+            eprintln!("缺少 DSN：kvlanglayout 只接受 shm://，且必须显式给出（无默认值）。");
+            eprintln!("例：kvlanglayout hello.kv shm:///tmp/kv.shm");
+            eprintln!("    kvlanglayout printlib hello.kv /lib shm:///tmp/kv.shm");
+            std::process::exit(2);
+        }
+    }
+}
+
 fn die(msg: &str) -> ! {
     eprintln!("{msg}");
     std::process::exit(1);
@@ -102,12 +121,9 @@ fn main() {
     }
     if args.len() >= 3 && args[1] == "printlib" {
         let prefix = args.get(3).map(String::as_str).unwrap_or("/lib");
-        let dsn = args
-            .get(4)
-            .map(String::as_str)
-            .unwrap_or("redis://127.0.0.1:6379");
+        let dsn = require_dsn(args.get(4).map(String::as_str));
         let src = read_src(&args[2]);
-        let mut kv = layout_or_die(&src, dsn);
+        let mut kv = layout_or_die(&src, &dsn);
         print!("{}", printlib(&mut kv, prefix));
         return;
     }
@@ -115,13 +131,10 @@ fn main() {
         eprintln!("usage: kvlanglayout <file.kv> [dsn]  |  kvlanglayout {{vet|format}} <file.kv>  |  kvlanglayout printlib <file.kv> [prefix] [dsn]");
         std::process::exit(1);
     }
-    let dsn = args
-        .get(2)
-        .map(String::as_str)
-        .unwrap_or("redis://127.0.0.1:6379");
+    let dsn = require_dsn(args.get(2).map(String::as_str));
     let src = read_src(&args[1]);
 
-    let mut kv = layout_or_die(&src, dsn);
+    let mut kv = layout_or_die(&src, &dsn);
 
     let entry = find_entry(&mut kv, "/lib/", "");
     let entry = if entry.is_empty() { "init" } else { &entry };

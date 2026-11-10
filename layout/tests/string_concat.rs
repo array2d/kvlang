@@ -24,11 +24,7 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
 }
 
 fn dsn(tag: &str) -> String {
-    format!(
-        "fs:///tmp/kvlanglayout_concat_{}_{}",
-        tag,
-        std::process::id(),
-    )
+    kvlanglayout::ffi::test_dsn(&format!("concat_{tag}"))
 }
 
 /// 一次 layout 的产物：`.kv` 路径 + fs store DSN + 输出。
@@ -42,7 +38,7 @@ struct Fixture {
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.file);
-        let _ = std::fs::remove_dir_all(self.db.trim_start_matches("fs://"));
+        kvlanglayout::ffi::remove_test_store(&self.db);
     }
 }
 

@@ -1,5 +1,5 @@
 //! byteseek —— 功能完整的 runtime 二进制。模式2（runtime 主导 + 就地 rwir stdlib）。
-//! CLI（DSN 取环境变量 KVSPACE，缺省 redis://127.0.0.1:6379）。入口须显式给出（不再自动探测）：
+//! CLI（DSN 取环境变量 KVSPACE，**必填无默认**）。入口须显式给出（不再自动探测）：
 //!   byteseek                 无入口 → 提示 need entry
 //!   byteseek <entry>         运行已 layout 进 kvspace 的入口（pkg·func 或裸名，pkg 可空）
 //!   byteseek <file.kv>       stdlib 先行 → layout 该文件 → 运行约定入口 test
@@ -21,15 +21,59 @@ use std::ptr::null_mut;
 use byteseek::engine::Engine;
 use byteseek::ffi::*;
 
+/// 存储 DSN。`KVSPACE` 是**唯一**允许的环境变量（G12），但**没有默认值**：
+/// 不给就是配置缺失，直接报错并给出可照抄的命令。
+///
+/// 曾经这里缺省 `redis://127.0.0.1:6379`——那是隐式默认值的典型：单库化之后
+/// `libkvspace` 只服务 `shm://`，那个默认值根本连不上，却要等 connect 才炸，
+/// 而报错不指向这里。
 fn dsn() -> String {
-    std::env::var("KVSPACE").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string())
+    match std::env::var("KVSPACE") {
+        Ok(v) if !v.is_empty() => v,
+        _ => {
+            byteseek::elog!("缺少 KVSPACE：DSN 必须显式给出（无默认值）。");
+            byteseek::elog!("例：KVSPACE=shm:///tmp/kv.shm byteseek -c 'print(\"ok\")'");
+            std::process::exit(2);
+        }
+    }
 }
 
-/// info 级日志（对齐 C logx.c 的 LOG_LEVEL 门控）：默认 warn 静默，仅 LOG_LEVEL=info|debug 时以 `<exe>: ` 前缀输出到 stderr。
+/// 日志级别。由 `--log-level=` 决定，**不看环境变量**：环境变量是隐式输入，
+/// 不进命令行也不进日志，两个人跑同一条命令可能得出不同结果（G12）。
+///
+/// 缺省 `Warn`：`log_info` 静默，与原「未设 LOG_LEVEL 即静默」等价。
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum LogLevel {
+    Warn,
+    Info,
+    Debug,
+}
+
+static LOG_LEVEL: std::sync::OnceLock<LogLevel> = std::sync::OnceLock::new();
+
+/// 解析 `--log-level=warn|info|debug`；非法值硬失败，不静默退回缺省。
+fn parse_log_level(args: &[String]) -> LogLevel {
+    let mut level = LogLevel::Warn;
+    for a in args {
+        if let Some(v) = a.strip_prefix("--log-level=") {
+            level = match v {
+                "warn" => LogLevel::Warn,
+                "info" => LogLevel::Info,
+                "debug" => LogLevel::Debug,
+                _ => {
+                    byteseek::elog!("--log-level 只接受 warn|info|debug，收到 {v:?}");
+                    std::process::exit(1);
+                }
+            };
+        }
+    }
+    level
+}
+
+/// info 级日志：以 `<exe>: ` 前缀输出到 stderr，仅在 `--log-level=info|debug` 时。
 fn log_info(msg: &str) {
-    match std::env::var("LOG_LEVEL").as_deref() {
-        Ok("info") | Ok("debug") => byteseek::elog!("{msg}"),
-        _ => {}
+    if LOG_LEVEL.get().copied().unwrap_or(LogLevel::Warn) >= LogLevel::Info {
+        byteseek::elog!("{msg}");
     }
 }
 
@@ -51,7 +95,12 @@ fn main() {
     // `--no-stdlib`（任意位置）：跳过 stdlib 的 layout&run 引导（benchmark 隔离用），
     // 仅把用户文件 layout 进 kvspace 后直接 run 入口，不加载/运行任何内置库。
     let no_stdlib = args.iter().any(|a| a == "--no-stdlib");
-    let args: Vec<String> = args.into_iter().filter(|a| a != "--no-stdlib").collect();
+    // `--log-level=warn|info|debug`（任意位置）：必须在任何 log_info 之前解析并落定。
+    let _ = LOG_LEVEL.set(parse_log_level(&args));
+    let args: Vec<String> = args
+        .into_iter()
+        .filter(|a| a != "--no-stdlib" && !a.starts_with("--log-level="))
+        .collect();
 
     match args.as_slice() {
         // ── 仅 layout / 校验 / 格式化（不需 runtime）───────────────────

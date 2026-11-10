@@ -65,7 +65,7 @@ fn compile(tag: &str, src: &str) -> (TempDir, Kv) {
     let dir = temp_dir(tag);
     let file = dir.join("p.kv");
     std::fs::write(&file, src).unwrap();
-    let db = format!("fs://{}", dir.join("db").display());
+    let db = format!("shm://{}", dir.join("db").display());
     let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();
     assert!(
         out.status.success(),

@@ -8,18 +8,14 @@ struct TempStore(String);
 
 impl Drop for TempStore {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(self.0.trim_start_matches("fs://"));
+        kvlanglayout::ffi::remove_test_store(&self.0);
     }
 }
 
 fn fresh_kv(tag: &str) -> (TempStore, Kv) {
-    let dsn = format!(
-        "fs:///tmp/kvlanglayout_callname_{}_{}",
-        tag,
-        std::process::id()
-    );
+    let dsn = kvlanglayout::ffi::test_dsn(&format!("callname_{tag}"));
     let store = TempStore(dsn.clone());
-    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+    kvlanglayout::ffi::remove_test_store(&dsn);
 
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();

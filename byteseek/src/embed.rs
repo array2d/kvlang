@@ -30,7 +30,7 @@ impl Lib {
     }
 }
 
-static LIBS: [Lib; 5] = [
+static LIBS: [Lib; 3] = [
     Lib::new("kvspace", include_bytes!(env!("EMBED_KVSPACE")), true),
     Lib::new(
         "kvlang_runtime",
@@ -42,12 +42,9 @@ static LIBS: [Lib; 5] = [
         include_bytes!(env!("EMBED_KVLANGLAYOUT")),
         false,
     ),
-    Lib::new("kvspace-c", include_bytes!(env!("EMBED_KVSPACE_C")), false),
-    Lib::new(
-        "kvspace_durable",
-        include_bytes!(env!("EMBED_KVSPACE_DURABLE")),
-        false,
-    ),
+    // `kvspace-c` 与 `kvspace_durable` 不再嵌入：单库化后 shm 引擎直接编在
+    // libkvspace 里，`kvspaceConnect` 不 dlopen 任何后端。嵌进去的两个字节块
+    // 没有任何代码会去 dlopen 它们——是纯粹的体积。
 ];
 
 fn die(msg: &str) -> ! {
