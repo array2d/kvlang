@@ -239,7 +239,7 @@ pub fn langtype_of(h: *mut c_void, key: &str) -> String {
     let mut off: u64 = 0;
     let mut err = [0u8; 256];
     let rc = unsafe {
-        kvspaceResolve(
+        kvspaceResolveOffset(
             h, cs(key).as_ptr(), 0, &mut off,
             err.as_mut_ptr() as *mut c_char, err.len() as u32,
         )
@@ -395,7 +395,7 @@ unsafe extern "C" {
     /// 进程内值区基址：地址 = base + value_offset。长连接句柄直接可用。
     pub fn kvspaceXvalueInProcessAddress(h: *mut c_void) -> *mut u8;
     /// key → 偏移。anchor 0 = root；不跟 Ptr。返回负 errno。
-    pub fn kvspaceResolve(
+    pub fn kvspaceResolveOffset(
         h: *mut c_void,
         key: *const c_char,
         parent_key_anchor: u64,

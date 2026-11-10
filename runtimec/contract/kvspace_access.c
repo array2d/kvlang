@@ -115,7 +115,7 @@ static runtimec_status_t runtimec_kvspace_access_read_wire(
     char error_text[256];
     error_text[0] = '\0';
     uint64_t value_offset = 0U;
-    const int status = kvspaceResolve(adapter->handle, key_text, 0U,
+    const int status = kvspaceResolveOffset(adapter->handle, key_text, 0U,
                                       &value_offset, error_text,
                                       (uint32_t)sizeof(error_text));
     if (status != 0) {
@@ -224,7 +224,7 @@ runtimec_status_t runtimec_kvspace_access_read(
     }
     /*
      * **不跟 Ptr**：runtimec 的解引用只走显式 `*`（见 16-ptr.kv），读接口拿的是
-     * key 本身的值。`kvspaceResolve` 契约就是「不跟 Ptr」，与旧接口 resolve=0 同义。
+     * key 本身的值。`kvspaceResolveOffset` 契约就是「不跟 Ptr」，与旧接口 resolve=0 同义。
      */
     const uint8_t *value = NULL;
     uint32_t value_size = 0U;
@@ -352,7 +352,7 @@ runtimec_status_t runtimec_kvspace_access_write_partial(
     char error_text[256];
     error_text[0] = '\0';
     uint64_t value_offset = 0U;
-    if (kvspaceResolve(adapter->handle, key_text, 0U, &value_offset, error_text,
+    if (kvspaceResolveOffset(adapter->handle, key_text, 0U, &value_offset, error_text,
                        (uint32_t)sizeof(error_text)) != 0) {
         return runtimec_kvspace_access_fail(
             error, RUNTIMEC_STATUS_ERROR, 16, "kvspace partial write failed");
@@ -748,7 +748,7 @@ runtimec_status_t runtimec_kvspace_access_source_revision(
         record_error[0] = '\0';
         uint64_t record_offset = 0U;
         const int read_status =
-            kvspaceResolve(adapter->handle, record_key, 0U, &record_offset,
+            kvspaceResolveOffset(adapter->handle, record_key, 0U, &record_offset,
                            record_error, (uint32_t)sizeof(record_error));
         const uint8_t *base = kvspaceXvalueInProcessAddress(adapter->handle);
         const uint64_t current_address =

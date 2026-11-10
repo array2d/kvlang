@@ -94,7 +94,7 @@ static inline bool runtimec_kvspace_read_wire(void *handle, const char *key,
     char message[128];
     message[0] = '\0';
     uint64_t value_offset = 0U;
-    const int status = kvspaceResolve(handle, key, 0U, &value_offset, message,
+    const int status = kvspaceResolveOffset(handle, key, 0U, &value_offset, message,
                                       (uint32_t)sizeof(message));
     if (status == KVSPACE_MISSING) {
         return true;

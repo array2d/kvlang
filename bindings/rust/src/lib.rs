@@ -29,7 +29,7 @@ mod ffi {
         pub fn kvspaceConnect(dsn: *const c_char) -> *mut std::ffi::c_void;
         pub fn kvspaceClose(h: *mut std::ffi::c_void);
         pub fn kvspaceXvalueInProcessAddress(h: *mut std::ffi::c_void) -> *mut u8;
-        pub fn kvspaceResolve(
+        pub fn kvspaceResolveOffset(
             h: *mut std::ffi::c_void,
             key: *const c_char,
             parent_key_anchor: u64,
@@ -323,7 +323,7 @@ impl KVSpace {
         let mut off: u64 = 0;
         let mut err = [0 as c_char; 256];
         let rc = unsafe {
-            ffi::kvspaceResolve(self.ptr, ckey.as_ptr(), 0, &mut off, err.as_mut_ptr(), 256)
+            ffi::kvspaceResolveOffset(self.ptr, ckey.as_ptr(), 0, &mut off, err.as_mut_ptr(), 256)
         };
         if rc != KVSPACE_OK {
             return None;

@@ -9,7 +9,7 @@ lib kvlang/spec/runtime语义/myrwir扩展_c {
 
 1. **拿 PC**：经 handoff / 驱动循环取当前 PC，跑己方 rwir，`NextPc` 求后继。
 2. **解析参数**：**只经** `kvlangRwirext*`（见 [[notinmyrwircaps]]）。
-3. **读写 kvspace**：存储访问**只经** `kvspace*` 正典 ABI（`kvspaceResolve` 定位、`kvspaceRealloc`
+3. **读写 kvspace**：存储访问**只经** `kvspace*` 正典 ABI（`kvspaceResolveOffset` 定位、`kvspaceRealloc`
    分配、`kvspaceXvalueInProcessAddress` 取基址）；值构造**只经**语言层 `kvlangXvalueHeadNew*` /
    `kvlangXvalueNew*`（`libkvlang_xvalue`），读取用 memcpy `kvspaceXvalueHead` struct + inline 访问器。
    **绝不自造 langtype 构造器、绝不手写 XValue/head。**

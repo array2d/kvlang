@@ -3,7 +3,7 @@ lib kvlang/spec/kvspace模型/CABI {
 	r####"# C ABI
 
 **符号命名（normative）**：所有 C ABI 符号统一 `<前缀><PascalCase>` 无下划线（即
-camelCase）——kvspace 层前缀 `kvspace`（`kvspaceResolve` / `kvspaceRealloc`），kvlang runtime 层前缀
+camelCase）——kvspace 层前缀 `kvspace`（`kvspaceResolveOffset` / `kvspaceRealloc`），kvlang runtime 层前缀
 `kvlang`（`kvlangRuntimeConnect` / `kvlangLangtypeParse`）。禁止下划线分词（不写 `kvspace_get` /
 `kvlang_runtime_connect`），头文件名可用下划线（`kvlang_runtime.h`），导出符号一律无下划线。
 
@@ -29,7 +29,7 @@ camelCase）——kvspace 层前缀 `kvspace`（`kvspaceResolve` / `kvspaceReall
 **借用二进制指针模型**：读返回指向后端常驻空间的二进制指针，调用方不得释放；寿命到该 key 被写/删或
 handle close（没有指令边界回收调用）。写返回 body 偏移的二进制指针供调用方直接填。
 
-**`libkvspace`（shm）是直读直写，没有快照层（normative）**：`kvspaceResolve` 给出的偏移
+**`libkvspace`（shm）是直读直写，没有快照层（normative）**：`kvspaceResolveOffset` 给出的偏移
 指向映射内真实位置，`kvspaceXvalueInProcessAddress + offset` 读到的就是当前字节。写入同样
 直接落在映射上。因此外部暂停/恢复/终止（改 `‥status`）对运行中的 kvcpu 立即可见。
 
@@ -64,7 +64,7 @@ wire 上只有这一个长度量（tag 2 `reallen` 已删除）；物理容量�
 
 ```c
 uint64_t offset = 0;
-kvspaceResolve(h, "/key", 0, &offset, err, cap);   /* 拿到 64 位偏移 */
+kvspaceResolveOffset(h, "/key", 0, &offset, err, cap);   /* 拿到 64 位偏移 */
 uint8_t *base = kvspaceXvalueInProcessAddress(h);  /* 进程内值区基址 */
 uint8_t *value = base + offset;                    /* 地址 = base + offset */
 ```
@@ -113,8 +113,8 @@ body 偏移恒 16——这个 struct 属字节层，在 `kvspace_xvalue.h`。）
 读一律走 inline 访问器（字段的唯一定义点）；langtype 不在 head——落值内 attr 区（tag 1 记录），
 随单 key 一次写整体落下。
 
-`kvspaceResolve` **不跟 Ptr**：解引用由 runtime 显式 `*` 掌控。旧 ABI 的 `resolve` 读参语义
-（`resolve=1` 穿透 link）随整个读接口一起删除；`listlen`/`list` 只列物理直接子项，无叠加层。
+`kvspaceResolveOffset` **不跟 Ptr**：解引用由 runtime 显式 `*` 掌控。旧 ABI 的 `resolve` 读参语义
+（旧 ABI 的 `resolve=1` 读参，用于穿透 link）随整个读接口一起删除；`listlen`/`list` 只列物理直接子项，无叠加层。
 head 线格式与 langtype 编码见 [[键系统与数组访问]]。
 
 **写侧不穿透整键（normative）**：`kvspaceRealloc` / `kvspaceFree` / `kvspaceDeltree` 对
@@ -144,7 +144,7 @@ head 线格式与 langtype 编码见 [[键系统与数组访问]]。
     kvspaceListlen                          存储 ABI：N / M
     kvspaceMkindex                          存储 ABI：建 index 位置
     kvspaceRealloc                          存储 ABI：唯一写原语
-    kvspaceResolve                          存储 ABI：key → 偏移
+    kvspaceResolveOffset                          存储 ABI：key → 偏移
     kvspaceXvalueInProcessAddress           存储 ABI：进程内值区基址
     kvspaceConstStorage                     存储常量：运行期查询
     kvspaceXvalueGetAttr                    字节层：按 tag 读 attr

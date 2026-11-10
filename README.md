@@ -72,7 +72,7 @@ kvspace is the addressing and memory space at the core; the language is a small 
 
 ![kvlang ecosystem architecture](docs/kvlang-architecture.en.png)
 
-- **kvspace** — one C ABI in PascalCase with no underscores (`kvspaceResolve`, `kvspaceRealloc`, `kvspaceList`); two implementations of that ABI, **chosen at link time, not by DSN**: `libkvspace` (C, serves `shm://` only) and `kvspace-durable` (Rust, `redis://` / `fs://`; being migrated to the current ABI). There is no runtime dispatch and no `dlopen` — `kvspaceConnect` rejects any DSN whose scheme is not `shm`.
+- **kvspace** — one C ABI in PascalCase with no underscores (`kvspaceResolveOffset`, `kvspaceRealloc`, `kvspaceList`); two implementations of that ABI, **chosen at link time, not by DSN**: `libkvspace` (C, serves `shm://` only) and `kvspace-durable` (Rust, `redis://` / `fs://`; being migrated to the current ABI). There is no runtime dispatch and no `dlopen` — `kvspaceConnect` rejects any DSN whose scheme is not `shm`.
 - **layout** — Rust crate (`bin/libkvlanglayout.so`, CLI `bin/kvlanglayout`). The **o0 compiler**: scan → parse → lower (control-flow lowering, type inference, specialization) → write the KV instruction tree into `/lib`. It performs **no optimization** — optimizing here would erase the high-level semantics that other runtimes rely on to optimize on heterogeneous hardware. It writes only to `/lib`, and diagnoses at three levels: `error` / `warn` / `info`.
 - **runtime-c** — the core interpreter (`bin/libkvlang_runtime.so`, C11). Pure interpretation: fetch-decode-execute, native rwir dispatch, the copy opcode `=`, call/return/br/goto, and the user-function call. It does not compile, optimize, or reorder. Depends only on the `kvspace*` C ABI.
 - **byteseek** — Rust (`bin/byteseek`, the `byteseek` CLI). A reference **myrwir host**: it links layout and runtime-c, interprets its own opcodes, and routes the rest. Its in-process families: `term`, `json`, `http`, `networld`, `kvlang·*`.
@@ -95,7 +95,6 @@ kvlang/
 ├── tutorial/             examples, which double as the conformance suite
 ├── error_cases/          expected-diagnostic cases
 ├── benchmark/            cross-language, cross-backend benchmarks
-├── bench/                IOPS floor micro-benchmark
 ├── extruntime_tutorial/  example extension runtimes: json (Go), numpy (Python)
 ├── extensions/kvlang/    VS Code language support for .kv files
 ├── site/                 source of kvlang.com

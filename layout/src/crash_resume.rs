@@ -321,7 +321,7 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
     ("kvspace/key·abs", CREATE),
     ("kvspace/key·tostr", CREATE),
     (
-        "kvspace/key·resolveptr",
+        "kvlang·resolvekey",
         OpSpec {
             heap_read: true,
             ..CREATE
@@ -921,9 +921,13 @@ fn parse_step(input: &StepInput, ctx: &Ctx, addr_taken: &mut BTreeSet<String>) -
         Callee::Unit(_) | Callee::Store(_) | Callee::Unverified(_) | Callee::Unknown(_)
     );
     let copy = matches!(input.op.as_str(), "=" | "copy");
+    /* 两个算子在这里并排，但它们**不再同族**——曾经都叫 `kvspace/key·*`，
+     * 后来 `resolveptr` 改名 `kvlang·resolvekey`（语义没变，仍是 base + 键值 → 位置）。
+     * 之所以还并在这里：判据是「产出一个地址而不是值」，与命名族无关。
+     * 看到两个不同前缀并排别当成手滑——是改名留下的痕迹。 */
     let address_of = matches!(
         input.op.as_str(),
-        "kvspace/key·abs" | "kvspace/key·resolveptr"
+        "kvspace/key·abs" | "kvlang·resolvekey"
     );
     let patches = spec.map_or(0, |s| s.patches);
     for (i, read) in reads.iter().enumerate() {
@@ -2516,7 +2520,7 @@ mod tests {
             "int64",
             "int8",
             "kvspace/key·abs",
-            "kvspace/key·resolveptr",
+            "kvlang·resolvekey",
             "kvspace·cp",
             "kvspace·cpdir",
             "kvspace·del",

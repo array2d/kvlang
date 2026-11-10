@@ -81,7 +81,7 @@ layout 与 runtime 对**数据 store**不做特化：不 dlopen、不双后端�
 # 存储层 ABI（kvspace.h；9 操作 + 生命周期 + 地址访问器，见 [[存储层ABI]]）
 # kvspace.h 原名 storage.h；旧 ABI 的公共头与符号都已删除
 kvspaceConnect / Close
-kvspaceResolve / Realloc / Free / Cp
+kvspaceResolveOffset / Realloc / Free / Cp
 kvspaceMkindex / Deltree / Cpdir / Listlen / List
 kvspaceXvalueInProcessAddress    // 地址空间访问器，不计入 9 个语义操作
 # attr 区按 tag 读写（不再是扫描器）：
@@ -97,7 +97,7 @@ kvlangXvalueNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 
 **读写模型**（新 ABI 下）：
 
-- **读**：`kvspaceResolve` 拿 `value_offset`，再用 `kvspaceXvalueInProcessAddress(h) + offset`
+- **读**：`kvspaceResolveOffset` 拿 `value_offset`，再用 `kvspaceXvalueInProcessAddress(h) + offset`
   取到映射内地址；durable 无映射（返回 NULL），不适用此路径。
 - **写**：`kvspaceRealloc` 是唯一写原语，按需创建/调整后返回可写偏移；调用方填完即生效。
 - **前缀枚举**：`kvspaceListlen` 返回 N（子项数）与 M（最长名长度），一次分配后

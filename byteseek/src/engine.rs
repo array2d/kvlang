@@ -37,7 +37,7 @@ impl Engine {
         let mut off: u64 = 0;
         let mut err = [0u8; 256];
         let rc = unsafe {
-            kvspaceResolve(
+            kvspaceResolveOffset(
                 self.kv, ck.as_ptr(), 0, &mut off,
                 err.as_mut_ptr() as *mut c_char, err.len() as u32,
             )

@@ -57,7 +57,7 @@ extern "C" {
     fn kvspaceConnect(dsn: *const c_char) -> *mut c_void;
     fn kvspaceClose(h: *mut c_void);
     // 新 ABI 三个动作：resolve 拿 offset / realloc 拿写入位置 / listlen+list 枚举目录。
-    fn kvspaceResolve(h: *mut c_void, key: *const c_char, anchor: u64,
+    fn kvspaceResolveOffset(h: *mut c_void, key: *const c_char, anchor: u64,
                       out_offset: *mut u64, err: *mut c_char, err_cap: u32) -> c_int;
     fn kvspaceRealloc(h: *mut c_void, key: *const c_char, body_len: u64,
                       attr_len: u64, out_offset: *mut u64, err: *mut c_char,
@@ -129,7 +129,7 @@ impl KV {
         let mut off: u64 = 0;
         let mut err = [0 as c_char; 256];
         let rc = unsafe {
-            kvspaceResolve(self.ptr, ck.as_ptr(), 0, &mut off, err.as_mut_ptr(), 256)
+            kvspaceResolveOffset(self.ptr, ck.as_ptr(), 0, &mut off, err.as_mut_ptr(), 256)
         };
         if rc != 0 {
             return None;

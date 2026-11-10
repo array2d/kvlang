@@ -25,7 +25,7 @@
  *
  * 联系：不依赖 kvspace 任何符号。读值这一动作由调用方以函数指针传入
  *       （`runtimec_key_reader_t`），于是本模块在旧 ABI（`kvspaceGet`）与新 ABI
- *       （`kvspaceResolve` + base+offset）上都能跑，读写路径切换时**不用改本文件**。
+ *       （`kvspaceResolveOffset` + base+offset）上都能跑，读写路径切换时**不用改本文件**。
  * 约束：
  *   - **判据是 langtype 首字符 `*`**，不是 head 里的某个位——head 早已没有 ptr 字段。
  *   - 不做 `@`（扩展）展开：后端也不做，这里多做一个就会与旧行为分叉。

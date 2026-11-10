@@ -119,7 +119,7 @@ static runtimec_status_t walk_reader(void *context, const char *key,
     error_text[0] = '\0';
     uint64_t value_offset = 0U;
     const int resolve_status =
-        kvspaceResolve(handle, key, 0U, &value_offset, error_text,
+        kvspaceResolveOffset(handle, key, 0U, &value_offset, error_text,
                        (uint32_t)sizeof(error_text));
     if (resolve_status != 0) {
         return RUNTIMEC_STATUS_INVALID; /* 键不存在：用当前路径 */

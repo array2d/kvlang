@@ -11,7 +11,7 @@ lib kvlang/spec/类型系统/成员访问 {
 | 动态键的显式算子 | **已删除**（2026-11-06）：按名访问就是普通 key 读写；显式形态待定 |
 
 **动态键必须显式 `*`**：`base·*k` 是动态成员键；layout 展开为
-`kvlang·resolve(base, k)` 再按显式 `*` 读写（见 [[动态键]]）。`k` 若本身是指针值
+`kvlang·resolvekey(base, k)` 再按显式 `*` 读写（见 [[动态键]]）。`k` 若本身是指针值
 （langtype 以 `*` 开头），必须先解引用再作键——省略 `*` 非法，没有隐式解引用。
 
 `base` 即 map 的 memheadname（或 struct 实例名）。访问键**逐字即键侧 formatter 的输出**（memitemkey 只

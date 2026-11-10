@@ -87,7 +87,7 @@ rwir accumulate(*int64 $delta) -> (*int64 $acc inplace)
 写槽在 writes 里是 `*acc` / `*[0,+k]`——字符串不等但指的是同一个形参。判据是「同一个名字」，
 不是「同一串字符」。
 
-- Coordinates `*[0,±k]` count for their parameter; `(*m)·*k` (desugared to a `kvlang·resolve`
+- Coordinates `*[0,±k]` count for their parameter; `(*m)·*k` (desugared to a `kvlang·resolvekey`
   position slot `_pN` and a write to `*_pN`) counts as a write of `m`. Quoted literals and
   static member keys (`(*q)·acc`) are not reads.
 - A call `g(...) -> (..., *P, ...)` reads and writes `P` when `g` marks that write position
