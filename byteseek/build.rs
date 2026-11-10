@@ -5,6 +5,15 @@
 // 并把 stdlib/**/*.kv（顶层语言级标准库）全部 include_str! 进二进制（EMBEDDED_KV），启动时 layout 进 kvspace。
 use std::path::{Path, PathBuf};
 
+// ── runtime 库名（**唯一常量**）────────────────────────────────────
+//
+// embed 与非 embed 两条路径共用这一个名字，改名只改这里。
+// **TASK-059 的最终名已落地**：runtimec 的 `OUTPUT_NAME` 已改为
+// `kvlang_runtime`，产物就是 `libkvlang_runtime.so`。改名前用的是
+// `libkvlang_runtimec_scaffold`——那次改名验证了这个常量的价值：
+// 从上到下只改这一行，两处用法（embed 要完整文件名、link-lib 要裸名）同步生效。
+const RUNTIME_LIBRARY_NAME: &str = "libkvlang_runtime";
+
 fn collect_kv(dir: &Path, files: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -33,7 +42,7 @@ fn emit_embed(manifest: &str) {
         ("EMBED_KVSPACE", &format!("libkvspace{ks_ext}")),
         // runtimec2 已归档（TASK-041）；runtimec 尚无 kvlangDefRwir 等价 ABI
         // （TASK-035）。embed 源暂缺，构建期显式报错而不是打进一个启动即崩的 .so。
-        ("EMBED_KVLANG_RUNTIME", &format!("libkvlang_runtimec2{rt_ext}")),
+        ("EMBED_KVLANG_RUNTIME", &format!("{RUNTIME_LIBRARY_NAME}{rt_ext}")),
         ("EMBED_KVLANGLAYOUT", &format!("libkvlanglayout{rt_ext}")),
         ("EMBED_KVSPACE_C", &format!("libkvspace-c{ks_ext}")),
         ("EMBED_KVSPACE_DURABLE", &format!("libkvspace_durable{ks_ext}")),
@@ -145,7 +154,13 @@ fn main() {
         // 「cannot find -lkvlang_runtimec2」——这是**预期**的：byteseek 的 boot
         // 依赖 c2 的 kvlangDefRwir 扩展注册，而 runtimec 还没有等价 ABI
         // （TASK-035）。等 TASK-035 落地后把这行改成 kvlang_runtime。
-        println!("cargo:rustc-link-lib=dylib=kvlang_runtimec2");
+        // rustc-link-lib 自动加 `lib` 前缀与平台后缀，传**裸名**。
+        // 常量带 `lib` 前缀（embed 那条要完整文件名），这里剥掉，
+        // 否则会拼成 `-llibkvlang_runtimec_scaffold`。
+        let runtime_link_name = RUNTIME_LIBRARY_NAME
+            .strip_prefix("lib")
+            .unwrap_or(RUNTIME_LIBRARY_NAME);
+        println!("cargo:rustc-link-lib=dylib={runtime_link_name}");
         println!("cargo:rustc-link-lib=dylib=kvspace");
         println!("cargo:rustc-link-lib=dylib=kvlanglayout");
 

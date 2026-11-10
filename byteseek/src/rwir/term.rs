@@ -4,10 +4,129 @@
 //! TTY 走 rustyline（方向键移动光标 / 上下翻历史 / 按字符退格）；管道走 read_line（脚本/测试）。
 
 use std::cell::RefCell;
+use std::ffi::{c_char, c_void};
 use std::io::Write;
 
 use crate::engine::{Engine, KvResult};
 use crate::ffi::*;
+
+// ── 新 API 版输出算子（TASK-042a）─────────────────────────────────
+//
+// 按裁决「一个 opid 一个 handler」：print / println / cerr 各一个 thin handler，
+// **共用渲染核心** `render_arguments`，行为差异由参数表达，**不在 handler 里 match 名字**。
+//
+// 取参走 runtimec 的 `kvlang_runtime_read_argument_text(frame, instruction, i, ...)`，
+// **不碰 kvspace 句柄**——这是与旧 `print_line` 的根本区别：旧版经
+// `kvlangRwirextParams(eng.kv, pc)` 自己去 kvspace 里解析操作数，那正是要消除的旁路。
+
+/// 三个输出算子共用的执行体：`sep` 分隔、`to_stderr` 选流、`newline` 决定末尾换行。
+unsafe fn emit(
+    frame: *mut c_void,
+    instruction: *const c_void,
+    output_exit: *mut c_void,
+    separator: &str,
+    to_stderr: bool,
+    newline: bool,
+    error: *mut kvlang_runtime_error_t,
+) -> runtimec_status_t {
+    // 读参数 = 该指令的读参个数。新 API 没有「数一下有几个」的入口，
+    // 所以由注册时的签名决定：三个算子都是变参（`*...`），逐个数到失败为止。
+    // runtimec 对越界返回 INVALID —— 用它当循环终止条件，不预设上限。
+    let mut pieces: Vec<String> = Vec::new();
+    let mut index = 0usize;
+    loop {
+        let mut buffer = kvlang_runtime_text_buffer_t {
+            data: std::ptr::null_mut(),
+            capacity: 0,
+            length: 0,
+            required_length: 0,
+        };
+        let status = kvlang_runtime_read_argument_text(
+            frame, instruction, index, &mut buffer, error,
+        );
+        if status == RuntimecStatus::Success && buffer.length == 0 {
+            pieces.push(String::new());
+            index += 1;
+            continue;
+        }
+        if status != RuntimecStatus::InsufficientCapacity {
+            break; // INVALID = 没有更多参数了
+        }
+        let needed = buffer.required_length;
+        let mut owned = vec![0u8; needed + 1];
+        buffer.data = owned.as_mut_ptr() as *mut c_char;
+        buffer.capacity = owned.len();
+        if kvlang_runtime_read_argument_text(frame, instruction, index, &mut buffer, error)
+            != RuntimecStatus::Success
+        {
+            break;
+        }
+        owned.truncate(buffer.length);
+        pieces.push(String::from_utf8_lossy(&owned).into_owned());
+        index += 1;
+    }
+    let line = pieces.join(separator);
+    if to_stderr {
+        eprint!("{line}");
+        if newline {
+            eprintln!();
+        }
+        std::io::stderr().flush().ok();
+    } else {
+        print!("{line}");
+        if newline {
+            println!();
+        }
+        std::io::stdout().flush().ok();
+    }
+    let _ = output_exit;
+    runtimec_status_t::Success
+}
+
+/// `print`：无分隔、无换行。
+pub unsafe extern "C" fn print_handler(
+    frame: *mut c_void,
+    instruction: *const c_void,
+    output_exit: *mut c_void,
+) -> runtimec_status_t {
+    let mut error = zeroed_error();
+    emit(frame, instruction, output_exit, "", false, false, &mut error)
+}
+
+/// `println`：空格分隔、末尾换行。
+pub unsafe extern "C" fn println_handler(
+    frame: *mut c_void,
+    instruction: *const c_void,
+    output_exit: *mut c_void,
+) -> runtimec_status_t {
+    let mut error = zeroed_error();
+    emit(frame, instruction, output_exit, " ", false, true, &mut error)
+}
+
+/// `cerr`：空格分隔、走 stderr、末尾换行。
+pub unsafe extern "C" fn cerr_handler(
+    frame: *mut c_void,
+    instruction: *const c_void,
+    output_exit: *mut c_void,
+) -> runtimec_status_t {
+    let mut error = zeroed_error();
+    emit(frame, instruction, output_exit, " ", true, true, &mut error)
+}
+
+/// 清零的错误对象：runtimec 在成功时不写它，失败时只写 message 缓冲以外部分。
+fn zeroed_error() -> kvlang_runtime_error_t {
+    kvlang_runtime_error_t {
+        status: RuntimecStatus::Success,
+        operation_status: RuntimecStatus::Success,
+        code: 0,
+        message: kvlang_runtime_text_buffer_t {
+            data: std::ptr::null_mut(),
+            capacity: 0,
+            length: 0,
+            required_length: 0,
+        },
+    }
+}
 
 pub fn print_line(eng: &Engine, pc: &str) -> KvResult {
     let params = take(unsafe { kvlangRwirextParams(eng.kv, cs(pc).as_ptr()) });
