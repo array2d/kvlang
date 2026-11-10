@@ -2,7 +2,7 @@
 lib kvlang/spec/类型系统/ref存储位置 {
 	r####"# 值、kvlang 指针与扩展定位
 
-wire 的 head 只描述字节布局（`bodylen` / `attrslen` / `layout` / `padding`），不再有 storetype 与 ptr
+wire 的 head 只描述字节布局（`bodylen` / `attrslen` / `padding`），不再有 storetype、ptr、layout
 字段。kvlang 指针是 langtype 以 `*` 开头的值，body 是目标 KV key 的 UTF-8 路径；目标 key 若也是指针，
 沿路径再次读取即可表示多层间接，每格只保存一层。空引用 = `*T` + 空 body。
 

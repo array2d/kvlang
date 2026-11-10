@@ -7,15 +7,16 @@ lib kvlang/spec/类型系统/总体方案 {
 
 每个 XValue 落入 kvspace 时，head 固定 16 字节、body 紧随其后：
 
-	head = [bodylen:u64 LE][attrslen:u16 LE][reserved:u16 LE][layout:u8][padding:3]
+	head = [bodylen:u64 LE][attrslen:u16 LE][padding:6]
 	body = head + 16
 
-- **`bodylen`（偏移 0-7）** — body 字节数；或容量（见 `layout`）。
+- **`bodylen`（偏移 0-7）** — body 区的**有效字节数**，wire 上唯一的长度量。容量是存储后端的
+  物理分配属性，不进 wire（见 [[XValueHead线格式]]）。
 - **`attrslen`（偏移 8-9）** — attr 区字节数（无长度前缀，记录自描述）；上限 `UINT16_MAX`。
-- **`reserved`（偏移 10-11）** — 必须为零；旧格式 `attrslen` 的高 2 字节落在这里。
-- **`layout`（偏移 12）** — `0` = bodylen 是有效长度；`1` = bodylen 是容量、有效长度在 attr tag 2。
-  其余取值保留且必须为零。
-- **`padding`（偏移 13-15）** — 必须为零；它是 ABI 的一部分，不是可填字段。
+- **`padding`（偏移 10-15）** — 六字节必须全零；它是 ABI 的一部分，不是可填字段。
+- **没有 `reserved`/`layout` 字段** — `reserved` 是旧 32 位 `attrslen` 高 2 字节的残迹；
+  `layout` 是「`bodylen` 记容量还是有效长度」的标志位，随容量退出 wire 一并作废。
+- **没有 `reallen` 记录（tag 2）** — 它曾是容量形态下的第二个长度量，已删除，读到即拒绝。
 - **没有 `storetype`/`ptr` 字段** — 存储形态由 langtype 推；指针与扩展是 langtype 的 `*` / `@`
   前缀（原样保留，任何一层都不剥）。
 - **类型不在 head** — langtype 存值内 attr 区（body 后 tag 1 记录，明文 UTF-8 串，含形状段）。

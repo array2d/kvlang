@@ -3,7 +3,9 @@ lib kvlang/spec/类型系统/字符串编码 {
 	r####"# 字符串编码
 
 char 种类（[[种类与定宽类型]]、[[种类_标量时间容器]]）承载三种编码：utf8、utf32、ascii。
-本章规定这三种编码在 **key/value 存储**、**用户 kv 代码**与 **string 标准库**三个层面的分工。
+字符串的物理载体是 compact 的 **bufferarray**（见 [[compact形态]]）：char 族决定编码，
+bufferarray 提供连续字节缓冲、有效长度与容量。本章规定这三种编码在 **key/value 存储**、
+**用户 kv 代码**与 **string 标准库**三个层面的分工。
 
 ## 一、key 侧 utf8，value 侧 utf32
 

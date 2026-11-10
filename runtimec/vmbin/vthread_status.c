@@ -156,16 +156,16 @@ runtimec_status_t runtimec_vthread_status_read(
         }
         memcpy(&head, wire, sizeof(head));
         /*
-         * 形状判据照抄 spec `02-kvspace模型/04-CABI.kv`：layout 为 0 或 1（状态槽
-         * 走容量形态、物理容量 ≥80）、头长恒 16、有效长度 ≤ LV。
+         * 形状判据照抄 spec `02-kvspace模型/04-CABI.kv`：头长恒 16、`padding` 为零、
+         * 有效长度 ≤ LV。状态槽走容量形态（物理容量 ≥80），而「bodylen 是容量还是
+         * 有效长度」由 langtype 判、不在 head 里——head 侧只校验这两个字段。
          *
-         * 旧实现还比对 `storetype == SLACK`；新头没有这个字段——storage class 是
-         * 后端写侧的概念，不是 wire 上的属性，所以这条判据**被布局判据取代**。
+         * 旧实现先后比对过 `storetype == SLACK` 与 `layout == 0/1`；两个字段都已从
+         * head 删除——storage class 是后端写侧的概念，不是 wire 上的属性。
          *
          * **本入口只校验与后端无关的项；物理容量由 slot view 把关**（见下方注释）。
          */
         if (!kvspaceXvalueHeadPaddingIsZero(&head) ||
-            !kvspaceXvalueHeadLayoutIsValid(&head) ||
             kvspaceXvalueHeadTotalLen(&head) == 0U ||
             kvspaceXvalueHeadTotalLen(&head) > (uint64_t)wire_length ||
             kvspaceXvalueHeadEffectiveLen(wire, (uint64_t)wire_length,

@@ -64,7 +64,7 @@ static bool scatter_container_empty(const binrwir_binvthread_frame_t *frame,
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
 
-    if (kvspaceXvalueHeadNewSlack(NULL, 0U, 0U, "stringkeymap", &wire,
+    if (kvspaceXvalueHeadNewSlack(NULL, 0U, "stringkeymap", &wire,
                                   &wire_size) != 0 ||
         wire == NULL) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
@@ -130,7 +130,7 @@ static void scatter_container_create(const binrwir_binvthread_frame_t *frame,
     memcpy(langtype_text, declared.data, declared.size);
     langtype_text[declared.size] = '\0';
     /* 空 body 的 map 头：body 长度为 0，类型在 attr 里。 */
-    if (kvspaceXvalueHeadNewSlack(NULL, 0U, 0U, langtype_text, &wire,
+    if (kvspaceXvalueHeadNewSlack(NULL, 0U, langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
@@ -632,7 +632,7 @@ static void scatter_expand_from_compact(
                                    sizeof(member)) != RUNTIMEC_STATUS_SUCCESS ||
                 kvspaceXvalueHeadNewSlack(
                     source.read_bytes + ordinal * source_type.element_size,
-                    source_type.element_size, source_type.element_size,
+                    source_type.element_size,
                     element_langtype, &wire, &wire_size) != 0) {
                 vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                                    VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,

@@ -13,8 +13,7 @@
 看字节：
 
     8 字节布局 : [len:u48][storetype][ptr]  body  [attr_len:u16][records]
-    16 字节布局: [bodylen:u64][attrslen:u16][reserved:u16][layout][padding:3]
-                 body  [records]
+    16 字节布局: [bodylen:u64][attrslen:u16][padding:6]  body  [records]
 
 后端查找顺序的**依据是规范条款** `workspace/622/routing/README.md` §十
 「后端查找顺序（规范性条款）」，不是 `frontend.c` 的实现：
@@ -61,15 +60,18 @@ import sys
 import tempfile
 
 EXPECTED_BODY = 2
-# 探针必须用「容量 > 长度」的形态：新旧布局在「容量 == 长度」的标量上字节完全相同
-# （旧 storetype=0 / ptr=0 与新 layout=0 / padding=0 同值），只测标量必然假绿。
+# `body_cap` 是 `kvspaceWriteNewPlace` 的**物理分配**参数：wire 上不表达容量，所以
+# 探针用 body_cap > body_len 写一条，再看 wire 里的 bodylen 到底是 2 还是 80。
+# 这是把「wire 仍带容量」的旧后端抓出来的唯一手段——构造器已无 capacity 参数。
 PROBE_CAPACITY = 80
 PROBE_LANGTYPE = "int64"
 LANGTYPE_RECORD_BYTES = 3 + len(PROBE_LANGTYPE)  # tag + u16 len + data
-REALLEN_RECORD_BYTES = 11  # tag + u16 len(=8) + u64 value，见 xvalue_head.c REALLEN_RECORD_LEN
+REALLEN_RECORD_BYTES = 11  # tag + u16 len(=8) + u64 value（旧格式的 tag 2）
+ZERO_PADDING = b"\x00" * 6  # head offset 10-15：恒为零
 
 RESULT_SIXTEEN = "16-byte"
-RESULT_SIXTEEN_NO_CAPACITY = "16-byte-no-capacity"
+RESULT_SIXTEEN_LAYOUT_BYTE = "16-byte-layout-byte"
+RESULT_SIXTEEN_CAPACITY_FORM = "16-byte-capacity-form"
 RESULT_EIGHT = "8-byte"
 RESULT_UNKNOWN = "unknown"
 RESULT_SKIPPED = "skipped"
@@ -78,8 +80,71 @@ EXPECTED_HEAD_LEN = 16
 LEGACY_HEAD_LEN = 8
 
 
+def classify_wire(data: bytes) -> tuple[str, str]:
+    """按字节判一条 wire 的 head 是哪一代。返回 (verdict, detail)。
+
+    **判据只有一处**：`probe_library`（构造器造的 wire）与 `probe_backend`（后端
+    读回的 wire）走同一段分类，否则两处判据迟早对「尾部残余字节」这类边角判不同。
+
+    现行头：[bodylen:u64][attrslen:u16][padding:6]，bodylen 恒为有效字节数，
+    没有 tag 2。上一代头有两处可辨认的痕迹，都比现行头多东西：
+      - offset 12 是 `layout` 字节而不是 padding 的一部分；
+      - bodylen 是容量（> 有效长度），且带 tag 2 reallen。
+    """
+    if len(data) < EXPECTED_HEAD_LEN:
+        return RESULT_UNKNOWN, f"wire too short: {len(data)} bytes"
+    bodylen = int.from_bytes(data[0:8], "little")
+    attrslen = int.from_bytes(data[8:10], "little")
+
+    # 旧 8 字节布局：head 8 + body + u16 attr 长度 + tag 记录。
+    if (int.from_bytes(data[0:6], "little") == EXPECTED_BODY and
+            len(data) == LEGACY_HEAD_LEN + EXPECTED_BODY + 2 +
+            LANGTYPE_RECORD_BYTES):
+        return RESULT_EIGHT, (f"u48 len={EXPECTED_BODY} storetype={data[6]} "
+                              f"pointer={data[7]} total={len(data)}")
+
+    if len(data) != EXPECTED_HEAD_LEN + bodylen + attrslen:
+        return RESULT_UNKNOWN, (
+            f"bodylen={bodylen} attrslen={attrslen} total={len(data)} "
+            "matches no known layout")
+
+    # 上一代：bodylen 是容量，有效长度在 attr tag 2。
+    if bodylen != EXPECTED_BODY:
+        reallen = data[EXPECTED_HEAD_LEN + bodylen + LANGTYPE_RECORD_BYTES:
+                       EXPECTED_HEAD_LEN + bodylen + LANGTYPE_RECORD_BYTES +
+                       REALLEN_RECORD_BYTES]
+        has_tag2 = (len(reallen) == REALLEN_RECORD_BYTES and reallen[0] == 2 and
+                    reallen[1] == 8 and reallen[2] == 0)
+        if has_tag2:
+            return RESULT_SIXTEEN_CAPACITY_FORM, (
+                f"bodylen={bodylen} is a capacity, reallen="
+                f"{int.from_bytes(reallen[3:11], 'little')} in attr tag 2")
+
+    # 上一代：offset 12 是 layout 字节。现行头该位置属于 padding，必须为零，
+    # 而 layout 在「容量 == 长度」时为 0——所以只能靠 bodylen 恒等来判，
+    # 单看 offset 12 会假绿。这里只在既有两代格式都对不上时才用它指认。
+    if data[10:16] != ZERO_PADDING:
+        if (data[10:12] == b"\x00\x00" and data[12] in (0, 1) and
+                data[13:16] == b"\x00\x00\x00"):
+            return RESULT_SIXTEEN_LAYOUT_BYTE, (
+                f"head still carries the removed `layout` byte "
+                f"(layout={data[12]}, bodylen={bodylen})")
+        return RESULT_UNKNOWN, (f"padding is not zero: {data[10:16].hex(' ')}")
+
+    if (bodylen == EXPECTED_BODY and
+            attrslen == LANGTYPE_RECORD_BYTES):
+        return RESULT_SIXTEEN, (f"bodylen={bodylen} attrslen={attrslen} "
+                                f"padding zero, no tag 2, total={len(data)}")
+    return RESULT_UNKNOWN, (f"bodylen={bodylen} attrslen={attrslen} "
+                            f"total={len(data)} matches no known layout")
+
+
 def probe_library(library_path: str) -> str:
-    """返回 RESULT_SIXTEEN / RESULT_EIGHT / RESULT_UNKNOWN，并打印证据。"""
+    """构造一条值、按字节判 head 代次。返回 RESULT_*，并打印证据。
+
+    构造器已无 capacity 参数，所以这条只判「16 vs 8」与「padding 是否为零」；
+    「bodylen 是不是容量」那条判据只有后端写路径能触发（见 `probe_backend`）。
+    """
     try:
         library = ctypes.CDLL(library_path)
         new_slack = library.kvspaceXvalueHeadNewSlack
@@ -88,14 +153,14 @@ def probe_library(library_path: str) -> str:
         return RESULT_UNKNOWN
     new_slack.restype = ctypes.c_int
     new_slack.argtypes = [
-        ctypes.c_char_p, ctypes.c_uint64, ctypes.c_uint64,
-        ctypes.c_char_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
+        ctypes.c_char_p, ctypes.c_uint64, ctypes.c_char_p,
+        ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
         ctypes.POINTER(ctypes.c_uint64),
     ]
     wire = ctypes.POINTER(ctypes.c_uint8)()
     wire_size = ctypes.c_uint64(0)
     status = new_slack(
-        b"ab", EXPECTED_BODY, PROBE_CAPACITY, PROBE_LANGTYPE.encode(),
+        b"ab", EXPECTED_BODY, PROBE_LANGTYPE.encode(),
         ctypes.byref(wire), ctypes.byref(wire_size))
     if status != 0 or wire_size.value == 0:
         print(f"  cannot construct a probe value (status={status})")
@@ -104,47 +169,9 @@ def probe_library(library_path: str) -> str:
     total = int(wire_size.value)
     data = bytes(wire[index] for index in range(total))
     print(f"  wire: {total} bytes: {data.hex(' ')}")
-
-    if total < EXPECTED_HEAD_LEN:
-        print(f"  wire too short: {total} bytes")
-        return RESULT_UNKNOWN
-    bodylen = int.from_bytes(data[0:8], "little")
-    attrslen = int.from_bytes(data[8:10], "little")
-    reallen = data[16 + bodylen + LANGTYPE_RECORD_BYTES:
-                   16 + bodylen + LANGTYPE_RECORD_BYTES + REALLEN_RECORD_BYTES]
-    if (bodylen == PROBE_CAPACITY and data[12] == 1 and
-            data[10:12] == b"\x00\x00" and data[13:16] == b"\x00\x00\x00" and
-            attrslen == LANGTYPE_RECORD_BYTES + REALLEN_RECORD_BYTES and
-            len(reallen) == REALLEN_RECORD_BYTES and
-            reallen[0] == 2 and
-            int.from_bytes(reallen[3:11], "little") == EXPECTED_BODY and
-            total == EXPECTED_HEAD_LEN + bodylen + attrslen):
-        print(f"  layout: 16-byte head, capacity form (bodylen={bodylen}, "
-              f"reallen={EXPECTED_BODY}, attrslen={attrslen})")
-        return RESULT_SIXTEEN
-
-    # 16 字节头、但 bodylen 报的是长度而不是容量：WriteNewPlace 忽略了 body_cap。
-    # 这不能算 8 字节（总长 >= 16+body），也不能算合格的新布局。
-    if (data[12] == 0 and data[10:12] == b"\x00\x00" and
-            data[13:16] == b"\x00\x00\x00" and
-            bodylen == EXPECTED_BODY and
-            total == EXPECTED_HEAD_LEN + bodylen + attrslen):
-        print(f"  layout: 16-byte head but body_cap ignored "
-              f"(bodylen={bodylen}, want {PROBE_CAPACITY})")
-        return RESULT_SIXTEEN_NO_CAPACITY
-
-    u48_length = int.from_bytes(data[0:6], "little")
-    # 旧 8 字节布局：head 8 + body + u16 attr 长度 + tag 记录。
-    if (u48_length == EXPECTED_BODY and
-            total == LEGACY_HEAD_LEN + EXPECTED_BODY + 2 +
-            LANGTYPE_RECORD_BYTES):
-        print(f"  layout: 8-byte head (u48 len={u48_length}, "
-              f"storetype={data[6]}, pointer={data[7]})")
-        return RESULT_EIGHT
-
-    print(f"  layout: unrecognised (bodylen={bodylen}, attrslen={attrslen}, "
-          f"u48={u48_length})")
-    return RESULT_UNKNOWN
+    verdict, detail = classify_wire(data)
+    print(f"  layout: {verdict} ({detail})")
+    return verdict
 
 
 def backend_candidates(frontend_path: str, soname: str) -> list[str]:
@@ -240,38 +267,7 @@ def probe_backend(frontend_path: str, scheme: str, dsn_template: str,
             if status != 0 or wire_len.value == 0:
                 return RESULT_UNKNOWN, "read failed"
             data = bytes(wire[index] for index in range(int(wire_len.value)))
-            if len(data) < EXPECTED_HEAD_LEN:
-                return RESULT_UNKNOWN, f"wire too short: {len(data)} bytes"
-            bodylen = int.from_bytes(data[0:8], "little")
-            attrslen = int.from_bytes(data[8:10], "little")
-            reallen = data[16 + bodylen + LANGTYPE_RECORD_BYTES:
-                           16 + bodylen + LANGTYPE_RECORD_BYTES +
-                           REALLEN_RECORD_BYTES]
-            if (bodylen == PROBE_CAPACITY and data[12] == 1 and
-                    data[10:12] == b"\x00\x00" and
-                    data[13:16] == b"\x00\x00\x00" and
-                    attrslen == LANGTYPE_RECORD_BYTES + REALLEN_RECORD_BYTES and
-                    len(reallen) == REALLEN_RECORD_BYTES and
-                    reallen[0] == 2 and
-                    int.from_bytes(reallen[3:11], "little") == EXPECTED_BODY and
-                    len(data) == EXPECTED_HEAD_LEN + bodylen + attrslen):
-                return RESULT_SIXTEEN, (
-                    f"capacity form bodylen={bodylen} reallen={EXPECTED_BODY} "
-                    f"attrslen={attrslen} total={len(data)}")
-            if (data[12] == 0 and data[10:12] == b"\x00\x00" and
-                    data[13:16] == b"\x00\x00\x00" and
-                    bodylen == EXPECTED_BODY and
-                    len(data) == EXPECTED_HEAD_LEN + bodylen + attrslen):
-                return RESULT_SIXTEEN_NO_CAPACITY, (
-                    f"16-byte head but body_cap ignored "
-                    f"(bodylen={bodylen}, want {PROBE_CAPACITY})")
-            if (int.from_bytes(data[0:6], "little") == EXPECTED_BODY and
-                    len(data) == LEGACY_HEAD_LEN + EXPECTED_BODY + 2 +
-                    LANGTYPE_RECORD_BYTES):
-                return RESULT_EIGHT, f"u48 len={EXPECTED_BODY} total={len(data)}"
-            return RESULT_UNKNOWN, (
-                f"bodylen={bodylen} attrslen={attrslen} total={len(data)} "
-                "matches no known layout")
+            return classify_wire(data)
         finally:
             library.kvspaceClose(handle)
 def run_main(arguments: list[str],
@@ -300,63 +296,26 @@ def run_main(arguments: list[str],
 # correct tree. Fixtures build real stub libraries with the C compiler — the probe judges
 # bytes produced by a library, so a Python fake would test the fake instead of the probe.
 # ---------------------------------------------------------------------------------------
+# 构造器 stub：签名与现行头一致（无 capacity 参数）。三个宏控制它写哪一代 wire——
+# 探针判的是**字节**，所以每个分支必须真的按各自格式写，否则测的是 stub 不是探针。
 STUB_SOURCE = """\
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-static void write_record(uint8_t *attrs, const char *langtype) {
-    const size_t length = strlen(langtype);
-    attrs[0] = 1;
-    attrs[1] = (uint8_t)(length & 0xFFu);
-    attrs[2] = (uint8_t)((length >> 8) & 0xFFu);
-    memcpy(attrs + 3, langtype, length);
-}
-
 int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
-                              uint64_t capacity, const char *langtype,
+                              const char *langtype,
                               uint8_t **output_wire,
                               uint64_t *output_wire_length) {
-    if (output_wire == NULL || output_wire_length == NULL || langtype == NULL) {
+    if (output_wire == NULL || output_wire_length == NULL || langtype == NULL ||
+        (data_length != 0U && data == NULL)) {
         return -1;
     }
     *output_wire = NULL;
     *output_wire_length = 0;
-    if (capacity < data_length || (data_length != 0U && data == NULL)) {
-        return -1;
-    }
     const uint64_t record_length = 3U + (uint64_t)strlen(langtype);
-#if HEAD_LEN == 16
-    const int capacity_layout = capacity > data_length;
-    const uint64_t body_field = capacity_layout ? capacity : data_length;
-    const uint64_t reallen_length = capacity_layout ? 5U : 0U;
-    const uint64_t total = 16U + body_field + record_length + reallen_length;
-    uint8_t *wire = calloc(1, (size_t)total);
-    if (wire == NULL) {
-        return -1;
-    }
-    memcpy(wire + 0, &body_field, 8);
-    const uint32_t attrs_length = (uint32_t)(record_length + reallen_length);
-    memcpy(wire + 8, &attrs_length, 4);
-    wire[12] = capacity_layout ? 1U : 0U;
-    wire[13] = 0U;
-    wire[14] = 0U;
-    wire[15] = 0U;
-    if (data_length != 0U) {
-        memcpy(wire + 16, data, (size_t)data_length);
-    }
-    write_record(wire + 16 + body_field, langtype);
-    if (capacity_layout) {
-        uint8_t *reallen = wire + 16 + body_field + record_length;
-        reallen[0] = 2;
-        reallen[1] = 8;
-        reallen[2] = 0;
-        for (int index = 0; index < 8; ++index) {
-            reallen[3 + index] =
-                (uint8_t)((data_length >> (8 * index)) & 0xFFu);
-        }
-    }
-#else
+#if defined(LEGACY_EIGHT_BYTE_HEAD)
+    /* 旧 8 字节头：[len:u48][storetype][ptr][body][attr_len:u16][records] */
     const uint64_t total = 8U + data_length + 2U + record_length;
     uint8_t *wire = calloc(1, (size_t)total);
     if (wire == NULL) {
@@ -373,7 +332,52 @@ int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
     uint8_t *attrs = wire + 8 + data_length;
     const uint16_t attr_length = (uint16_t)record_length;
     memcpy(attrs, &attr_length, 2);
-    write_record(attrs + 2, langtype);
+    attrs[2] = 1;
+    attrs[3] = (uint8_t)(strlen(langtype) & 0xFFu);
+    attrs[4] = (uint8_t)((strlen(langtype) >> 8) & 0xFFu);
+    memcpy(attrs + 5, langtype, strlen(langtype));
+#else
+    /* [bodylen:u64][attrslen:u16][padding:6][body][records] */
+#ifdef LEGACY_CAPACITY_FORM
+    /* 上一代：bodylen 记容量，有效长度在 tag 2。 */
+    const uint64_t extra = 11U;
+    const uint64_t body_field = 80U;
+#else
+    const uint64_t extra = 0U;
+    const uint64_t body_field = data_length;
+#endif
+    const uint64_t total = 16U + body_field + record_length + extra;
+    uint8_t *wire = calloc(1, (size_t)total);
+    if (wire == NULL) {
+        return -1;
+    }
+    memcpy(wire + 0, &body_field, 8);
+    const uint16_t attrs_length = (uint16_t)(record_length + extra);
+    memcpy(wire + 8, &attrs_length, 2);
+    memset(wire + 10, 0, 6);
+#ifdef LEGACY_LAYOUT_BYTE
+    /* 上一代头：offset 12 是 layout 而不是 padding 的一部分。 */
+    wire[12] = 1U;
+#endif
+    if (data_length != 0U) {
+        memcpy(wire + 16, data, (size_t)data_length);
+    }
+    uint8_t *attrs = wire + 16 + body_field;
+    attrs[0] = 1;
+    attrs[1] = (uint8_t)(strlen(langtype) & 0xFFu);
+    attrs[2] = (uint8_t)((strlen(langtype) >> 8) & 0xFFu);
+    memcpy(attrs + 3, langtype, strlen(langtype));
+    if (extra != 0U) {
+        /* 上一代：attr 尾部一条 tag 2 reallen。 */
+        uint8_t *reallen = attrs + record_length;
+        reallen[0] = 2;
+        reallen[1] = 8;
+        reallen[2] = 0;
+        for (int index = 0; index < 8; ++index) {
+            reallen[3 + index] =
+                (uint8_t)((data_length >> (8 * index)) & 0xFFu);
+        }
+    }
 #endif
     *output_wire = wire;
     *output_wire_length = total;
@@ -381,73 +385,18 @@ int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
 }
 """
 
-# 一个导出别的名字的库：文件在、符号不在，走 `cannot load or bind` 分支。
-STUB_WITHOUT_SYMBOL = """\
-int some_other_entry_point(void) { return 0; }
-"""
-
-# 一个返回无法识别字节的库：两版布局都不匹配，走 `unrecognised` 分支。
-STUB_UNRECOGNISED = """\
-#include <stdint.h>
-#include <stdlib.h>
-
-int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
-                              uint64_t capacity, const char *langtype,
-                              uint8_t **output_wire,
-                              uint64_t *output_wire_length) {
-    (void)data; (void)data_length; (void)capacity; (void)langtype;
-    uint8_t *wire = calloc(1, 32);
-    if (wire == NULL) {
-        return -1;
-    }
-    *output_wire = wire;
-    *output_wire_length = 32;
-    return 0;
-}
-"""
-
-
-class SelftestFailure(Exception):
-    pass
-
-
-def compile_stub(directory: str, name: str, source: str,
-                 definitions: tuple[str, ...] = ()) -> str:
-    source_path = os.path.join(directory, name + ".c")
-    library_path = os.path.join(directory, name + ".so")
-    with open(source_path, "w", encoding="utf-8") as stream:
-        stream.write(source)
-    compiler = shutil.which("cc") or shutil.which("gcc")
-    if compiler is None:
-        raise SelftestFailure(
-            "cannot run the self-test: a C compiler (cc or gcc) is required to build "
-            "the stub libraries")
-    command = [compiler, "-shared", "-fPIC"]
-    command.extend(f"-D{definition}" for definition in definitions)
-    command.extend(["-o", library_path, source_path])
-    completed = subprocess.run(command, text=True, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT)
-    if completed.returncode != 0 or not os.path.exists(library_path):
-        raise SelftestFailure(
-            f"cannot run the self-test: building {name} failed:\n{completed.stdout}")
-    return library_path
-
-
-def expect(condition: bool, message: str, failures: list[str]) -> None:
-    if not condition:
-        failures.append(message)
-
-
-STUB_BACKEND = """/* 最小后端：补齐前端会 dlsym 的全部符号，head 长度由 HEAD_LEN 决定。
-   探针判的是它写出来的 wire 字节，所以这个 stub 必须真的按各自布局写字节
-   ——否则测的是 stub 而不是探针。 */
+# 最小后端：补齐前端会 dlsym 的全部符号。`kvspaceWriteNewPlace` 写出来的字节决定
+# 探针判什么，所以它必须真的按目标代的格式写，否则测的是 stub 而不是探针。
+#   LEGACY_CAPACITY_FORM —— bodylen 记容量、attr 尾带 tag 2 reallen
+#   LEGACY_LAYOUT_BYTE   —— offset 12 是 layout 字节而不是 padding
+STUB_BACKEND = """/* 最小后端 */
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define HEAD_LEN __HEAD_LEN__
 
-static uint8_t g_wire[128];
+static uint8_t g_wire[512];
 static uint32_t g_wire_len = 0;
 
 void *kvspaceConnect(const char *dsn) { (void)dsn; return (void *)0x1000; }
@@ -493,29 +442,31 @@ int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetyp
                          uint32_t body_len, uint64_t body_cap, const char *langtype,
                          uint8_t **body, char *err, uint32_t err_cap) {
     (void)h; (void)key; (void)storetype; (void)ref; (void)err; (void)err_cap;
+    (void)body_cap;
     const unsigned lt = (unsigned)strlen(langtype);
     memset(g_wire, 0, sizeof g_wire);
     const unsigned record = 3 + lt;
-#if __HEAD_LEN__ == 16
-    /* [bodylen:u64][attrslen:u16][reserved:u16][layout:u8][padding:3]
-       [body][attrs]。容量形态：bodylen 是容量，有效长度在 attr tag 2。 */
-    const int capacity_layout = body_cap > (uint64_t)body_len;
-    const uint64_t body_field = capacity_layout ? body_cap : (uint64_t)body_len;
-    const unsigned reallen_bytes = capacity_layout ? 11U : 0U;
-    /* `body_len` 是 uint32_t：只拷 4 字节会把高位留成栈垃圾。按 u64 显式展开。 */
-    const uint64_t body_len_u64 = body_field;
-    memcpy(g_wire + 0, &body_len_u64, 8);
-    const uint16_t attrs_len = (uint16_t)(record + reallen_bytes);
+#if HEAD_LEN == 16
+#ifdef LEGACY_CAPACITY_FORM
+    const uint64_t body_field = 80U;
+    const unsigned extra = 11U;
+#else
+    const uint64_t body_field = (uint64_t)body_len;
+    const unsigned extra = 0U;
+#endif
+    memcpy(g_wire + 0, &body_field, 8);
+    const uint16_t attrs_len = (uint16_t)(record + extra);
     memcpy(g_wire + 8, &attrs_len, 2);
-    g_wire[10] = 0U; g_wire[11] = 0U; /* reserved */
-    g_wire[12] = capacity_layout ? 1U : 0U;
-    g_wire[13] = 0U; g_wire[14] = 0U; g_wire[15] = 0U;
+    memset(g_wire + 10, 0, 6);
+#ifdef LEGACY_LAYOUT_BYTE
+    g_wire[12] = 1U;
+#endif
     memset(g_wire + 16, 'a', (size_t)body_field);
     uint8_t *attrs = g_wire + 16 + body_field;
     attrs[0] = 1;
     attrs[1] = (uint8_t)(lt & 0xFF); attrs[2] = (uint8_t)(lt >> 8);
     memcpy(attrs + 3, langtype, lt);
-    if (capacity_layout) {
+    if (extra != 0U) {
         uint8_t *reallen = attrs + record;
         reallen[0] = 2; reallen[1] = 8; reallen[2] = 0;
         for (int index = 0; index < 8; ++index) {
@@ -523,12 +474,9 @@ int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetyp
                 (uint8_t)(((uint64_t)body_len >> (8 * index)) & 0xFFu);
         }
     }
+    g_wire_len = (uint32_t)(HEAD_LEN + body_field + record + extra);
 #else
-    (void)body_cap;
     /* [len:u48][storetype][ptr][body][attr_len:u16][tag][len][data] */
-    /* `body_len` 是 uint32_t：直接 `>> (8*i)` 在 i>=4 时位移越过类型宽度，
-     * 是未定义行为（实测 i=4 会得到原值，把 len 写成 0x0000000200000002）。
-     * 先提升到 u64 再移。 */
     const uint64_t body_len_u48 = (uint64_t)body_len;
     for (int i = 0; i < 6; ++i) g_wire[i] = (uint8_t)(body_len_u48 >> (8 * i));
     g_wire[6] = storetype; g_wire[7] = ref;
@@ -539,13 +487,9 @@ int kvspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storetyp
     attrs[2] = 1;
     attrs[3] = (uint8_t)(lt & 0xFF); attrs[4] = (uint8_t)(lt >> 8);
     memcpy(attrs + 5, langtype, lt);
+    g_wire_len = (uint32_t)(HEAD_LEN + body_len + 2 + record);
 #endif
     *body = g_wire + HEAD_LEN;
-#if __HEAD_LEN__ == 16
-    g_wire_len = (uint32_t)(HEAD_LEN + body_field + record + reallen_bytes);
-#else
-    g_wire_len = (uint32_t)(HEAD_LEN + body_len + 2 + record); /* +2: u16 attr 长度前缀 */
-#endif
     return 0;
 }
 
@@ -629,47 +573,33 @@ int kvspaceGet(void *h, const char *key, int resolve, uint8_t **out,
 }
 
 int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
-                              uint64_t capacity, const char *langtype,
+                              const char *langtype,
                               uint8_t **output_wire,
                               uint64_t *output_wire_length) {
     if (output_wire == NULL || output_wire_length == NULL || langtype == NULL ||
-        capacity < data_length) {
+        (data_length != 0U && data == NULL)) {
         return -1;
     }
-    const int capacity_layout = capacity > data_length;
-    const uint64_t body_field = capacity_layout ? capacity : data_length;
-    const uint64_t reallen_bytes = capacity_layout ? 11U : 0U;
+    *output_wire = NULL;
+    *output_wire_length = 0;
     const uint64_t record = 3U + (uint64_t)strlen(langtype);
-    const uint64_t total = 16U + body_field + record + reallen_bytes;
+    const uint64_t total = 16U + data_length + record;
     uint8_t *wire = calloc(1, (size_t)total);
     if (wire == NULL) {
         return -1;
     }
-    memcpy(wire + 0, &body_field, 8);
-    const uint32_t attrs_length = (uint32_t)(record + reallen_bytes);
-    memcpy(wire + 8, &attrs_length, 4);
-    wire[12] = capacity_layout ? 1U : 0U;
-    wire[13] = 0U;
-    wire[14] = 0U;
-    wire[15] = 0U;
+    memcpy(wire + 0, &data_length, 8);
+    const uint16_t attrs_length = (uint16_t)record;
+    memcpy(wire + 8, &attrs_length, 2);
+    memset(wire + 10, 0, 6);
     if (data_length != 0U) {
         memcpy(wire + 16, data, (size_t)data_length);
     }
-    uint8_t *attrs = wire + 16 + body_field;
+    uint8_t *attrs = wire + 16 + data_length;
     attrs[0] = 1;
     attrs[1] = (uint8_t)(strlen(langtype) & 0xFFu);
     attrs[2] = (uint8_t)((strlen(langtype) >> 8) & 0xFFu);
     memcpy(attrs + 3, langtype, strlen(langtype));
-    if (capacity_layout) {
-        uint8_t *reallen = attrs + record;
-        reallen[0] = 2;
-        reallen[1] = 8;
-        reallen[2] = 0;
-        for (int index = 0; index < 8; ++index) {
-            reallen[3 + index] =
-                (uint8_t)((data_length >> (8 * index)) & 0xFFu);
-        }
-    }
     *output_wire = wire;
     *output_wire_length = total;
     return 0;
@@ -685,10 +615,10 @@ STUB_UNRECOGNISED = """\
 #include <stdlib.h>
 
 int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
-                              uint64_t capacity, const char *langtype,
+                              const char *langtype,
                               uint8_t **output_wire,
                               uint64_t *output_wire_length) {
-    (void)data; (void)data_length; (void)capacity; (void)langtype;
+    (void)data; (void)data_length; (void)langtype;
     uint8_t *wire = calloc(1, 32);
     if (wire == NULL) {
         return -1;
@@ -739,6 +669,20 @@ def run_selftest() -> int:
             for length in (16, 8):
                 compile_stub(directory, f"backend{length}",
                              STUB_BACKEND.replace("__HEAD_LEN__", str(length)))
+            legacy_eight = compile_stub(
+                directory, "libeight", STUB_SOURCE, ("LEGACY_EIGHT_BYTE_HEAD",))
+            legacy_constructor = compile_stub(
+                directory, "liblegacy", STUB_SOURCE, ("LEGACY_LAYOUT_BYTE",))
+            capacity_constructor = compile_stub(
+                directory, "libcapacity", STUB_SOURCE, ("LEGACY_CAPACITY_FORM",))
+            legacy_backend = compile_stub(
+                directory, "backend16legacy",
+                STUB_BACKEND.replace("__HEAD_LEN__", "16"),
+                ("LEGACY_LAYOUT_BYTE",))
+            capacity_backend = compile_stub(
+                directory, "backend16capacity",
+                STUB_BACKEND.replace("__HEAD_LEN__", "16"),
+                ("LEGACY_CAPACITY_FORM",))
             symbol_missing = compile_stub(directory, "libnosym", STUB_WITHOUT_SYMBOL)
             unrecognised = compile_stub(directory, "libodd", STUB_UNRECOGNISED)
 
@@ -750,6 +694,15 @@ def run_selftest() -> int:
                    "probe_library(unrecognised wire) must be unknown", failures)
             expect(probe_library(symbol_missing) == RESULT_UNKNOWN,
                    "probe_library(library without the symbol) must be unknown", failures)
+            expect(probe_library(legacy_eight) == RESULT_EIGHT,
+                   "probe_library(8-byte constructor) must be 8-byte", failures)
+            # 两处「上一代痕迹」必须各自能判出来——判不出「旧」就是假绿。
+            expect(probe_library(legacy_constructor) == RESULT_SIXTEEN_LAYOUT_BYTE,
+                   "probe_library(a head still carrying the `layout` byte) must "
+                   "report the removed byte", failures)
+            expect(probe_library(capacity_constructor) == RESULT_SIXTEEN_CAPACITY_FORM,
+                   "probe_library(a head whose bodylen is a capacity) must report "
+                   "the capacity form", failures)
 
             # 2. 判据核心：写值 + 读 headlen，按后端指认。
             verdict, detail = probe_backend(
@@ -762,6 +715,16 @@ def run_selftest() -> int:
                 os.path.join(directory, "backend8.so"))
             expect(verdict == RESULT_EIGHT,
                    f"an 8-byte backend must be judged 8-byte, got {verdict!r}", failures)
+            verdict, detail = probe_backend(
+                frontend, "shm", "shm://{store}/store", legacy_backend)
+            expect(verdict == RESULT_SIXTEEN_LAYOUT_BYTE,
+                   "a backend still writing the `layout` byte must be judged stale, "
+                   f"got {verdict!r}", failures)
+            verdict, detail = probe_backend(
+                frontend, "shm", "shm://{store}/store", capacity_backend)
+            expect(verdict == RESULT_SIXTEEN_CAPACITY_FORM,
+                   "a backend still writing bodylen=capacity must be judged stale, "
+                   f"got {verdict!r}", failures)
             verdict, detail = probe_backend(
                 frontend, "fs", "fs://{store}/store", None)
             expect(verdict == RESULT_SKIPPED,
@@ -862,14 +825,15 @@ def main(arguments: list[str]) -> int:
         verdicts.append((scheme, verdict, detail, library))
 
     stale = [entry for entry in verdicts
-             if entry[1] in (RESULT_EIGHT, RESULT_SIXTEEN_NO_CAPACITY)]
+             if entry[1] in (RESULT_EIGHT, RESULT_SIXTEEN_LAYOUT_BYTE,
+                             RESULT_SIXTEEN_CAPACITY_FORM)]
     unjudged = [entry for entry in verdicts if entry[1] == RESULT_UNKNOWN]
     judged = [entry for entry in verdicts if entry[1] == RESULT_SIXTEEN]
     skipped = [entry for entry in verdicts if entry[1] == RESULT_SKIPPED]
 
     for scheme, verdict, detail, library in verdicts:
         shown = os.path.realpath(library) if library else "(not built)"
-        print(f"backend {scheme:4s}: {verdict:9s} {detail}")
+        print(f"backend {scheme:4s}: {verdict:22s} {detail}")
         print(f"          library: {shown}")
 
     if stale:

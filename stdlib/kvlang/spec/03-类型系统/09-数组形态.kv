@@ -10,9 +10,9 @@ rwir 只写既有槽/成员，绝不隐式跨形态转换）。
 
 ## 两套算子族
 
-**`compactarray`（compact 形态，单一 XValue，定长）**：元素限 `bool` 与 10 种数值标量
-（有/无符号 8/16/32/64 位整数、`float32/float64`）；char 族是字符串本身，
-不是「字符的数组」（见 [[compact形态]]）。
+**`compactarray`（compact 形态，单一 XValue；含定长数组与 bufferarray 两种，见 [[compact形态]]）**：
+定长数组元素限 `bool` 与 10 种数值标量（有/无符号 8/16/32/64 位整数、`float32/float64`）；
+bufferarray 是一维运行期长度缓冲，`char` 族字符串就是 bufferarray 的实例，不是「字符的数组」。
 
 | 类别 | rwir | 语义 |
 |------|------|------|
@@ -71,6 +71,9 @@ rwir 只写既有槽/成员，绝不隐式跨形态转换）。
 
 - compact 字面量降级为 `compactarray·new(…)` 构造。变长字符串元素进 compact `[…]` 在 layout 语法
   检查期报错（`compact array [...] cannot hold variable-length string element`）。
+- **bufferarray 不由字面量括号选择**：它由 langtype 的 `[]` / `[.]` 空轴或 `char/<enc>` 基种类
+  决定，是一个 XValue 的一维连续缓冲；字符串字面量写的正是 bufferarray。需要 append/删除成员时
+  仍走 stringkeymap，不能把 bufferarray 当可追加数组。
 - stringkeymap 字面量降级为 `map·new(…)` / `scatterarray·new` 构造，只作赋值右值或 `for-in` 源。
 
 ## 定长初始化（无需逐元素赋值）

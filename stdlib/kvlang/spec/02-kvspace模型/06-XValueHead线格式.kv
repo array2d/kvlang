@@ -5,8 +5,7 @@ lib kvlang/spec/kvspace模型/XValueHead线格式 {
 XValue 由 head、body 与 attr 区组成。所有后端使用同一线格式：
 
 ```
-[bodylen:u64 LE@0][attrslen:u16 LE@8][reserved:u16 LE@10]
-[layout:u8@12][padding:3@13-15]
+[bodylen:u64 LE@0][attrslen:u16 LE@8][padding:6@10-15]
 [body @16..16+bodylen][attr @16+bodylen..16+bodylen+attrslen]
 ```
 
@@ -19,16 +18,32 @@ head 固定 **16 字节**，body 偏移恒为 16。类型（langtype）**不在 
 
 | 字段 | 宽 | 含义 | 边界 |
 |------|----|------|------|
-| `bodylen` | u64 | body 字节数（或容量，见 `layout`） | 存储 |
+| `bodylen` | u64 | body 区**有效字节数**（恒为此义，见下） | 存储 |
 | `attrslen` | u16 | attr 区字节数（不含任何前缀）；上限 `UINT16_MAX` | 存储 |
-| `reserved` | u16 | 必须为零；旧格式 `attrslen` 的高 2 字节落在这里 | ABI 校验 |
-| `layout` | u8 | `bodylen` 的语义：0 = 有效长度；1 = 容量（有效长度在 attr tag 2） | **只许表达长度字段怎么读** |
-| `padding` | 3 | 必须为零；非零即非法 | ABI 校验 |
+| `padding` | 6 | 必须为零；非零即非法 | ABI 校验 |
 
-`layout` 其余取值保留且必须为零，非零按非法处理。`reserved` 与 `padding` 同样必须为零：
-旧 wire 的 `attrslen` 高 2 字节在新布局里就是 `reserved`，attr 区小于 65536 字节时两者字节
-完全一致；非零即说明写方按旧 32 位长度写入了越界 attr。原来同时占据这一段的 `storetype`
-与 `ptr` 两个字节**已全部删除**：它们的语义都能从 langtype 推出（见下），保留即第二个真相。
+`padding` 必须全零：它是 ABI 的一部分，不是可填字段。原先占据这一段的 `reserved:u16` 与
+`layout:u8` **已删除**：`reserved` 是旧 32 位 `attrslen` 高 2 字节的残迹，`layout` 是
+「`bodylen` 记的是容量还是有效长度」的标志位——它随容量退出 wire 一并作废（容量已不在 wire 层，
+见下）。同段原有的 `storetype` 与 `ptr` 两个字节更早已删除；它们的语义都能从 langtype 推出，
+保留即第二个真相。
+
+## `bodylen` 恒为有效长度
+
+**`bodylen` 是 wire 上唯一的长度量，含义固定：body 区的有效字节数。** 它不随 langtype 改义。
+
+| langtype | `bodylen` | 容量 |
+|---|---|---|
+| bufferarray（`[]T`、`[.]T`、`[N]char/<enc>`） | 有效字节数 | 后端物理分配属性，**不进 wire** |
+| 定长数组 / 标量 / 其它 | 有效字节数 | 无独立容量概念 |
+
+容量与有效长度**不在同一层**：容量是存储后端分配的物理空间（shm 的 `body_cap`），用于原地增长；
+有效长度是 wire 上的 `bodylen`。构造时两者分开传（`kvspaceWriteNewPlace(ref, body_len, body_cap,
+langtype)`：`body_len` 进 wire，`body_cap` 只给后端），wire 里永远只有有效长度。
+
+`kvspaceXvalueHeadEffectiveLen` 恒返回 `bodylen`——它保留入口只为让调用方统一走 accessor，
+不是在算第二种语义。attr 区也**没有** `reallen` 记录：旧 tag 2 已删除，读到即**拒绝**
+（第二事实源，出现说明写读双方对格式理解不一致）。
 
 ## 指针与扩展都是类型前缀
 
@@ -59,12 +74,15 @@ head 不再有 `storetype`。原先五个取值的归属：
 | 原 storetype | 现在怎么判 |
 |---|---|
 | 0 短定长 | langtype 是定宽标量或定长形状 ⇒ body 宽度由类型定 |
-| 1 变长 | langtype 是变长形态（`[]char/*`、`*T`、`@T`、代码槽） ⇒ `bodylen` 是有效字节 |
+| 1 变长 | langtype 是变长形态（`[]char/*`、`*T`、`@T`、代码槽） ⇒ body 长度由 `bodylen` 给出 |
 | 2 大定长 | langtype 带具体形状 `[d0,d1,…]T` ⇒ 元素连续 |
 | 3 扩展定位 | langtype 以 `@` 开头 |
-| 4 定容量变长 | `layout = 1`（**唯一无法从类型推出的一项，故保留为布局标志**） |
+| 4 定容量变长 | langtype 是 bufferarray（`[]T`/`[.]T`/`char/*`） ⇒ 物理容量由后端预留 |
 
-`bodylen` 与 langtype 里形状段的关系：UTF-8 字符数组的 `bodylen` 是**字节数**，langtype 里的
+五个取值全部从类型可推，head 不需要任何残留标志位——这也正是 `layout` 被删除的理由。
+注意第 4 项：bufferarray 只影响**后端分配多少物理容量**，不改变 `bodylen` 的含义（恒为有效长度）。
+
+`bodylen` 与 langtype 里形状段的关系：字符数组的 `bodylen` 是**字节数**，langtype 里的
 长度是 Unicode 码点数；两者独立校验。
 
 ## 值内 attr 区
@@ -79,8 +97,9 @@ attr 区编码（normative）：
 
 - `record = [tag:u8][len:u16 LE][data len 字节]`
   - tag 1 = langtype：UTF-8 明文串，含 `[dims]` 形状段与 `*`/`@` 前缀；终止由 record len 自描述，无 NUL。
-  - tag 2 = `reallen`：仅 `layout = 1` 时存在；其它 layout 出现即非法（「有定义但此处无意义」
-    说明写读双方理解不一致）。
+  - **tag 2 = `reallen`：已删除**。它曾是「容量形态下的有效长度」，与 `bodylen` 构成第二事实源。
+    任何读到 tag 2 的实现（存储层与上层一致）**必须拒绝该值**，不得静默忽略或按旧语义解释。
+    写方不得产出它。
   - tag 3+ = 预留扩展（ro/vid 等，未实现）。
 - `total = 16 + bodylen + attrslen`（自描述——后端据此读完整值长）。
 - 无 pad：attr 起始 = 16+bodylen；记录紧凑；整体末尾不 pad。

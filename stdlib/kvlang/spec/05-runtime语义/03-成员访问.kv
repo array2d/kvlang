@@ -136,18 +136,19 @@ kvlang 指针（`Ptr`，head ref==1，源码前缀 `*`）在 kvspace 中存**目
   非 kvlang 指针的值即停；**不得**把 char 字符串值误当路径继续追（否则字符串实参内容会被当
   键，穿两层调用即变 `None`）。写侧解析（`ResolveWriteSlot`）遵循同一纪律。
 
-## 扩展世界句柄（storetype 3，@ext）
+## 扩展世界句柄（`@` 前缀，@ext）
 
-`@ext` 使用 storetype=3、ptr=2，不使用独立 `ref` 字节。head 的 langtype 是目标类型（不带 `@` 前缀，存
-于值内 attr 区）；body 是 UTF-8 **定位串**（如
+`@ext` 的 wire langtype 是**目标类型加 `@` 前缀**（如 `@[256,256]uint8`），存于值内 attr 区；
+body 是 UTF-8 **定位串**（如
 `/networld/<host>/proc/<pid>-<n>/stdout`），不是真实值字节。读取该 key 时
 由支持 `@` 的 rwir（如 byteseek 的 fs/networld 一族）按 body 定位串还原真实字节（见 [[runtime开发规
 范]]、[[执行模型]] §八）。真
-实 xvalue 落在扩展世界（fs 文件、gpu tensordata 等），非 kvspace 元存。
+实 xvalue 落在扩展世界（fs 文件、gpu tensordata 等），非 kvspace 元存。head 不再有 storetype 与
+ptr 字节：扩展性就是这个 `@` 前缀，详解见 [[XValueHead线格式]]。
 
 ## compact 数组下标
 
-数组有两种存储形态：**compact**（`[...]` 字面量，元素连续打包进单个 XValue，head kind = 元素类型）与
+数组有两种存储形态：**compact**（`[...]` 字面量，元素连续打包进单个 XValue，langtype 尾段 = 元素类型）与
 **stringkeymap**（`{...}` 字面量，散 key，每元素落 `base·[i]` 坐标段独立子 key）。下标 `a[i]` /
 `compactarray·at` / `compactarray·set` 用于 **compact** 形态；stringkeymap 形态用 `scatterarray·at` /
 `scatterarray·set` / `for-in` / 普通 key 读遍历访问。

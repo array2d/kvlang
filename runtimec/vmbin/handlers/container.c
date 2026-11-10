@@ -1411,7 +1411,7 @@ static runtimec_status_t container_write_member(
     memcpy(langtype_text, declared.data, declared.size);
     langtype_text[declared.size] = '\0';
     if (kvspaceXvalueHeadNewSlack(element.read_bytes, (uint64_t)element.size,
-                                  (uint64_t)element.size, langtype_text, &wire,
+                                  langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         return RUNTIMEC_STATUS_ERROR;

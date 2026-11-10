@@ -22,7 +22,7 @@ lib kvlang/spec/kvspace模型/键系统与数组访问 {
 | 概念 | 内容 | 例 |
 |------|------|----|
 | **kind** | 基础类型字符串（标量或元素类型），是 langtype 的叶子 | `uint8` `int32` `float64` `bool` `char/utf32` `stringkeymap` `rwir` `rwfunc` … |
-| **langtype** | 完整类型表达式串：可选 `[dims]` + kind；ref 已独立为 head 字节字段，不再是 langtype 前缀 | `int8` `[10]int32` `[256,256]uint8` `[]char/utf8·int64` |
+| **langtype** | 完整类型表达式串：可选 `*`/`@` 前缀 + 可选 `[dims]` + kind；前缀**保留**在 wire langtype 里 | `int8` `[10]int32` `[256,256]uint8` `[]char/utf8·int64` `*int64` |
 
 kind 常量集中定义于 `kvspace/include/kvspace/const.h`（C）与 `kvspace-durable/src/const.rs`
 （Rust），两侧同名同值。剥掉 langtype 的所有前缀与 `[dims]` 修饰即得 kind。

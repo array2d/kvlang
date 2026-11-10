@@ -3031,18 +3031,15 @@ mod tests {
         .unwrap();
         let dir = kv.get_one("/lib/a/b·f/");
         assert_eq!(kvkind::kind(&dir, &kv.langtype_of("/lib/a/b·f/")), "rwfunc");
-        /* 新 head 没有 storetype：`layout` 才是字段（0=有效长度 / 1=容量）。 */
-        assert_eq!(ffi::xh_layout(&dir), 0);
+        /* head 只有 bodylen + attrslen + padding：目录 marker 的 bodylen 为 0。 */
+        assert_eq!(ffi::xh_len(&dir), 0);
         assert_eq!(
             kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]"), &kv.langtype_of("/lib/a/b·f/[0,0]")),
             "rwfunc"
         );
-        /* 原先断言 `storetype == 1`（code 槽的存储形态）。新 head 没有 storetype
-         * 字段，`layout` 只表达「bodylen 是长度还是容量」，与存储形态无关——
-         * 把旧期望值搬过来是错的（实测 layout=0）。这里改断言语义上等价的事实：
-         * 该槽是 rwfunc 的 code 槽，其 body 非空。 */
+        /* code 槽的判据是「body 非空」，不是 head 里的某个形态位——形态位
+         * （storetype / layout）已先后从 head 删除，存储形态由 langtype 推。 */
         let anchor = kv.get_one("/lib/a/b·f/[0,0]");
-        assert_eq!(ffi::xh_layout(&anchor), 0);
         assert!(!kvkind::body(&anchor).is_empty());
 
         // 同 lib a 下再 layout 另一嵌套 lib c，验证 b·f 未被整库删除（增量合并）
