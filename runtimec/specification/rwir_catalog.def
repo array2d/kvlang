@@ -1113,7 +1113,7 @@ RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KEY_TOSTRING, "kvspace/key·tostr", 0x01A3
                         RUNTIMEC_RWIR_ALIAS_FORBIDDEN,
                         "float-member-key-identity")  /* install signature -> char/utf8 */
 /* behavior-decision: pointer-target-key-text */
-RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KEY_RESOLVE_POINTER, "kvspace/key·resolveptr", 0x01A6,
+RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_KVLANG_RESOLVE_POINTER, "kvlang·resolve", 0x01A6,
                         0x00000000, 0x00040000,
                         "", "",
                         RUNTIMEC_RWIR_CONSTRAINT_NONE,

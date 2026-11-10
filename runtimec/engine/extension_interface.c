@@ -71,7 +71,18 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_read_argument_text(
     runtimec_bytes_buffer_reset(&buffer);
     buffer.data = (uint8_t *)output->data;
     buffer.capacity = output->capacity;
-    status = vmbin_value_access_read(
+    /*
+     * **读 body，不是读整条 wire。**
+     *
+     * `vmbin_value_access_read` 对 LITERAL / 内联绑定给的是**整条 wire**
+     * （16 字节 head + body + attr），对地址绑定给的已经是 body——一个函数两种
+     * 语义。文本要的只有 body：拿 wire 去当文本，前面就是 16 字节头、后面还跟着
+     * langtype attr，长度也一起错。
+     *
+     * 两个入口各自只回答一个问题：`read` = 值的完整存储区间（`kvspaceSetValue`
+     * 才需要，它收整条 wire），`read_body` = 值体。这里要的是后者。
+     */
+    status = vmbin_value_access_read_body(
         call.frame, &call.instruction->read_arguments.data[index], &buffer,
         &internal);
     if (status == RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY) {
@@ -111,7 +122,10 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_read_argument_integer(
     uint8_t storage[8];
     buffer.data = storage;
     buffer.capacity = sizeof(storage);
-    status = vmbin_value_access_read(call.frame, argument, &buffer, &internal);
+    /* 与文本读参同一个理由：要的是值体，不是整条 wire——整数按 wire 读会把
+     * 头里的 bodylen 当低字节，得到的数看着合法但完全无关。 */
+    status = vmbin_value_access_read_body(call.frame, argument, &buffer,
+                                          &internal);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }

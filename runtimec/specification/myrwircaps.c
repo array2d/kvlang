@@ -363,7 +363,7 @@ static const struct {
     {"kvspace·watch", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"kvspace/key·abs", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"kvspace/key·tostr", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
-    {"kvspace/key·resolveptr", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
+    {"kvlang·resolve", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"nonnull", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"nonnull·not", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"vthread·create", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},

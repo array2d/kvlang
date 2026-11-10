@@ -140,7 +140,7 @@ static runtimec_program_counter_t runtimec_execution_window_make_program_counter
  *
  * 之前只有绑定表那一跳（把调用方的值地址直接记在形参槽号上），于是：
  *   - `*arr` 靠绑定表能拿到值，看起来「能用」；
- *   - 但 `resolveptr(argument0, k)` 这类**按 key 派生**的路径拿不到形参槽的目标
+ *   - 但 `kvlang·resolve(argument0, k)` 这类**按 key 派生**的路径拿不到形参槽的目标
  *     ——它去读形参槽的 body，那里什么都没有（空 body 的容器），于是拼出
  *     `<形参槽>·k` 这个从不存在的 key。`binary_search` 就是这样红的。
  *
@@ -157,7 +157,7 @@ static runtimec_program_counter_t runtimec_execution_window_make_program_counter
  *   - Debug 与 Release **两套构建结论一致**，均等于改动前基线（无回归）。
  *
  * 未达成：`binary_search` 仍报 `0x4005 read parameter type is outside the
- * capability mask`——那是 layout 侧 `resolveptr` 的读参声明类型带 `*`，掩码
+ * capability mask`——那是 layout 侧 `kvlang·resolve` 的读参声明类型带 `*`，掩码
  * 匹配不上，**不是本函数引入的**（关掉本函数的调用，`0x4005` 不变）。
  *
  * 「未传参的槽读 `*name` 仍失败」未单测：那种帧在 `bind_parameters` 的
@@ -503,7 +503,7 @@ static runtimec_status_t runtimec_execution_window_bind_parameters(
          * **第二跳**：先把形参槽物化成「指向调用方 key 的指针」，再做绑定。
          *
          * 顺序要紧：绑定表记的是「这个槽现在指向哪」，而指针 key 是**存储里的
-         * 实体**——`resolveptr(argument0, k)` 读的就是它。先写存储再绑，两步看到
+         * 实体**——`kvlang·resolve(argument0, k)` 读的就是它。先写存储再绑，两步看到
          * 的是同一个目标。
          */
         status = runtimec_execution_window_materialize_parameter_pointer(

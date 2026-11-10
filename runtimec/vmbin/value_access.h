@@ -285,7 +285,7 @@ runtimec_status_t vmbin_value_access_locate_body(
 /*
  * **读语义**的同款定位：解引用到不存在的目标时给 **None**（空 body），不是失败。
  *
- * 规范 `05-runtime语义/12-动态键.kv` §四：「`resolveptr` 定位到的目标不存在时，
+ * 规范 `05-runtime语义/12-动态键.kv` §四：「`kvlang·resolve` 定位到的目标不存在时，
  * **读得 `None`**；普通绝对 key 的读仍失败封闭。」
  *
  * 与 `locate_body` 的差别只在解引用那一支：

@@ -29,34 +29,49 @@ static void kvlang_runtime_text_buffer_clear(
     }
 }
 
-static runtimec_status_t kvlang_runtime_fail(
-    kvlang_runtime_error_t *error, runtimec_status_t status,
-    const char *message) {
+/*
+ * 把一次失败的诊断记进调用方的错误对象。**返回值永远由调用方决定**，不由本函数
+ * 决定——这就是「状态码为主，错误文本为辅」的唯一落地点（TASK-071）。
+ *
+ * 曾经这里是三条改返回值的路：
+ *   - `error == NULL` ⇒ 报 INVALID。于是**不想要错误文本的调用方**拿到的码与
+ *     真正的失败无关：连不上数据源（ERROR）也会读成 INVALID；
+ *   - 缓冲放不下 ⇒ 报 INSUFFICIENT_CAPACITY，并覆盖 `error->status`。于是
+ *     「调用方给多大缓冲」成了操作结论的一部分；
+ *   - 缓冲畸形（capacity 非零而 data 为空）⇒ 报 INVALID，同上。
+ *
+ * 三者都是同一个错误：**把旁路资源的状况写进了主结论**。文本是辅助物：写不下
+ * 就**不写**（不写半条），`required_length` 报出完整长度让调用方扩容重试；缓冲
+ * 畸形就**只当没有文本**，不动状态码。
+ */
+static void kvlang_runtime_report(kvlang_runtime_error_t *error,
+                                  runtimec_status_t status,
+                                  const char *message) {
     if (error == NULL) {
-        return status;
+        return;
     }
     error->status = status;
     error->operation_status = status;
     error->code = 0;
-    if (!kvlang_runtime_text_buffer_is_valid(&error->message)) {
-        error->status = RUNTIMEC_STATUS_INVALID;
-        error->operation_status = RUNTIMEC_STATUS_INVALID;
-        error->message.length = 0U;
-        error->message.required_length = 0U;
-        return RUNTIMEC_STATUS_INVALID;
-    }
     kvlang_runtime_text_buffer_clear(&error->message);
-    if (message == NULL) {
-        return status;
+    if (message == NULL || !kvlang_runtime_text_buffer_is_valid(&error->message)) {
+        return;
     }
-    size_t message_length = strlen(message);
+    const size_t message_length = strlen(message);
+    /* 容量不足也照样报出完整长度：那是调用方扩容的唯一依据。 */
     error->message.required_length = message_length;
     if (error->message.capacity <= message_length) {
-        error->status = RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY;
-        return RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY;
+        return;
     }
     memcpy(error->message.data, message, message_length + 1U);
     error->message.length = message_length;
+}
+
+/* 失败 = 记诊断 + **原样返回操作结论**。 */
+static runtimec_status_t kvlang_runtime_fail(
+    kvlang_runtime_error_t *error, runtimec_status_t status,
+    const char *message) {
+    kvlang_runtime_report(error, status, message);
     return status;
 }
 
@@ -66,8 +81,8 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_create(
     if (output != NULL) {
         *output = NULL;
     }
-    if (request == NULL || output == NULL || error == NULL ||
-        !kvlang_runtime_text_buffer_is_valid(&error->message) ||
+    /* `error` 是可选的：不要诊断的调用方传 NULL，拿到的仍是同一个状态码。 */
+    if (request == NULL || output == NULL ||
         request->data_source_name == NULL ||
         request->data_source_name[0] == '\0' ||
         request->instance_identifier == 0U) {
@@ -158,8 +173,8 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_create(
 
 KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_destroy(
     kvlang_runtime_t *runtime, kvlang_runtime_error_t *error) {
-    if (runtime == NULL || error == NULL ||
-        !kvlang_runtime_text_buffer_is_valid(&error->message)) {
+    /* `error` 可选，理由同 create。 */
+    if (runtime == NULL) {
         return kvlang_runtime_fail(
             error, RUNTIMEC_STATUS_INVALID,
             "invalid runtimec destroy request");
@@ -186,8 +201,8 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_execute(
         kvlang_runtime_text_buffer_clear(&output->value);
         kvlang_runtime_text_buffer_clear(&output->program_counter);
     }
-    if (runtime == NULL || request == NULL || output == NULL || error == NULL ||
-        !kvlang_runtime_text_buffer_is_valid(&error->message) ||
+    /* `error` 可选；`output` 的两个缓冲不是——它们是**结果**，必须收得下。 */
+    if (runtime == NULL || request == NULL || output == NULL ||
         !kvlang_runtime_text_buffer_is_valid(&output->value) ||
         !kvlang_runtime_text_buffer_is_valid(&output->program_counter) ||
         request->entry_kind < KVLANG_RUNTIME_ENTRY_FUNCTION ||

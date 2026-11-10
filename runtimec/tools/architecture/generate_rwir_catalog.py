@@ -583,11 +583,17 @@ FAMILY_ROWS = (
     # （任何可作为键的值都收，拒绝面由 handler 按 `contract/langtype` 判）。
     FamilyRow("kvspace/key", "tostr", 0x01A3, "float-member-key-identity",
               0, CHARACTER_UTF8),
-    # `kvspace/key·resolveptr(base, keyvalue) -> Ptr`：由 base 与运行期键值算出目标
-    # 位置（spec `05-runtime语义/12-动态键` §二）。与 `abs` **并列的两条**：
-    # `abs` 取已有位置，`resolveptr` 拼出新位置；产出同为指针形态。
+    # `kvlang·resolve(base, keyvalue) -> Ptr`：由 base 与运行期键值算出目标位置
+    # （spec `05-runtime语义/12-动态键` §二）。
+    #
+    # **曾经叫 `kvspace/key·resolveptr`，已改名 `kvlang·resolve`**：它的名字里
+    # 不再带存储层前缀。改名只动 family/name，**opid 仍是 0x01A6**——线上身份是
+    # opid，已持久化的字节码按 opid 解，改名不影响。
+    #
+    # 与 `abs` 仍是**并列的两条**（判据是「产出地址」而非命名族）：
+    # `abs` 取已有位置，本行拼出新位置；产出同为指针形态。
     # 写掩码 POINTER：结果一定是指针，与 `abs` 同一判据。
-    FamilyRow("kvspace/key", "resolveptr", 0x01A6, "pointer-target-key-text", 0, POINTER),
+    FamilyRow("kvlang", "resolve", 0x01A6, "pointer-target-key-text", 0, POINTER),
 )
 
 # ---------------------------------------------------------------------------------------
@@ -667,7 +673,7 @@ IDENTIFIER_WORDS = {
     "uint64": "UNSIGNED_64", "int63": "SIGNED_63", "intn": "BELOW",
     "abs": "ADDRESS_OF",
     "tostr": "TOSTRING",
-    "resolveptr": "RESOLVE_POINTER",
+    "resolve": "RESOLVE_POINTER",
 }
 
 FAMILY_IDENTIFIER_WORDS = {
