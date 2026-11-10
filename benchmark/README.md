@@ -10,8 +10,13 @@ kvlang 与 Python / Rust / C 的跨语言性能基准。每个 case 是同一算
 
 > **执行模型分代（跨版本比较的前提）**：`results/` 里的历史行混着**两代执行模型**，而 CSV
 > schema 相同（用户已裁定不加列），所以「同名同列」不等于「可比」：
-> - `v0.3.31` 及更早——**c2 + JIT**（`libkvlang_runtimec2` + binircompiler）；
-> - `v0.3.32` 起——**runtimec 解释器**（`libkvlang_runtime`，纯解释、无 JIT）。
+> - `v0.3.30` 及更早——**c2 + JIT**（`--kvlang-bin` 默认 `bin/byteseek`，内嵌 `libkvlang_runtimec2`）；
+> - `v0.3.31` 起——**runtimec 解释器**（`--kvlang-bin` 默认 `bin/kvlangrun`，纯解释、无 JIT）。
+>
+> 换代点在 **30/31 之间**，不是 31/32。判据是 `benchmark/run.py` 里 `--kvlang-bin` 的默认值：
+> `git show v0.3.30:benchmark/run.py` 指向 `bin/byteseek`，`v0.3.31` 起指向 `bin/kvlangrun`，
+> 且 `v0.3.31` 树里已有 `runtimec/tools/kvlangrun.c`。实测 `v0.3.31 vs v0.3.30` 中位数 **25.6×**，
+> 那才是换代量级；`v0.3.32 vs v0.3.31` 中位数 **1.68×**，是**同一代内的退化**，不是换代。
 >
 > 分界点写成 `v0.3.32` 而不是 `v0.3.33`，是因为 **`v0.3.32` 这个 tag 被重打过**：
 > 旧树上的 `v0.3.32` 从未产出过可用的 release 与 CSV，用户裁定把新树直接标成 `v0.3.32`，
