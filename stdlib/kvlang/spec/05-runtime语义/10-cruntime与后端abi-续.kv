@@ -2,17 +2,23 @@
 lib kvlang/spec/runtime语义/cruntime与后端abi_续 {
 	r####"# C runtime 与后端 ABI（续）
 
-## 三个后端
+## 两个库
 
-| 后端 | 库 | 存储 | 场景 |
-|------|-----|------|------|
-| shm | kvspace-c（C） | ART 树 + slotsboxmalloc + file-backed mmap | 高性能（训练/推理） |
-| redis | kvspace-durable（Rust） | Redis | 基线验证 |
-| fs | kvspace-durable（Rust） | 文件系统 | 本地持久化 |
+| 库 | serve 的 DSN | 存储 | 场景 |
+|------|--------------|------|------|
+| `libkvspace` | **只有 `shm://`** | ART 树 + slotsboxmalloc + file-backed mmap | 高性能（训练/推理） |
+| `kvspace-durable` | `redis://` / `fs://` / `s3://` | Redis / 文件系统 / 对象存储 | 持久化 |
 
-`conn(dsn)` 按 scheme（`shm://` / `redis://` / `fs://`）选后端，DSN 是唯一的后端区分。三后端**语义必
-须完全一致**：一致性判据是 `tutorial/` 全量三后端逐字节相同输出（见导言卷）。后端存储布局差异（如 fs
-把 `·` 编码为 `·/` 嵌套目录）经对称编解码还原，**不是**语义差异。
+**scheme 到库的选择是链接期决定，不是运行期 dispatch**（单库化 TASK-082 已删掉前端转发层）。
+`kvspaceConnect` 对非 `shm://` 直接返回 NULL——不是它「选错了后端」，而是这个库只服务 shm。
+
+**一致性判据分两层**：
+
+- **wire 层（可测、必须相同）**：XValue 的字节布局（head / body / attr）逐字节相同。这是真契约。
+- **ABI 层（当前不同步）**：`libkvspace` 已收敛到 12 个存储符号；`kvspace-durable` 仍在旧 ABI
+  （导出的符号集合与前者交集只有 12/16）。**durable 收敛前不参与 ABI 一致性判定。**
+
+后端存储布局差异（如 fs 把 `·` 编码为 `·/` 嵌套目录）经对称编解码还原，**不是**语义差异。
 
 ## 核心与扩展宿主的一致性（runtimec2 ↔ byteseek）
 
@@ -29,8 +35,8 @@ rwir 路由的 rwir 的**执行位置策略**，且对 kvlang 程序不可观测
   rwir_runtimecimpl。
 
 二者对 native builtin、控制流、`=` 拷贝、值语义的处理**必须**一致；差异仅限须经 def rwir 路由的 rwir
-的**就地 vs 移交**这一执行位置维度，且对 kvlang 程序不可观测（同一 tutorial 三后端两 runtime 输出一
-致）。
+的**就地 vs 移交**这一执行位置维度，且对 kvlang 程序不可观测（同一 tutorial 在 `shm://` 上两 runtime
+输出一致）。
 
 ## durable 单句柄相干
 
@@ -43,10 +49,11 @@ durable 后端（fs/redis）采用**惰性 flush**，只在**同一 kvspace 句�
 
 扩展宿主（op-gpu、numpy、Go json）**自己** `kvspaceConnect(dsn)` 拿句柄，rwir 移交只用
 `kvlangRwirext*` 的 runtime 语义（`kvlangDefRwir`/`Params`/`ResolveRead`/`ResolveReadPath`/`ResolveWrite`
-/`NextPc`）。tensor 类大 buffer **应**走 shm 后端零拷贝：`ResolveReadPath` 拿容器路径 → `kvspaceGet`
+/`NextPc`）。tensor 类大 buffer **应**走 shm 后端零拷贝：`ResolveReadPath` 拿容器路径 →
+`kvspaceResolve` 得 64 位偏移 → `kvspaceXvalueInProcessAddress + offset`
 取 XValue 的二进制指针 → memcpy `kvspaceXvalueHead` struct + `kvspaceXvalueHeadLen` 定位 body（head 固定
 16 字节，body 偏移恒 16）→ 在该地址原位建 ndarray，读写 ndarray 即读写 kvspace，无拷贝；
-写走 `kvspaceXvalueHeadNew*` + `WriteInPlace`/`WriteNewPlace`。锚例：`tutorial/14-numpy/`（shm 全流程，该目录尚未落地）、
+写走 `kvspaceRealloc` + 直写。锚例：`tutorial/14-numpy/`（shm 全流程，该目录尚未落地）、
 `tutorial/byteseek/14-networld/`（fs/proc）。
 ## slot view 的使用（runtimec2, normative）
 

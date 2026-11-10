@@ -74,7 +74,7 @@ stringkeymap 散列容器；跨形态 TypeError。`compactarray·set` 仅同槽 
   **`kvspace·mkindex` 只有一个读参 `(key)`，没有 capacity。** capacity 是存储分配属性，
   不是语言签名的一部分（见 [[存储层ABI]]）。多传一个实参属于 arity 不符，由 arity 校验拒绝，
   不是「可选参数被忽略」。
-- `kvspace/key·`：`tostr`（值 → 成员键文本）、`resolveptr`（base + 键值 → 位置 Ptr）、
+- `kvspace/key·`：`tostr`（值 → 成员键文本）、`kvlang·resolve`（base + 键值 → 位置 Ptr）、
   `abs`（取址；`&x ≡ kvspace/key·abs(x)`）。本族负责**计算 key**：三者都只算位置、不读写值，
   读写由显式 `*` 完成。动态键的两步展开见 [[动态键]]。
 - `vthread·`：`create`、`run`、`call`、`sleep`、`setstatus`、`pc`（语义见 [[执行模型]] §七与

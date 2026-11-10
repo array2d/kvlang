@@ -23,8 +23,9 @@ runtime **不得**在 kvspace 之外持有执行状态。PC、栈帧、局部变
 
 - **PC 的键是 `/vthread/<vid>/‥pc`，值是 `[2]int32`（`{stackid, s0}`）**（编码见 §四）。PC 既是
   取指坐标，也是当前帧的定位符；**键路径不是 PC 的值**，两者不可混用。
-- **读写**：runtime 经 `kvspaceGet` 借用读值，借用在下一次读写前失效；写值经 `kvspaceSetValue`
-  同步提交完整 XValue。变量的**值**每条指令都从 kvspace 读回；PC 的值以 kvspace 的 `‥pc` 为唯一
+- **读写**：runtime 经 `kvspaceResolve` 定位、`kvspaceXvalueInProcessAddress + offset` 直接读写值；
+  变量第一次构造走 `kvspaceRealloc` + 语言层构造器（`libkvlang_xvalue`）。变量的**值**每条指令都从
+  kvspace 读回；PC 的值以 kvspace 的 `‥pc` 为唯一
   事实源。顺序推进时可直接复用上一指令刚写入 PC 的同值缓冲（由已写出的 PC 复制而来，不是第二事实
   源），避免重复读取。
 - **`‥pc` 与 `‥status` 原地写（in-place），地址在线程生命周期内不变**：二者每次更新都写同一个

@@ -20,10 +20,11 @@ lib kvlang/spec/kvspace模型/存储层ABI {
 |---|---|
 | `kvspace/kvspace.h` | **存储层 ABI**：本文件的 9 个操作 + 生命周期 + 地址访问器（原名 `storage.h`） |
 | `kvspace/kvspace_xvalue.h` | **字节层**：head 布局、attr 区 TLV、`kvspaceXvalueGetAttr`/`SetAttr`、`EffectiveLen` |
-| `kvspace/kvlang_xvalue.h` | **语言层**：tag 1 langtype 的读写、langtype 包装、`New*` 构造器 |
+| `kvlang/xvalue.h`（**kvlang 仓**） | **语言层**：tag 1 langtype 的读写、langtype 包装、`New*` 构造器；编译进 `libkvlang_xvalue.a` |
 
-旧头 `xvalue_head.h` **已删除**，内容按上面两行拆分。引用的规矩：讲字节布局引
-`kvspace_xvalue.h`，讲 langtype/构造器引 `kvlang_xvalue.h`——**不要引旧路径**。
+旧头 `xvalue_head.h` 与旧路径 `kvspace/kvlang_xvalue.h` **均已删除**，内容按上面两行拆分。
+引用的规矩：讲字节布局引 kvspace 仓的 `kvspace_xvalue.h`，讲 langtype/构造器引 kvlang 仓的
+`kvlang/xvalue.h`——**不要引旧路径**。
 
 ## 三个基本量
 
@@ -93,7 +94,7 @@ int kvspaceList(void *h, const char *key, char *out_names, uint32_t out_capacity
 
 外加生命周期 `kvspaceConnect` / `kvspaceClose`（与旧 ABI 同签名），以及地址空间访问器
 `kvspaceXvalueInProcessAddress`（见上，不计入这 9 个）。**`kvspace.h` 共 12 个符号**：
-9 个语义操作 + Connect + Close + DataBase。
+9 个语义操作 + Connect + Close + `kvspaceXvalueInProcessAddress`。
 
 **语言层的 key 参数位**：`kvspace·*` 算子的 `key` / `old_key` / `new_key` / `source_key` /
 `destination_key` 这些形参，在 kvlang 源码里既能用路径字面量也能用字符串字面量书写，**两者都表示
@@ -276,7 +277,7 @@ TLV 的三个直接后果：
 
 attr 区**不再暴露扫描器**（原 `kvspaceXvalueHeadScan` 已删除），只暴露按 tag 的读写。
 这两个属于**字节层**，定义在 `kvspace/kvspace_xvalue.h`：它们只认 tag 与字节，不解释
-langtype 是什么（`tag 1` 的语义在 `kvspace/kvlang_xvalue.h` 那一侧）：
+langtype 是什么（`tag 1` 的语义在 kvlang 仓 `kvlang/xvalue.h` 那一侧）：
 
 ```c
 int kvspaceXvalueGetAttr(const uint8_t *wire, uint64_t wire_len, uint8_t tag,
