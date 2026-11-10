@@ -72,7 +72,7 @@ kvspace is the addressing and memory space at the core; the language is a small 
 
 ![kvlang ecosystem architecture](docs/kvlang-architecture.en.png)
 
-- **kvspace** — one C ABI in PascalCase with no underscores (`kvspaceGet`, `kvspaceWriteInPlace`, `kvlangRuntimeConnect`); two implementations selected at run time by DSN: `kvspace-c` (C, `shm://`) and `kvspace-durable` (Rust, `redis://` / `fs://`; s3 planned). Backends must be byte-identical.
+- **kvspace** — one C ABI in PascalCase with no underscores (`kvspaceResolve`, `kvspaceRealloc`, `kvspaceList`); two implementations of that ABI, **chosen at link time, not by DSN**: `libkvspace` (C, serves `shm://` only) and `kvspace-durable` (Rust, `redis://` / `fs://`; being migrated to the current ABI). There is no runtime dispatch and no `dlopen` — `kvspaceConnect` rejects any DSN whose scheme is not `shm`.
 - **layout** — Rust crate (`bin/libkvlanglayout.so`, CLI `bin/kvlanglayout`). The **o0 compiler**: scan → parse → lower (control-flow lowering, type inference, specialization) → write the KV instruction tree into `/lib`. It performs **no optimization** — optimizing here would erase the high-level semantics that other runtimes rely on to optimize on heterogeneous hardware. It writes only to `/lib`, and diagnoses at three levels: `error` / `warn` / `info`.
 - **runtime-c** — the core interpreter (`bin/libkvlang_runtime.so`, C11). Pure interpretation: fetch-decode-execute, native rwir dispatch, the copy opcode `=`, call/return/br/goto, and the user-function call. It does not compile, optimize, or reorder. Depends only on the `kvspace*` C ABI.
 - **byteseek** — Rust (`bin/byteseek`, the `byteseek` CLI). A reference **myrwir host**: it links layout and runtime-c, interprets its own opcodes, and routes the rest. Its in-process families: `term`, `json`, `http`, `networld`, `kvlang·*`.
@@ -142,11 +142,22 @@ make all                                     # runtime(C) + layout(Rust) + bytes
 
 `make` targets: `all` · `runtime` · `layout` · `byteseek` · `json` · `oldhero` · `test` · `install` · `clean`. `make install` places the libraries in `/usr/lib`, the CLIs (`byteseek`, `kvlanglayout`) in `/usr/bin`, and headers in `/usr/include/kvlang`.
 
-**Backends** are chosen by the `KVSPACE` DSN (default `redis://127.0.0.1:6379`):
+**Sibling repositories are not defaults.** Targets that touch the kvspace source repo (`kvspace-libs`, `kvspace-frontend`, `kvspace-cli`, `kvspace-durable-lib`, `kvlang-xvalue`, `runtimec_runner`, `check-kvspace-head`) **require explicit paths** and stop with `$(error)` plus a copy-pasteable command when one is missing:
 
 ```bash
-KVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-c
-KVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-durable
+make kvspace-libs KVSPACE_SRC=/path/to/kvspace KVSPACE_DUR_SRC=/path/to/kvspace-durable
+cmake -S xvalue -B build/kvlang-xvalue \
+  -DKVLANG_KVSPACE_INCLUDE_DIRECTORY=/path/to/kvspace/include \
+  -DKVLANG_KVSPACE_LIB_DIRECTORY=/path/to/kvspace/build
+```
+
+Rationale: a sibling layout is a local accident, not a contract. It has already caused three classes of incident — the build silently picking up a non-pinned version from the sibling checkout, CI cloning repos into a fixed adjacent directory it then dare not restructure, and pod rebuilds invalidating every path while the error points at the wrong cause. **Once a default exists, the correct path becomes "the one not shadowed by the default", and nobody ever verifies it.**
+
+**Backend** is chosen at link time, not by DSN. The `KVSPACE` DSN names a store; `libkvspace` accepts only `shm://` and returns NULL for any other scheme (no runtime dispatch, no `dlopen`).
+
+```bash
+KVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # libkvspace
+# fs:// and redis:// require linking kvspace-durable instead of libkvspace.
 ```
 
 Two more modes: `byteseek create <func>` prints a vthread `vid`, and `byteseek run <vid>` resumes from the persisted PC (crash recovery). With `--lib p1:p2:…` (instead of an entry), byteseek lays out every `.kv` under those paths and runs each lib's `init`; there is no environment variable for this.

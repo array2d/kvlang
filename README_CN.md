@@ -72,7 +72,7 @@ kvspace 是核心的寻址空间与内存空间；语言本体是小核心 runti
 
 ![kvlang 生态架构](docs/kvlang-architecture.zh.png)
 
-- **kvspace** — 一套 PascalCase、无下划线的 C ABI（`kvspaceGet`、`kvspaceWriteInPlace`、`kvlangRuntimeConnect`）；两种实现由运行期 DSN 选择：`kvspace-c`（C，`shm://`）与 `kvspace-durable`（Rust，`redis://` / `fs://`；s3 规划中）。各后端必须逐字节一致。
+- **kvspace** — 一套 PascalCase、无下划线的 C ABI（`kvspaceResolve`、`kvspaceRealloc`、`kvspaceList`）；两种实现，**由链接期选择、不是由 DSN 选择**：`libkvspace`（C，只服务 `shm://`）与 `kvspace-durable`（Rust，`redis://` / `fs://`；正在迁到当前 ABI）。没有运行期 dispatch，也没有 `dlopen`——`kvspaceConnect` 对任何非 `shm` scheme 的 DSN 直接返回 NULL。
 - **layout** — Rust crate（`bin/libkvlanglayout.so`，CLI `bin/kvlanglayout`）。**o0 编译器**：scan → parse → lower（控制流降级、类型推断、特化）→ 把 KV 指令树写进 `/lib`。它**不做任何优化**——在此优化会丢掉其它 runtime 赖以在异构硬件上优化所需的高层语义。只写 `/lib`，诊断三级：`error` / `warn` / `info`。
 - **runtime-c** — 核心解释器（`bin/libkvlang_runtime.so`，C11）。纯解释：取指-译码-执行、native rwir 派发、拷贝操作码 `=`、call/return/br/goto、用户函数调用。不编译、不优化、不重排。只依赖 `kvspace*` C ABI。
 - **byteseek** — Rust（`bin/byteseek`，即 `byteseek` CLI）。一个参考 **myrwir 宿主**：链接 layout 与 runtime-c，解释自己的操作码、路由其余。其进程内 families：`term`、`json`、`http`、`networld`、`kvlang·*`。
@@ -141,11 +141,22 @@ make all                                     # runtime(C) + layout(Rust) + bytes
 
 `make` 目标：`all` · `runtime` · `layout` · `byteseek` · `json` · `oldhero` · `test` · `install` · `clean`。`make install` 把库装到 `/usr/lib`、CLI（`byteseek`、`kvlanglayout`）装到 `/usr/bin`、头文件装到 `/usr/include/kvlang`。
 
-**后端**由 `KVSPACE` DSN 选择（默认 `redis://127.0.0.1:6379`）：
+**兄弟仓库不是默认值。** 碰 kvspace 源仓的目标（`kvspace-libs`、`kvspace-frontend`、`kvspace-cli`、`kvspace-durable-lib`、`kvlang-xvalue`、`runtimec_runner`、`check-kvspace-head`）**必须显式传路径**，不传直接 `$(error)` 停下并给出可照抄的命令：
 
 ```bash
-KVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-c
-KVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-durable
+make kvspace-libs KVSPACE_SRC=/path/to/kvspace KVSPACE_DUR_SRC=/path/to/kvspace-durable
+cmake -S xvalue -B build/kvlang-xvalue \
+  -DKVLANG_KVSPACE_INCLUDE_DIRECTORY=/path/to/kvspace/include \
+  -DKVLANG_KVSPACE_LIB_DIRECTORY=/path/to/kvspace/build
+```
+
+理由：兄弟布局是开发者本地的偶然状态、不是契约；它已经制造过三类事故——构建系统静默命中兄弟仓里非 pin 的版本、CI 为了迁就默认值把仓库克隆到固定相邻目录后再也不敢动、pod 重建后路径全失效而报错不指向真因。**默认值一旦存在，正确路径就变成「没被默认值遮住的那条」，而没有人会去验它。**
+
+**后端**由链接期选择，不是由 DSN 选择。`KVSPACE` 给的是存储地址；`libkvspace` 只接受 `shm://`，其它 scheme 一律返回 NULL（没有运行期 dispatch，也没有 `dlopen`）。
+
+```bash
+KVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # libkvspace
+# fs:// 与 redis:// 需要改为链接 kvspace-durable，而不是换 DSN。
 ```
 
 另有两种模式：`byteseek create <func>` 打印 vthread `vid`，`byteseek run <vid>` 从持久化的 PC 继续（崩溃恢复）。用 `--lib p1:p2:…`（代替入口名）时，byteseek 会 layout 这些路径下的所有 `.kv` 并运行各 lib 的 `init`；没有对应环境变量。

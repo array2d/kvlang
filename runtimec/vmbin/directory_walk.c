@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <kvspace/kvlang_xvalue.h>
+#include <kvlang/xvalue.h>
 #include <kvspace/kvspace_xvalue.h>
 
 #include "contract/key_resolution.h"
@@ -146,7 +146,7 @@ static runtimec_status_t walk_reader(void *context, const char *key,
     }
     const uint8_t *langtype = NULL;
     const uint16_t langtype_size =
-        kvspaceXvalueHeadLangtypeBounded(wire, (uint64_t)wire_size, &langtype);
+        kvlangXvalueHeadLangtypeBounded(wire, (uint64_t)wire_size, &langtype);
     if (output_langtype != NULL && langtype != NULL) {
         *output_langtype = (const char *)langtype;
     }

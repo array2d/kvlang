@@ -28,7 +28,7 @@
 #include "contract/error.h"
 #include "contract/status.h"
 #include "contract/view.h"
-#include <kvspace/kvlang_xvalue.h>
+#include <kvlang/xvalue.h>
 #include <kvspace/kvspace_xvalue.h>
 #include "vmbin/handlers/container.h"
 #include "vmbin/frame_target_key.h"
@@ -66,7 +66,7 @@ static bool scatter_container_empty(const binrwir_binvthread_frame_t *frame,
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
 
-    if (kvspaceXvalueHeadNewSlack(NULL, 0U, "stringkeymap", &wire,
+    if (kvlangXvalueHeadNewSlack(NULL, 0U, "stringkeymap", &wire,
                                   &wire_size) != 0 ||
         wire == NULL) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
@@ -133,7 +133,7 @@ static void scatter_container_create(const binrwir_binvthread_frame_t *frame,
     memcpy(langtype_text, declared.data, declared.size);
     langtype_text[declared.size] = '\0';
     /* 空 body 的 map 头：body 长度为 0，类型在 attr 里。 */
-    if (kvspaceXvalueHeadNewSlack(NULL, 0U, langtype_text, &wire,
+    if (kvlangXvalueHeadNewSlack(NULL, 0U, langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
@@ -643,7 +643,7 @@ static void scatter_expand_from_compact(
 
             if (scatter_member_key(base, (int64_t)ordinal, member,
                                    sizeof(member)) != RUNTIMEC_STATUS_SUCCESS ||
-                kvspaceXvalueHeadNewSlack(
+                kvlangXvalueHeadNewSlack(
                     source.read_bytes + ordinal * source_type.element_size,
                     source_type.element_size,
                     element_langtype, &wire, &wire_size) != 0) {

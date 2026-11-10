@@ -2,9 +2,11 @@
 # 下载 ABI 依赖（deps.json: repo → tag），安装到 repo 内（不装 /usr）：
 #   头   → <root>/include/
 #   前端 → <root>/lib/
-#   后端 → <root>/lib/kvspace/（kvspace-c、kvspace-durable）
+#   后端 → <root>/lib/kvspace/（kvspace-durable）
 #   可执行 → <root>/bin/
 # 本地与 CI 共用。
+#
+# 没有 kvspace-c：该仓已冻结，shm 引擎并入 kvspace 仓，随 libkvspace 一起发布。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 mkdir -p "$ROOT/include" "$ROOT/lib/kvspace" "$ROOT/bin"
@@ -13,7 +15,7 @@ for repo in $(jq -r 'keys[]' "$ROOT/deps.json"); do
   tmp="$(mktemp -d)"
   gh release download "$ver" -R "array2d/$repo" -p "${repo}-abi-*-linux-x86_64.tar.gz" -D "$tmp"
   tar xzf "$tmp"/*.tar.gz -C "$tmp" --strip-components=1
-  if [ "$repo" = "kvspace-c" ] || [ "$repo" = "kvspace-durable" ]; then
+  if [ "$repo" = "kvspace-durable" ]; then
     # Backend tarballs may bundle build-time kvspace headers; use headers from kvspace only.
     cp -P "$tmp/lib/"*.so* "$ROOT/lib/kvspace/"
   else

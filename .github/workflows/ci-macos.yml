@@ -14,11 +14,15 @@ jobs:
           # 版本与 deps.json 的 kvspace 钉死一致，不跟 master 漂移。
           ver=$(python3 -c 'import json;print(json.load(open("deps.json"))["kvspace"])')
           echo "kvspace $ver"
+          # 显式落到 $RUNNER_TEMP，**不**用「仓库的兄弟目录」——兄弟布局是开发者本地
+          # 的偶然状态，不是契约（见 Makefile / CMakeLists 里的同类注释）。
           git clone --depth 1 --branch "$ver" \
-            https://github.com/array2d/kvspace /tmp/kvspace
-          mkdir -p include
-          cp -R /tmp/kvspace/include/kvspace include/
-          test -f include/kvspace/xvalue_head.h
+            https://github.com/array2d/kvspace "$RUNNER_TEMP/kvspace"
+          test -f "$RUNNER_TEMP/kvspace/include/kvspace/kvspace_xvalue.h"
+          # 头**不**复制进仓库 include/：kvlang/include/kvspace/ 一律被视为过期副本，
+          # runtimec 的配置阶段会 FATAL_ERROR。用它的那一步把路径**直接写进命令**，
+          # 不经环境变量中转——环境变量是隐式输入，不进命令行也不进日志，
+          # 同一个 `run:` 里两个人跑同一条命令可能得出不同结果。
       - name: 守卫：runtimec 不得依赖 runtimec2 / runtime
         run: |
           set -euo pipefail
@@ -40,7 +44,8 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S runtimec -B /tmp/kvlang-runtimec-build \
-            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+            -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON \
+            -DKVSPACE_INCLUDE_DIRECTORY="$RUNNER_TEMP/kvspace/include"
           cmake --build /tmp/kvlang-runtimec-build --parallel
       - name: ctest
         run: ctest --test-dir /tmp/kvlang-runtimec-build --output-on-failure
@@ -84,11 +89,12 @@ jobs:
     # 不装 /usr/local——layout 现在按 layout/../lib 找 libkvspace.dylib。
     steps:
       - uses: actions/checkout@v4
-      - name: 构建依赖链到 repo（blockmalloc / slotsboxmalloc / kvspace / kvspace-c）
+      # kvspace-c 已冻结并入 kvspace（shm 引擎在本仓），不再作为依赖构建。
+      - name: 构建依赖链到 repo（blockmalloc / slotsboxmalloc / kvspace）
         run: |
           set -euo pipefail
           mkdir -p include lib/kvspace bin
-          for repo in blockmalloc slotsboxmalloc kvspace kvspace-c; do
+          for repo in blockmalloc slotsboxmalloc kvspace; do
             git clone --depth 1 "https://github.com/array2d/$repo.git" "/tmp/$repo"
             cmake -S "/tmp/$repo" -B "/tmp/$repo/build" \
               -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD" \

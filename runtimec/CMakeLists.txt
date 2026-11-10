@@ -21,25 +21,54 @@ if(RUNTIMEC_TEMP_OUTPUT)
 endif()
 
 set(RUNTIMEC_INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include")
+# XValue 的**字节布局**头在 kvspace；**语言层**头在本仓（TASK-082 从 kvspace 搬来：
+# langtype、构造器、坐标比较器都是语言概念，存储层不该认识）。
+#
+# **必填，没有默认值**：兄弟目录布局是开发者本地的偶然状态，不是契约。它已经制造
+# 过三类事故——CMake 静默命中兄弟仓里非 pin 的版本、CI 把仓库 clone 到相邻目录之后
+# 就再也不敢动目录结构、pod 重建后路径全失效而报错不指向真因。默认值一旦存在，
+# 正确路径就变成「没被默认值遮住的那条」，而没有人会去验它。
+set(KVSPACE_INCLUDE_DIRECTORY "" CACHE PATH
+    "kvspace 仓的 include/（提供 <kvspace/kvspace_xvalue.h>）；必填")
+if(NOT KVSPACE_INCLUDE_DIRECTORY)
+    message(FATAL_ERROR
+        "缺少 -DKVSPACE_INCLUDE_DIRECTORY=<kvspace 仓的 include/>。\n"
+        "例：cmake -S runtimec -B build/runtimec \\\n"
+        "       -DKVSPACE_INCLUDE_DIRECTORY=/path/to/kvspace/include")
+endif()
 # kvspace 头只有一个定义点：`kvspace` 仓的 include/。kvlang 内的过期副本一旦重现，
 # 「真头 16 字节、副本 8 字节」的局面就无法验证，故在此拦住。
 set(KVLANG_STALE_INCLUDE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../include/kvspace")
-get_filename_component(KVSPACE_INCLUDE_DIRECTORY
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../kvspace/include" ABSOLUTE)
 if(EXISTS "${KVLANG_STALE_INCLUDE_DIRECTORY}")
     message(FATAL_ERROR "kvlang/include/kvspace/ must not exist (stale copy of the "
         "kvspace headers). Delete it; the single definition is "
         "${KVSPACE_INCLUDE_DIRECTORY}/kvspace.")
 endif()
-# XValue 的两个头（字节布局 + 语言层语义）都必须存在：只查一个会让「拆了一半」
-# 的树在配置期假通过，直到某个 TU 编译才炸。
-foreach(header_name kvspace_xvalue.h kvlang_xvalue.h)
-    if(NOT EXISTS "${KVSPACE_INCLUDE_DIRECTORY}/kvspace/${header_name}")
-        message(FATAL_ERROR "runtimec requires kvspace/include/kvspace/${header_name} "
-            "(looked in ${KVSPACE_INCLUDE_DIRECTORY}/kvspace; clone array2d/kvspace as "
-            "a sibling).")
-    endif()
-endforeach()
+if(NOT EXISTS "${KVSPACE_INCLUDE_DIRECTORY}/kvspace/kvspace_xvalue.h")
+    message(FATAL_ERROR
+        "KVSPACE_INCLUDE_DIRECTORY=${KVSPACE_INCLUDE_DIRECTORY} 里没有 "
+        "kvspace/kvspace_xvalue.h；它要指向 kvspace 仓的 include/。")
+endif()
+get_filename_component(KVLANG_INCLUDE_DIRECTORY
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include" ABSOLUTE)
+if(NOT EXISTS "${KVLANG_INCLUDE_DIRECTORY}/kvlang/xvalue.h")
+    message(FATAL_ERROR "runtimec requires kvlang/include/kvlang/xvalue.h "
+        "(looked in ${KVLANG_INCLUDE_DIRECTORY}/kvlang).")
+endif()
+
+# 语言层静态库：kvlang/xvalue 构建产出。构造器（kvlangXvalueHeadNew*）与坐标比较器
+# 都在这里，不再是 libkvspace 的符号。
+# 不要在这之前 `set(... "" CACHE FILEPATH)`：那会把缓存条目建成空串，
+# find_library 见变量已定义就**直接跳过搜索**，于是默认路径永远找不到、
+# 只有显式 -D 才能配置成功。让 find_library 自己建缓存条目：-D 仍然优先。
+find_library(KVLANG_XVALUE_LIBRARY_PATH NAMES kvlang_xvalue
+    PATHS "${CMAKE_CURRENT_SOURCE_DIR}/../lib" NO_DEFAULT_PATH
+    DOC "libkvlang_xvalue.a (built from kvlang/xvalue)")
+if(NOT KVLANG_XVALUE_LIBRARY_PATH)
+    message(FATAL_ERROR "cannot find libkvlang_xvalue.a (searched kvlang/lib). "
+        "Fix: cmake -S kvlang/xvalue -B <dir> && cmake --build <dir>, then copy the "
+        ".a into kvlang/lib or pass -DKVLANG_XVALUE_LIBRARY_PATH=<path>.")
+endif()
 
 set(RUNTIMEC_GENERATED_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
 file(MAKE_DIRECTORY "${RUNTIMEC_GENERATED_DIRECTORY}")
@@ -76,7 +105,7 @@ function(runtimec_configure_target target_name)
     target_compile_features(${target_name} PRIVATE c_std_11)
     target_include_directories(${target_name} PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}" "${RUNTIMEC_INCLUDE_DIRECTORY}"
-        "${KVSPACE_INCLUDE_DIRECTORY}")
+        "${KVSPACE_INCLUDE_DIRECTORY}" "${KVLANG_INCLUDE_DIRECTORY}")
     set_target_properties(${target_name} PROPERTIES
         C_VISIBILITY_PRESET hidden POSITION_INDEPENDENT_CODE ON)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
@@ -127,13 +156,16 @@ target_include_directories(runtimec_contract PUBLIC
 # contract 与 vmbin 的 handler 都直接调 kvspace C ABI（不对 ABI 二次封装，句柄就是
 # `void *`），**只链前端 `libkvspace`**——kvspace-c / kvspace-durable 由 DSN scheme
 # 运行期选择，编译期不出现。`m`：scalar 的 sqrt/exp/log。
-target_link_libraries(runtimec_contract PRIVATE "${RUNTIMEC_KVSPACE_LIBRARY_PATH}")
+# contract 造值要用语言层构造器（kvlangXvalueHeadNew*），故一并链 kvlang_xvalue.a。
+# 方向仍是「语言层 ← 运行时」，kvspace 不参与。
+target_link_libraries(runtimec_contract PRIVATE
+    "${RUNTIMEC_KVSPACE_LIBRARY_PATH}" "${KVLANG_XVALUE_LIBRARY_PATH}")
 target_link_libraries(runtimec_binrwir PRIVATE runtimec_contract)
 target_link_libraries(runtimec_vmkv PRIVATE runtimec_contract runtimec_binrwir)
 target_link_libraries(runtimec_binrwir_compiler
     PRIVATE runtimec_contract runtimec_binrwir)
 target_link_libraries(runtimec_vmbin PRIVATE runtimec_contract runtimec_binrwir
-    "${RUNTIMEC_KVSPACE_LIBRARY_PATH}" m)
+    "${RUNTIMEC_KVSPACE_LIBRARY_PATH}" "${KVLANG_XVALUE_LIBRARY_PATH}" m)
 # engine 是组合根：connect kvspace 拿句柄，再借给 contract/kvspace_access。
 target_link_libraries(runtimec_engine PRIVATE
     runtimec_contract runtimec_binrwir runtimec_vmkv
@@ -212,3 +244,10 @@ foreach(alias_contract "runtimec_contract" "runtimec_binrwir" "runtimec_vmkv"
     add_library(kvlang::${alias_contract} ALIAS ${alias_contract})
 endforeach()
 add_library(kvlang::runtimec_scaffold ALIAS kvlang_runtimec_scaffold)
+
+# **测试文件与它的注册是一组**：只留 .c 没有 add_test 时，`ctest` 报
+# `No tests were found!!!` 且**退出码 0**，CI 因此恒绿而一个测试都没跑过
+# （TASK-086 的假绿）。`enable_testing()` 必须在这里调——子目录里的 add_test
+# 只有在祖先目录开启后才被 ctest 看到。
+enable_testing()
+add_subdirectory(tests)

@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "contract/view.h"
-#include <kvspace/kvlang_xvalue.h>
+#include <kvlang/xvalue.h>
 #include <kvspace/kvspace_xvalue.h>
 
 #include "contract/kvspace_interface.h"
@@ -119,7 +119,7 @@ runtimec_status_t runtimec_vthread_status_write(
     }
     {
         uint8_t *attr = slot + KVSPACE_XVALUE_HEAD_LEN + (uint64_t)status.size;
-        attr[0] = (uint8_t)KVSPACE_XVALUE_ATTR_TAG_LANGTYPE;
+        attr[0] = (uint8_t)KVLANG_XVALUE_ATTR_TAG_LANGTYPE;
         attr[1] = (uint8_t)(langtype_length & 0xFFU);
         attr[2] = (uint8_t)((langtype_length >> 8U) & 0xFFU);
         memcpy(attr + 3, RUNTIMEC_VTHREAD_STATUS_LANGTYPE, langtype_length);

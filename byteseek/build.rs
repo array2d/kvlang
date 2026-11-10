@@ -162,6 +162,9 @@ fn main() {
             .unwrap_or(RUNTIME_LIBRARY_NAME);
         println!("cargo:rustc-link-lib=dylib={runtime_link_name}");
         println!("cargo:rustc-link-lib=dylib=kvspace");
+        // 语言层的 wire 构造器（kvlangXvalueHeadNew*）：TASK-082 从 libkvspace 搬到
+        // kvlang 自己的静态库，随 kvlang/xvalue 构建产出到 repo 的 lib/。
+        println!("cargo:rustc-link-lib=static=kvlang_xvalue");
         println!("cargo:rustc-link-lib=dylib=kvlanglayout");
 
         if cfg!(target_os = "macos") {

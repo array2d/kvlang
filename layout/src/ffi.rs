@@ -66,28 +66,28 @@ extern "C" {
     fn kvspaceDeltree(h: Handle, key: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
     fn kvspaceMkindex(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
     /// 固定 16 字节 head 构造器（直接 memcpy struct + body + attr 区；langtype 空 = 空 attr）。
-    fn kvspaceXvalueHeadNewNone(out: *mut *mut u8, out_len: *mut u64) -> c_int;
+    fn kvlangXvalueHeadNewNone(out: *mut *mut u8, out_len: *mut u64) -> c_int;
     /// **没有 `storetype` 形参**：head 的 storetype 由构造器按 kind 自己定，
     /// 调用方不再决定。签名以 `kvspace/include/kvspace/xvalue_head.h` 为准。
     ///
     /// 早先这里多传一个 `storetype: u8`，而新库已经改成 4 个形参——
     /// **实参个数与形参个数不符是 UB**：Debug 构建侥幸不崩，Release 必段错误
-    /// （14:0x 实测，`kvspaceXvalueHeadNewScalar` 里 SIGSEGV）。
-    fn kvspaceXvalueHeadNewScalar(
+    /// （14:0x 实测，`kvlangXvalueHeadNewScalar` 里 SIGSEGV）。
+    fn kvlangXvalueHeadNewScalar(
         raw: *const u8,
         raw_len: u32,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
-    fn kvspaceXvalueHeadNewSlack(
+    fn kvlangXvalueHeadNewSlack(
         data: *const u8,
         data_len: u64,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
-    fn kvspaceXvalueHeadNewTensor(
+    fn kvlangXvalueHeadNewTensor(
         dims: *const u64,
         ndim: u32,
         raw: *const u8,
@@ -96,7 +96,7 @@ extern "C" {
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
-    fn kvspaceXvalueHeadNewCode(
+    fn kvlangXvalueHeadNewCode(
         body: *const u8,
         body_len: u64,
         langtype: *const c_char,
@@ -104,16 +104,16 @@ extern "C" {
         out_len: *mut u64,
     ) -> c_int;
 
-    fn kvspaceNewChar(
+    fn kvlangXvalueNewChar(
         bytes: *const u8,
         len: u32,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvspaceNewBool(v: u8, langtype: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
-    fn kvspaceNewInt64(v: i64, langtype: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
-    fn kvspaceNewFloat64(v: f64, langtype: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
+    fn kvlangXvalueNewBool(v: u8, langtype: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
+    fn kvlangXvalueNewInt64(v: i64, langtype: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
+    fn kvlangXvalueNewFloat64(v: f64, langtype: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
 }
 
 // ── 原位 head 访问（16 字节固定头：长度全在 head 里，attr 区无前缀）──
@@ -513,13 +513,13 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>,
     let dims = al_to_dims(kind, array_len);
     if (kind.is_empty() || kind == "None") && raw.is_empty() {
         return call_codec64("HeadNewNone", |out, out_len| unsafe {
-            kvspaceXvalueHeadNewNone(out, out_len)
+            kvlangXvalueHeadNewNone(out, out_len)
         });
     }
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     if kind == "char" || kind.starts_with("char/") {
         return call_codec64("HeadNewSlack", |out, out_len| unsafe {
-            kvspaceXvalueHeadNewSlack(
+            kvlangXvalueHeadNewSlack(
                 raw.as_ptr(),
                 raw.len() as u64,
                 empty,
@@ -531,12 +531,12 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>,
     if !dims.is_empty() && !kind.contains('·') && !kind.starts_with('/') {
         let d: Vec<u64> = dims.iter().map(|&x| x as u64).collect();
         return call_codec64("HeadNewTensor", |out, out_len| unsafe {
-            kvspaceXvalueHeadNewTensor(d.as_ptr(), d.len() as u32, raw.as_ptr(), raw.len() as u64, empty, out, out_len)
+            kvlangXvalueHeadNewTensor(d.as_ptr(), d.len() as u32, raw.as_ptr(), raw.len() as u64, empty, out, out_len)
         });
     }
     if kind == "rwir" || kind == "def langtype" || (kind == "rwfunc" && !raw.is_empty()) {
         return call_codec64("HeadNewCode", |out, out_len| unsafe {
-            kvspaceXvalueHeadNewCode(
+            kvlangXvalueHeadNewCode(
                 raw.as_ptr(),
                 raw.len() as u64,
                 empty,
@@ -546,7 +546,7 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>,
         });
     }
     call_codec64("HeadNewScalar", |out, out_len| unsafe {
-        kvspaceXvalueHeadNewScalar(raw.as_ptr(), raw.len() as u32, empty, out, out_len)
+        kvlangXvalueHeadNewScalar(raw.as_ptr(), raw.len() as u32, empty, out, out_len)
     })
 }
 
@@ -604,7 +604,7 @@ pub fn new_char(kind: &str, s: &str) -> Result<Vec<u8>, String> {
     };
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     call_codec64("HeadNewSlack", |out, out_len| unsafe {
-        kvspaceXvalueHeadNewSlack(
+        kvlangXvalueHeadNewSlack(
             raw.as_ptr(),
             raw.len() as u64,
             empty,
@@ -617,7 +617,7 @@ pub fn new_char(kind: &str, s: &str) -> Result<Vec<u8>, String> {
 pub fn new_char_byte(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     call_codec("NewChar", |out, out_len| unsafe {
-        kvspaceNewChar(bytes.as_ptr(), bytes.len() as u32, empty, out, out_len)
+        kvlangXvalueNewChar(bytes.as_ptr(), bytes.len() as u32, empty, out, out_len)
     })
 }
 
@@ -625,26 +625,26 @@ pub fn new_char_byte(bytes: &[u8]) -> Result<Vec<u8>, String> {
 ///
 /// **不是零字节**——存储层以 `invalid XValue` 拒绝零字节值（实测见
 /// `workspace/tmp/coding1/none_wire_probe.c`）。也不要手拼这 16 字节：
-/// 头布局的唯一来源是 kvspace 的 `kvspaceXvalueHeadNewNone`。
+/// 头布局的唯一来源是 kvspace 的 `kvlangXvalueHeadNewNone`。
 pub fn new_none() -> Result<Vec<u8>, String> {
     call_codec64("HeadNewNone", |out, out_len| unsafe {
-        kvspaceXvalueHeadNewNone(out, out_len)
+        kvlangXvalueHeadNewNone(out, out_len)
     })
 }
 
 pub fn new_bool(v: bool) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec("NewBool", |out, out_len| unsafe { kvspaceNewBool(v as u8, empty, out, out_len) })
+    call_codec("NewBool", |out, out_len| unsafe { kvlangXvalueNewBool(v as u8, empty, out, out_len) })
 }
 
 pub fn new_int64(v: i64) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec("NewInt64", |out, out_len| unsafe { kvspaceNewInt64(v, empty, out, out_len) })
+    call_codec("NewInt64", |out, out_len| unsafe { kvlangXvalueNewInt64(v, empty, out, out_len) })
 }
 
 pub fn new_float64(v: f64) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec("NewFloat64", |out, out_len| unsafe { kvspaceNewFloat64(v, empty, out, out_len) })
+    call_codec("NewFloat64", |out, out_len| unsafe { kvlangXvalueNewFloat64(v, empty, out, out_len) })
 }
 
 #[cfg(test)]

@@ -20,7 +20,7 @@
  *   - `new` 的 body 打包用定长栈缓冲 `CONTAINER_NEW_BODY_CAPACITY`（8192 字节，
  *     no-malloc 基线）。超过即失败，细节码
  *     `RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER`——**那是缓冲上限，不是内存不足**。
- *     正解是流式写或让存储层分配（`kvspaceXvalueHeadNewTensor`），属下一批。
+ *     正解是流式写或让存储层分配（`kvlangXvalueHeadNewTensor`），属下一批。
  *   - `at` / `set` 的**多维**已支持（`container_element_offset` 按 langtype 的
  *     dims 做行主序扁平化，每维独立边界检查）。剩下的限制只有数组总字节数那条。
  */
@@ -40,7 +40,7 @@
 #include "contract/status.h"
 #include "contract/view.h"
 #include "contract/kvspace_interface.h"
-#include <kvspace/kvlang_xvalue.h>
+#include <kvlang/xvalue.h>
 #include <kvspace/kvspace_xvalue.h>
 #include "vmbin/frame_target_key.h"
 #include "vmbin/handlers/handler_call.h"
@@ -61,7 +61,7 @@
  * 字节），而 512 会让它 `0x4301`。取 8 倍余量给同类规模留空间，同时仍在栈上——
  * 单个 8KB 帧对递归深度 log₂N 的 quicksort、以及 nqueens 都可接受。
  *
- * **再往上就该换实现，不是继续加这个数**：`kvspaceXvalueHeadNewTensor` 让存储层
+ * **再往上就该换实现，不是继续加这个数**：`kvlangXvalueHeadNewTensor` 让存储层
  * 分配，栈帧不随元素数增长。加这个常量只是把分水岭推后，不是消除它。
  *
  * ── 覆盖情况：只有一半 ────────────────────────────────────────────────
@@ -1411,7 +1411,7 @@ static runtimec_status_t container_write_member(
     }
     memcpy(langtype_text, declared.data, declared.size);
     langtype_text[declared.size] = '\0';
-    if (kvspaceXvalueHeadNewSlack(element.read_bytes, (uint64_t)element.size,
+    if (kvlangXvalueHeadNewSlack(element.read_bytes, (uint64_t)element.size,
                                   langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {

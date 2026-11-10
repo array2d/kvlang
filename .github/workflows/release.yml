@@ -108,11 +108,12 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - name: 构建依赖链到 repo（blockmalloc / slotsboxmalloc / kvspace / kvspace-c / durable）
+      # kvspace-c 已冻结并入 kvspace（shm 引擎在本仓），不再作为依赖构建。
+      - name: 构建依赖链到 repo（blockmalloc / slotsboxmalloc / kvspace）
         run: |
           set -euo pipefail
           mkdir -p include lib/kvspace bin
-          for repo in blockmalloc slotsboxmalloc kvspace kvspace-c; do
+          for repo in blockmalloc slotsboxmalloc kvspace; do
             git clone --depth 1 "https://github.com/array2d/$repo.git" "/tmp/$repo"
             cmake -S "/tmp/$repo" -B "/tmp/$repo/build" \
               -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD" \

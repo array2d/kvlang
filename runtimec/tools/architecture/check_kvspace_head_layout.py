@@ -9,7 +9,7 @@
 或 `libkvspace_durable`。前端重建、后端没重建时，探针只看前端会给出「16 字节，
 没问题」的假结论——这条是用一次完整的红换来的。
 
-判据不看符号是否存在（两版都有 `kvspaceXvalueHeadNewSlack`），而是直接造一个值
+判据不看符号是否存在（两版都有 `kvlangXvalueHeadNewSlack`），而是直接造一个值
 看字节：
 
     8 字节布局 : [len:u48][storetype][ptr]  body  [attr_len:u16][records]
@@ -147,7 +147,7 @@ def probe_library(library_path: str) -> str:
     """
     try:
         library = ctypes.CDLL(library_path)
-        new_slack = library.kvspaceXvalueHeadNewSlack
+        new_slack = library.kvlangXvalueHeadNewSlack
     except (OSError, AttributeError) as error:
         print(f"  cannot load or bind: {error}")
         return RESULT_UNKNOWN
@@ -303,7 +303,7 @@ STUB_SOURCE = """\
 #include <stdlib.h>
 #include <string.h>
 
-int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
+int kvlangXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
                               const char *langtype,
                               uint8_t **output_wire,
                               uint64_t *output_wire_length) {
@@ -572,7 +572,7 @@ int kvspaceGet(void *h, const char *key, int resolve, uint8_t **out,
     return forward->get(forward->handle, key, resolve, out, out_len);
 }
 
-int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
+int kvlangXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
                               const char *langtype,
                               uint8_t **output_wire,
                               uint64_t *output_wire_length) {
@@ -614,7 +614,7 @@ STUB_UNRECOGNISED = """\
 #include <stdint.h>
 #include <stdlib.h>
 
-int kvspaceXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
+int kvlangXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
                               const char *langtype,
                               uint8_t **output_wire,
                               uint64_t *output_wire_length) {

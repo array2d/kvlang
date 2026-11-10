@@ -229,7 +229,7 @@ impl Engine {
         let value = unsafe {
             let mut out = null_mut();
             let mut len = 0u64;
-            let rc = kvspaceXvalueHeadNewExt(
+            let rc = kvlangXvalueHeadNewExt(
                 locator.as_ptr(),
                 locator.len() as u32,
                 cs(target_langtype).as_ptr(),
