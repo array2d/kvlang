@@ -11,17 +11,17 @@ lib kvlang/spec/runtime语义/动态键 {
 
 ```
 v -> m·*k
-⇒ newm := kvspace/key·resolveptr(m, k)     // base + 键值 → 位置（Ptr）
+⇒ newm := kvlang·resolvekey(m, k)     // base + 键值 → 位置（Ptr）
    *newm = v                              // 显式解引用写
 ```
 
-读同形：`newm := kvspace/key·resolveptr(m, k)`，再 `*newm -> x`。
+读同形：`newm := kvlang·resolvekey(m, k)`，再 `*newm -> x`。
 
 - **位置用 Ptr 值表示**：Ptr 的 body 就是目标的绝对 key 路径（见 [[ptr]]）；
 - **读写只走显式 `*`**：这是本 runtime 唯一的解引用路径，不存在隐式解引用；
 - **`*` 是语法标记，不是数据**：layout 期固定，运行期只按标记跟一跳；
-- **`resolveptr` 不判目标是否存在**：位置不是值。C 的 `&arr[i]` 对未初始化元素也合法；存在性
-  在解引用那一步判。若 `resolveptr` 提前判存在，`v -> base·*k` 的首次写永远不成立。
+- **`kvlang·resolvekey` 不判目标是否存在**：位置不是值。C 的 `&arr[i]` 对未初始化元素也合法；存在性
+  在解引用那一步判。若 `kvlang·resolvekey` 提前判存在，`v -> base·*k` 的首次写永远不成立。
 
 **为什么不用 `kvspace·get/set`**：按名访问一个 key 不需要算子（读用该 key 作操作数、写用
 `=` / `->` 落到该 key 为写目标）。`get`/`set` 把「取哪一段」混进读参、并用读参表达写目标，
@@ -32,10 +32,10 @@ v -> m·*k
 | rwir key | 读参 | 写参 | 结果 | 语义 |
 |---|---|---|---|---|
 | `kvspace/key·tostr` | 1：值 | 1 | 键文本 `char/utf8` | 值 → 成员键文本（逐字铁律的唯一实现） |
-| `kvspace/key·resolveptr` | 2：base、键值 | 1 | Ptr | 由 base 与键值算出目标位置 |
+| `kvlang·resolvekey` | 2：base、键值 | 1 | Ptr | 由 base 与键值算出目标位置 |
 | `kvspace/key·abs` | 1：可寻址表达式 | 1 | Ptr | 取已有位置（快捷形式 `&x`） |
 
-- `resolveptr` 的**键值直接是值**，成员键文本由 `member_key_text` 在算子内部算，不要求调用方
+- `kvlang·resolvekey` 的**键值直接是值**，成员键文本由 `member_key_text` 在算子内部算，不要求调用方
   先 `tostr` 再传文本；
 - `tostr` 不是动态键的必经步骤，单独存在用于「只想要键文本」的场景；
 - 三者的共同点：**它们都只算位置，不读写值**。读写由 `*` 与普通读写完成。
@@ -46,7 +46,7 @@ v -> m·*k
 
 | 步 | 组件 | 动作 |
 |---|---|---|
-| 1 | layout | 发 `kvspace/key·resolveptr(m, k) -> _p` |
+| 1 | layout | 发 `kvlang·resolvekey(m, k) -> _p` |
 | 2 | vmkv | 正常编码；base、k 是读参，`_p` 是写参 |
 | 3 | vmbin | 解析 base 的绝对 key → 调 `member_key_text(k)` 得键文本 → 拼 `base·键文本` → 造 Ptr |
 | 4 | layout / vmbin | 读：`*_p -> x`；写：`v -> *_p` |
@@ -56,11 +56,11 @@ v -> m·*k
 **迭代，不设多段变参算子**：
 
 ```
-p1 := kvspace/key·resolveptr(a,  k1)
-p2 := kvspace/key·resolveptr(p1, k2)
+p1 := kvlang·resolvekey(a,  k1)
+p2 := kvlang·resolvekey(p1, k2)
 ```
 
-`resolveptr` 的 base 允许是 Ptr：base 为 Ptr 时先取其 target 路径，再拼下一段。由此 N 段是 N 次
+`kvlang·resolvekey` 的 base 允许是 Ptr：base 为 Ptr 时先取其 target 路径，再拼下一段。由此 N 段是 N 次
 调用，段数不设上限，也不需要新的 arity。
 
 **中间段的存在性是硬前提**：要拿它作父路径继续拼下一段，所以它必须已经存在（是容器）；
@@ -68,7 +68,7 @@ p2 := kvspace/key·resolveptr(p1, k2)
 
 ### 3.3 base 的四态
 
-`resolveptr` 的 base 按序判定，命中即止：
+`kvlang·resolvekey` 的 base 按序判定，命中即止：
 
 | base 形态 | 解析 |
 |---|---|
@@ -81,21 +81,21 @@ p2 := kvspace/key·resolveptr(p1, k2)
 四态都不命中 ⇒ 具名失败，不得把 body 字节当路径猜。
 
 **「存在性」只对中间段成立**：中间段要拿 target 作父路径继续拼，所以它必须存在；末端与单段
-不要求存在（写时创建）。这一条是 `resolveptr` 不判目标存在性（§一）在多段情形下的补充，
+不要求存在（写时创建）。这一条是 `kvlang·resolvekey` 不判目标存在性（§一）在多段情形下的补充，
 两者不矛盾。
 
 ### 3.4 混合段（本轮不支持）
 
 `a·b·*k`（静态段与动态段混在一条成员链里）：**本轮具名拒绝**。判据是 parser 的成员写解析
 只接受单段。`tutorial/runtimec/12-struct/10-member-chain.kv:45` 的 `t·*k·val` 是**中段动态**
-形态（比末段动态多一步：先 `resolveptr` 出中间位置，再静态拼 `·val`），**不要与 `a·b·*k` 的
+形态（比末段动态多一步：先 `kvlang·resolvekey` 出中间位置，再静态拼 `·val`），**不要与 `a·b·*k` 的
 末段动态合并成一种实现**。
 
 > 证据说明：该文件当前失败于 `local '_6' is written with a non-concrete langtype`
 > （`FAILURES.md`），不是动态键拦截——**两个缺陷叠在同一文件上**。因此它不能作为「动态键
 > 中段形态今天被拒」的证据；中段形态本轮按上面判据直接拒绝，与那个失败原因无关。
 
-将来支持时的路径已明确：静态段在 layout 期折叠进 base 路径，动态段进 `resolveptr`，
+将来支持时的路径已明确：静态段在 layout 期折叠进 base 路径，动态段进 `kvlang·resolvekey`，
 不必新增算子。
 
 中段 Ptr（`p1·*k`）在语义上由 base 四态天然支持，本轮同样不开放语法；语料 0 处。
@@ -118,11 +118,11 @@ p2 := kvspace/key·resolveptr(p1, k2)
 （`runtimec/vmbin/handlers/handler_call.h`），本族只是**复用其语义**；`0x4409` 属值访问段
 `VMBIN_VALUE_ACCESS_DIAG_*`。规范给出的对应关系是「情形 → 既有码」，不是新增码表。
 
-**本族不进 `native_rwir_decls.kv`**：`resolveptr` / `tostr` 的第一读参是「任意可作键的值」
+**本族不进 `native_rwir_decls.kv`**：`kvlang·resolvekey` / `tostr` 的第一读参是「任意可作键的值」
 或 base 四态，没有任何单一 langtype 能收敛；`abs` 的读参是「可寻址表达式」。这与
 `kvspace-family.md` §七 的结论一致（那条有五条语料从 blocked 变 fail 的反证），不要再试着补声明。
 
-**缺失的语义**：`resolveptr` 定位到的目标不存在时，读得 `None`（成员访问语义）；普通绝对 key
+**缺失的语义**：`kvlang·resolvekey` 定位到的目标不存在时，读得 `None`（成员访问语义）；普通绝对 key
 的读仍失败封闭。两者走不同路径，不冲突。
 
 **零长不是缺失**：判据是 key/head 的存在性，不是 body 长度。空 body 是合法值（空串）。
@@ -145,14 +145,14 @@ p2 := kvspace/key·resolveptr(p1, k2)
 | 保留 `kvspace·get/set` 的 `(base,key)` 形态 | 用读参表达写目标，违反方向原则 |
 | `store(base, 键文本) -> 写参`（写参当值载体） | 写参语义出现第二个含义（全仓恒为「目标 key」）；无法表达跨位置复制 |
 | `store(base, 键文本, 值)`（3 读 0 写） | 与方向原则字面冲突；且 `*ptr` 已覆盖，不需要第二个写算子 |
-| 多段变参 `resolveptr(base, k1, k2, …)` | 段数不设限但 rwir arity 有上限；迭代已覆盖且每段可独立诊断 |
+| 多段变参 `kvlang·resolvekey(base, k1, k2, …)` | 段数不设限但 rwir arity 有上限；迭代已覆盖且每段可独立诊断 |
 | 在 vmkv 期求值动态键 | 静态编码器无帧无值，等于要求编译期知道运行期值 |
 | 运行期按 `·*` 文本现场解析 | 键文本成了半程序，`*` 的规则会分裂在两处 |
 
 ## 七、验收
 
 - `&x -> p; *p -> y` 得 `y == x`；`*p = 9` 后读 `x` 得 9；
-- 多段：`a·*k1·*k2` 与两次 `resolveptr` 的结果一致，且第一段失败与第二段失败的诊断码可区分；
+- 多段：`a·*k1·*k2` 与两次 `kvlang·resolvekey` 的结果一致，且第一段失败与第二段失败的诊断码可区分；
 - 读缺失得 `None`；读空串值得空串（两者不可混）；
 - 非 Ptr 解引用、不可寻址取址、NaN 键、元组键各有一条具名失败；
 - 键文本超后端上限：具名失败，无截断。

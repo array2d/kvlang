@@ -72,7 +72,7 @@ kvspace 是核心的寻址空间与内存空间；语言本体是小核心 runti
 
 ![kvlang 生态架构](docs/kvlang-architecture.zh.png)
 
-- **kvspace** — 一套 PascalCase、无下划线的 C ABI（`kvspaceResolve`、`kvspaceRealloc`、`kvspaceList`）；两种实现，**由链接期选择、不是由 DSN 选择**：`libkvspace`（C，只服务 `shm://`）与 `kvspace-durable`（Rust，`redis://` / `fs://`；正在迁到当前 ABI）。没有运行期 dispatch，也没有 `dlopen`——`kvspaceConnect` 对任何非 `shm` scheme 的 DSN 直接返回 NULL。
+- **kvspace** — 一套 PascalCase、无下划线的 C ABI（`kvspaceResolveOffset`、`kvspaceRealloc`、`kvspaceList`）；两种实现，**由链接期选择、不是由 DSN 选择**：`libkvspace`（C，只服务 `shm://`）与 `kvspace-durable`（Rust，`redis://` / `fs://`；正在迁到当前 ABI）。没有运行期 dispatch，也没有 `dlopen`——`kvspaceConnect` 对任何非 `shm` scheme 的 DSN 直接返回 NULL。
 - **layout** — Rust crate（`bin/libkvlanglayout.so`，CLI `bin/kvlanglayout`）。**o0 编译器**：scan → parse → lower（控制流降级、类型推断、特化）→ 把 KV 指令树写进 `/lib`。它**不做任何优化**——在此优化会丢掉其它 runtime 赖以在异构硬件上优化所需的高层语义。只写 `/lib`，诊断三级：`error` / `warn` / `info`。
 - **runtime-c** — 核心解释器（`bin/libkvlang_runtime.so`，C11）。纯解释：取指-译码-执行、native rwir 派发、拷贝操作码 `=`、call/return/br/goto、用户函数调用。不编译、不优化、不重排。只依赖 `kvspace*` C ABI。
 - **byteseek** — Rust（`bin/byteseek`，即 `byteseek` CLI）。一个参考 **myrwir 宿主**：链接 layout 与 runtime-c，解释自己的操作码、路由其余。其进程内 families：`term`、`json`、`http`、`networld`、`kvlang·*`。
@@ -95,7 +95,6 @@ kvlang/
 ├── tutorial/             示例，同时是一致性测试套件
 ├── error_cases/          期望诊断用例
 ├── benchmark/            跨语言、跨后端性能基准
-├── bench/                IOPS 地板微基准
 ├── extruntime_tutorial/  扩展 runtime 示例：json（Go）、numpy（Python）
 ├── extensions/kvlang/    .kv 的 VS Code 语言支持
 ├── site/                 kvlang.com 源码

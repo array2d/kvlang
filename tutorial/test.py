@@ -26,14 +26,20 @@ from unittest import mock
 RED, GREEN, YELLOW, NC = "\033[0;31m", "\033[0;32m", "\033[1;33m", "\033[0m"
 ROOT = Path(__file__).resolve().parent.parent
 KV = str(ROOT / "kvlang")
-LAYOUT_BIN = os.environ.get("KVLANG_LAYOUT_BIN", str(ROOT / "bin" / "kvlanglayout"))
-TERM_BIN = os.environ.get("KVLANG_TERM_BIN", str(ROOT / "bin" / "byteseek"))
-_C_DSN = os.environ.get("KVSPACE", "redis://127.0.0.1:6379")
+# 被测二进制的路径走 **argv**（`--layout-bin=` / `--term-bin=`），不走环境变量：
+# 环境变量是隐式输入，不进命令行也不进日志（G12）。这里的默认值是本仓产物路径，
+# 不是外部配置。
+LAYOUT_BIN = str(ROOT / "bin" / "kvlanglayout")
+TERM_BIN = str(ROOT / "bin" / "byteseek")
+# DSN 无默认值：没给 `--kvspace=` 就报错退出。曾经这里缺省 redis，单库化后
+# `libkvspace` 只服务 shm://，那个默认值根本连不上，却要等用的时候才炸。
+_C_DSN = ""
 FAIL_CSV = (ROOT / "tutorial" / "test_failures.csv").resolve()
 BENCH_CSV = (ROOT / "tutorial" / "benchmark.csv").resolve()
 MODULE = sys.modules[__name__]
 
-_KV_ENV = {**os.environ, "KVSPACE": os.environ.get("KVSPACE", "goheap://")}
+# DSN 由 argv 的 `--kvspace=` 决定（见 _C_DSN），这里**不读环境变量**。
+_KV_ENV = {**os.environ}
 
 # shm/fs 后端每用例一个独立文件，见 _case_dsn。
 _BACKEND_TMP = None
@@ -76,8 +82,8 @@ def _case_dsn() -> str:
         _drop_backend(_LAST_BACKEND)
         _LAST_BACKEND = None
     n = next(_CASE_SEQ)
-    dsn = (f"shm://{_BACKEND_TMP.name}/{n}.shm"
-           if _C_DSN.startswith("shm://") else f"fs://{_BACKEND_TMP.name}/{n}.fs")
+    # 只有 shm（G17：durable 的 fs/redis/s3 不在测试面出现，也不留分支）。
+    dsn = f"shm://{_BACKEND_TMP.name}/{n}.shm"
     _LAST_BACKEND = dsn
     return dsn
 
@@ -335,12 +341,20 @@ def main():
     ap.add_argument("--no-build", action="store_true", help="skip make build")
     ap.add_argument("--errorexit", action="store_true", help="exit on first error")
     ap.add_argument("--bench", action="store_true", help="benchmark matching .kv/.py/.c files")
-    ap.add_argument("--kvspace", default=_C_DSN,
-                    help="KVSPACE dsn（默认取环境变量 KVSPACE，未设时 redis://127.0.0.1:6379）")
+    ap.add_argument("--kvspace", default="",
+                    help="DSN，必填且只接受 shm://（如 shm:///tmp/kv.shm）；无默认值")
+    ap.add_argument("--layout-bin", default=LAYOUT_BIN, help="kvlanglayout 路径")
+    ap.add_argument("--term-bin", default=TERM_BIN, help="byteseek 路径")
     args = ap.parse_args()
+    global LAYOUT_BIN, TERM_BIN
+    LAYOUT_BIN, TERM_BIN = args.layout_bin, args.term_bin
     _C_DSN = args.kvspace
-    if _C_DSN.startswith(("shm://", "fs://")):
-        _BACKEND_TMP = tempfile.TemporaryDirectory(prefix="kvlang-tut-")
+    if not _C_DSN:
+        ap.error("缺少 --kvspace=：DSN 必填且只接受 shm://，例如 "
+                 "--kvspace=shm:///tmp/kv.shm（无默认值）")
+    if not _C_DSN.startswith("shm://"):
+        ap.error(f"--kvspace 只接受 shm://，收到 {_C_DSN!r}")
+    _BACKEND_TMP = tempfile.TemporaryDirectory(prefix="kvlang-tut-")
 
     files = [f for f in discover(ROOT / "tutorial")
              if args.filter in str(f)]

@@ -33,11 +33,9 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
 }
 
 fn dsn(tag: &str) -> String {
-    format!(
-        "fs:///tmp/kvlanglayout_shape_{}_{}",
-        tag,
-        std::process::id(),
-    )
+    // shm 而非 fs：单库后 libkvspace 只服务 shm://，而 shm 也是 file-backed
+    // mmap，持久化/重开能力齐全。测的是布局语义，不是后端语义。
+    kvlanglayout::ffi::test_dsn(&format!("shape_{tag}"))
 }
 
 fn slot_text(kv: &mut Kv, key: &str) -> String {
@@ -73,7 +71,7 @@ fn opcodes(tag: &str, func: &str, src: &str) -> Vec<String> {
     // 用完即清：`.kv` 与 fs store 都删。反复跑不留残骸（曾累积到 421G）。
     drop(kv);
     let _ = std::fs::remove_file(&file);
-    let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
+    kvlanglayout::ffi::remove_test_store(&db);
     ops
 }
 
@@ -148,7 +146,7 @@ fn string_plus_emits_concat_and_mixed_is_rejected() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("cannot mix string and numeric"), "stderr: {err}");
     let _ = std::fs::remove_file(&file);
-    let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
+    kvlanglayout::ffi::remove_test_store(&db);
 }
 
 #[test]
@@ -180,6 +178,6 @@ fn no_switch_can_bring_typed_names_back() {
         }
         drop(kv);
         let _ = std::fs::remove_file(&file);
-        let _ = std::fs::remove_dir_all(db.trim_start_matches("fs://"));
+        kvlanglayout::ffi::remove_test_store(&db);
     }
 }

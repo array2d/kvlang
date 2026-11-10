@@ -1652,7 +1652,7 @@ impl Parser {
         let mut inst = Instruction::default();
         let mut multi: Vec<Instruction> = Vec::new();
         /*
-         * desugar 为**追加**产生的指令（动态键的 `resolveptr`）。
+         * desugar 为**追加**产生的指令（动态键的 `kvlang·resolvekey`）。
          * 与 `multi` 分开：`multi` 是「这条源码语句本来就多条」的展开，
          * 合用一个变量会让 `out` 的构造丢掉 `inst`（见下方注释）。
          */
@@ -1801,7 +1801,7 @@ impl Parser {
             self.dispatch_struct_literal(&mut i);
             self.lower_array_fill(&mut i);
             self.desugar_subscript_write(&mut i);
-            /* 动态键展开要多一条 `resolveptr`：先收在 `expanded` 里，
+            /* 动态键展开要多一条 `kvlang·resolvekey`：先收在 `expanded` 里，
              * 等 `i` push 之后按顺序接上（位置指令在前、写指令在后）。 */
             let mut expanded: Vec<Instruction> = Vec::new();
             self.desugar_member_write(&mut i, &mut expanded);
@@ -1946,7 +1946,7 @@ impl Parser {
                     args.append(&mut chain_segs);
                     left = ast::call(MEMBER_READ_OP, args);
                 } else {
-                    /* 动态段改写为 `resolveptr` 序列（spec 12-动态键 §3.1）。
+                    /* 动态段改写为 `kvlang·resolvekey` 序列（spec 12-动态键 §3.1）。
                      * 混合段（静态 + 动态）本轮具名拒绝。 */
                     if !chain_segs.is_empty() {
                         self.error_at(
@@ -1957,23 +1957,23 @@ impl Parser {
                         return None;
                     }
                     /*
-                     * 每段一次 `resolveptr(base, 段)`，多段**迭代**（spec §3.2）。
-                     * 首轮必须带上第一段——曾经写成 `resolveptr(base)` 起手再迭代，
+                     * 每段一次 `kvlang·resolvekey(base, 段)`，多段**迭代**（spec §3.2）。
+                     * 首轮必须带上第一段——曾经写成 `kvlang·resolvekey(base)` 起手再迭代，
                      * 单段情形就丢掉了那一段，产出一条只有一个读参的畸形指令
-                     * （实测 `[3] resolveptr(h)` 只有 `h`）。
+                     * （实测 `[3] kvlang·resolvekey(h)` 只有 `h`）。
                      */
                     let mut segments = std::mem::take(&mut dynamic_segments).into_iter();
                     let mut position = match segments.next() {
-                        Some(first) => ast::call("kvspace/key·resolveptr", vec![base, first]),
+                        Some(first) => ast::call("kvlang·resolvekey", vec![base, first]),
                         None => base,
                     };
                     for segment in segments {
                         position =
-                            ast::call("kvspace/key·resolveptr", vec![position, segment]);
+                            ast::call("kvlang·resolvekey", vec![position, segment]);
                     }
                     /*
-                     * **读侧还要解引用**（spec §一：「读同形：`newm := resolveptr(...)`，
-                     * 再 `*newm -> x`」）。`resolveptr` 给的是**位置**（Ptr），
+                     * **读侧还要解引用**（spec §一：「读同形：`newm := kvlang·resolvekey(...)`，
+                     * 再 `*newm -> x`」）。`kvlang·resolvekey` 给的是**位置**（Ptr），
                      * 不包一层 `*` 的话调用方拿到的是指针值，`cur + 1` 就会报
                      * 「add expects numeric operand, got *int64」。
                      */
@@ -3245,13 +3245,13 @@ impl Parser {
             }
         }
         /*
-         * **动态写槽 `base·*k` 改写为 `resolveptr` + 显式解引用写**
+         * **动态写槽 `base·*k` 改写为 `kvlang·resolvekey` + 显式解引用写**
          * （spec `12-动态键` §3.1）。静态成员写保留原串——`=` 写由 runtime 拼
          * 成员绝对路径；但动态段的 `*k` 是运行期值，**编码器明令拒绝**
          * （`encoder.c` 的 `dynamic member key not representable`，那条拒绝保留，
          * 它是最后一道断言，不是要放行的东西）。
          *
-         *   `v -> base·*k`  ⇒  `p := resolveptr(base, k)`   （本条指令）
+         *   `v -> base·*k`  ⇒  `p := kvlang·resolvekey(base, k)`   （本条指令）
          *                     `v -> *_p`                  （追加到 outputs）
          *
          * 两条指令的 pc 相同：恢复/重放/诊断都按 pc 定位源码行，分开编号会让
@@ -3286,7 +3286,7 @@ impl Parser {
             let mut position = ast::leaf(&base);
             for field in s.split(keytree::MEMBER_SEP).skip(1) {
                 position = ast::call(
-                    "kvspace/key·resolveptr",
+                    "kvlang·resolvekey",
                     vec![position, ast::leaf(&field[1..])],
                 );
             }

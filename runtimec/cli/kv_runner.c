@@ -116,6 +116,71 @@ typedef int (*layout_file_function_t)(const char *path, const char *data_source,
 
 /* ── 三态计数 ─────────────────────────────────────────────────────── */
 
+/*
+ * **每条用例恰好落进一个桶**，且这个桶在用例结束前必须被记下来。
+ *
+ * 两条不变式（都各有一次真实事故）：
+ *   1. **各桶之和 == cases.count**。少一条说明某条用例走到了没人记账的出口——
+ *      250 里 8 条没有归属，正是这么来的：`!file_is_case` 那个 continue 什么
+ *      都不记，而它跳过的文件彼此还不是同一种东西（见 `case_outcome_t`）；
+ *   2. **`failed` == 五个细分之和**（`classified`）。`failed += 1U` 散落在十几处，
+ *      谁忘了给细分都没人知道。这条早就有自检，但只校了 fail 内部。
+ *
+ * 为了让第 1 条可判定，最终归属记在**每一条用例自己的账上**（`outcomes[]`），
+ * 而不是只在几个计数器上 +=1：计数器只能证明「和相等」，归属表能证明「哪条归哪」。
+ */
+typedef enum case_outcome {
+    CASE_OUTCOME_UNRECORDED = 0, /* 还没走到归属语句：出现即为缺陷 */
+    CASE_OUTCOME_EXECUTED,       /* 真跑且输出逐行相同 */
+    CASE_OUTCOME_BLOCKED,        /* 有名字的能力缺口 */
+    CASE_OUTCOME_EXPECTED_FAILED,/* 负向用例被按期望拒绝 */
+    CASE_OUTCOME_ENCODE_FAILED,
+    CASE_OUTCOME_WINDOW_FAILED,
+    CASE_OUTCOME_EXECUTION_FAILED,
+    CASE_OUTCOME_EXPECTATION_WRONG,
+    CASE_OUTCOME_INCOMPLETE,
+    CASE_OUTCOME_UNOBSERVED,
+    CASE_OUTCOME_MISSING_EXPECTATION,
+    /* 文件里没有 `rwfunc test` 入口 —— **不是用例**，但它诚实地占一个桶。 */
+    CASE_OUTCOME_NOT_A_CASE,
+    CASE_OUTCOME_COUNT
+} case_outcome_t;
+
+static const char *case_outcome_name(case_outcome_t outcome) {
+    switch (outcome) {
+    case CASE_OUTCOME_UNRECORDED: return "未记账";
+    case CASE_OUTCOME_EXECUTED: return "executed";
+    case CASE_OUTCOME_BLOCKED: return "blocked";
+    case CASE_OUTCOME_EXPECTED_FAILED: return "预期失败";
+    case CASE_OUTCOME_ENCODE_FAILED: return "编译期失败";
+    case CASE_OUTCOME_WINDOW_FAILED: return "窗口期失败";
+    case CASE_OUTCOME_EXECUTION_FAILED: return "执行期失败";
+    case CASE_OUTCOME_EXPECTATION_WRONG: return "期望不符";
+    case CASE_OUTCOME_INCOMPLETE: return "用例不完整";
+    case CASE_OUTCOME_UNOBSERVED: return "未观测到";
+    case CASE_OUTCOME_MISSING_EXPECTATION: return "缺期望头";
+    case CASE_OUTCOME_NOT_A_CASE: return "非用例(无 test 入口)";
+    case CASE_OUTCOME_COUNT: break;
+    }
+    return "非法归属";
+}
+
+/* 该归属是否算「失败」（进入 `counts.failed`）。 */
+static bool case_outcome_is_failure(case_outcome_t outcome) {
+    switch (outcome) {
+    case CASE_OUTCOME_ENCODE_FAILED:
+    case CASE_OUTCOME_WINDOW_FAILED:
+    case CASE_OUTCOME_EXECUTION_FAILED:
+    case CASE_OUTCOME_EXPECTATION_WRONG:
+    case CASE_OUTCOME_INCOMPLETE:
+    case CASE_OUTCOME_UNOBSERVED:
+    case CASE_OUTCOME_MISSING_EXPECTATION:
+        return true;
+    default:
+        return false;
+    }
+}
+
 typedef struct runner_counts {
     size_t passed;
     size_t failed;
@@ -155,6 +220,93 @@ typedef struct blocked_entry {
 } blocked_entry_t;
 
 #define MAX_BLOCKED 512
+
+/* 用例表容量：与本文件的 `case_list_t::paths` 同一个上界，别让两者漂开。 */
+#define MAX_CASES 256U
+
+/*
+ * 每条用例的**最终归属**。与 `counts` 的关系是「明细 → 汇总」：counts 用来读数，
+ * outcomes 用来证明「每条都有归属」以及打印逐条明细。
+ *
+ * 用静态数组而不是堆：256 * (1024 + 4) 约 263KB，是 BSS 不是栈；显式上界也与
+ * `case_list_t` 一致，不会出现「表里塞得下、账上记不下」。
+ */
+typedef struct case_outcome_record {
+    char path[CASE_PATH_CAPACITY];
+    case_outcome_t outcome;
+} case_outcome_record_t;
+
+static case_outcome_record_t g_outcomes[MAX_CASES];
+
+/*
+ * 记账：**一条用例只许记一次**，且必须记。
+ *
+ * 重复记账当场打红——它意味着某条用例走到了两个出口，而两个出口都以为自己
+ * 是它的终点（例如先记 fail 又在收尾处记 incomplete）。那种情况计数之和会
+ * **超过** cases.count，而「和一个不等」正是本机制要抓的东西。
+ */
+static void record_outcome(case_outcome_record_t *records, size_t index,
+                           const char *path, case_outcome_t outcome) {
+    if (index >= MAX_CASES) {
+        return;
+    }
+    if (records[index].outcome != CASE_OUTCOME_UNRECORDED) {
+        fprintf(stderr,
+                "runner 缺陷：%s 被记了两遍归属（先 %s，又 %s）\n", path,
+                case_outcome_name(records[index].outcome),
+                case_outcome_name(outcome));
+        return;
+    }
+    snprintf(records[index].path, sizeof(records[index].path), "%s", path);
+    records[index].outcome = outcome;
+}
+
+/*
+ * 把明细汇总进 counts。**counts 的每个字段只在这里被写**——散落着 `+= 1U`
+ * 时，「某条路径忘了加细分」是无声的；收成一处后，漏加只能漏在这里，而这里的
+ * 覆盖由 `case_outcome_is_failure` 与下面的断言共同钉住。
+ */
+static void tally_outcome(runner_counts_t *counts, case_outcome_t outcome) {
+    if (case_outcome_is_failure(outcome)) {
+        counts->failed += 1U;
+    }
+    switch (outcome) {
+    case CASE_OUTCOME_EXECUTED: counts->passed += 1U; counts->executed += 1U; break;
+    case CASE_OUTCOME_BLOCKED: counts->blocked += 1U; break;
+    case CASE_OUTCOME_EXPECTED_FAILED:
+        counts->passed += 1U;
+        counts->expected_failed += 1U;
+        break;
+    case CASE_OUTCOME_ENCODE_FAILED: counts->encode_failed += 1U; break;
+    case CASE_OUTCOME_WINDOW_FAILED: counts->window_failed += 1U; break;
+    case CASE_OUTCOME_EXECUTION_FAILED: counts->execution_failed += 1U; break;
+    case CASE_OUTCOME_EXPECTATION_WRONG: counts->expectation_wrong += 1U; break;
+    case CASE_OUTCOME_INCOMPLETE: counts->incomplete += 1U; break;
+    case CASE_OUTCOME_UNOBSERVED: counts->unobserved += 1U; break;
+    /* 缺期望头只进 failed：它是 harness 侧的问题，五个「失败发生在哪一层」
+     * 的桶都不合适——那五个描述的是被测链路的层。 */
+    case CASE_OUTCOME_MISSING_EXPECTATION: break;
+    /* 两类「不是用例」不进任何计数桶：它们不该出现在分母里，但**必须留痕**，
+     * 否则下一次又是「总数对不上，说不清少在哪」。 */
+    case CASE_OUTCOME_NOT_A_CASE:
+    case CASE_OUTCOME_UNRECORDED:
+    case CASE_OUTCOME_COUNT:
+        break;
+    }
+}
+
+/*
+ * 一条用例的收尾：记归属 + 汇总。**每个出口只写这一句**。
+ *
+ * 之所以把两件事并成一次调用：分开写时总有一个出口会漏掉其中一件，而漏掉的
+ * 症状恰好是「总数对不上，但看不出少在哪」——这正是本次要消灭的形态。
+ */
+static void close_case(case_outcome_record_t *records, size_t index,
+                       const char *path, runner_counts_t *counts,
+                       case_outcome_t outcome) {
+    record_outcome(records, index, path, outcome);
+    tally_outcome(counts, outcome);
+}
 
 /*
  * ── 编码期的**能力缺口**白名单 ──────────────────────────────────────
@@ -786,7 +938,7 @@ typedef struct expectation {
  *
  * 只看 `rwfunc test` 这一种写法：语料的入口约定就是它（`test.py` 也按它跑）。
  */
-static bool file_is_case(const char *path) {
+static bool has_test_entry(const char *path) {
     FILE *file = fopen(path, "rb");
     if (file == NULL) {
         return false;
@@ -820,6 +972,22 @@ static bool file_is_case(const char *path) {
     }
     fclose(file);
     return found;
+}
+
+/*
+ * 该文件是不是**一条用例**：有 `rwfunc test` 入口，**或者**声明了期望错误。
+ *
+ * 第二个条件是后加的（架构师裁决）：**负向用例的本质是「这段声明该被拒绝」**，
+ * 入口从来不是它的必要条件——它压根不该有可执行体。只看入口会让这类用例
+ * **永远进不了负向分支**，于是 `// 期望错误:` 一次都没被验，而汇总上它们既不
+ * 进分母也不报错，只是安静地消失。
+ *
+ * 这不是假想：`16-runtimec-corpus/types/rwfunc_union_parameter.kv` 与
+ * `rwfunc_union_return.kv` 就这么空转了整段时间。同目录的 `empty_kindexpr.kv`
+ * 有 `test` 入口、正常计「预期失败」——**对照组就在旁边**，差别只在入口。
+ */
+static bool file_is_case(const char *path, bool declares_expected_error) {
+    return has_test_entry(path) || declares_expected_error;
 }
 
 static void parse_expectations(const char *path, expectation_t *out) {
@@ -1222,6 +1390,12 @@ int main(int argument_count, char **arguments) {
     memset(&counts, 0, sizeof(counts));
     size_t missing_expectation = 0U;
     size_t layout_ok = 0U;
+    memset(g_outcomes, 0, sizeof(g_outcomes));
+    /*
+     * 每条用例的出口都改成**先记归属、再记账**：`record_outcome` 保证唯一，
+     * `tally_outcome` 把明细收敛成 counts。于是「各桶之和 == cases.count」
+     * 变成可判定的——下面汇总处会断言它。
+     */
     for (size_t index = 0U; index < cases.count; ++index) {
         char full[CASE_PATH_CAPACITY * 2U];
         snprintf(full, sizeof(full), "%s/%s", corpus, cases.paths[index]);
@@ -1236,8 +1410,8 @@ int main(int argument_count, char **arguments) {
         if (!case_store_open(&environment, (unsigned)index)) {
             fprintf(stderr, "FAIL %s: 无法建立 per-case store\n",
                     cases.paths[index]);
-            counts.failed += 1U;
-                counts.window_failed += 1U;
+            close_case(g_outcomes, index, cases.paths[index], &counts,
+                       CASE_OUTCOME_WINDOW_FAILED);
             (void)case_store_close(&environment);
             continue;
         }
@@ -1245,8 +1419,8 @@ int main(int argument_count, char **arguments) {
          * 换 store 就没了。少做一次的表现是「layout 说未定义函数 输出算子」。 */
         if (!declare_external_capabilities(&environment)) {
             fprintf(stderr, "FAIL %s: 无法声明外部能力\n", cases.paths[index]);
-            counts.failed += 1U;
-                counts.window_failed += 1U;
+            close_case(g_outcomes, index, cases.paths[index], &counts,
+                       CASE_OUTCOME_WINDOW_FAILED);
             (void)case_store_close(&environment);
             continue;
         }
@@ -1270,8 +1444,8 @@ int main(int argument_count, char **arguments) {
                     "FAIL %s: `期望输出` 与 `期望错误` 互斥——一条用例只能是正向"
                     "或负向\n",
                     cases.paths[index]);
-            counts.failed += 1U;
-                counts.incomplete += 1U;
+            close_case(g_outcomes, index, cases.paths[index], &counts,
+                       CASE_OUTCOME_INCOMPLETE);
             (void)case_store_close(&environment);
             continue;
         }
@@ -1292,14 +1466,27 @@ int main(int argument_count, char **arguments) {
             }
             fprintf(stderr, "BLOCKED %s: declared — %s\n", cases.paths[index],
                     expectation.expected_block);
-            counts.blocked += 1U;
+            close_case(g_outcomes, index, cases.paths[index], &counts,
+                       CASE_OUTCOME_BLOCKED);
             (void)case_store_close(&environment);
             continue;
         }
-        if (!file_is_case(full)) {
-            /* **不是用例，不进分母**。判据是「有没有 `rwfunc test` 入口」，
-             * 不是文件名——`07-lib` 下的 `lib-` 前缀支持文件、`09-debugger` 下的
-             * 调试素材，它们本来就不该有期望输出。见 `file_is_case` 的注释。 */
+        if (!file_is_case(full, expects_layout_failure)) {
+            /* **不是用例，不进分母**——但它必须留归属。
+             *
+             * 判据是「有 `rwfunc test` 入口**或**有 `// 期望错误:`」，不是文件名：
+             * `07-lib` 下的支持文件（只声明 `lib`/`init`）、`09-debugger` 下的调试
+             * 素材，两者都没有，本来就不该出现在分母里。见 `file_is_case` 的注释。
+             *
+             * **这个 continue 曾经什么都不记**，于是「250 条里 8 条不在任何桶」
+             * 有一部分就是这里：`collect_cases` 收所有 `.kv`，`file_is_case` 在
+             * 后面才筛，筛掉的既不进分母也不留痕。
+             *
+             * 现在只剩**一种**非用例：既无入口也无期望错误。曾经分红的是
+             * 「有 `期望错误` 但无 `test` 入口」，那类改判据后已进负向分支，
+             * 对应的桶随之删除——**能删的桶不要改名**。 */
+            close_case(g_outcomes, index, cases.paths[index], &counts,
+                       CASE_OUTCOME_NOT_A_CASE);
             (void)case_store_close(&environment);
             continue;
         }
@@ -1307,8 +1494,8 @@ int main(int argument_count, char **arguments) {
             /* 没有期望的用例会永远 pass —— 那是恒真判据。这里直接算失败。 */
             fprintf(stderr, "FAIL %s: 缺 `// 期望输出:` 头\n", cases.paths[index]);
             missing_expectation += 1U;
-            counts.failed += 1U;
-                counts.incomplete += 1U;
+            close_case(g_outcomes, index, cases.paths[index], &counts,
+                       CASE_OUTCOME_MISSING_EXPECTATION);
             (void)case_store_close(&environment);
             continue;
         }
@@ -1321,8 +1508,8 @@ int main(int argument_count, char **arguments) {
             fprintf(stderr,
                     "FAIL %s: 期望输出超过 runner 容量 %u 行\n", cases.paths[index],
                     (unsigned)KVRUN_EXPECTATION_LINE_CAPACITY);
-            counts.failed += 1U;
-                counts.incomplete += 1U;
+            close_case(g_outcomes, index, cases.paths[index], &counts,
+                       CASE_OUTCOME_INCOMPLETE);
             (void)case_store_close(&environment);
             continue;
         }
@@ -1331,8 +1518,8 @@ int main(int argument_count, char **arguments) {
                     "FAIL %s: 期望输出第 %zu 行超过 runner 单行容量 %u 字节\n",
                     cases.paths[index], expectation.line_overflow_index + 1U,
                     (unsigned)KVRUN_EXPECTATION_LINE_SIZE);
-            counts.failed += 1U;
-                counts.incomplete += 1U;
+            close_case(g_outcomes, index, cases.paths[index], &counts,
+                       CASE_OUTCOME_INCOMPLETE);
             (void)case_store_close(&environment);
             continue;
         }
@@ -1367,8 +1554,8 @@ int main(int argument_count, char **arguments) {
             if (layout_result == 0) {
                 fprintf(stderr, "FAIL %s: 预期 layout 失败，但它通过了\n",
                         cases.paths[index]);
-                counts.failed += 1U;
-                counts.encode_failed += 1U;
+                close_case(g_outcomes, index, cases.paths[index], &counts,
+                           CASE_OUTCOME_ENCODE_FAILED);
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1385,13 +1572,13 @@ int main(int argument_count, char **arguments) {
                         cases.paths[index], expectation.expected_error,
                         stderr_line,
                         error_text[0] != '\0' ? error_text : "(空)");
-                counts.failed += 1U;
-                counts.encode_failed += 1U;
+                close_case(g_outcomes, index, cases.paths[index], &counts,
+                           CASE_OUTCOME_ENCODE_FAILED);
                 (void)case_store_close(&environment);
                 continue;
             }
-            counts.passed += 1U;
-            counts.expected_failed += 1U;
+            close_case(g_outcomes, index, cases.paths[index], &counts,
+                       CASE_OUTCOME_EXPECTED_FAILED);
             (void)case_store_close(&environment);
             continue;
         }
@@ -1432,7 +1619,8 @@ int main(int argument_count, char **arguments) {
                 }
                 fprintf(stderr, "BLOCKED %s: layout — %s\n", cases.paths[index],
                         reason);
-                counts.blocked += 1U;
+                close_case(g_outcomes, index, cases.paths[index], &counts,
+                           CASE_OUTCOME_BLOCKED);
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1442,8 +1630,8 @@ int main(int argument_count, char **arguments) {
             first_error_line(captured, stderr_line, sizeof(stderr_line));
             fprintf(stderr, "FAIL %s: layout failed: %s\n  实际 stderr 首行：%s\n",
                     cases.paths[index], error_text, stderr_line);
-            counts.failed += 1U;
-                counts.encode_failed += 1U;
+            close_case(g_outcomes, index, cases.paths[index], &counts,
+                       CASE_OUTCOME_ENCODE_FAILED);
             (void)case_store_close(&environment);
             continue;
         }
@@ -1458,8 +1646,8 @@ int main(int argument_count, char **arguments) {
                 RUNTIMEC_STATUS_SUCCESS) {
                 fprintf(stderr, "FAIL %s: cannot get components\n",
                         cases.paths[index]);
-                counts.failed += 1U;
-                counts.window_failed += 1U;
+                close_case(g_outcomes, index, cases.paths[index], &counts,
+                           CASE_OUTCOME_WINDOW_FAILED);
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1494,8 +1682,8 @@ int main(int argument_count, char **arguments) {
                     &encode_error) != RUNTIMEC_STATUS_SUCCESS) {
                 fprintf(stderr, "FAIL %s: source revision unavailable\n",
                         cases.paths[index]);
-                counts.failed += 1U;
-                counts.window_failed += 1U;
+                close_case(g_outcomes, index, cases.paths[index], &counts,
+                           CASE_OUTCOME_WINDOW_FAILED);
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1537,7 +1725,8 @@ int main(int argument_count, char **arguments) {
                             encode_error.message.data
                                 ? encode_error.message.data
                                 : "");
-                    counts.blocked += 1U;
+                    close_case(g_outcomes, index, cases.paths[index], &counts,
+                               CASE_OUTCOME_BLOCKED);
                     (void)case_store_close(&environment);
                     continue;
                 }
@@ -1545,8 +1734,8 @@ int main(int argument_count, char **arguments) {
                         cases.paths[index], (long long)encode_error.code,
                         encode_error.message.data ? encode_error.message.data
                                                   : "");
-                counts.failed += 1U;
-                counts.encode_failed += 1U;
+                close_case(g_outcomes, index, cases.paths[index], &counts,
+                           CASE_OUTCOME_ENCODE_FAILED);
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1561,8 +1750,8 @@ int main(int argument_count, char **arguments) {
                 RUNTIMEC_STATUS_SUCCESS) {
                 fprintf(stderr, "FAIL %s: get_view failed\n",
                         cases.paths[index]);
-                counts.failed += 1U;
-                counts.window_failed += 1U;
+                close_case(g_outcomes, index, cases.paths[index], &counts,
+                           CASE_OUTCOME_WINDOW_FAILED);
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1597,7 +1786,8 @@ int main(int argument_count, char **arguments) {
                 }
             }
             if (foreign > 0U) {
-                counts.blocked += 1U;
+                close_case(g_outcomes, index, cases.paths[index], &counts,
+                           CASE_OUTCOME_BLOCKED);
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1614,8 +1804,8 @@ int main(int argument_count, char **arguments) {
                 (size_t)vthread_length >= sizeof(vthread_identifier)) {
                 fprintf(stderr, "FAIL %s: vthread identifier truncated\n",
                         cases.paths[index]);
-                counts.failed += 1U;
-                counts.window_failed += 1U;
+                close_case(g_outcomes, index, cases.paths[index], &counts,
+                           CASE_OUTCOME_WINDOW_FAILED);
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1660,11 +1850,11 @@ int main(int argument_count, char **arguments) {
                  * `engine/execution_window.c` 的
                  * `runtimec_execution_window_diagnostic_t`。
                  */
-                counts.failed += 1U;
                 switch (frame_exit.detail_code) {
                 case RUNTIMEC_EXECUTION_WINDOW_DIAG_ENCODE_FAILED:
                 case RUNTIMEC_EXECUTION_WINDOW_DIAG_SPECIALIZE_FAILED:
-                    counts.encode_failed += 1U;
+                    close_case(g_outcomes, index, cases.paths[index], &counts,
+                               CASE_OUTCOME_ENCODE_FAILED);
                     break;
                 case RUNTIMEC_EXECUTION_WINDOW_DIAG_MISSING_HOST_CAPABILITY:
                 case RUNTIMEC_EXECUTION_WINDOW_DIAG_SNAPSHOT_FAILED:
@@ -1679,10 +1869,12 @@ int main(int argument_count, char **arguments) {
                 case RUNTIMEC_EXECUTION_WINDOW_DIAG_LOCAL_FAILED:
                 case RUNTIMEC_EXECUTION_WINDOW_DIAG_OUT_OF_MEMORY:
                 case RUNTIMEC_EXECUTION_WINDOW_DIAG_ARGUMENT_MATERIALIZE_FAILED:
-                    counts.window_failed += 1U;
+                    close_case(g_outcomes, index, cases.paths[index], &counts,
+                               CASE_OUTCOME_WINDOW_FAILED);
                     break;
                 default:
-                    counts.execution_failed += 1U;
+                    close_case(g_outcomes, index, cases.paths[index], &counts,
+                               CASE_OUTCOME_EXECUTION_FAILED);
                     break;
                 }
                 (void)case_store_close(&environment);
@@ -1701,7 +1893,8 @@ int main(int argument_count, char **arguments) {
                              "handoff");
                     g_blocked_count += 1U;
                 }
-                counts.blocked += 1U;
+                close_case(g_outcomes, index, cases.paths[index], &counts,
+                           CASE_OUTCOME_BLOCKED);
                 (void)case_store_close(&environment);
                 continue;
             }
@@ -1718,24 +1911,24 @@ int main(int argument_count, char **arguments) {
                         frame_exit.detail_code,
                         frame_exit.logical_program_counter,
                         stderr_line);
-                counts.failed += 1U;
-                counts.execution_failed += 1U;
+                close_case(g_outcomes, index, cases.paths[index], &counts,
+                           CASE_OUTCOME_EXECUTION_FAILED);
                 (void)case_store_close(&environment);
                 continue;
             }
             /* 真跑完了：逐行比对。 */
             switch (compare_output(&expectation, captured_output, cases.paths[index])) {
                 case COMPARE_PASS:
-                    counts.passed += 1U;
-                    counts.executed += 1U;
+                    close_case(g_outcomes, index, cases.paths[index], &counts,
+                               CASE_OUTCOME_EXECUTED);
                     break;
                 case COMPARE_EXPECTATION_WRONG:
-                    counts.failed += 1U;
-                    counts.expectation_wrong += 1U;
+                    close_case(g_outcomes, index, cases.paths[index], &counts,
+                               CASE_OUTCOME_EXPECTATION_WRONG);
                     break;
                 case COMPARE_INCOMPLETE:
-                    counts.failed += 1U;
-                    counts.incomplete += 1U;
+                    close_case(g_outcomes, index, cases.paths[index], &counts,
+                               CASE_OUTCOME_INCOMPLETE);
                     break;
                 case COMPARE_UNOBSERVED:
                     /* 与「输出不符」分开计。混在一起会让「链路没通」看起来像
@@ -1744,8 +1937,8 @@ int main(int argument_count, char **arguments) {
                      * 并且**打出停止位置**：「未观测到」只说明期望有内容、实际零行，
                      * 它不说明停在哪。停在 call 那条（跨 Program 调用没接上）与停在
                      * 最后一条之后（输出没捕获）处置完全不同。 */
-                    counts.failed += 1U;
-                    counts.unobserved += 1U;
+                    close_case(g_outcomes, index, cases.paths[index], &counts,
+                               CASE_OUTCOME_UNOBSERVED);
                     {
                         const binrwir_execution_exit_t *exit_information =
                             &frame_exit;
@@ -1768,8 +1961,8 @@ int main(int argument_count, char **arguments) {
                     break;
                 default:
                     /* 四态之外的返回值 = harness 自己判不了，不是被测对象失败。 */
-                    counts.failed += 1U;
-                    counts.incomplete += 1U;
+                    close_case(g_outcomes, index, cases.paths[index], &counts,
+                               CASE_OUTCOME_INCOMPLETE);
                     break;
             }
         }
@@ -1781,20 +1974,86 @@ int main(int argument_count, char **arguments) {
     }
 
     /*
-     * TODO(骨架)：layout → 编码 → 执行 → 抓输出。
-     * 现在只做「发现用例 + 校验期望格式」，**不产出任何 pass 数**——
-     * 一个不执行的 runner 若报 PASS，就是又一个恒真判据。
+     * ── 逐条归属：先打出每条用例落在哪个桶，再做集合核对 ─────────────
+     *
+     * 「250 条里 8 条不在任何桶」当初就是这么漏掉的：`collect_cases` 收所有
+     * `.kv`，各出口各自 `counts.x += 1U`，中间有两处 `continue` 什么都不记。
+     * 光看汇总数对不上，**看不出少的是哪几条**。
+     *
+     * 所以先把归属逐条打出来（`--list-outcomes` 时才打，默认不污染输出），
+     * 再把「各桶之和 == cases.count」做成断言：不等就红，不让它下次静默。
      */
+    {
+        /* 逐条明细默认不打（会淹没汇总），`KVRUN_LIST_OUTCOMES=1` 时打。
+         * 用环境开关而不是第四个位置参数：位置参数的数量是既有契约。 */
+        const char *list = getenv("KVRUN_LIST_OUTCOMES");
+        const bool list_each = list != NULL && list[0] != '\0' && list[0] != '0';
+        bool matches = true;
+        for (size_t index = 0U; index < cases.count; ++index) {
+            const case_outcome_t outcome = g_outcomes[index].outcome;
+            if (outcome == CASE_OUTCOME_UNRECORDED) {
+                matches = false;
+            }
+            if (list_each) {
+                printf("  归属  %-24s %s\n", case_outcome_name(outcome),
+                       cases.paths[index]);
+            }
+        }
+        if (!matches) {
+            fprintf(stderr, "每条用例的最终归属（未记账项）：\n");
+            for (size_t index = 0U; index < cases.count; ++index) {
+                if (g_outcomes[index].outcome == CASE_OUTCOME_UNRECORDED) {
+                    fprintf(stderr, "  未记账  %s\n", cases.paths[index]);
+                }
+            }
+        }
+    }
+    /* 各桶之和必须等于用例总数。
+     *
+     * 「不是用例」的两类（无 test 入口 / 有 test 无期望）**不进分母**，所以它们
+     * 从等式中扣掉——但仍然逐条有归属，扣得掉才是可证明的。
+     *
+     * 这条断言的意义：它是**唯一**能发现「某个出口忘了记账」的机制。旧代码里
+     * `failed` 散落十几处、每处各自 `+= 1U`，漏一处只会让某个数偏小，而偏小的
+     * 数字看起来永远合理。 */
+    {
+        size_t bucketed = counts.executed + counts.blocked + counts.failed +
+                          counts.expected_failed;
+        /* `counts.passed` 同时含 executed 与 expected_failed，别重复加。 */
+        size_t not_a_case = 0U;
+        for (size_t index = 0U; index < cases.count; ++index) {
+            if (g_outcomes[index].outcome == CASE_OUTCOME_NOT_A_CASE) {
+                not_a_case += 1U;
+            }
+        }
+        const size_t accounted = bucketed + not_a_case;
+        if (accounted != cases.count) {
+            fprintf(stderr,
+                    "ASSIGNMENT GAP: 各桶之和 %zu != 用例总数 %zu"
+                    "（executed %zu + blocked %zu + fail %zu + 预期失败 %zu"
+                    " + 非用例 %zu）\n",
+                    accounted, cases.count, counts.executed, counts.blocked,
+                    counts.failed, counts.expected_failed, not_a_case);
+        }
+        printf("归属核对：各桶之和 %zu / 用例总数 %zu"
+               "（其中非用例 %zu：无 test 入口或无期望头）——%s\n",
+               accounted, cases.count, not_a_case,
+               accounted == cases.count ? "齐" : "**不齐**");
+    }
     /* 汇总首行：`executed` 与 `blocked` **必须同时出现**。
      *
      * 只报 executed 的话「5/25」看起来像全过；只报 blocked 的话「20」看不出
      * 底下有 5 条真跑过。两个数挨着摆，第一眼就知道「大部分没验」。
      *
      * 顺序按「可信度」排：executed（跑对）→ blocked（没验）→ fail（红了）→
-     * 仅编码（只编过）。抄数字的人从左往右读，先读到的是可信的。 */
+     * 仅编码（只编过）。抄数字的人从左往右读，先读到的是可信的。
+     *
+     * `pass(仅编码)` = `passed` 里既不是 executed、也不是**预期失败**的那部分。
+     * 只减 executed 会把「负向用例被正确拒绝」也算成「仅编码通过」——它其实
+     * 什么都没编过（layout 是按它的期望失败的）。 */
     printf("用例 %zu：executed %zu / blocked %zu / fail %zu / pass(仅编码) %zu\n",
            cases.count, counts.executed, counts.blocked, counts.failed,
-           counts.passed - counts.executed);
+           counts.passed - counts.expected_failed - counts.executed);
     /* fail 的细分按**修复方向**排，不按发生顺序：
      *   未观测到    → 查链路（输出没接上）
      *   执行期失败  → 查链路（带错误码，看 status/detail）
@@ -1831,9 +2090,17 @@ int main(int argument_count, char **arguments) {
      * 「有多少条没归类」，让写的人去补。
      */
     {
+        /* **每一项进 `failed` 的归属都必须在这里出现**，否则 GAP 会把它算成
+         * 「有失败路径没被任何标签接住」。
+         *
+         * `missing_expectation` 就是漏掉的一项：它计入 failed，却是 harness 侧
+         * 的缺口，不属于「失败发生在被测链路的哪一层」那五个桶。它必须单列——
+         * 否则 GAP 会把「缺期望头」报成「有分类漏洞」，指向完全错的地方。
+         * 实测：探针用例（无期望头）让 GAP 报 1，而真因只是缺一行注释。 */
         const size_t classified = counts.encode_failed + counts.window_failed +
                                   counts.execution_failed +
-                                  counts.expectation_wrong + counts.incomplete;
+                                  counts.expectation_wrong + counts.incomplete +
+                                  counts.unobserved + missing_expectation;
         /* **0 也照打**：不打印的话，「没有 GAP 行」与「自检没跑」无法区分。 */
         printf("CLASSIFICATION GAP: %zu failures are unclassified "
                "(failed %zu, classified %zu)\n",

@@ -56,7 +56,7 @@ struct KV {
     // 读：resolve 拿 offset，在 base+offset 处解 head/body/attr。
     bool get(const char *key, std::string &kind, std::string &raw) {
         uint64_t offset = 0; char err[256];
-        if (kvspaceResolve(kv, key, 0, &offset, err, sizeof(err)) != KVSPACE_OK)
+        if (kvspaceResolveOffset(kv, key, 0, &offset, err, sizeof(err)) != KVSPACE_OK)
             return false;
         const uint8_t *base = kvspaceXvalueInProcessAddress(kv);
         if (!base) return false;

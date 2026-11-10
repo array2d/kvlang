@@ -593,7 +593,7 @@ impl LabelGen {
 /// 取**写入值的静态类型**。
 ///
 /// `v -> h·*key`（`h:[]char/*` 是父路径文本）展开成两条指令：
-///   `_p1 := resolveptr(h, key)`   ← 位置槽
+///   `_p1 := kvlang·resolvekey(h, key)`   ← 位置槽
 ///   `v -> *_p1`                   ← 写入
 ///
 /// `_p1` 的目标 kindexpr 不能从 base 推（路径串没有容器类型），但**写入方带着
@@ -601,12 +601,12 @@ impl LabelGen {
 ///
 /// **边界（缺一不可）**：
 ///   1. 只补 `_pN` 这一种内部位置槽；用户变量、成员槽一律不碰；
-///   2. 只在前一条指令是 `kvspace/key·resolveptr` 时补——那证明它就是这次展开
+///   2. 只在前一条指令是 `kvlang·resolvekey` 时补——那证明它就是这次展开
 ///      生成的那一格；
-///   3. 写入值静态类型推不出来 ⇒ **不补**，让 `check_resolveptr_write_slot`
+///   3. 写入值静态类型推不出来 ⇒ **不补**，让 `check_resolve_write_slot`
 ///      报「需要显式类型注解」。不默认成任何类型。
 ///
-/// **有声明类型的 map 写不受影响**：那条路 `check_resolveptr_write_slot` 早已
+/// **有声明类型的 map 写不受影响**：那条路 `check_resolve_write_slot` 早已
 /// 放行（`container_value`/`container_elem` 能得出成员类型），走不到这里。
 pub fn annotate_position_slot_types(fn_: &mut Func, tm: &HashMap<String, String>) {
     annotate_position_slots_in(&mut fn_.body, tm);
@@ -626,11 +626,11 @@ fn annotate_position_slots_in(body: &mut [Stmt], tm: &HashMap<String, String>) {
         }
     }
     /*
-     * 配对规则：`resolveptr` 那条的后一条若是 `v -> *_pN`，则 `_pN` 的类型
-     * 取 `v` 的静态类型——**补在 `resolveptr` 那条指令上**。
+     * 配对规则：`kvlang·resolvekey` 那条的后一条若是 `v -> *_pN`，则 `_pN` 的类型
+     * 取 `v` 的静态类型——**补在 `kvlang·resolvekey` 那条指令上**。
      *
-     * 为什么补前一条而不是后一条：`check_resolveptr_write_slot` 校验的是
-     * `resolveptr` 自己的写槽（`_pN`）。补在后一条（`*_pN`）上，校验看不见。
+     * 为什么补前一条而不是后一条：`check_resolve_write_slot` 校验的是
+     * `kvlang·resolvekey` 自己的写槽（`_pN`）。补在后一条（`*_pN`）上，校验看不见。
      * 这个位置差一格，就是「判据补了却一条不生效」的来源。
      */
     let positions: Vec<usize> = body
@@ -638,7 +638,7 @@ fn annotate_position_slots_in(body: &mut [Stmt], tm: &HashMap<String, String>) {
         .enumerate()
         .filter(|(_, st)| {
             matches!(st, Stmt::Instruction(inst)
-                if inst.expr.as_ref().is_some_and(|e| e.op == "kvspace/key·resolveptr"))
+                if inst.expr.as_ref().is_some_and(|e| e.op == "kvlang·resolvekey"))
         })
         .map(|(index, _)| index)
         .collect();
@@ -660,7 +660,7 @@ fn annotate_position_slots_in(body: &mut [Stmt], tm: &HashMap<String, String>) {
          * **只在 base 是路径串时补**。
          *
          * 有声明类型的 map（`m:'[]char/utf8'int64` 的 `5 -> m·*k`）本来就能从
-         * 容器类型推出成员类型，`check_resolveptr_write_slot` 早已放行——
+         * 容器类型推出成员类型，`check_resolve_write_slot` 早已放行——
          * 给它补 `int64` 会把 `_p1:*int64` 覆盖成 `int64`，实测报
          * `cannot assign *int64 to int64`，把一条已绿的路径打红。
          *
@@ -686,9 +686,9 @@ fn annotate_position_slots_in(body: &mut [Stmt], tm: &HashMap<String, String>) {
             continue;
         };
         if position_inst.write_types.first().is_none_or(|t| t.is_empty()) {
-            /* `_pN` 是**位置槽**，类型是 `*T`（不是 `T`）——`resolveptr` 的写参
+            /* `_pN` 是**位置槽**，类型是 `*T`（不是 `T`）——`kvlang·resolvekey` 的写参
              * 语义就是「产出一个指向成员的 Ptr」。写成裸 `T` 会让编码器把
-             * `resolveptr` 的结果类型判成非指针，撞能力掩码
+             * `kvlang·resolvekey` 的结果类型判成非指针，撞能力掩码
              * （实测 `result type is outside the capability mask`）。 */
             position_inst.write_types = vec![format!("*{value_type}")];
         }
@@ -702,7 +702,7 @@ fn annotate_position_slots_in(body: &mut [Stmt], tm: &HashMap<String, String>) {
         }
     }
     /*
-     * **读侧**：`_N := resolveptr(...)` 后跟 `z:T = *_N` 时，`_N` 装的是位置，
+     * **读侧**：`_N := kvlang·resolvekey(...)` 后跟 `z:T = *_N` 时，`_N` 装的是位置，
      * 类型是 `*T`——`T` 由作者注解给出。
      *
      * 与写侧的分工：写侧的类型来自**写入值**（#632），读侧来自**读入目标**的
@@ -717,7 +717,7 @@ fn annotate_position_slots_in(body: &mut [Stmt], tm: &HashMap<String, String>) {
         .enumerate()
         .filter(|(_, st)| {
             matches!(st, Stmt::Instruction(inst)
-                if inst.expr.as_ref().is_some_and(|e| e.op == "kvspace/key·resolveptr")
+                if inst.expr.as_ref().is_some_and(|e| e.op == "kvlang·resolvekey")
                     && inst.write_types.first().is_none_or(|t| t.is_empty()))
         })
         .map(|(index, _)| index)
@@ -785,7 +785,7 @@ fn position_slot_value_type(inst: &Instruction) -> Option<String> {
      * （实测 `val="5" lit=LitNone`），按 `lit` 判一律返回 `None`——那正是
      * 「补了判据却一条不生效」的来源。`arg_type` 走 `val` 文本，不受影响。
      *
-     * 推不出来 ⇒ `None` ⇒ **不补**，交给 `check_resolveptr_write_slot`
+     * 推不出来 ⇒ `None` ⇒ **不补**，交给 `check_resolve_write_slot`
      * 报「需要显式类型注解」。不默认成任何类型。
      */
     let t = arg_type(e, &HashMap::new());
@@ -1589,7 +1589,7 @@ fn flatten_expr_with(
     }
     /*
      * `h·*c != None`：左值是**动态成员读**，展开形态是
-     * `DEREF(resolveptr(base, key))`。这里只把 `resolveptr` 那一条指令物化出来
+     * `DEREF(kvlang·resolvekey(base, key))`。这里只把 `kvlang·resolvekey` 那一条指令物化出来
      * （它产出的是**位置**），父指令直接读那个位置槽并跟一跳——不产生
      * `_N:<值类型> = *_pos` 那条取值指令。
      *
@@ -1597,9 +1597,9 @@ fn flatten_expr_with(
      */
     if none_test && e.op == ast::DEREF_OP {
         if let Some(inner) = e.args.first() {
-            if inner.op == "kvspace/key·resolveptr" {
+            if inner.op == "kvlang·resolvekey" {
                 /*
-                 * 把 `resolveptr` 那一条指令原样物化出来（它产出**位置** `_P`），
+                 * 把 `kvlang·resolvekey` 那一条指令原样物化出来（它产出**位置** `_P`），
                  * 然后让父指令读 `*_P`——**不再插一条 `_N:<值类型> = *_P`**。
                  *
                  * 判据是「这条子表达式只在这里用一次」，所以没有第二处要读值。
@@ -2618,11 +2618,11 @@ fn infer_op_type(
          * 不会出现——写在这里也永远不执行。真落点是本函数上面处理 `+` 的字符串支。
          */
         /*
-         * `kvspace/key·resolveptr(base, key) -> Ptr`：指向容器成员。
+         * `kvlang·resolvekey(base, key) -> Ptr`：指向容器成员。
          * 与 `expr_result_type` 的同一分支**同一个判据**——两处都在 specialize
          * 之前/之后各算一次结果类型，必须给出一致的答案。
          */
-        "kvspace/key·resolveptr" => {
+        "kvlang·resolvekey" => {
             /* base 是 `*T` 时解一层再取成员（多段迭代的形态）；取不到 ⇒ 空，
              * 由 layout 期具名检查报错。**不产裸 `*`**——那是「不知道」。 */
             let base = reads.first().map(|r| slot_type(r, tm)).unwrap_or_default();
@@ -4085,7 +4085,7 @@ pub fn resolve_slot_type(
 /// 判据必须是**基种类**，不是「串里出现 char」：`'[]char/utf8'int64` 是字符串
 /// 键的 map，基种类是 `int64`，它的成员类型在值侧、layout 推得出。
 ///
-/// `member_chain_type` 与 `resolveptr` 的两处结果类型推导都调这一份——
+/// `member_chain_type` 与 `kvlang·resolvekey` 的两处结果类型推导都调这一份——
 /// 同一个事实出现两份答案，就是「一条 int64 写入被报成 char/utf32」的来源。
 pub(crate) fn base_is_path_string(base: &str) -> bool {
     let bare = base.trim_start_matches('*');
@@ -4522,14 +4522,14 @@ fn expr_result_type(
         return format!("*{t}");
     }
     /*
-     * `kvspace/key·resolveptr(base, key) -> Ptr`：指针指向**容器成员**的类型。
+     * `kvlang·resolvekey(base, key) -> Ptr`：指针指向**容器成员**的类型。
      *
      * target kindexpr 从 base 的容器类型取（spec §四：结果类型由写槽声明给，
      * layout 必须能静态定出，定不出就报错，不许编一个）。`m:[int64]·int64` 的
      * 成员类型是 `int64`；compact `[3]int64` 的元素类型也是 `int64`。
      * base 是 Ptr 时先剥一层（多段迭代的形态）。
      */
-    if e.op == "kvspace/key·resolveptr" {
+    if e.op == "kvlang·resolvekey" {
         /*
          * 结果类型 = `*` + **成员类型**。成员类型只能从 base 的容器类型取：
          *   `[int64]·int64`（map）      → `container_value` → `int64`
@@ -5001,7 +5001,7 @@ fn walk_inst(
     check_declared_write_slots(s, tm, annotated, diags);
     check_call_args(e, sigs, tm, declared, diags);
     check_implicit_deref_member(e, tm, declared, diags);
-    check_resolveptr_write_slot(s, e, tm, diags);
+    check_resolve_write_slot(s, e, tm, diags);
     if e.op == format!("struct{}new", keytree::MEMBER_SEP) {
         check_struct_literal(e, structs, diags);
     }
@@ -5439,10 +5439,10 @@ fn record_inst_inplace_usage(
         .map(|w| usage_name(w, coords, positions))
         .collect();
     if let Some(e) = &inst.expr {
-        /* `base·*k` writes desugar to `_pN := resolveptr(base, k); v -> *_pN`. */
-        if e.op == "kvspace/key·resolveptr" && inst.writes.len() == 1 {
+        /* `base·*k` writes desugar to `_pN := kvlang·resolvekey(base, k); v -> *_pN`. */
+        if e.op == "kvlang·resolvekey" && inst.writes.len() == 1 {
             let mut root = e;
-            while root.op == "kvspace/key·resolveptr" && !root.args.is_empty() {
+            while root.op == "kvlang·resolvekey" && !root.args.is_empty() {
                 root = &root.args[0];
             }
             /* Root is a leaf, or `(*m)` once `format` output is parsed again. */
@@ -5560,7 +5560,7 @@ pub fn validate_writes(
     diags
 }
 
-/// `kvspace/key·resolveptr(base, key)` 的写槽**必须有显式类型注解**。
+/// `kvlang·resolvekey(base, key)` 的写槽**必须有显式类型注解**。
 ///
 /// 判据的由来（架构师裁决 2026-11-06）：成员类型只能从 base 的容器类型静态得出；
 /// base 是字符串（父路径文本）时，容器类型要到运行期才知道。此时唯一能给出
@@ -5570,26 +5570,26 @@ pub fn validate_writes(
 /// （`local … non-concrete langtype`）是**兜底**，它答的是「这条 wire 编不了」，
 /// 不是「你的源码缺一个类型注解」。两件事混在一个码里，用户看到的是内部错误
 /// 而不是自己的错。
-fn check_resolveptr_write_slot(
+fn check_resolve_write_slot(
     s: &Instruction,
     e: &Expr,
     tm: &HashMap<String, String>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    if e.op != "kvspace/key·resolveptr" || s.writes.len() != 1 {
+    if e.op != "kvlang·resolvekey" || s.writes.len() != 1 {
         return;
     }
     /*
      * **只检查「写侧展开」，不检查「读侧读入」。**
      *
-     * 两种形态都会产出一条 `resolveptr` 指令，但写目标的身份完全不同：
+     * 两种形态都会产出一条 `kvlang·resolvekey` 指令，但写目标的身份完全不同：
      *
-     *   写侧：`v -> base·*k` ⇒ `p := resolveptr(base,k); v -> *p`
+     *   写侧：`v -> base·*k` ⇒ `p := kvlang·resolvekey(base,k); v -> *p`
      *         写槽 `p` 是**内部临时槽**（`_p<N>`），它的类型必须由 layout 定出
      *         ⇒ 定不出就是真缺口，报错。
      *
-     *   读侧：`base·*k -> v` ⇒ `v := *resolveptr(base,k)`
-     *         写槽是**用户自己的变量** `v`，`resolveptr` 只是它的来源；
+     *   读侧：`base·*k -> v` ⇒ `v := *kvlang·resolvekey(base,k)`
+     *         写槽是**用户自己的变量** `v`，`kvlang·resolvekey` 只是它的来源；
      *         `v` 的类型可以由它自己的声明/后续用法推，**不该在这里要求注解**。
      *         曾把两者混为一谈，于是 `stdlib/kvlang/reflect.kv` 的
      *         `base·*key -> v`（v 是任意值，类型本来就静态不可知）被误报。
@@ -5650,7 +5650,7 @@ fn check_resolveptr_write_slot(
     }
     /*
      * **base 是指针时必须放行**：这是多段迭代的形态
-     * （`p2 := resolveptr(p1, k2)` 里 `p1` 就是 Ptr），以及「动态键位置」的读侧
+     * （`p2 := kvlang·resolvekey(p1, k2)` 里 `p1` 就是 Ptr），以及「动态键位置」的读侧
      * （`*_p -> v` 里的 `_p`）。指针的值就是 target 路径，成员类型由它指向的
      * 位置决定，不是「静态定不出」。
      *

@@ -374,7 +374,7 @@ static runtimec_status_t vmbin_value_access_dereference_ex(
     /*
      * ── 解引用**读**到不存在的目标 ⇒ `None` ──────────────────────────────
      *
-     * spec `05-runtime语义/12-动态键.kv` §四：「`resolveptr` 定位到的目标不存在时，
+     * spec `05-runtime语义/12-动态键.kv` §四：「`kvlang·resolvekey` 定位到的目标不存在时，
      * **读得 `None`**（成员访问语义）；普通绝对 key 的读仍失败封闭。」
      *
      * 这是「解引用**写**创建目标」的读侧对偶，两条走不同入口：
@@ -1500,7 +1500,7 @@ runtimec_status_t vmbin_value_access_write_body(
          *
          * ── 解引用写目标尚不存在 ⇒ **创建**（`05-runtime语义/12-动态键.kv` §一）──
          *
-         * 规范写明「`resolveptr` 不判目标是否存在……若提前判存在，`v -> base·*k`
+         * 规范写明「`kvlang·resolvekey` 不判目标是否存在……若提前判存在，`v -> base·*k`
          * 的首次写永远不成立」。所以「写到不存在的目标」不是错误，是**写即创建**
          * （#632）在解引用形态上的落地：`h·*k` 里的 `k` 运行期才定，目标的 key
          * 只有指针值自己知道。

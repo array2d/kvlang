@@ -2,9 +2,15 @@
 # kvlang「runtime 崩溃可随时恢复」端到端验证。
 # 核心承诺：vthread 全部执行态（pc/帧/栈）活在 kvspace，runtime 进程无内存态；
 # 进程随时被 SIGKILL，另起一个进程即可从持久化 pc 续跑，不重启、不重演已完成步骤。
-# 需 redis 后端（状态须活过被杀进程）。
+# KVSPACE 必填、无默认值：状态须活过被杀进程，所以必须是能持久保存的 DSN
+# （如 shm:// 上的一份文件）。不给就报错退出，不静默连某个默认后端。
 set -u
-export KVSPACE="${KVSPACE:-redis://127.0.0.1:6379}"
+if [ -z "${KVSPACE:-}" ]; then
+  echo "缺少 KVSPACE：DSN 必填、无默认值。" >&2
+  echo "用法：KVSPACE=shm:///tmp/crashrecover.shm $0" >&2
+  exit 2
+fi
+export KVSPACE
 KV=/usr/bin/kvspace
 KVLANG=/usr/bin/kvlang
 DIR="$(cd "$(dirname "$0")" && pwd)"

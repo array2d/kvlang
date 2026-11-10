@@ -38,7 +38,7 @@
 #include "vmbin/vthread_status.h"
 
 /* 成员分隔符 `·`（U+00B7）的 UTF-8 编码。**唯一定义点**：成员键拼接只有
- * `key·resolveptr` 一处，散落魔数会让「`·` 有几个字节」变成多处口径。 */
+ * `kvlang·resolvekey` 一处，散落魔数会让「`·` 有几个字节」变成多处口径。 */
 #define RUNTIMEC_HOST_MEMBER_SEPARATOR "\xC2\xB7"
 #define RUNTIMEC_HOST_MEMBER_SEPARATOR_LENGTH 2U
 
@@ -1020,7 +1020,7 @@ static runtimec_status_t runtimec_host_build_pointer_wire(
     /*
      * **类型从哪一个参数取，由调用方给**：
      *   `key·abs`      取**读参**——`&x` 的指针类型来自 x 自己；
-     *   `key·resolveptr` 取**写参**——位置是新造的，target kindexpr 只能由
+     *   `kvlang·resolvekey` 取**写参**——位置是新造的，target kindexpr 只能由
      *                    写槽声明给出（与 `newreshape` 的
      *                    `container_replace_langtype` 同一条规矩）。
      * 两处不能各写一份取类型的代码：剥 `*`/`@` 的规则必须只有一处。
@@ -1145,10 +1145,10 @@ static runtimec_status_t runtimec_host_key_tostr_fail(
     uint32_t source_program_counter);
 
 /*
- * `kvspace/key·resolveptr(base, keyvalue) -> Ptr`：由 base 与运行期键值算出目标位置。
+ * `kvlang·resolvekey(base, keyvalue) -> Ptr`：由 base 与运行期键值算出目标位置。
  *
  * spec `05-runtime语义/12-动态键` §二/§3.3。与 `key·abs` 并列：`abs` 取**已有**位置
- * （`&x` 的快捷形式），`resolveptr` 由 base + 键值**拼出**新位置。两者产出都是 Ptr
+ * （`&x` 的快捷形式），`kvlang·resolvekey` 由 base + 键值**拼出**新位置。两者产出都是 Ptr
  * （langtype 以 `*` 开头，body = 目标绝对 key 路径），读写都只能再走显式 `*`。
  *
  * **不判目标是否存在**：位置不是值。C 的 `&arr[i]` 对未初始化元素也合法；存在性在
@@ -1156,10 +1156,10 @@ static runtimec_status_t runtimec_host_key_tostr_fail(
  */
 
 /*
- * `kvspace/key·resolveptr(base, keyvalue) -> Ptr`：base + 运行期键值 → 目标位置。
+ * `kvlang·resolvekey(base, keyvalue) -> Ptr`：base + 运行期键值 → 目标位置。
  *
  * spec `05-runtime语义/12-动态键` §二/§3.3。与 `key·abs` 并列：`abs` 取**已有**
- * 位置，`resolveptr` 由 base + 键值**拼出**新位置。两者产出同为 Ptr。
+ * 位置，`kvlang·resolvekey` 由 base + 键值**拼出**新位置。两者产出同为 Ptr。
  *
  * **不判目标是否存在**：位置不是值（C 的 `&arr[i]` 对未初始化元素也合法）。
  *
@@ -1217,7 +1217,7 @@ static bool runtimec_host_base_is_character(runtimec_string_view_t langtype) {
 }
 
 /// base 的四态之一：把 base 解析成**父路径**文本。命中即止、顺序不可换。
-static runtimec_status_t runtimec_host_resolveptr_base_path(
+static runtimec_status_t runtimec_host_resolve_base_path(
     binrwir_binvthread_frame_t *frame, const binrwir_argument_t *base,
     char *base_path, size_t capacity, size_t *output_length,
     binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
@@ -1321,7 +1321,7 @@ static runtimec_status_t runtimec_host_resolveptr_base_path(
 }
 
 /// 键值 → 键文本。逐字铁律的唯一实现是 `member_key_text`，这里只做取参。
-static runtimec_status_t runtimec_host_resolveptr_key_text(
+static runtimec_status_t runtimec_host_resolve_key_text(
     binrwir_binvthread_frame_t *frame, const binrwir_argument_t *key,
     char *key_text, size_t capacity, size_t *output_length,
     binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
@@ -1355,7 +1355,7 @@ static runtimec_status_t runtimec_host_resolveptr_key_text(
 }
 
 /// `父路径` + `·` + `键文本`。分隔符只有一处定义（`RUNTIMEC_HOST_MEMBER_SEPARATOR`）。
-static runtimec_status_t runtimec_host_resolveptr_join(
+static runtimec_status_t runtimec_host_resolve_join(
     const char *base_path, size_t base_length, const char *key_text,
     size_t key_length, char *target, size_t capacity,
     binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
@@ -1375,10 +1375,10 @@ static runtimec_status_t runtimec_host_resolveptr_join(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/// 造 Ptr wire 并写进写槽（`resolveptr` 的收尾）。
+/// 造 Ptr wire 并写进写槽（`kvlang·resolvekey` 的收尾）。
 ///
 /// 类型取**写参**声明：新位置没有读参类型可依（与 `key·abs` 取读参不同）。
-static runtimec_status_t runtimec_host_resolveptr_write(
+static runtimec_status_t runtimec_host_resolve_write(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction, const char *target,
     binrwir_execution_exit_t *output_exit, uint32_t source_program_counter) {
@@ -1407,7 +1407,7 @@ static runtimec_status_t runtimec_host_resolveptr_write(
     return status;
 }
 
-static runtimec_status_t runtimec_host_key_resolveptr(
+static runtimec_status_t runtimec_host_kvlang_resolve(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
@@ -1427,23 +1427,23 @@ static runtimec_status_t runtimec_host_key_resolveptr(
                                   VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY,
                                   source_program_counter);
     }
-    status = runtimec_host_resolveptr_base_path(
+    status = runtimec_host_resolve_base_path(
         frame, &instruction->read_arguments.data[0], base_path,
         sizeof(base_path), &base_length, output_exit, source_program_counter);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_host_resolveptr_key_text(
+        status = runtimec_host_resolve_key_text(
             frame, &instruction->read_arguments.data[1], key_text,
             sizeof(key_text), &key_length, output_exit, source_program_counter);
     }
     if (status == RUNTIMEC_STATUS_SUCCESS) {
-        status = runtimec_host_resolveptr_join(
+        status = runtimec_host_resolve_join(
             base_path, base_length, key_text, key_length, target,
             sizeof(target), output_exit, source_program_counter);
     }
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
-    return runtimec_host_resolveptr_write(frame, instruction, target,
+    return runtimec_host_resolve_write(frame, instruction, target,
                                           output_exit, source_program_counter);
 }
 
@@ -1482,7 +1482,7 @@ static vmbin_handler_call_diagnostic_t runtimec_host_key_tostr_diagnostic(
  * `kvspace/key·tostr(value) -> 键文本`：值 → 成员键文本（逐字铁律的唯一实现）。
  *
  * 它**不碰存储**——不读 base、不拼父路径、不定位目标。这些属于定位算子
- * （`kvspace/key·resolveptr`）。本算子只回答一个问题：**这个值作成员键时，
+ * （`kvlang·resolvekey`）。本算子只回答一个问题：**这个值作成员键时，
  * 路径段是什么文本**。
  *
  * ── 为什么用上界栈缓冲，不用两段式 ────────────────────────────────────
@@ -1618,10 +1618,10 @@ static const binrwir_registry_entry_t runtimec_host_entry_table[] = {
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KEY_TOSTRING,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
      .handler = runtimec_host_key_tostr},
-    /* `key·resolveptr`：由 base + 键值算位置。不读写目标值，故不是 EFFECT。 */
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KEY_RESOLVE_POINTER,
+    /* `kvlang·resolvekey`：由 base + 键值算位置。不读写目标值，故不是 EFFECT。 */
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVLANG_RESOLVE_POINTER,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
-     .handler = runtimec_host_key_resolveptr},
+     .handler = runtimec_host_kvlang_resolve},
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_RANDOM_UNSIGNED_64,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
      .handler = runtimec_host_random_unsigned_64},

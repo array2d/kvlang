@@ -276,7 +276,7 @@ static bool vmbin_interpreter_copy_binds_reference(
      * 两处都判 structref 会漏掉 map：`(*arr)·*mid` 里 `arr` 是
      * `'[int64]'int64`（FORM_MAPPING），目标是同名 map——那条链路曾把容器的
      * 空 body 当值拷贝过去，产物是一个「body 空、类型是 map」的副本，
-     * 随后 `resolveptr` 取它自己的物理路径，拼出 `_7·k`（从不存在的 key）。
+     * 随后 `kvlang·resolvekey` 取它自己的物理路径，拼出 `_7·k`（从不存在的 key）。
      * 所以源侧改判**容器**（map ∪ structref）。
      */
     if (!vmbin_value_access_langtype_is_container(target_langtype)) {

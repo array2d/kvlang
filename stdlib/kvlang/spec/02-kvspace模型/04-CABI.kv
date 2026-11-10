@@ -3,7 +3,7 @@ lib kvlang/spec/kvspace模型/CABI {
 	r####"# C ABI
 
 **符号命名（normative）**：所有 C ABI 符号统一 `<前缀><PascalCase>` 无下划线（即
-camelCase）——kvspace 层前缀 `kvspace`（`kvspaceGet` / `kvspaceWriteInPlace`），kvlang runtime 层前缀
+camelCase）——kvspace 层前缀 `kvspace`（`kvspaceResolveOffset` / `kvspaceRealloc`），kvlang runtime 层前缀
 `kvlang`（`kvlangRuntimeConnect` / `kvlangLangtypeParse`）。禁止下划线分词（不写 `kvspace_get` /
 `kvlang_runtime_connect`），头文件名可用下划线（`kvlang_runtime.h`），导出符号一律无下划线。
 
@@ -25,226 +25,143 @@ camelCase）——kvspace 层前缀 `kvspace`（`kvspaceGet` / `kvspaceWriteInPl
 > 旧消费者只有两条路：**迁移到新 ABI，或退出构建**。删除是彻底的——没有「过渡期保留导出」
 > 这一档，任何依赖旧符号的代码都编不过、链不上。
 
-访问 kvspace 的唯一 C ABI 由前端 dispatch 静态导出。读写采用
+访问 kvspace 的唯一 C ABI 由 `libkvspace` 直接导出（单库化后没有 dispatch 转发层）。读写采用
 **借用二进制指针模型**：读返回指向后端常驻空间的二进制指针，调用方不得释放；寿命到该 key 被写/删或
 handle close（没有指令边界回收调用）。写返回 body 偏移的二进制指针供调用方直接填。
 
-**durable 读是 handle 内 per-key 常驻快照（normative）**：同一 key 首次读后直接返回同一缓冲，
-直到**本 handle** 写/删该 key 才失效；其它 handle/进程对该 key 的写不被观测。跨进程等待必须用
-`kvspaceWatch`，不得用 `kvspaceGet` 轮询。
+**`libkvspace`（shm）是直读直写，没有快照层（normative）**：`kvspaceResolveOffset` 给出的偏移
+指向映射内真实位置，`kvspaceXvalueInProcessAddress + offset` 读到的就是当前字节。写入同样
+直接落在映射上。因此外部暂停/恢复/终止（改 `‥status`）对运行中的 kvcpu 立即可见。
 
-**volatile keys（normative）**：控制键 `/vthread/*/‥status` 不走快照——每次
-`kvspaceGet`/`kvspaceGetPart` 都重读后端；实现用双缓冲，上一视图保活到该 key 下一次读。
-因此外部暂停/恢复/终止（改该键）对运行中的 kvcpu 立即可见。除此之外的 key 都是 snapshot；
-新增外部可改写键必须在此登记为 volatile。
+> **历史（durable 旧 ABI）**：`kvspace-durable` 曾有 handle 内 per-key 常驻快照与
+> `kvspaceWatch` 等待原语，配合「volatile keys」白名单让 `‥status` 绕过快照。那套在
+> `libkvspace` 上不存在——它没有快照层，也就不需要 volatile 名单。
 
 **status 固定档（normative）**：`/vthread/*/‥status` 的**形状固定**——head 恒为
 `KVSPACE_XVALUE_HEAD_LEN`（**当前 16 字节**，不得写死数字）、padding 全零、
 langtype 的 base kind 为字符族（`char/X`、`[N]char/X`、`[]char/X`；runtimec 写 `[]char/utf8`）。
 字符族即 bufferarray（见 [[XValueHead线格式]]），`bodylen` 就是内容字节数，上限 LV=16。
 wire 上只有这一个长度量（tag 2 `reallen` 已删除）；物理容量是后端属性（shm 的 `body_cap`），
-不进 wire。shm 后端创建该键时按**物理容量下限 80 字节**分配（实际 `headlen`/`body_cap` 以
-slot view 返回为准），使内容能在容量内原地改写。之后任何写入
+不进 wire。shm 后端创建该键时按**物理容量下限 80 字节**分配，使内容能在容量内原地改写。
+之后任何写入
 （runtime `setstatus`/`SetDone`/`SetError` 或外部 `kvspace set`）都必须原地完成；
 `bodylen` > LV、head 形状不符（含 padding 非零）、langtype 不是字符族，或现存槽自身物理容量
 <80，必须**硬错返回**，不得 realloc、不得截断、不得更换 box。**旧 store 中 headlen 不符或
-物理容量 <80 的 status 槽不自动升级**：写入硬错，slot view 返回 `-1`，需重建/重置该 store。
+物理容量 <80 的 status 槽不自动升级**：写入硬错，需重建/重置该 store。
 
 **约束归属（normative）**：`‥status` 的「langtype base kind 是 char + `bodylen` ≤16」是
-**wire 级契约，所有后端都必须校验**；「物理容量 ≥80」只对 shm 后端有意义（它靠 slot view
-原地读写）。durable 后端没有物理 box 概念，只校验 wire 契约本身。合规槽的
-view 的二进制指针在 handle 生命期内稳定；`kvspaceWatch` 仍按后端值轮询，status 变更仍可见。
+**wire 级契约，所有后端都必须校验**；「物理容量 ≥80」只对 shm 后端有意义。durable 后端没有
+物理 box 概念，只校验 wire 契约本身。
 
-**slot view（shm-only, normative）**：`kvspaceSlotView(handle, ref, key_fallback, view)`
-把已绑定槽在映射内的地址一次性交给调用方，供每步直接读/写。非 shm 后端返回 `-2`
-（不支持），调用方必须回退既有读写 API，且**每个句柄只判定一次**，不得在热路径重试。
+## 视图协议：历史设计（已废弃）
 
-```c
-typedef struct {
-    uint8_t *head;       /* XValue head 起点 */
-    uint32_t headlen;    /* head 字节数；body = head + headlen */
-    uint8_t *body;
-    uint64_t body_cap;   /* = cap - headlen */
-    uint64_t cap;        /* 整 box 物理容量（sbo_allocated_size），非常量假设 */
-} kvspaceSlotView_t;
-int kvspaceSlotView(void *h, const kvspaceRef_t *ref,
-                    const char *key_fallback, kvspaceSlotView_t *out);
-/* 0=成功；-1=不存在/ref 失效/不可视槽；-2=后端不支持。 */
-```
+本节的 slot view / view token / 屏障契约 / 延迟回收**四个协议已被删除**（TASK-082 单库化）。
+`kvspaceSlotView`、`kvspaceViewResolve/Check/Write/Del/Refresh/Sweep/Ack/Quiesce`、`kvspaceViewToken_t`
+等符号**在库中一个都不存在**，runtimec 也不调用它们。下面保留描述仅为记录历史设计，
+**新实现不得照此编写**。
 
-**`key_fallback` 必填（normative）**：status 的识别与形状/容量校验依赖它；
-传 NULL 一律返回 `-1`，不得绕过 status 规则。`status` 形状不符、`content_len >16`、
-物理容量 `cap <80` 或旧 store 不合规时同样返回 `-1`（runtime 回退既有 API）。
-二进制指针为借用：寿命到该 key 被写/删、view 失效或 handle close。两种使用模式：
-
-- **只读 view**：只读 head/body，不写；用于 status 与 operand 的每步读。
-- **owned view（P1 仅 PC）**：key 由本 vthread 独占写，`layout`/`headlen` 固定。
-  允许一次 memcpy 原地替换整个 XValue，但必须按 `view->body_cap` 编码（不得按
-  新值长度收紧）；**head 与 attr 区必须逐字节不变**（langtype 是类型事实，改类型即换值，
-  走整值写）；char 的
-  `[<n>]` 长度前缀是派生字段，必须用规范编码随内容更新并与 valuelen 一致
-  （不得整串照抄旧 n）。总长超过 `cap` 或后端拒绝时回退 `SetPartByRef`（一次性）。
-  owned 键不提供 `kvspaceWatch` 通知保证；P1 的局部操作数不进入 owned，继续走
-  `WriteBody`（FIXED_SMALL body 直写）。
-
-**view token（shm-only, normative）**：shm 后端额外提供版本化视图 token；
-durable 无映射内槽，全部返回 `-2`。
+**现在的机制**：
 
 ```c
-typedef struct {
-    uint8_t *head;        /* XValue 起点（映射内，借用） */
-    uint8_t *body;        /* head + headlen */
-    uint32_t headlen;
-    uint32_t value_len;
-    uint64_t cap;         /* 整 box 物理容量 */
-    uint64_t body_cap;
-    uint32_t struct_gen;  /* 结构版本：子集变化/搬迁才变 */
-    uint32_t value_gen;   /* 值版本：写/删递增（seqlock） */
-    uint64_t store_id;    /* 句柄身份：close/重开后旧 token 失效 */
-    uint32_t node_id;
-    uint32_t _pad;        /* 存放 recovery_epoch（Check 用） */
-} kvspaceViewToken_t;
+uint64_t offset = 0;
+kvspaceResolveOffset(h, "/key", 0, &offset, err, cap);   /* 拿到 64 位偏移 */
+uint8_t *base = kvspaceXvalueInProcessAddress(h);  /* 进程内值区基址 */
+uint8_t *value = base + offset;                    /* 地址 = base + offset */
 ```
 
-符号：`kvspaceViewResolve` / `FromRef` / `ResolveFrom` /
-`ResolvePrefix` / `Check` / `Write` / `Del` / `Refresh` / `Sweep` /
-`Ack` / `Quiesce`。返回码：`0`=有效/成功，`1`=STALE（需 `Refresh`），
-`-1`=错误，`-2`=后端不支持（durable 全部 `-2`，调用方回退既有读写
-API，每个句柄只判定一次）。**没有 Release**：token 无 pin，`store_id`
-失配或版本不符即失效。
+- **一次调用拿到位置**，不需要 view token、不需要版本号、不需要 `Refresh`/`Check`；
+- **地址稳定性**由 `kvspaceXvalueInProcessAddress` 的契约给出：shm 的基址在进程生命周期内
+  稳定（预留 VA + `MAP_FIXED`），跨进程只传 `offset`、不传 base；
+- **回收是即时的**：`kvspaceFree` 删值即释放，没有「屏障轮」「垃圾环」这套延迟回收。
 
-**屏障契约（normative）**：
+`‥status` 的形状约束（head 16 字节、padding 全零、字符族、有效长度 ≤16）**仍然有效**，
+但它是 **wire 级契约**，不依赖任何 view——见上文「status 固定档」。
 
-- claim 后默认 `quiesced=1`；**使用 token/view 前必须
-  `kvspaceViewQuiesce(h, 0)`**。
-- 进入阻塞（`kvspaceWatch` / sleep / 长时间不让出）前必须
-  `Quiesce(1)` + `kvspaceViewAck`；返回后 `Quiesce(0)` 并作废本进程
-  全部派生 token。
-- 长计算每 64 个 op 检查一次（runtime 已内置）。不 ack 只会让屏障轮
-  阻塞、垃圾不回收——是背压，不是错误。
-- leader 只在“所有存活进程都已 ack 或 quiesced”后推进 epoch 并回收；
-  死进程按 `/proc/<pid>/stat` 判定。
+> **历史设计（原文保留，仅作记录）**：曾有 slot view 把已绑定槽在映射内的地址一次性交给
+> 调用方（含 head/body/body_cap/cap），并有 view token 携带 `struct_gen`/`value_gen`/`store_id`
+> 做版本失效、屏障轮推进 epoch 后回收垃圾。这套协议随单库化一并删除——它解决的是「多进程
+> 共享一个可变映射」的问题，而现在 shm 后端是单写者、无跨进程视图同步需求。
+>
+> 仍有效的两条契约保留如下：
+>
+> - **单写者（normative）**：同一 store 同一时刻只允许**一个写者进程**；两个进程并发写
+>   （即使不同 key）为未定义行为，后端可硬错。多进程只读/等待不受限。
+> - **shm store 格式（normative）**：`format_version` 由后端维护，旧格式在 open 时硬失败
+>   并提示重建；不迁移、不向后兼容。节点 8 字节对齐是正确性前提：非对齐 8 字节原子在 x86
+>   上退化为 split lock，在 AArch64 上可能直接陷入。
 
-**单写者契约（normative）**：同一 store 同一时刻只允许**一个写者进程**；
-两个进程并发写（即使不同 key）为未定义行为，后端可硬错。多进程只读/
-等待不受限。
+## 真实符号面
 
-**shm store 格式 4（normative）**：`format_version = 4`（ART val 原子字、
-垃圾环、单写者降级、ART 节点 8 字节对齐）。旧格式（2/3）在 open 时
-硬失败并提示重建；不迁移、不向后兼容。节点 8 字节对齐是正确性前提：
-非对齐 8 字节原子在 x86 上退化为 split lock，在 AArch64 上可能直接陷入。
+**现行**：`libkvspace` 导出 **16** 个符号——12 个存储 ABI（`kvspace.h`）+ 3 个字节层 attr 访问
+（`kvspace_xvalue.h`）+ 1 个存储常量查询（`const.h`）。完整清单与语义见 [[存储层ABI]]；
+导出面由 `tests/test_export_surface.c` 逐个取地址断言，打包后由 `tests/check_release_abi.sh` 复核。
 
-**删除是延迟回收（normative）**：`kvspaceDel` / `kvspaceViewDel` 只把
-box 退役进垃圾环；释放发生在屏障轮（`kvspaceViewSweep` 同步跑一轮，或
-维护线程在未回收字节达 64 MiB 时启动）。需要立即观察物理释放的调用方
-必须显式 `Sweep`。
+**旧 ABI 已全部删除**（`kvspaceGet` / `kvspaceSetValue` / `kvspaceWriteInPlace` /
+`kvspaceWriteNewPlace` / `kvspaceListLen` / `kvspaceListAt` / `kvspaceDel` / `kvspaceDelTree` /
+`kvspaceClear` / `kvspaceWatch` / `kvspaceSlotView` / `kvspaceView*` …）：声明从公共头消失，
+**符号也不再导出**。历史清单见文末「附录：已删除的旧 ABI」。
 
-核心符号：
+无句柄的 XValue 构造/读取（byte-identical）：head 固定 **16 字节**、无 encode/decode 层。
 
-| 符号 | 语义 |
-|------|------|
-| `kvspaceGet` | 借用读：`*out` 指向后端常驻空间；`resolve=1` 穿透 link；不存在/空值 → `*out=NULL`、返回 0 |
-| `kvspaceSlotView` | shm-only slot view：返回映射内 `head/body/cap/body_cap`；只读或 owned 直写；不支持后端返回 `-2` |
-| `kvspaceWriteInPlace` | 就地写：key 已存在、kind 不变、body 长度不变；返回原 box body 偏移的二进制指针，违反前置条件即报错，绝不静默重分配 |
-| `kvspaceWriteNewPlace` | 新位置写：按 `(ref, body_len, body_cap, langtype)` 分配新 box、写 head 与 tag 1 langtype 记录，返回 body 偏移的二进制指针。用于新建或 kind/尺寸变化。`bodylen` 记 `body_len`（有效字节数）；`body_cap` 只作后端物理分配下界，**不进 wire**；`ref` 转成 langtype 的 `*`/`@` 前缀。**`storetype` 形参保留只为 ABI 稳定，不携带信息：实现不得对它分支或校验**（见旧 ABI 私有 legacy 头的注释） |
-| `kvspaceSetValue` | 整值写：给定完整 xvalue 字节，由后端编码 head 并写入。runtime 侧的写出口走它，而非上面的偏移二进制指针原语 |
-| `kvspaceListLen` | 返回前缀下直接子项计数 |
-| `kvspaceListAt` | 取前缀下第 `idx` 个子项名，写入调用方自备缓冲；配合 `kvspaceListLen` 遍历 |
-| `kvspaceDel` | 批量删除给定 key 数组 |
-| `kvspaceDelTree` | 删除前缀子树 |
-| `kvspaceCp` / `kvspaceCpTree` / `kvspaceCpList` | 复制单值 / 子树 / 直接子项 |
-| `kvspaceMkindex` | 旧 ABI：建目录，带 `capacity` 预留容量。新 ABI **同名但签名已变**——`（h, key, err, cap)` 无 capacity（见 [[存储层ABI]]） |
-| `kvspaceClear` | 清空 |
-| `kvspaceWatch` | 一次性等待某 key 变为目标值 |
+**构造器属语言层**（TASK-082 起）：`kvlangXvalueHeadNewNone`/`NewScalar`/`NewSlack`/`NewTensor`/
+`NewPtr`/`NewExt`/`NewCode`/`Reserve`，以及标准标量构造器 `kvlangXvalueNewPtr` / `NewChar` /
+`NewBool` / `NewInt64` / `NewFloat64`——定义在 `kvlang/include/kvlang/xvalue.h`，编译进
+`libkvlang_xvalue.a`，**不在 `libkvspace` 里**。存储层不认识 langtype 这个词。
 
-> **旧 ABI 与存储层 ABI 的关系**（2026-11-10 起）：上表是**旧 ABI，已删除**——
-> 声明从公共头消失，**符号也不再导出**；下面的条目只作历史记录，不是可用接口。
-> 新存储层 ABI 见 [[存储层ABI]]——9 个操作
-> （`resolve`/`realloc`/`free`/`cp`/`makeindex`/`deltree`/`cpdir`/`listlen`/`list`），
-> **不提供 extindex**（`kvspaceMkindexExt`/`kvspaceRmIndexExt` 不存在）。
-
-无句柄的 XValue 构造/读取（前端静态导出，byte-identical）：head 固定 **16 字节**、无 encode/decode 层——
-构造走 `kvspaceXvalueHeadNewNone`/`NewScalar`/`NewSlack`/`NewTensor`/`NewPtr`/`NewExt`/`NewCode`/`Reserve`
 （`kvspaceXvalueHead` struct 为 `bodylen:u64 @0`、`attrslen:u16 @8`、`padding:6 @10-15`，
-body 偏移恒 16），读一律走 inline 访问器（字段的唯一定义点）；langtype 不在 head——
-落值内 attr 区（tag 1 记录），随单 key 一次写整体落下。标准标量构造器保留：`kvspaceNewPtr`（存目标完整 langtype +
-目标 key）、`kvspaceNewChar` / `kvspaceNewBool` / `kvspaceNewInt64` / `kvspaceNewFloat64`（签名各增
-langtype 参数，写入 attr 区）。
+body 偏移恒 16——这个 struct 属字节层，在 `kvspace_xvalue.h`。）
+读一律走 inline 访问器（字段的唯一定义点）；langtype 不在 head——落值内 attr 区（tag 1 记录），
+随单 key 一次写整体落下。
 
-读写各带 `resolve` 参数：`resolve=1` 时透明穿透 langtype 以 `*` 开头的 kvlang 指针（link）。旧 ABI 的
-`kvspaceListLen`/`kvspaceListAt` 另带 `expand_ext` 参数（展开 extindex 子项），**新存储层 ABI 已删除
-该语义**：`listlen`/`list` 只列物理直接子项，无叠加层。head 线格式与 langtype 编码见 [[键系统与数组访
-问]]。
+`kvspaceResolveOffset` **不跟 Ptr**：解引用由 runtime 显式 `*` 掌控。旧 ABI 的 `resolve` 读参语义
+（旧 ABI 的 `resolve=1` 读参，用于穿透 link）随整个读接口一起删除；`listlen`/`list` 只列物理直接子项，无叠加层。
+head 线格式与 langtype 编码见 [[键系统与数组访问]]。
 
-**写侧不穿透整键（normative）**：`kvspaceWriteInPlace` / `kvspaceWriteNewPlace` / `kvspaceDel` /
-`kvspaceDelTree` 对**最终组件**不解析 link——写/删 Ptr 键只作用该键本体，不重定向到 target
-（`Del`/`DelTree` 为 POSIX rm 式：删该 kvlang 指针本身，不删被指向者）。解引用由 runtime 显式 `*` 掌控（见
-[[ptr]]）。否则「写实参地址 Ptr 到帧槽」会被重定向到 target，导致丢参 / 写坏被指向的值。
+**写侧不穿透整键（normative）**：`kvspaceRealloc` / `kvspaceFree` / `kvspaceDeltree` 对
+**最终组件**不解析 link——写/删 Ptr 键只作用该键本体，不重定向到 target
+（`free`/`deltree` 为 POSIX rm 式：删该 kvlang 指针本身，不删被指向者）。解引用由 runtime
+显式 `*` 掌控（见 [[ptr]]）。否则「写实参地址 Ptr 到帧槽」会被重定向到 target，导致丢参 /
+写坏被指向的值。
 
-**写侧落盘时机（normative）**：`kvspaceWriteInPlace` / `kvspaceWriteNewPlace` 返回 body 偏移的二进制指针
-给调用方**在返回后**填，故本笔写不可能在返回前落盘——写在下一次 `kvspace*` 调用（读也算：每个 op
-开头先落盘上一笔）或 `kvspaceClose` 时落盘；前者失败以返回码 + err 报出，后者失败写 stderr。
-进程正常退出（`exit` / main 返回）时，前端（dispatch）对所有未 `Close` 句柄兜底关闭即落盘：
-**漏调 Close 不丢数据，真丢也绝不静默**。shm 后端写即落盘（body 的二进制指针即最终位置），两后端在
-「下一次调用前可见」上一致。
+**写侧落盘时机（normative）**：`kvspaceRealloc` 返回 body 偏移的二进制指针给调用方**在返回后**填。
+`libkvspace`（shm）写即落盘——body 的二进制指针就是最终位置，下一次 `kvspace*` 调用（读也算）
+即可见，不依赖 `kvspaceClose`。`kvspace-durable` 仍是延迟落盘（下一次调用或 `Close` 时落盘，
+失败写 stderr）。
 
-## kvspace C ABI 导出符号（快照）
+## `libkvspace` 导出符号（快照）
 
-权威来源是**构建产物**——`nm -D --defined-only /usr/lib/kvspace/libkvspace.so | grep '^kvspace'`（前端
-dispatch 静态导出；后端 `kvspace-c` / `kvspace-durable` 各导出同一集合）。下列快照仅作阅读导航，改 ABI 时
-不必同步本文：
+**权威来源是构建产物**：`nm -D --defined-only lib/libkvspace.so.1.0.0 | awk '$2=="T"{print $3}' | grep '^kvspace'`。
+下面是**生产配置**（`-DBUILD_TESTING=OFF`）的 16 个，`tests/check_release_abi.sh` 会在打包后复核。
 
 ```
-    kvspaceClear
-    kvspaceClose
+    kvspaceClose                            存储 ABI：生命周期
     kvspaceConnect
-    kvspaceConst
-    kvspaceCp
-    kvspaceCpList
-    kvspaceCpTree
-    kvspaceDel
-    kvspaceDelTree
-    kvspaceGet
-    kvspaceGetByRef
-    kvspaceGetPart
-    kvspaceListAt
-    kvspaceListLen
-    kvspaceMkindex
-    kvspaceMkindexExt
-    kvspaceNewBool
-    kvspaceNewChar
-    kvspaceNewFloat64
-    kvspaceNewInt64
-    kvspaceNewPtr
-    kvspaceResolveRef
-    kvspaceRmindexExt
-    kvspaceSetPart
-    kvspaceSetPartByRef
-    kvspaceSetValue
-    kvspaceSetValueByRef
-    kvspaceViewAck
-    kvspaceViewCheck
-    kvspaceViewDel
-    kvspaceViewFromRef
-    kvspaceViewQuiesce
-    kvspaceViewRefresh
-    kvspaceViewResolve
-    kvspaceViewResolveFrom
-    kvspaceViewResolvePrefix
-    kvspaceViewSweep
-    kvspaceViewWrite
-    kvspaceWatch
-    kvspaceWriteInPlace
-    kvspaceWriteNewPlace
-    kvspaceXvalueBodyView
-    kvspaceXvalueHeadNewCode
-    kvspaceXvalueHeadNewExt
-    kvspaceXvalueHeadNewNone
-    kvspaceXvalueHeadNewPtr
-    kvspaceXvalueHeadNewScalar
-    kvspaceXvalueHeadNewSlack
-    kvspaceXvalueHeadNewTensor
-    kvspaceXvalueHeadReserve
+    kvspaceCp                               存储 ABI：单键复制
+    kvspaceCpdir                            存储 ABI：递归复制子树
+    kvspaceDeltree                          存储 ABI：连根删子树
+    kvspaceFree                             存储 ABI：删值 / 空索引
+    kvspaceList                             存储 ABI：整体枚举直接子项
+    kvspaceListlen                          存储 ABI：N / M
+    kvspaceMkindex                          存储 ABI：建 index 位置
+    kvspaceRealloc                          存储 ABI：唯一写原语
+    kvspaceResolveOffset                          存储 ABI：key → 偏移
+    kvspaceXvalueInProcessAddress           存储 ABI：进程内值区基址
+    kvspaceConstStorage                     存储常量：运行期查询
+    kvspaceXvalueGetAttr                    字节层：按 tag 读 attr
+    kvspaceXvalueSetAttr                    字节层：按 tag 写 attr
+    kvspaceXvalueHeadEffectiveLen           字节层：有效长度（= bodylen）
 ```
-	"#### -> /lib/kvlang/spec/kvspace模型/CABI
+
+**测试配置**（`-DBUILD_TESTING=ON`）额外导出 `kvspaceShm*` 测试钩子共 46 个符号——那是
+`P2_TEST_HOOKS` 白名单，生产配置一个都不导出。
+
+> **已删除的旧 ABI**：`kvspaceGet` / `kvspaceSetValue` / `kvspaceWriteInPlace` /
+> `kvspaceWriteNewPlace` / `kvspaceListLen` / `kvspaceListAt` / `kvspaceDel` / `kvspaceDelTree` /
+> `kvspaceClear` / `kvspaceWatch` / `kvspaceSlotView` / `kvspaceView*` / `kvspaceXvalueHeadNew*` /
+> `kvspaceNew*` / `kvspaceConst` / `kvspaceMkindexExt` / `kvspaceResolveRef` 等——声明与导出
+> **全部消失**。构造器迁到 `libkvlang_xvalue`（见上文「构造器属语言层」）。
+>
+> 本题为 P1-3/P1-4 的范围：原有 50 行旧符号快照整块替换为上述真实清单。
+
+"#### -> /lib/kvlang/spec/kvspace模型/CABI
 }

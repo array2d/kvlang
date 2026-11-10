@@ -111,8 +111,9 @@ attr 区编码（normative）：**TLV 记录首尾相接**。
 遍历——那会复制出知道字节布局的第二处，边界检查漏一处就是越界读。
 
 **头文件按层分家**：head 与 attr 的**字节层**（布局、TLV、`GetAttr`/`SetAttr`、`EffectiveLen`）
-在 `kvspace/kvspace_xvalue.h`；**tag 1 langtype 的语义**、langtype 包装与 `New*` 构造器在
-`kvspace/kvlang_xvalue.h`。旧头 `xvalue_head.h` 已删除。
+在 **kvspace 仓**的 `kvspace/kvspace_xvalue.h`；**tag 1 langtype 的语义**、langtype 包装与
+`New*` 构造器在 **kvlang 仓**的 `kvlang/xvalue.h`（编译进 `libkvlang_xvalue.a`）。
+旧头 `kvspace/kvlang_xvalue.h` 与 `xvalue_head.h` 均已删除。
 
 ## 空值：`None` 与「空但不是 None」
 

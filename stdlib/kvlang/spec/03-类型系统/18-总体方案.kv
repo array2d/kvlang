@@ -23,7 +23,8 @@ lib kvlang/spec/类型系统/总体方案 {
 
 **codec 不解析 langtype**：后端是纯存储层——body 偏移恒为 16，类型事实源在值内 attr 区，
 由 vmkv（明文栈）读取解析。head/attr 的字节层定义点是 `kvspace/include/kvspace/kvspace_xvalue.h`，
-langtype 与构造器的定义点是 `kvspace/include/kvspace/kvlang_xvalue.h`；读/写一律走各自的
+langtype 与构造器的定义点在 **kvlang 仓**的 `include/kvlang/xvalue.h`（旧路径
+`kvspace/include/kvspace/kvlang_xvalue.h` 已删除）；读/写一律走各自的
 inline 访问器，不自己按字节布局解析。
 "#### -> /lib/kvlang/spec/类型系统/总体方案
 }

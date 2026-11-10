@@ -1,5 +1,5 @@
 //! Robustness tests: user input must never panic, hang, or half-write kvspace, and `vet`
-//! must match `compile` on all pure checks. Each test uses an isolated temporary `fs://` dir.
+//! must match `compile` on all pure checks. Each test uses an isolated temporary `shm://` store.
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -25,7 +25,7 @@ fn store() -> Store {
         SEQ.fetch_add(1, Ordering::SeqCst)
     );
     let _ = std::fs::remove_dir_all(&dir);
-    let mut kv = Kv::conn(&format!("fs://{dir}"));
+    let mut kv = Kv::conn(&format!("shm://{dir}"));
     init_dirs(&mut kv).unwrap();
     kv.set(&[(
         "/lib/println".to_string(),
@@ -246,7 +246,7 @@ fn cli_reports_errors_without_panicking() {
     let f = dir.join("brk.kv");
     std::fs::write(&f, "rwfunc test() -> () {\n\tprintln(\"before\")\n\tbreak\n}\n").unwrap();
     let bin = env!("CARGO_BIN_EXE_kvlanglayout");
-    let dsn = format!("fs://{}", dir.join("db").display());
+    let dsn = format!("shm://{}", dir.join("db").display());
     for args in [
         vec!["vet".to_string(), f.display().to_string()],
         vec![f.display().to_string(), dsn.clone()],

@@ -496,7 +496,7 @@ fn inplace_reads_ignore_literals_member_keys_and_shadowing() {
     assert!(!passes("rwfunc f(*[]int64 $d) -> () {\n\tfor (d in *d) {\n\t\tprint(d)\n\t}\n}\n"));
 }
 
-/// `(*m)·*k` desugars to a `resolveptr` position slot; the write still counts for `m`.
+/// `(*m)·*k` desugars to a `kvlang·resolvekey` position slot; the write still counts for `m`.
 #[test]
 fn inplace_dynamic_member_write_counts() {
     let src = "rwfunc put(*int64 $k, *int64 $v) -> (*'[int64]'int64 $m inplace) {\n\t(*m)·*k + *v -> (*m)·*k\n}\n";

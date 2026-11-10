@@ -17,8 +17,9 @@ durable 单句柄相干、后端装载。
    拷贝语义。
 2. **值语义与读写点**：head 固定 16 字节（`bodylen:u64@0`、`attrslen:u16@8`、`padding:6@10-15`，
    body 偏移恒 16，见 [[XValueHead线格式]]），唯一 wire
-   读写点在前端——构造走 `kvspaceXvalueHeadNew*`/`Reserve`，读走 memcpy `kvspaceXvalueHead` struct +
-   `kvspaceXvalueHeadLen`，标准标量构造器 `kvspaceNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`；
+   读写点只有一处——构造走 `kvlangXvalueHeadNew*`/`Reserve`（`libkvlang_xvalue`），读走 memcpy
+   `kvspaceXvalueHead` struct + `kvspaceXvalueHeadLen`（`kvspace_xvalue.h` 的 inline 访问器），
+   标准标量构造器 `kvlangXvalueNewPtr`/`NewChar`/`NewBool`/`NewInt64`/`NewFloat64`；
    langtype 落值内 attr 区（随单 key 一次写整体落下）。runtimec2 的 `xvalue.c` 只是其薄封装。langtype 串是类型的
    唯一真相，怎么拼、怎么解，只此一处。
 3. **指令解码与签名校验**：`rwir_decode.c:RwirDecode`（稠密探查、遇空即停）、`/lib/<op>`
@@ -80,14 +81,14 @@ layout 与 runtime 对**数据 store**不做特化：不 dlopen、不双后端�
 # 存储层 ABI（kvspace.h；9 操作 + 生命周期 + 地址访问器，见 [[存储层ABI]]）
 # kvspace.h 原名 storage.h；旧 ABI 的公共头与符号都已删除
 kvspaceConnect / Close
-kvspaceResolve / Realloc / Free / Cp
+kvspaceResolveOffset / Realloc / Free / Cp
 kvspaceMkindex / Deltree / Cpdir / Listlen / List
 kvspaceXvalueInProcessAddress    // 地址空间访问器，不计入 9 个语义操作
 # attr 区按 tag 读写（不再是扫描器）：
 kvspaceXvalueGetAttr / kvspaceXvalueSetAttr
-# 无句柄的 XValue 构造/读取（字节层 + 语言层，见 [[XValueHead线格式]]）：
-kvspaceXvalueHeadNewNone / NewScalar / NewSlack / NewTensor / NewPtr / NewExt / NewCode / Reserve
-kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
+# 无句柄的 XValue 构造（**语言层**，在 libkvlang_xvalue.a，不在 libkvspace 里）：
+kvlangXvalueHeadNewNone / NewScalar / NewSlack / NewTensor / NewPtr / NewExt / NewCode / Reserve
+kvlangXvalueNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 ```
 
 **旧 ABI 符号已删除，不设过渡导出**：`kvspaceGet`、`kvspaceSetValue`、`kvspaceWriteInPlace`、
@@ -96,7 +97,7 @@ kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 
 **读写模型**（新 ABI 下）：
 
-- **读**：`kvspaceResolve` 拿 `value_offset`，再用 `kvspaceXvalueInProcessAddress(h) + offset`
+- **读**：`kvspaceResolveOffset` 拿 `value_offset`，再用 `kvspaceXvalueInProcessAddress(h) + offset`
   取到映射内地址；durable 无映射（返回 NULL），不适用此路径。
 - **写**：`kvspaceRealloc` 是唯一写原语，按需创建/调整后返回可写偏移；调用方填完即生效。
 - **前缀枚举**：`kvspaceListlen` 返回 N（子项数）与 M（最长名长度），一次分配后
@@ -106,8 +107,9 @@ kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
 `ResolveReadValue` 在执行当前指令时从 KVSpace 读取目标值。初始化 XValue 的指令可直接使用代码槽
 中的内联字面量。读取后的临时解码值只在当前指令内有效，下一条指令重新读取 KVSpace。
 
-**后端由链接决定**：构建期经环境变量选择链接哪个 kvspace 库（`kvspace-c` 或 `kvspace_durable`），两
-者导出同一 ABI；runtime 的句柄结构只保留 `void *h`，代码零后端分支。
+**后端由链接决定**：构建期决定链哪个库——`libkvspace`（serve `shm://`）或 `kvspace-durable`
+（serve `redis://`/`fs://`/`s3://`）。两者共享同一份 `kvspace.h` 的 ABI 形状；runtime 的句柄结构
+只保留 `void *h`，代码零后端分支。`kvspaceConnect` 对不属于自己库的 scheme 返回 NULL。
 
 ## 导出符号
 

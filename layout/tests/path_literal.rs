@@ -11,18 +11,14 @@ struct TempStore(String);
 
 impl Drop for TempStore {
     fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(self.0.trim_start_matches("fs://"));
+        kvlanglayout::ffi::remove_test_store(&self.0);
     }
 }
 
 fn fresh_kv(tag: &str) -> (TempStore, Kv) {
-    let dsn = format!(
-        "fs:///tmp/kvlanglayout_pathlit_{}_{}",
-        tag,
-        std::process::id()
-    );
+    let dsn = kvlanglayout::ffi::test_dsn(&format!("pathlit_{tag}"));
     let store = TempStore(dsn.clone());
-    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+    kvlanglayout::ffi::remove_test_store(&dsn);
 
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
@@ -62,10 +58,7 @@ fn quoted_path_in_write_slot_is_rejected() {
         "rwfunc f() -> () {\n    42 -> \"/tmp/pathlit/a\"\n}\n",
     )
     .unwrap();
-    let dsn = format!(
-        "fs:///tmp/kvlanglayout_pathlit_cli_{}",
-        std::process::id()
-    );
+    let dsn = kvlanglayout::ffi::test_dsn(&format!("pathlit_cli_{}", std::process::id()));
     let out = Command::new(bin)
         .arg(&file)
         .arg(&dsn)
@@ -80,7 +73,7 @@ fn quoted_path_in_write_slot_is_rejected() {
         "诊断文本不符：{err}"
     );
     let _ = std::fs::remove_file(&file);
-    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+    kvlanglayout::ffi::remove_test_store(&dsn);
 }
 
 #[test]
@@ -144,10 +137,7 @@ fn raw_quoted_path_in_write_slot_is_rejected() {
         "rwfunc f() -> () {\n    42 -> r\"/tmp/pathlit/c\"\n}\n",
     )
     .unwrap();
-    let dsn = format!(
-        "fs:///tmp/kvlanglayout_pathlit_raw_{}",
-        std::process::id()
-    );
+    let dsn = kvlanglayout::ffi::test_dsn(&format!("pathlit_raw_{}", std::process::id()));
     let out = Command::new(bin)
         .arg(&file)
         .arg(&dsn)
@@ -162,7 +152,7 @@ fn raw_quoted_path_in_write_slot_is_rejected() {
         "原始串诊断文本不符：{err}"
     );
     let _ = std::fs::remove_file(&file);
-    let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
+    kvlanglayout::ffi::remove_test_store(&dsn);
 }
 
 #[test]

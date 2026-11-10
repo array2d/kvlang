@@ -33,11 +33,25 @@ langtype 以 `@` 开头（@ext，见 [[XValueHead线格式]]），其 body 只�
 networld/fs 一族 rwir 直接以 `@` 开头的扩展 key 为输入（`byteseek/src/engine.rs` 的 `read_at` /
 `resolve_ext`）。核心 runtimec2 不解引用 `@`。
 
-## 后端与前端
+## 后端与库
 
-kvspace 的 C ABI 由前端 dispatch 层（`kvspace` 仓 `src/frontend.c`）统一导出，运行期按连接串 scheme
-选择后端：`shm://` 走 kvspace-c，`redis`/`fs`/`s3` 等走 kvspace-durable。三后端**必须**实现同一 ABI
-与同一线格式（byte-identical），语义一致；一致性由 tutorial 三后端全绿判定（见 [[范围与一致性]]）。
+**没有 dispatch 层。** kvspace 的 C ABI 就是 `libkvspace` 自己导出的那 12 个符号——单库化
+（TASK-082）之后不再有前端转发的中间层，也不再 `dlopen` 任何后端。
+
+**两个库，不是三后端**：
+
+| 库 | serve 的 DSN | 状态 |
+|---|---|---|
+| `libkvspace` | **只有 `shm://`** | 12 个存储符号（见 [[存储层ABI]]） |
+| `kvspace-durable` | `redis://` / `fs://` / `s3://` | **仍在旧 ABI**，尚未收敛到 12 符号 |
+
+`kvspaceConnect` 对非 `shm://` 直接返回 NULL——scheme 到库的选择不是运行期 dispatch，
+而是**链接期决定你链了哪个库**。
+
+两者**共享同一份 `kvspace.h` 的 9 个存储操作的 ABI 形状**，但当前 ABI 实现度不同（durable
+仍在旧 ABI）。因此一致性判据是「**两个库对同一份 `kvspace.h` 的符合度**」，不是「三后端全绿」；
+wire 层（XValue 字节布局）两者必须逐字节相同，那是真契约、可测。
+
 ABI 符号与 XValue 线格式见 [[寻址与命名]] 与 [[键系统与数组访问]]。
 	"#### -> /lib/kvlang/spec/kvspace模型/地址空间
 }

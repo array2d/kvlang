@@ -78,7 +78,7 @@ def _bind_all():
     _bind(_L().kvspaceConnect, [ctypes.c_char_p], ctypes.c_void_p)
     _bind(_L().kvspaceClose, [ctypes.c_void_p], None)
     _bind(_L().kvspaceXvalueInProcessAddress, [ctypes.c_void_p], _U8P)
-    _bind(_L().kvspaceResolve,
+    _bind(_L().kvspaceResolveOffset,
           [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64,
            ctypes.POINTER(ctypes.c_uint64), ctypes.c_char_p, ctypes.c_uint32],
           ctypes.c_int)
@@ -319,7 +319,7 @@ class KVSpace:
         """读该 key 的完整 wire（拷贝）；不存在返回 None。"""
         off = ctypes.c_uint64(0)
         err = ctypes.create_string_buffer(256)
-        rc = _L().kvspaceResolve(self._kv, key.encode(), 0,
+        rc = _L().kvspaceResolveOffset(self._kv, key.encode(), 0,
                                  ctypes.byref(off), err, len(err))
         if rc != KVSPACE_OK:
             return None

@@ -20,10 +20,38 @@ lib kvlang/spec/kvspace模型/存储层ABI {
 |---|---|
 | `kvspace/kvspace.h` | **存储层 ABI**：本文件的 9 个操作 + 生命周期 + 地址访问器（原名 `storage.h`） |
 | `kvspace/kvspace_xvalue.h` | **字节层**：head 布局、attr 区 TLV、`kvspaceXvalueGetAttr`/`SetAttr`、`EffectiveLen` |
-| `kvspace/kvlang_xvalue.h` | **语言层**：tag 1 langtype 的读写、langtype 包装、`New*` 构造器 |
+| `kvlang/xvalue.h`（**kvlang 仓**） | **语言层**：tag 1 langtype 的读写、langtype 包装、`New*` 构造器；编译进 `libkvlang_xvalue.a` |
 
-旧头 `xvalue_head.h` **已删除**，内容按上面两行拆分。引用的规矩：讲字节布局引
-`kvspace_xvalue.h`，讲 langtype/构造器引 `kvlang_xvalue.h`——**不要引旧路径**。
+旧头 `xvalue_head.h` 与旧路径 `kvspace/kvlang_xvalue.h` **均已删除**，内容按上面两行拆分。
+引用的规矩：讲字节布局引 kvspace 仓的 `kvspace_xvalue.h`，讲 langtype/构造器引 kvlang 仓的
+`kvlang/xvalue.h`——**不要引旧路径**。
+
+## 两个 `resolve` 的分工（normative）
+
+生态里有两个都叫 resolve 的东西，**它们不是一回事，不可互换**——一个返回偏移、一个返回
+Ptr；一个在存储层、一个在语言层。
+
+| | **存储层** `kvspaceResolveOffset` | **语言层** `kvlang·resolvekey` |
+|---|---|---|
+| 全名 | `kvspaceResolveOffset(handle, key, parent_key_anchor, out_offset, err, cap)` | rwir 算子 `kvlang·resolvekey(base, k)` |
+| 输入 | 一条 key 文本 + 父节点 key 区偏移 | base（容器或 Ptr）+ **运行期键值** |
+| 输出 | **int64 值区偏移**（地址 = `base + offset`） | **Ptr（位置）** |
+| 读目标值？ | 否 | 否 |
+| 跟 Ptr？ | 否（解引用由 `*` 显式做） | 否（同样要显式 `*`） |
+| 归属 | 存储层，`libkvspace` 导出 | 语言层，layout 发射、runtimec 执行 |
+
+**分工的判据是「输入从哪来」**：
+
+- `kvspaceResolveOffset` 要的是**一条已经算好的 key 文本**——它不知道也不关心这条文本是怎么
+  拼出来的（首址 + 下标 + 分隔符）。存储层只做「这条文本指向哪」。
+- `kvlang·resolvekey` 要的是**运行期才知道的键值**——`base` 加一个当时求值的 `k`，语言层负责
+  把两者拼成一条 key 文本，**再**去存储层定位。
+
+所以顺序是**先 `kvlang·resolvekey`、后 `kvspaceResolveOffset`**，不能反过来：语言层不知道拼出来的
+文本该怎么在存储树里查找，存储层也不知道运行期键值怎么拼。
+
+**本章与本文档其余部分举例时，裸写 `resolve` 一律指 `kvspaceResolveOffset`**；讲语言层算子时
+一律写全 `kvlang·resolvekey`。历史段落若出现裸写，会带「旧 ABI 的」这类限定语。
 
 ## 三个基本量
 
@@ -70,7 +98,7 @@ uint8_t *kvspaceXvalueInProcessAddress(void *handle);
 
 ```c
 /* 单 key 生命周期 */
-int kvspaceResolve(void *h, const char *key, uint64_t parent_key_anchor,
+int kvspaceResolveOffset(void *h, const char *key, uint64_t parent_key_anchor,
                    uint64_t *out_value_offset, char *err, uint32_t err_cap);
 int kvspaceRealloc(void *h, const char *key, uint64_t body_length,
                    uint64_t attr_length, uint64_t *out_value_offset,
@@ -93,14 +121,14 @@ int kvspaceList(void *h, const char *key, char *out_names, uint32_t out_capacity
 
 外加生命周期 `kvspaceConnect` / `kvspaceClose`（与旧 ABI 同签名），以及地址空间访问器
 `kvspaceXvalueInProcessAddress`（见上，不计入这 9 个）。**`kvspace.h` 共 12 个符号**：
-9 个语义操作 + Connect + Close + DataBase。
+9 个语义操作 + Connect + Close + `kvspaceXvalueInProcessAddress`。
 
 **语言层的 key 参数位**：`kvspace·*` 算子的 `key` / `old_key` / `new_key` / `source_key` /
 `destination_key` 这些形参，在 kvlang 源码里既能用路径字面量也能用字符串字面量书写，**两者都表示
 key**，运行时必须编码成 **STATIC key reference**——不是先把字面量物化成字符值再当参数传。
 判据是**参数语义**而非文本长相：同一段文本在数据参数位仍是值。详见 [[绝对路径字面量]] §key 参数位。
 
-### `resolve`
+### `kvspaceResolveOffset`
 
 key → 偏移。**不跟 Ptr**：指针解引用是语义层的事，由上层显式做。
 `anchor = 0` 表示从 root 解析；anchor 失效返回 `KVSPACE_ANCHOR_INVALID`（不是 `MISSING`——
@@ -189,7 +217,7 @@ langtype `"lib"`）**只是各自的历史写法，不是新 ABI 的约定**—�
 | `/only/` 有根值、无后代 | `OK n=0`（空索引） |
 | `/only/` 既无根值也无后代 | `MISSING` |
 
-注意 `resolve` 与 `listlen` 问的不是同一件事：`resolve("/only/")` 问的是**值**，
+注意 `kvspaceResolveOffset` 与 `listlen` 问的不是同一件事：`kvspaceResolveOffset("/only/")` 问的是**值**，
 无根值时照样可以返回 `MISSING`；而 `listlen("/only/")` 问的是**子项**，此时返回 `OK n=1`。
 两者不矛盾——一个问值，一个问下级。
 
@@ -215,7 +243,7 @@ langtype `"lib"`）**只是各自的历史写法，不是新 ABI 的约定**—�
 |---|---|
 | `listlen("/desc/")`（有后代） | `OK n=1` |
 | `listlen("/desc")`（无根值） | `MISSING` |
-| `resolve("/desc")` | `MISSING` |
+| `kvspaceResolveOffset("/desc")` | `MISSING` |
 
 ## `list`：整体复制
 
@@ -276,7 +304,7 @@ TLV 的三个直接后果：
 
 attr 区**不再暴露扫描器**（原 `kvspaceXvalueHeadScan` 已删除），只暴露按 tag 的读写。
 这两个属于**字节层**，定义在 `kvspace/kvspace_xvalue.h`：它们只认 tag 与字节，不解释
-langtype 是什么（`tag 1` 的语义在 `kvspace/kvlang_xvalue.h` 那一侧）：
+langtype 是什么（`tag 1` 的语义在 kvlang 仓 `kvlang/xvalue.h` 那一侧）：
 
 ```c
 int kvspaceXvalueGetAttr(const uint8_t *wire, uint64_t wire_len, uint8_t tag,
@@ -308,7 +336,7 @@ int kvspaceXvalueSetAttr(uint8_t *wire, uint64_t wire_capacity, uint8_t tag,
 
 | 原语 | 处置 | 理由 |
 |---|---|---|
-| `exist` | 删 | `resolve` 的 `-ENOENT` 即不存在 |
+| `exist` | 删 | `kvspaceResolveOffset` 的 `-ENOENT` 即不存在 |
 | `malloc` | 并入 `realloc` | 不存在即创建 |
 | `delindex` | 并入 `free` | 删除叠加键就是 `free` |
 | `extindex` | 删 | runtimec 零使用；帧直接读 `/lib` |

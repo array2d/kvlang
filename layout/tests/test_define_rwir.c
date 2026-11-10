@@ -3,7 +3,7 @@
  * 验的是**跨 ABI 边界**：符号能 dlsym 到、参数按 C 约定传对、写进 kvspace 的
  * 内容能被新存储 ABI 原样读出来。
  *
- * 读回用新 ABI（kvspaceResolve + kvspaceXvalueInProcessAddress），不经过 layout
+ * 读回用新 ABI（kvspaceResolveOffset + kvspaceXvalueInProcessAddress），不经过 layout
  * 自己的 printlib——那会把「写对了」和「layout 读得懂」混成一个判据。
  */
 
@@ -121,7 +121,7 @@ int main(int argc, char **argv) {
     }
     kv_connect = (connect_fn)dlsym(kv_dl, "kvspaceConnect");
     kv_close = (close_fn)dlsym(kv_dl, "kvspaceClose");
-    kv_resolve = (resolve_fn)dlsym(kv_dl, "kvspaceResolve");
+    kv_resolve = (resolve_fn)dlsym(kv_dl, "kvspaceResolveOffset");
     kv_inproc = (inproc_fn)dlsym(kv_dl, "kvspaceXvalueInProcessAddress");
     if (!kv_connect || !kv_close || !kv_resolve || !kv_inproc) {
         fprintf(stderr, "kvspace 缺少所需符号\n");

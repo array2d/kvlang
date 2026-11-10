@@ -38,9 +38,16 @@ impl TempDirectory {
         TempDirectory(directory)
     }
 
-    /// `fs://` DSN，直接喂给 `Kv::conn`。
+    /// `shm://` DSN，直接喂给 `Kv::conn`。
+    ///
+    /// **唯一入口**：所有测试都走这里拿 DSN，不许各自拼。同一件事两个入口正是
+    /// 本轮踩坑的原因——16 个测试文件各改一遍，漏一个就留下 `fs://` 死路径。
+    ///
+    /// 为什么不是 `fs://`：单库化后 `libkvspace` 的 `kvspace_dsn_path()` 只认
+    /// `shm` scheme，其它一律返回 -1。而 shm 本身就是 file-backed mmap，持久化、
+    /// 重开、崩溃恢复能力齐全——它只是**换了个后端**，不是降低覆盖。
     pub fn dsn(&self) -> String {
-        format!("fs://{}", self.0.display())
+        format!("shm://{}", self.0.join("store").display())
     }
 
     pub fn path(&self) -> &Path {
@@ -55,6 +62,14 @@ impl TempDirectory {
 
 impl Drop for TempDirectory {
     fn drop(&mut self) {
+        // shm store 是**五个文件**（`<path>`、`.garb`、`.gen`、`.sbo.data`、
+        // `.sbo.head`），不是目录。它们都在本临时目录内，故 `remove_dir_all`
+        // 一次覆盖；这里显式列出后缀只是为了把「shm 是多文件」这件事写在
+        // 会读到的地方——**若是把 dsn 指到目录外，就必须逐个删**。
+        let store = self.0.join("store");
+        for suffix in ["", ".garb", ".gen", ".sbo.data", ".sbo.head"] {
+            let _ = std::fs::remove_file(format!("{}{suffix}", store.display()));
+        }
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }

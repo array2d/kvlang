@@ -36,7 +36,7 @@ Each operand is mapped to classes:
 | literal, label | ignored |
 
 `Heap` aliases Params and every absolute key; `Bare` aliases every address-taken local: one
-named by `kvspace/key·abs` / `resolveptr`, passed to a non-builtin callee, or copied from as a
+named by `kvspace/key·abs` / `kvlang·resolvekey`, passed to a non-builtin callee, or copied from as a
 container. When a same-unit caller passes an absolute key or a path, `Params` also aliases every
 absolute key. An operand that cannot be parsed makes the step `unknown`.
 
@@ -76,7 +76,7 @@ writes and call writes are not.
 `write_body` stores in place and fails unless the value has the bound slot's size;
 `write_new_value` rebinds the slot at the value's size. The table records which one each op
 uses (copy, string·set: either; text results, compactarray creates, map·new, struct·new,
-key·abs/tostr/resolveptr, time·now: rebind; everything else: in place). An in-place op that
+`kvspace/key·abs`/`kvspace/key·tostr`/`kvlang·resolvekey`, time·now: rebind; everything else: in place). An in-place op that
 writes an absolute key or a member counts as either, since `write_body` creates a key unresolved
 at encode time and every member. Every slot whose type is not fixed width (strings, `char/*`,
 pointers, arrays, containers, unknown) also has a size class `Size(slot)`:

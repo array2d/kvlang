@@ -56,7 +56,7 @@ fn layout(tag: &str, src: &str) -> (TempDir, Result<std::process::Output, String
     let dir = temp_dir(tag);
     let file = dir.join("p.kv");
     std::fs::write(&file, src).unwrap();
-    let db = format!("fs://{}", dir.join("db").display());
+    let db = format!("shm://{}", dir.join("db").display());
     let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();
     (dir, Ok(out))
 }
@@ -87,7 +87,7 @@ fn write_type(kv: &mut Kv, dir: &str, instruction: usize) -> String {
 }
 
 fn connect(dir: &TempDir) -> Kv {
-    let mut kv = Kv::conn(&format!("fs://{}", dir.join("db").display()));
+    let mut kv = Kv::conn(&format!("shm://{}", dir.join("db").display()));
     init_dirs(&mut kv).unwrap();
     kv
 }

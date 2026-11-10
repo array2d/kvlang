@@ -15,7 +15,7 @@ lib kvlang/spec/类型系统/已敲定 {
 - map/struct 的 base key 是空 body 的容器头，成员在 `base·member`；函数与 lib 用 `/` 目录。
   成员由物理 key 前缀枚举，无 index 矩阵或 memindex body。
 - **存储层 ABI 收敛**：kvspace 只负责存储层，9 个操作
-  （`resolve`/`realloc`/`free`/`cp`/`makeindex`/`deltree`/`cpdir`/`listlen`/`list`）；
+  （`kvspaceResolveOffset`/`realloc`/`free`/`cp`/`makeindex`/`deltree`/`cpdir`/`listlen`/`list`）；
   extindex 已删除，`listlen`/`list` 不排序（排序上移到上层按 `cmp_coord`）。见 [[存储层ABI]]。
 - rwfunc 目录值为空 body；`[0,0]` 锚点与调用槽都是**代码值**（空 langtype，5 字节计数头+名字）。
   def rwir 路由头同为代码值。

@@ -27,8 +27,24 @@ add_executable(directory_walk_open_failure_test directory_walk_open_failure_test
 target_link_libraries(directory_walk_open_failure_test PRIVATE
     runtimec_vmbin runtimec_contract runtimec_binrwir)
 
+# 错误状态与错误文本的优先级（TASK-071）：公共入口的失败路径。
+add_executable(error_status_priority_test error_status_priority_test.c)
+target_link_libraries(error_status_priority_test PRIVATE
+    runtimec_interface runtimec_contract runtimec_binrwir runtimec_vmbin
+    runtimec_vmkv runtimec_binrwir_compiler runtimec_engine)
+
+# 扩展读参的文本语义（TASK-070）：走 interface 的读参入口，需要 engine 全链。
+add_executable(argument_text_wire_test argument_text_wire_test.c)
+# 造 wire 要用语言层构造器（`kvlangXvalueHeadNew*`），其头在 kvlang/include。
+target_include_directories(argument_text_wire_test PRIVATE
+    "${KVLANG_INCLUDE_DIRECTORY}")
+target_link_libraries(argument_text_wire_test PRIVATE
+    runtimec_interface runtimec_contract runtimec_binrwir runtimec_vmbin
+    runtimec_vmkv runtimec_binrwir_compiler runtimec_engine)
+
 foreach(test_target key_order_test key_resolution_test
-                   extension_registration_test directory_walk_open_failure_test)
+                   extension_registration_test directory_walk_open_failure_test
+                   argument_text_wire_test error_status_priority_test)
     target_compile_features(${test_target} PRIVATE c_std_11)
     target_include_directories(${test_target} PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/.."

@@ -227,7 +227,7 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_set_exit(
 
 /* ── TASK-047：Ptr 构造/解引用（底层能力，给扩展 handler 用）──────────
  *
- * **与语言层算子 `kvlang·resolve` 不是同一层**：那是 catalog 里的一条指令
+ * **与语言层算子 `kvlang·resolvekey` 不是同一层**：那是 catalog 里的一条指令
  * （由 base 与运行期键值算目标位置、不读目标值）；这两个 API 操作的是 wire 层面
  * 的 `*T` 值，让 handler 不必自己拼字节。
  */

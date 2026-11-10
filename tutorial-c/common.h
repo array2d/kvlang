@@ -1,7 +1,7 @@
 // common.h — tutorial 公共助手：新存储 ABI 上的单键读写与目录枚举。
 //
 // 新 ABI 的模型只有三个动作，示例也正是按这三步写的，不含任何兼容层：
-//   读：kvspaceResolve(key) → offset，再读 base+offset 处的 head/body/attr
+//   读：kvspaceResolveOffset(key) → offset，再读 base+offset 处的 head/body/attr
 //   写：kvspaceRealloc(key, bodylen, attrlen) → offset，再直接写 base+offset
 //   目录：kvspaceListlen 取 N/M → kvspaceList 一次取全部名字
 //
@@ -49,7 +49,7 @@ static inline uint8_t *kv_base(void *h) { return kvspaceXvalueInProcessAddress(h
 static inline int kv_read(void *h, const char *key, kv_value *out) {
     uint64_t offset = 0;
     char err[KV_ERR_CAP];
-    if (kvspaceResolve(h, key, 0, &offset, err, sizeof err) != KVSPACE_OK)
+    if (kvspaceResolveOffset(h, key, 0, &offset, err, sizeof err) != KVSPACE_OK)
         return -1;
     uint8_t *base = kv_base(h);
     if (!base)

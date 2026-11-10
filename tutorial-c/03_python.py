@@ -68,7 +68,7 @@ def bind(fn, args, restype):
 bind(lib.kvspaceConnect, [ctypes.c_char_p], ctypes.c_void_p)
 bind(lib.kvspaceClose, [ctypes.c_void_p], None)
 # 新 ABI 三个动作：resolve 拿 offset / realloc 拿写入位置 / listlen+list 枚举目录。
-bind(lib.kvspaceResolve, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64,
+bind(lib.kvspaceResolveOffset, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64,
                           U64P, ctypes.c_char_p, ctypes.c_uint32], ctypes.c_int)
 bind(lib.kvspaceRealloc, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64,
                           ctypes.c_uint64, U64P, ctypes.c_char_p,
@@ -154,7 +154,7 @@ class KV:
         返回 (kind, body)；不存在或 wire 不合法返回 None。"""
         off = ctypes.c_uint64()
         err = ctypes.create_string_buffer(256)
-        rc = lib.kvspaceResolve(self.kv, key.encode(), 0, ctypes.byref(off),
+        rc = lib.kvspaceResolveOffset(self.kv, key.encode(), 0, ctypes.byref(off),
                                 err, 256)
         if rc != 0:
             return None

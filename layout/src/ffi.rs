@@ -20,7 +20,7 @@ extern "C" {
     // 旧 ABI 的 Get/SetValue/Del/ListLen/ListAt/DelTree 已从库里删除，不再声明。
 
     /// key → 偏移。0 是合法偏移，错误由返回码表达（不用 0/-1 当哨兵）。
-    fn kvspaceResolve(
+    fn kvspaceResolveOffset(
         h: Handle,
         key: *const c_char,
         parent_key_anchor: u64,
@@ -240,6 +240,41 @@ fn connect_or_panic(dsn: &str) -> Handle {
     h
 }
 
+/// 测试用 DSN：`shm://<临时路径>`。
+///
+/// **为什么不是 `fs://`**：单库化后 `libkvspace` 只服务 `shm://`（`kvspace_dsn_path`
+/// 拒绝其它 scheme）。而 `shm` 本身就是 file-backed mmap——持久化、重开、崩溃恢复
+/// 这些能力它都有。layout 的测试要验的是**布局语义**，不是后端语义，换一个真能跑
+/// 的后端比跳过它更接近本意。
+///
+/// `tag` 用来区分同一测试进程内的多个 store，避免互相覆盖。
+pub fn test_dsn(tag: &str) -> String {
+    format!("shm:///tmp/kvlanglayout_{}_{}", tag, std::process::id())
+}
+
+/// 删除一个 shm store 的全部文件。
+///
+/// shm 后端一个 store 是**四个文件**（`<path>`、`.garb`、`.gen`、`.sbo.data`、
+/// `.sbo.head`），不是目录——`remove_dir_all` 对它无效。全删干净才不会在
+/// /tmp 累积（表观几百 MB、实际 sparse 几 KB，但文件数会堆）。
+pub fn remove_test_store(dsn: &str) {
+    let path = dsn.trim_start_matches("shm://");
+    for suffix in ["", ".garb", ".gen", ".sbo.data", ".sbo.head"] {
+        let _ = std::fs::remove_file(format!("{path}{suffix}"));
+    }
+}
+
+/// 尝试连接；失败返回 None（不 panic）。
+///
+/// 给「后端本期不支持」这类**环境缺口**用：单库化后 `libkvspace` 只服务
+/// `shm://`，`fs://` 会在 DSN 解析处被拒。那是后端能力边界，不是被测代码错，
+/// 按「跳过≠损坏」应当显式 SKIP 并打印原因，而不是长期红着让人以为是回归。
+pub fn try_connect(dsn: &str) -> Option<Handle> {
+    let c = CString::new(dsn).ok()?;
+    let h = unsafe { kvspaceConnect(c.as_ptr()) };
+    (!h.is_null()).then_some(h)
+}
+
 /// KVSpace 安全封装（Drop 时释放底层句柄）。单数据 store，无控制 store。
 pub struct Kv {
     h: Handle,
@@ -353,7 +388,7 @@ impl Kv {
         let mut off: u64 = 0;
         let mut err: [c_char; 256] = [0; 256];
         let ret = unsafe {
-            kvspaceResolve(self.h, c.as_ptr(), 0, &mut off, err.as_mut_ptr(), err.len() as u32)
+            kvspaceResolveOffset(self.h, c.as_ptr(), 0, &mut off, err.as_mut_ptr(), err.len() as u32)
         };
         if ret != 0 {
             return Vec::new();

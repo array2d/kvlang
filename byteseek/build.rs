@@ -30,7 +30,7 @@ fn collect_kv(dir: &Path, files: &mut Vec<PathBuf>) {
 
 /// #493 embed：把发布版 .so/.dylib 的字节嵌进可执行文件（include_bytes!），不直接链接。
 fn emit_embed(manifest: &str) {
-    // payload 目录固定为 build/embed（由 tools/stage_embed.sh 组装）；
+    // payload 目录固定为 build/embed（由 `make embed-payload` 组装）；
     // 不读任何构建环境变量。产物后缀：Linux=.so(+版本号) macOS=.dylib。
     let dir = format!("{manifest}/../build/embed");
     let (ks_ext, rt_ext) = if cfg!(target_os = "macos") {
@@ -38,27 +38,28 @@ fn emit_embed(manifest: &str) {
     } else {
         (".so.1", ".so")
     };
+    // **单库化之后的真实形态：只有三个。**
+    //
+    // 旧布局是六件套（前端 + runtimec2 + layout + c 后端 + durable 后端），其中
+    // `libkvspace-c` 与 `libkvspace_durable` 随单库化消失——`kvspaceConnect` 不再
+    // dlopen 任何后端，shm 引擎直接编在 `libkvspace` 里；runtimec2 更是早已归档
+    // （TASK-041）。留着那三个名字，症状是「说缺一个已经不存在的文件」。
     let names = [
         ("EMBED_KVSPACE", &format!("libkvspace{ks_ext}")),
-        // runtimec2 已归档（TASK-041）；runtimec 尚无 kvlangDefRwir 等价 ABI
-        // （TASK-035）。embed 源暂缺，构建期显式报错而不是打进一个启动即崩的 .so。
         ("EMBED_KVLANG_RUNTIME", &format!("{RUNTIME_LIBRARY_NAME}{rt_ext}")),
         ("EMBED_KVLANGLAYOUT", &format!("libkvlanglayout{rt_ext}")),
-        ("EMBED_KVSPACE_C", &format!("libkvspace-c{ks_ext}")),
-        ("EMBED_KVSPACE_DURABLE", &format!("libkvspace_durable{ks_ext}")),
     ];
     for (var, file) in names {
-        let mut found = None;
-        for sub in ["", "kvspace/"] {
-            let p = format!("{dir}/{sub}{file}");
-            if std::path::Path::new(&p).is_file() {
-                found = Some(p);
-                break;
-            }
+        // 只在 payload 根目录找，**不搜 `kvspace/` 子目录**：那个子目录装的是已经不
+        // 存在的 c/durable 后端，留在搜索路径里等于给一套废弃布局留后门——哪天有人
+        // 手工建出 `kvspace/` 目录，构建就会从一个没人维护的位置取字节。
+        //
+        // `is_file()` 会跟符号链接：payload 里若是断链（`cp -P` 的典型后果），这里
+        // 返回 false 并报「找不到」，而不是把一个 0 字节的东西 include_bytes! 进去。
+        let p = format!("{dir}/{file}");
+        if !std::path::Path::new(&p).is_file() {
+            panic!("embed: {file} not found under {dir} (run make embed-payload first)");
         }
-        let p = found.unwrap_or_else(|| {
-            panic!("embed: {file} not found under {dir} (run tools/stage_embed.sh first)")
-        });
         println!("cargo:rustc-env={var}={p}");
         println!("cargo:rerun-if-changed={p}");
     }
