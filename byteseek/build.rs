@@ -31,7 +31,8 @@ fn emit_embed(manifest: &str) {
     };
     let names = [
         ("EMBED_KVSPACE", &format!("libkvspace{ks_ext}")),
-        // 默认 c2 runtime；C 版（libkvlang_runtime.so）仅作 A/B fallback。
+        // runtimec2 已归档（TASK-041）；runtimec 尚无 kvlangDefRwir 等价 ABI
+        // （TASK-035）。embed 源暂缺，构建期显式报错而不是打进一个启动即崩的 .so。
         ("EMBED_KVLANG_RUNTIME", &format!("libkvlang_runtimec2{rt_ext}")),
         ("EMBED_KVLANGLAYOUT", &format!("libkvlanglayout{rt_ext}")),
         ("EMBED_KVSPACE_C", &format!("libkvspace-c{ks_ext}")),
@@ -140,6 +141,10 @@ fn main() {
     } else {
         println!("cargo:rustc-link-search=native={lib}");
         println!("cargo:rustc-link-search=native={backend}");
+        // runtimec2 已归档（TASK-041）并从 lib/ 移除。仍然链它会在链接期报
+        // 「cannot find -lkvlang_runtimec2」——这是**预期**的：byteseek 的 boot
+        // 依赖 c2 的 kvlangDefRwir 扩展注册，而 runtimec 还没有等价 ABI
+        // （TASK-035）。等 TASK-035 落地后把这行改成 kvlang_runtime。
         println!("cargo:rustc-link-lib=dylib=kvlang_runtimec2");
         println!("cargo:rustc-link-lib=dylib=kvspace");
         println!("cargo:rustc-link-lib=dylib=kvlanglayout");
