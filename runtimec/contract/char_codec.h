@@ -30,7 +30,7 @@ extern "C" {
  * - 缓冲不足 → 返回 false，输出长度置 0；
  * - 成功 → 返回 true 并写入 `output_length`（不含结尾，不写 NUL）。
  *
- * 关于 `output_capacity` 的 `+1`：**这是调用方（`temp_println`）原有的缓冲约定，
+ * 关于 `output_capacity` 的 `+1`：**这是调用方（`temp_output`）原有的缓冲约定，
  * 不是编码器的语义。** 本函数要求 `output_capacity > 输出长度`，即保留末字节不写，
  * 因为它的第一个调用方按「文本缓冲总要留一个位置」分配。**调用方若不需要末尾预留，
  * 传 `capacity + 1` 即可**——编码器本身不占用那个字节，也不会写入它。

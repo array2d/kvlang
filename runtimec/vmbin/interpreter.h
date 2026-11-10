@@ -65,7 +65,7 @@ typedef enum vmbin_interpreter_diagnostic {
  * 段断言：本模块的码必须落在自己的段内。
  *
  * 迁移前五个模块各自从 1 开始编号，同一个 `3` 同时是「解释器的指令非法」与
- * 「println 的值格式非法」。那造成过一整晚的误判——**不是细心能解决的，是
+ * 「输出算子 的值格式非法」。那造成过一整晚的误判——**不是细心能解决的，是
  * 命名空间缺失**。这两条断言把「漏加偏移」变成编译期错误。
  */
 _Static_assert(RUNTIMEC_DIAGNOSTIC_IN_BAND(VMBIN_INTERPRETER_DIAG_CONTRADICTORY_EXIT, RUNTIMEC_DIAGNOSTIC_BAND_INTERPRETER),

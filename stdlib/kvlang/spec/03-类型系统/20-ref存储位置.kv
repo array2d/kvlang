@@ -11,7 +11,7 @@ wire 的 head 只描述字节布局（`bodylen` / `attrslen` / `padding`），�
 字节；类型事实的唯一来源是值内 attr 区（tag 1 记录）。
 
 核心 runtime 本期不兑现扩展存储（`@` 仅保留语言与线格式语义），涉及 `@` 的测试以 `// wip`
-排除。C ABI 的 `kvspaceGetHead` / `kvspaceHead_t` 已删除：读头一律用 `xvalue_head.h` 的
-inline 方法，不另设解码结构体。
+排除。C ABI 的 `kvspaceGetHead` / `kvspaceHead_t` 已删除：读头一律用 `kvspace/kvspace_xvalue.h`
+的 inline 方法，不另设解码结构体。
 "#### -> /lib/kvlang/spec/类型系统/ref存储位置
 }

@@ -28,7 +28,7 @@ pub type Handler = fn(&Engine, &str, &str) -> KvResult;
 /// 读参、写参默认 `*T`（一层指针，见 #329 评论「关于五.7 指针」）——参数 key 是 `[s,i]`，
 /// i 正为写参、负为读参，`*T` 约定覆盖两者。union 逐 branch 加 `*`，变参尾缀 `...` 保持在最后。
 /// 例外：xvalue 初始化类 rwir 的参数是真实值 `T`（`input`/`json·from`，见
-/// runtime/src/kvcpu.c 的 rwir_init_byval）。
+/// oldhero/oldgo/runtime/src/kvcpu.c 的 rwir_init_byval）。
 pub struct Rwir {
     pub rp: &'static [&'static str],
     pub wp: &'static [&'static str],

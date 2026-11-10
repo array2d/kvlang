@@ -37,7 +37,7 @@
 #include "contract/error.h"
 #include "contract/snapshot.h"
 #include "contract/kvspace_access.h"
-#include <kvspace/kvspace.h>
+#include "contract/kvspace_interface.h"
 #include "vmkv/encoder.h"
 #include "vmkv/rwir_manifest.h"
 
@@ -230,30 +230,58 @@ static int compare_names(const void *left, const void *right) {
     return strcmp((const char *)left, (const char *)right);
 }
 
-/* 返回函数名数量；失败返回 -1。 */
+/*
+ * 返回函数名数量；失败返回 -1。
+ *
+ * 旧实现带 `expand_ext=1`（展开 extindex 叠加层）；新接口没有这个概念，只列
+ * 物理子项——本工具读的是 layout 写进 `/lib/` 的真实函数，不依赖叠加层。
+ * 顺序由后端给（不排序），本工具只取名字后自己 `qsort`，与列举顺序无关。
+ */
 static int list_functions(void *handle, char names[][NAME_CAPACITY]) {
-    int32_t count = 0;
-    if (kvspaceListLen(handle, "/lib/", 1, 0, &count) !=
-        0) {
+    int64_t count = 0;
+    uint32_t max_name_length = 0U;
+    char count_error[256];
+    count_error[0] = '\0';
+    if (kvspaceListlen(handle, "/lib/", &count, &max_name_length, count_error,
+                       (uint32_t)sizeof(count_error)) != 0) {
+        return -1;
+    }
+    if (count <= 0) {
+        return 0;
+    }
+    /* 一次分配：`listlen` 的 M 就是最长名字节数。 */
+    const uint32_t capacity = (uint32_t)(count * (int64_t)(max_name_length + 1U));
+    char *buffer = malloc(capacity != 0U ? capacity : 1U);
+    if (buffer == NULL) {
+        return -1;
+    }
+    uint32_t length = 0U;
+    uint32_t entry_count = 0U;
+    uint64_t generation = 0U;
+    char list_error[256];
+    list_error[0] = '\0';
+    if (kvspaceList(handle, "/lib/", buffer, capacity, &length, &entry_count,
+                    &generation, list_error,
+                    (uint32_t)sizeof(list_error)) != 0) {
+        free(buffer);
         return -1;
     }
     int output_count = 0;
-    for (int32_t ordinal = 0; ordinal < count; ++ordinal) {
-        uint8_t entry[1024];
-        uint32_t entry_size = 0U;
-        if (kvspaceListAt(handle, "/lib/", 1, 0, ordinal,
-                                              entry, (uint32_t)sizeof(entry),
-                                              &entry_size) != 0) {
-            continue;
-        }
+    const char *entry = buffer;
+    for (uint32_t ordinal = 0U; ordinal < entry_count; ++ordinal) {
+        const uint32_t entry_size = (uint32_t)strlen(entry);
+        const char *next = entry + entry_size + 1U;
         if (output_count >= MAX_FUNCTIONS) {
+            free(buffer);
             return -1;
         }
-        if (function_name_of(entry, entry_size, names[output_count],
-                             NAME_CAPACITY)) {
+        if (function_name_of((const uint8_t *)entry, entry_size,
+                             names[output_count], NAME_CAPACITY)) {
             output_count += 1;
         }
+        entry = next;
     }
+    free(buffer);
     qsort(names, (size_t)output_count, NAME_CAPACITY, compare_names);
     return output_count;
 }
@@ -338,8 +366,9 @@ static bool declare_capabilities(dump_context_t *context,
                                  const char *data_source,
                                  const char *work_directory, char *stage,
                                  char *reason) {
+    /* 那个已摘除的输出算子（TASK-044）不再声明；本工具只声明要跑的语料用到的
+     * 那些外部能力。 */
     static const char declarations[] =
-        "rwir println(*[]char/utf32 $s...)\n"
         "rwir print(*[]char/utf32 $s...)\n"
         "rwir printf(*[]char/utf32 $s...)\n"
         "rwir debugger()\n";
@@ -391,9 +420,9 @@ static bool function_has_revision(void *handle, const char *function_path) {
                      function_path)) {
         return false;
     }
-    uint8_t *raw = NULL;
+    const uint8_t *raw = NULL;
     uint32_t raw_size = 0U;
-    if (kvspaceGet(handle, key, 1, &raw, &raw_size) != 0) {
+    if (!runtimec_kvspace_read_wire(handle, key, &raw, &raw_size)) {
         return false;
     }
     return raw != NULL && raw_size != 0U;

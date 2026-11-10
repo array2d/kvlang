@@ -30,8 +30,7 @@
 #include "contract/error.h"
 #include "contract/status.h"
 #include "contract/view.h"
-#include "kvspace/kvspace.h"
-#include "kvspace/xvalue_head.h"
+#include <kvspace/kvspace_xvalue.h>
 #include "vmbin/handlers/container.h"
 #include "vmbin/frame_target_key.h"
 #include "vmbin/handlers/handler_call.h"

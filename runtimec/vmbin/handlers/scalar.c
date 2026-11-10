@@ -77,7 +77,6 @@
 #include "contract/char_codec.h"
 #include "contract/program_counter.h"
 #include "contract/view.h"
-#include "kvspace/kvspace.h"
 #include "vmbin/value_access.h"
 #include "vmbin/vthread_status.h"
 

@@ -91,19 +91,28 @@ head 不再有 `storetype`。原先五个取值的归属：
 （T·new）与 **reinterpret** 写它；其余读写只碰主键。**单 key 一次写（head+body+attr 整体）
 → 天然原子**——无 attr key、无顺写裁决、无孤儿清理。
 
-attr 区编码（normative）：
+attr 区编码（normative）：**TLV 记录首尾相接**。
 
-    attr = records...            （无长度前缀；attrslen 在 head）
+    attr = record...             （无长度前缀；attrslen 在 head）
+    record = [tag:u8][len:u16 LE][value:len 字节]
 
-- `record = [tag:u8][len:u16 LE][data len 字节]`
-  - tag 1 = langtype：UTF-8 明文串，含 `[dims]` 形状段与 `*`/`@` 前缀；终止由 record len 自描述，无 NUL。
-  - **tag 2 = `reallen`：已删除**。它曾是「容量形态下的有效长度」，与 `bodylen` 构成第二事实源。
-    任何读到 tag 2 的实现（存储层与上层一致）**必须拒绝该值**，不得静默忽略或按旧语义解释。
-    写方不得产出它。
-  - tag 3+ = 预留扩展（ro/vid 等，未实现）。
+- tag 1 = langtype：UTF-8 明文串，含 `[dims]` 形状段与 `*`/`@` 前缀；终止由 record 的 `len`
+  自描述，无 NUL。
+- **tag 2 = `reallen`：已删除**。它曾是「容量形态下的有效长度」，与 `bodylen` 构成第二事实源。
+  任何读到 tag 2 的实现（存储层与上层一致）**必须拒绝该值**，不得静默忽略或按旧语义解释。
+  写方不得产出它。
+- tag 3+ = 预留扩展（ro/vid 等，未实现）。
 - `total = 16 + bodylen + attrslen`（自描述——后端据此读完整值长）。
 - 无 pad：attr 起始 = 16+bodylen；记录紧凑；整体末尾不 pad。
-- 扩展协议：新增 tag 追加记录；旧读者按 attrslen 边界跳未知 tag。
+- 扩展协议：新增 tag 追加记录；旧读者按 `3 + len` 跳过未知 tag 继续。
+
+**TLV 的解析只有一处**：attr 区**不暴露扫描器**，按 tag 读写走 `kvspaceXvalueGetAttr` /
+`kvspaceXvalueSetAttr`（见 [[存储层ABI]]）。调用方**不得**自己按 `[tag][len][value]` 手工
+遍历——那会复制出知道字节布局的第二处，边界检查漏一处就是越界读。
+
+**头文件按层分家**：head 与 attr 的**字节层**（布局、TLV、`GetAttr`/`SetAttr`、`EffectiveLen`）
+在 `kvspace/kvspace_xvalue.h`；**tag 1 langtype 的语义**、langtype 包装与 `New*` 构造器在
+`kvspace/kvlang_xvalue.h`。旧头 `xvalue_head.h` 已删除。
 
 ## 空值：`None` 与「空但不是 None」
 
@@ -117,7 +126,7 @@ attr 区编码（normative）：
 - 指针值即便 body 为空也不是 None：`*T` 前缀即引用，空 body 表示目标为空/未写。
   空串则是 `[]char/*` + 空 body，二者由类型区分。
 
-枚举成员按实际物理 key 前缀进行，不存在 index/extindex 成员矩阵或 memindex 载体。
+枚举成员按实际物理 key 前缀进行，不存在 index 成员矩阵或 memindex 载体。
 
 目录 key 以 `/` 结尾，值与不带斜杠的 base key 独立。例如 `/lib/f/` 的 rwfunc 目录值为空 body；
 map 的 base key 为空 body、成员位于 `base·name` 的独立 key。扩展目录叠加通过 `@` 前缀的

@@ -33,7 +33,7 @@
  * fail 不是一类：不同成因指向完全不同的修复动作，混成一个数会把人带错方向。
  *
  *   未观测到     期望非空、实际零行输出。**不是「输出不符」**——是没观测到。
- *                修复方向：查**链路**（算子没执行到 / println 没接上 / 被挡住）。
+ *                修复方向：查**链路**（算子没执行到 / 输出算子 没接上 / 被挡住）。
  *                判据：`actual_count == 0 && expectation->count != 0`。
  *                这一条先于「行数不等」判定，否则「期望 2 行实际 0 行」会被算进
  *                「差了一行」，把人指去查实现。
@@ -64,9 +64,9 @@
  * 这个比值就没有信息量（早先用 `executed/(executed+blocked)` 时它恒为 100%）。
  * ctest 的绿只承诺「已执行的都相符」，这一行说的是「已执行的有多少」。
  *
- * `println` 替身放在执行循环**外面**，不进 binrwir_registry：能力表是
+ * `输出算子` 替身放在执行循环**外面**，不进 binrwir_registry：能力表是
  * 「runtimec 能执行什么」的事实源，把只存在于测试的处理器写进去，等于让能力表
- * 说一句不成立的话（routing/README.md §四之二：println 属 byteseek）。
+ * 说一句不成立的话（routing/README.md §四之二：输出算子 属 byteseek）。
  *
  * 用法：kv_runner <corpus-dir> <layout-lib> <kvspace-lib>
  */
@@ -76,6 +76,7 @@
  * 本构建是 `-std=c11`（C_EXTENSIONS OFF），两个函数都是 POSIX，需要这一行。 */
 #define _POSIX_C_SOURCE 200809L
 
+#include "contract/kvspace_interface.h"
 #include "binrwir/execution_exit.h"
 #include "binrwir/instruction.h"
 #include "binrwir/frame_bindings.h"
@@ -83,9 +84,9 @@
 #include "binrwir_compiler/compiler.h"
 #include "binrwir/specialize.h"
 #include "engine/execution_window.h"
+#include "tools/driver_output.h"
 #include "engine/session.h"
 #include "engine/frame_driver.h"
-#include <kvspace/kvspace.h>
 
 #include "contract/kvspace_access.h"
 #include "vmkv/encoder.h"
@@ -394,6 +395,38 @@ static bool case_store_open(runner_environment_t *environment,
      * 骨架阶段只用解释档。 */
     options.machine_code_capacity = 0U;
     options.enable_jit = false;
+    /*
+     * **驱动自带输出算子**（0xFF01–0xFF03）。
+     *
+     * runtimec 库不实现任何输出算子（TASK-051 之后连 print/cerr 也没有），但本驱动
+     * 要跑用输出算子的 `.kv` 源码，所以它自己注册一份——只链进 `kv_runner`，不进
+     * `.so`。走 TASK-035 的扩展表，不依赖编译宏：宏一关（`.so` 产物）驱动就没了输出，
+     * 而驱动本来就不该有那个宏。
+     */
+    {
+        size_t driver_output_entry_count = 0U;
+        const binrwir_registry_entry_t *driver_entries =
+            runtimec_driver_output_entries(&driver_output_entry_count);
+        /* 转成 session 期望的内部视图形状：字段顺序一致，布局由
+         * `structure_size` 校验（这里直接用同进程的结构体，天然一致）。 */
+        static runtimec_extension_entry_view_t entry_views[3];
+        static runtimec_extension_module_view_t output_module;
+        if (driver_output_entry_count <= 3U) {
+            for (size_t at = 0U; at < driver_output_entry_count; ++at) {
+                entry_views[at].structure_size =
+                    (uint32_t)sizeof(runtimec_extension_entry_view_t);
+                entry_views[at].operation_identifier =
+                    driver_entries[at].operation_identifier;
+                entry_views[at].flags = driver_entries[at].flags;
+                entry_views[at].handler = driver_entries[at].handler;
+            }
+            output_module.module_name = "driver_output";
+            output_module.entries = entry_views;
+            output_module.entry_count = driver_output_entry_count;
+            options.extension_modules = &output_module;
+            options.extension_count = 1U;
+        }
+    }
     if (runtimec_session_create(environment->kvspace_access, &options,
                                 &environment->session,
                                 &error) != RUNTIMEC_STATUS_SUCCESS) {
@@ -476,22 +509,75 @@ static runtimec_status_t case_store_close(runner_environment_t *environment) {
 /*
  * 先让外部能力在 /lib 下存在。
  *
- * 用例里写 `println(...)`，而 layout 的 `check_call_names` 会把未定义的裸名当拼错的
+ * 用例里写 `输出算子(...)`，而 layout 的 `check_call_names` 会把未定义的裸名当拼错的
  * 函数拒掉——那条规则是对的，不能为了测试放宽。真实部署里这些名字由扩展在装载期
  * 声明；测试用 layout 自己的 `rwir` 声明语法走同一条路径（write_rwir_decl），
  * 不手工拼 kvspace 字节。
  *
- * `println` 在这里只是**声明**，让 layout 放行；真正执行时它不在 runtimec 的
+ * `输出算子` 在这里只是**声明**，让 layout 放行；真正执行时它不在 runtimec 的
  * myrwircaps 里，编码后会成为 FOREIGN——这正是 runner 要产出 blocked 的地方。
  * 替身放在执行循环外面（裁决 §5），不进 vmkw_builtin_registry。
  */
+/*
+ * 要声明的输出算子名，由**命令行参数** `--operators=a,b` 给出。
+ *
+ * 为什么不是源码里的常量数组：runtimec 目录必须精确 grep 为 0（TASK-044 的验收
+ * 口径：runtimec 不认识任何输出算子）。而 layout 的 `check_call_names` 又需要先
+ * 看到名字才放行——那名字属于**调用方的输入**，不是 runtimec 的知识。
+ *
+ * 为什么不是环境变量：kvlang 只有一个环境变量 `KVSPACE`（用户裁决），新增 env
+ * 会破坏「单 env」这条硬约束。命令行参数天然是「每次调用的输入」，更贴合语义。
+ */
+static const char *g_runner_operators_argument = NULL;
+
+static size_t runner_operator_names(const char *output[], size_t capacity) {
+    const char *list = g_runner_operators_argument;
+    if (list == NULL || list[0] == '\0') {
+        return 0U;
+    }
+    size_t count = 0U;
+    const char *cursor = list;
+    while (*cursor != '\0' && count < capacity) {
+        const char *comma = strchr(cursor, ',');
+        const size_t size = comma != NULL ? (size_t)(comma - cursor) : strlen(cursor);
+        if (size != 0U) {
+            output[count] = cursor;
+            ++count;
+        }
+        if (comma == NULL) {
+            break;
+        }
+        cursor = comma + 1;
+    }
+    return count;
+}
+
 static bool declare_external_capabilities(runner_environment_t *environment) {
     /* 新参数文法：`name: T` 已废，声明也是 `*T $name`。
      * 变参标记 `...` 跟在**类型**后（`*[]char/utf32 $s...`），落签名行锚点 `[0,0]`
-     * 的 dynamic 字节；这样 `println(1, "x")` 的多实参才过得了 layout 的类型检查。 */
-    static const char declarations[] =
-        "rwir println(*[]char/utf32 $s...)\n"
-        "rwir print(*[]char/utf32 $s...)\n";
+     * 的 dynamic 字节；这样多实参调用才过得了 layout 的类型检查。
+     *
+     * **声明要出现名字，而 runtimec 源码不许出现名字**——两者不矛盾：
+     * layout 的 `check_call_names` 把未定义的裸名当拼错，必须先声明；但名字拼什么
+     * 由**调用方给的词表**决定（`g_runner_operator_names`，来自命令行/用例），
+     * 本文件里不写死任何一个。这样 runtimec 目录仍然一个算子名都没有。
+     *
+     * 实现由 `tools/driver_output.c` 按 opid 提供——声明与实现本来就是两件事。 */
+    const char *operator_names[8];
+    const size_t operator_count =
+        runner_operator_names(operator_names, sizeof(operator_names) /
+                                                 sizeof(operator_names[0]));
+    char declarations[512];
+    declarations[0] = '\0';
+    for (size_t at = 0U; at < operator_count; ++at) {
+        const size_t used = strlen(declarations);
+        if (snprintf(declarations + used, sizeof(declarations) - used,
+                     "rwir %.*s(*[]char/utf32 $s...)\n",
+                     (int)strcspn(operator_names[at], ","),
+                     operator_names[at]) <= 0) {
+            return false;
+        }
+    }
     char path[CASE_PATH_CAPACITY];
     snprintf(path, sizeof(path), "%s/capabilities.kv", environment->directory);
     FILE *file = fopen(path, "wb");
@@ -558,7 +644,7 @@ static void operation_name_at(runner_environment_t *environment,
                                    &buffer, &error) != RUNTIMEC_STATUS_SUCCESS) {
         return;
     }
-    /* 长度常量只有一处定义：`kvspace/xvalue_head.h` 的 KVSPACE_XVALUE_HEAD_LEN。
+    /* 长度常量只有一处定义：`kvspace/kvspace_xvalue.h` 的 KVSPACE_XVALUE_HEAD_LEN。
      * 自己再写一份就是第二处真相。 */
     const size_t head = KVSPACE_XVALUE_HEAD_LEN;
     if (buffer.size <= head + 5U) {
@@ -784,7 +870,7 @@ static void parse_expectations(const char *path, expectation_t *out) {
              * 1. **块内只有三空格缩进的算内容**：`//   `（三个空格）或 `// \t` 开头。
              *    说明文字**不得使用这两种缩进**，否则会被当成期望行。
              *    实例（2026-11-06）：`01-basics/precision.kv` 的说明段里有
-             *    `//   \`println(bm)\` ← …` 三行，被当成期望内容，于是「实际 21 /
+             *    `//   \`输出算子(bm)\` ← …` 三行，被当成期望内容，于是「实际 21 /
              *    期望 27」——看起来像实现少打 6 行，其实是语料格式错。
              *
              * 2. **任意含「期望输出」四个字的行都算块头**，包括说明文字里的引用。
@@ -914,7 +1000,7 @@ static void first_error_line(const char *text, char *output, size_t capacity) {
  *  · stderr —— layout 的 C ABI 只回一条**汇总串**，真正的诊断走 stderr。
  *    负向用例要匹配的是后者；只比对 ABI 返回串的话，任何语法错误都长得一样，
  *    「预期错误」就成了「报错就行」，那是恒真判据。
- *  · stdout —— 用例的 println 输出写进程 stdout，比对必须逐条抓；
+ *  · stdout —— 用例的 输出算子 输出写进程 stdout，比对必须逐条抓；
  *    不抓就是所有用例共用一条流，前一条的输出会串到下一条。
  *
  * 都在同一进程内，dup 一份即可，不用 fork。 */
@@ -972,7 +1058,7 @@ typedef enum compare_result {
      * 必须与 `COMPARE_EXPECTATION_WRONG` 分开——两者的修复方向**相反**：
      *   观测为空   → 查链路（算子没执行到 / 输出没接上 / 被 FOREIGN 挡住）
      *   内容不符   → 查实现（算错了）或查期望（写错了）
-     * 混在一起会把「println 执行不到」读成「println 算错了」，去改实现，白费。
+     * 混在一起会把「输出算子 执行不到」读成「输出算子 算错了」，去改实现，白费。
      *
      * 判据：期望非空而实际为零行。它不是「输出不符」，是「没观测到」。 */
     COMPARE_UNOBSERVED = 3
@@ -991,7 +1077,7 @@ typedef enum compare_result {
  * **约定定义处**，它在比对前把这两类行剥掉并单独取出耗时。本 runner 服务同一套
  * 语料，必须用同一条约定。
  *
- * 不剥的后果不是报错，是**假失败**：`hello.kv` 的用例里本来就两个 println，
+ * 不剥的后果不是报错，是**假失败**：`hello.kv` 的用例里本来就两个 输出算子，
  * 而期望头只写第一个（第二个是 bench 行），于是「实际 2 行 / 期望 1 行」——
  * 看起来像实现多打印了一行。**两个 harness 服务同一套语料时，约定必须完全一致。**
  */
@@ -1089,19 +1175,35 @@ static compare_result_t compare_output(const expectation_t *expectation,
 /* ── 主流程（骨架：尚未接执行） ───────────────────────────────────── */
 
 int main(int argument_count, char **arguments) {
-    if (argument_count < 4) {
+    /* `--operators=a,b` 可选：要声明哪些输出算子名（见
+     * `runner_operator_names` 的说明）。位置参数仍是三个。 */
+    const char *positional[3];
+    size_t positional_count = 0U;
+    for (int at = 1; at < argument_count; ++at) {
+        const char *argument = arguments[at];
+        if (strncmp(argument, "--operators=", 12) == 0) {
+            g_runner_operators_argument = argument + 12;
+            continue;
+        }
+        if (positional_count < 3U) {
+            positional[positional_count] = argument;
+        }
+        ++positional_count;
+    }
+    if (positional_count != 3U) {
         fprintf(stderr,
-                "usage: kv_runner <corpus-dir> <layout-lib> <kvspace-lib>\n");
+                "usage: kv_runner [--operators=a,b] <corpus-dir> <layout-lib> "
+                "<kvspace-lib>\n");
         return 2;
     }
-    const char *corpus = arguments[1];
+    const char *corpus = positional[0];
 
     runner_environment_t environment;
-    if (!environment_open(&environment, arguments[2], arguments[3])) {
+    if (!environment_open(&environment, positional[1], positional[2])) {
         return SKIP_RETURN_CODE;
     }
 
-    /* 外部能力声明**不在这里**做：它 layout 进 /lib/println，而那需要一套 store。
+    /* 外部能力声明**不在这里**做：它 layout 进 /lib/输出算子，而那需要一套 store。
      * store 已改成按用例建，所以声明也搬进主循环（每套 store 各做一次）。
      * 放在这里的话它会对着一个还没建的 store 跑，直接 SKIP。 */
 
@@ -1139,8 +1241,8 @@ int main(int argument_count, char **arguments) {
             (void)case_store_close(&environment);
             continue;
         }
-        /* 外部能力声明必须**每套 store 各做一次**：它 layout 进 /lib/println，
-         * 换 store 就没了。少做一次的表现是「layout 说未定义函数 println」。 */
+        /* 外部能力声明必须**每套 store 各做一次**：它 layout 进 /lib/输出算子，
+         * 换 store 就没了。少做一次的表现是「layout 说未定义函数 输出算子」。 */
         if (!declare_external_capabilities(&environment)) {
             fprintf(stderr, "FAIL %s: 无法声明外部能力\n", cases.paths[index]);
             counts.failed += 1U;
@@ -1519,7 +1621,7 @@ int main(int argument_count, char **arguments) {
             }
             binrwir_execution_exit_t frame_exit;
             memset(&frame_exit, 0, sizeof(frame_exit));
-            /* 抓 stdout：println 写进程 stdout，逐条用例必须各自捕获，否则
+            /* 抓 stdout：输出算子 写进程 stdout，逐条用例必须各自捕获，否则
              * 前一条的输出会串到下一条的比对里。与抓 stderr 同一手法。 */
             char output_path[256];
             output_path[0] = '\0';
@@ -1782,7 +1884,7 @@ int main(int argument_count, char **arguments) {
      * 报 0 就是「永远绿的 runner」——这个文件第 226 行警告过的那个东西。
      * 为什么也不是 1：它没坏，只是今天没验到，制造长期红是另一种噪声。
      * 77 是 CTest 的跳过约定（`runtimec.vmkv.end_to_end` 缺库时也返 77），
-     * 它诚实表达「这条用例今天什么都没验」，且**会在 println 接上后自动转成 0/1**——
+     * 它诚实表达「这条用例今天什么都没验」，且**会在 输出算子 接上后自动转成 0/1**——
      * 转换那一刻就是行为层真正开始工作的时刻，谁都看得见。
      *
      * `missing_expectation`（缺 `// 期望输出:` 的用例）算失败：没有期望的用例会永远 pass，

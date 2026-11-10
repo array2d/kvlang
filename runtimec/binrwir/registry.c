@@ -6,6 +6,8 @@
 
 #include "registry.h"
 
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "contract/view.h"
@@ -61,9 +63,9 @@ static void binrwir_registry_rebuild_index(binrwir_registry_t *registry) {
         } else {
             /* 非特化区的**全部**条目都进这张数组——包括保留区（`0xFF00` 以上）。
              *
-             * 保留区里确实住着算子（临时 println `0xFF01–0xFF03`，见
-             * `vmbin/temp_println.h`），`append` 也特意放行它们。早先把保留区
-             * 排除在索引外，于是「注册了却查不到」：任何临时 println 在执行期
+             * 保留区里确实住着算子（临时 输出算子 `0xFF01–0xFF03`，见
+             * `vmbin/temp_output.h`），`append` 也特意放行它们。早先把保留区
+             * 排除在索引外，于是「注册了却查不到」：任何临时 输出算子 在执行期
              * 都拿 `CORRUPT_REGISTRY`。
              *
              * 判据：**能不能分派由注册表里有没有这条决定，不由 opid 落在哪个
@@ -135,9 +137,9 @@ runtimec_status_t binrwir_registry_append(
          * 注册进来等于给同一个 opid 造出第二条分派路径。
          *
          * 判据刻意**不是** `>= RESERVED_BASE`：保留区里确实住着算子——临时
-         * println 三条注册在 0xFF01–0xFF03（见 binrwir/instruction.h 的占用
+         * 输出算子 三条注册在 0xFF01–0xFF03（见 binrwir/instruction.h 的占用
          * 记账），它们是 in-process builtin，正是本表存在的理由。用band 判据会
-         * 在 RUNTIMEC_TEMP_PRINTLN=ON 时把整个 session 建不起来。
+         * 在 RUNTIMEC_TEMP_OUTPUT=ON 时把整个 session 建不起来。
          */
         if (entry->operation_identifier == BINRWIR_OPERATION_IDENTIFIER_NONE ||
             entry->operation_identifier == BINRWIR_OPERATION_IDENTIFIER_FOREIGN) {

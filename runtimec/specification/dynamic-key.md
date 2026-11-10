@@ -52,7 +52,7 @@ PARAMETER_READ / PARAMETER_WRITE / LOCAL / STATIC / LITERAL / FUNCTION
 
 ## 四、实测：`·*k` 被字面化（本树，2026-11-06）
 
-源码 `m:[]char/utf8·int64 = {} ; k = "a" ; 10 -> m·*k ; println(m·*k)`：
+源码 `m:[]char/utf8·int64 = {} ; k = "a" ; 10 -> m·*k ; 输出算子(m·*k)`：
 
 layout 落盘（`kvspace list /lib/test/`）：
 
@@ -77,8 +77,8 @@ symbol[3] m·*k : int64                                  ← 名字就是这四�
 
 | 用例 | 期望 | 实际 |
 |---|---|---|
-| `10 -> m·*k ; println(m·*k)` | 10 | 10（**错误键上的自洽**） |
-| `10 -> m·*k ; println(m·a)` | 10 | **0**（真正的 `m·a` 没有被写） |
+| `10 -> m·*k ; 输出算子(m·*k)` | 10 | 10（**错误键上的自洽**） |
+| `10 -> m·*k ; 输出算子(m·a)` | 10 | **0**（真正的 `m·a` 没有被写） |
 
 `runtimec/tests/kv/member/dynamic_key.kv` 的最后一行 `m·k == None` 正是为这条判据写的；
 它当前先被「非指针判 None」的静态检查拦住（另一条已知缺口），所以这条语料目前报的是
@@ -155,7 +155,7 @@ vmkv 在登记符号前判定：键文本含完整的 `·` + `*` 两字节序列
 
 - 短期：`dynamic_key.kv` 从「输出不符」变成「blocked + 具名诊断」，且任何语料不因此从绿变红；
 - 长期（脱糖落地后）：
-  `10 -> m·*k ; println(m·*k)` 得 10、`println(m·a)` 得 10、`println(m·k == None)` 得 true；
+  `10 -> m·*k ; 输出算子(m·*k)` 得 10、`输出算子(m·a)` 得 10、`输出算子(m·k == None)` 得 true；
   同时 `m·k`（静态名）与 `m·*k`（`k="a"`）必须落到不同键。
 
 ## 七、地基：把 kvspace ABI 提升为 BinRWIR 原语

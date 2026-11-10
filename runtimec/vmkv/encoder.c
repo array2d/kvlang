@@ -6,10 +6,10 @@
  *       V.body；任何不确定处失败封闭，不用默认提升或占位地址换取成功。
  */
 
-#include <stdio.h>
 
 #include "vmkv/encoder.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "contract/error.h"
@@ -645,11 +645,97 @@ static runtimec_status_t vmkv_encoder_dynamic_member_fail(
                              logical_program_counter);
 }
 
+/* langtype 去掉开头的 `[dims]` 形状段之后是否等于 `name`。 */
+static bool vmkv_encoder_langtype_is(runtimec_string_view_t langtype,
+                                     const char *name) {
+    if (langtype.data == NULL) {
+        return false;
+    }
+    size_t start = 0U;
+    while (start < langtype.size && langtype.data[start] == '[') {
+        while (start < langtype.size && langtype.data[start] != ']') {
+            ++start;
+        }
+        if (start < langtype.size) {
+            ++start;
+        }
+    }
+    const size_t name_size = strlen(name);
+    if (langtype.size - start != name_size) {
+        return false;
+    }
+    return memcmp(langtype.data + start, name, name_size) == 0;
+}
+
+/*
+ * 字面量是不是「字符文本」：langtype 是 `char/utf8` / `char/utf32` / `char/ascii`，
+ * 或者带形状段的 `[N]char/utf32`（数组字面量的形态）。
+ *
+ * 为什么不能直接比前缀：实测 `"/tmp/probe/"` 的 langtype 是 `[11]char/utf32`——
+ * **带 `[N]` 形状段**。比 `memcmp("char", 4)` 会漏掉这一类。
+ */
+static bool vmkv_encoder_literal_is_character_text(
+    runtimec_string_view_t langtype) {
+    if (langtype.data == NULL || langtype.size < 4U) {
+        return false;
+    }
+    size_t start = 0U;
+    /* 跳过开头的 `[dims]`：形状段不含字母，找到第一个 `c` 就是 `char`。 */
+    while (start < langtype.size && langtype.data[start] == '[') {
+        while (start < langtype.size && langtype.data[start] != ']') {
+            ++start;
+        }
+        if (start < langtype.size) {
+            ++start; /* 跳过 `]` */
+        }
+    }
+    if (langtype.size - start < 4U) {
+        return false;
+    }
+    return memcmp(langtype.data + start, "char", 4U) == 0;
+}
+
+/*
+ * 取某个参数位置的语义角色。`roles` 是逗号分隔的文本（`"key"`、`"key,"`、空），
+ * 第 i 项对第 i 个参数。越界或空 → ANY。
+ *
+ * 为什么用文本而不是位集：预处理器传不了带逗号的小列表——花括号里的逗号会被当成
+ * 实参分隔符，圆括号又会被原样保留成逗号表达式。字符串里逗号没有特殊含义。
+ * 解析在这里做，不在生成期展开：表是静态的，一次线性扫描，代价可忽略。
+ */
+static bool vmkv_encoder_parameter_role_is_key(runtimec_string_view_t roles,
+                                               size_t ordinal) {
+    if (roles.data == NULL || roles.size == 0U) {
+        return false;
+    }
+    size_t position = 0U;
+    size_t cursor = 0U;
+    while (cursor <= roles.size) {
+        const size_t start = cursor;
+        while (cursor < roles.size && roles.data[cursor] != ',') {
+            ++cursor;
+        }
+        if (position == ordinal) {
+            const size_t length = cursor - start;
+            /* 只有恰好 `key` 三个字节才算 KEY；其余（含空项）都是 ANY。 */
+            return length == 3U && roles.data[start] == 'k' &&
+                   roles.data[start + 1U] == 'e' && roles.data[start + 2U] == 'y';
+        }
+        ++position;
+        if (cursor >= roles.size) {
+            break;
+        }
+        ++cursor; /* 跳过逗号 */
+    }
+    return false;
+}
+
 static runtimec_status_t vmkv_encoder_map_argument(
     const vmkv_encode_request_t *request, binrwir_binfunc_builder_t *builder,
     const vmkv_local_types_t *local_types, vmkv_encode_function_t *function,
     const vmkv_rwir_argument_view_t *source_argument, bool function_target,
-    binrwir_argument_t *output, runtimec_program_counter_t logical_program_counter,
+    bool parameter_is_key, binrwir_argument_t *output,
+    runtimec_program_counter_t logical_program_counter,
     runtimec_error_t *error) {
     *output = (binrwir_argument_t){0};
     /*
@@ -688,6 +774,128 @@ static runtimec_status_t vmkv_encoder_map_argument(
         function, &argument_index, logical_program_counter, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
+    }
+    /*
+     * **key 位置上的字符串是这个位置的键，不是内联值数据。**
+     *
+     * 判据来自能力行的 `read_roles`/`write_roles`（catalog 是唯一权威），不是
+     * 「内容以 `/` 开头」这类脏猜——`"/tmp/x"` 在别处可以只是一个普通字符串。
+     *
+     * 必须在 literal 分支**之前**判：字面量分支一命中就 return，走不到后面的
+     * STATIC 分支。这正是 `0x4603` 的成因——`kvspace·mkindex("/tmp/x/")` 的实参
+     * 被编成 LITERAL，而 handler 只接受 STATIC。
+     *
+     * 只对 char 族的字符串字面量生效：数字字面量放在 key 位置上是类型错误，
+     * 那不是本判据要处理的，交给后面的类型校验失败封闭。
+     */
+    if (parameter_is_key && source_argument->literal.bytes.data != NULL &&
+        vmkv_encoder_literal_is_character_text(
+            source_argument->literal.langtype)) {
+
+        /*
+         * `literal.bytes` 是**整条 wire**（head + body + attr），不是 body
+         * （`vmkv/rwir.c:193` 直接给 `slot->wire`）。所以长度取 head 里的
+         * bodylen，起点跳过 16 字节头——直接 memcpy 会把 bodylen 与 attrslen
+         * 当成路径开头的两个字节（实测符号表里存进去的就是 `,`＝0x2c）。
+         */
+        char key_text[1024];
+        const uint64_t wire_size = (uint64_t)source_argument->literal.bytes.size;
+        if (wire_size < KVSPACE_XVALUE_HEAD_LEN) {
+            return vmkv_encoder_fail(
+                error, RUNTIMEC_STATUS_INVALID, VMKV_ENCODER_DIAG_INVALID_REQUEST,
+                "vmkv encoder: key-position literal wire is truncated",
+                logical_program_counter);
+        }
+        const kvspaceXvalueHead *literal_head =
+            (const kvspaceXvalueHead *)(const void *)source_argument->literal.bytes.data;
+        const uint8_t *text_bytes =
+            source_argument->literal.bytes.data + KVSPACE_XVALUE_HEAD_LEN;
+        const size_t text_size = (size_t)kvspaceXvalueHeadLen(literal_head);
+        if (text_size == 0U || text_size >= sizeof(key_text) ||
+            KVSPACE_XVALUE_HEAD_LEN + text_size > wire_size) {
+            return vmkv_encoder_fail(
+                error, RUNTIMEC_STATUS_INVALID, VMKV_ENCODER_DIAG_INVALID_REQUEST,
+                "vmkv encoder: key-position literal is empty or too long",
+                logical_program_counter);
+        }
+        /*
+         * 字面量的字节是**该 langtype 的编码**：`char/utf32` 是 4 字节小端码点，
+         * 而 key 文本恒 utf8。直接 memcpy 会把 `2f 00 00 00` 当成四字节路径，
+         * 符号表里存进去的就是垃圾。所以这里按 langtype 转一次。
+         */
+        size_t written = 0U;
+        if (vmkv_encoder_langtype_is(source_argument->literal.langtype,
+                                     "char/utf32")) {
+            if (text_size % 4U != 0U) {
+                return vmkv_encoder_fail(
+                    error, RUNTIMEC_STATUS_INVALID,
+                    VMKV_ENCODER_DIAG_INVALID_REQUEST,
+                    "vmkv encoder: key literal is not whole utf32 code points",
+                    logical_program_counter);
+            }
+            for (size_t at = 0U; at < text_size; at += 4U) {
+                const uint32_t code_point =
+                    (uint32_t)text_bytes[at] |
+                    ((uint32_t)text_bytes[at + 1U] << 8U) |
+                    ((uint32_t)text_bytes[at + 2U] << 16U) |
+                    ((uint32_t)text_bytes[at + 3U] << 24U);
+                /* 只接受 ASCII：路径/键在 runtimec 里没有非 ASCII 的先例，
+                 * 猜一个码点表比拒绝更危险。 */
+                if (code_point == 0U || code_point > 0x7FU) {
+                    return vmkv_encoder_fail(
+                        error, RUNTIMEC_STATUS_UNSUPPORTED,
+                        VMKV_ENCODER_DIAG_DYNAMIC_KEY,
+                        "vmkv encoder: non-ASCII key literal is not representable",
+                        logical_program_counter);
+                }
+                key_text[written] = (char)code_point;
+                ++written;
+            }
+        } else {
+            memcpy(key_text, text_bytes, text_size);
+            written = text_size;
+        }
+        /*
+         * **类型从局部类型表查**，不能用字面量自己的 `[N]char/utf32`。
+         *
+         * 符号表按「同名同类型」幂等：`10 -> /cp_src` 已把 `/cp_src` 登记为
+         * `int64`；这里拿字面量的数组类型去登记就是同名异型 → 冲突（实测
+         * `code=34`）。这一支与上面「局部变量必须查 local_types」是同一条规矩
+         * ——key 位置的符号是那个 key 的槽，不是字面量。
+         *
+         * 查不到就沿用实参自带类型：那说明这个 key 还没有任何写位置，符号表里
+         * 也没有同名项可与它冲突。
+         */
+        /*
+         * **同一个物理 key 在符号池里只该有一条。**
+         *
+         * `10 -> /cp_src` 已经把它登记成 `int64`；这里若拿字面量自己的
+         * `[7]char/utf32` 再登记一次，`add_symbol` 会按「同名异型」拒绝
+         * （实测 `code=34`）。key 位置的符号是**那个 key 的槽**，类型由写位置
+         * 决定，不是由「这个实参是个字符串」决定。
+         *
+         * 所以先按名字查：命中就复用下标（绝不重新登记），未命中才登记，且用
+         * 实参自带类型（此时池里没有同名项，不可能冲突）。
+         */
+        uint16_t existing_symbol = BINRWIR_SYMBOL_INDEX_NONE;
+        if (binrwir_binfunc_builder_find_symbol(
+                builder, runtimec_string_view_make(key_text, written),
+                &existing_symbol) == RUNTIMEC_STATUS_SUCCESS) {
+            output->argument_index = argument_index;
+            output->reference_kind = (uint8_t)BINRWIR_REFERENCE_STATIC;
+            output->dereference = has_dereference ? 1U : 0U;
+            output->slot = existing_symbol;
+            output->payload = RUNTIMEC_VALUE_BODY_ADDRESS_NONE;
+            return RUNTIMEC_STATUS_SUCCESS;
+        }
+        return vmkv_encode_static_argument_into(
+            request, builder,
+            &(vmkv_rwir_argument_view_t){
+                .key = runtimec_key_view_make(key_text, written),
+                .key_addressability = VMKV_KEY_ADDRESSABILITY_STATIC,
+                .parameter_type_name = source_argument->parameter_type_name,
+            },
+            argument_index, output, error);
     }
     if (source_argument->literal.bytes.data != NULL) {
         uint32_t literal_index = BINRWIR_LITERAL_INDEX_NONE;
@@ -760,8 +968,8 @@ static runtimec_status_t vmkv_encoder_map_argument(
      * 动态成员键 `base·*k`：**失败封闭，不许字面化**。
      *
      * 它必须在登记符号**之前**拦下——一旦写成符号池条目，写和读就用同一个
-     * 错误键，整条链上再也看不出「键取错了」（`println(m·a)` 得 0，而同写法的
-     * `println(m·*k)` 得 10，即 p1 说的「以奇怪的方式成功」）。
+     * 错误键，整条链上再也看不出「键取错了」（`输出算子(m·a)` 得 0，而同写法的
+     * `输出算子(m·*k)` 得 10，即 p1 说的「以奇怪的方式成功」）。
      *
      * 三种「以 `*` 出现」的形态在这里互不重叠：
      *   `*[0,±k]` 形参引用 —— 上面已经 return；
@@ -1068,40 +1276,60 @@ static runtimec_status_t vmkv_encoder_resolve_write_types(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-#ifdef RUNTIMEC_TEMP_PRINTLN
 /*
- * **临时**：三个输出算子的名字 → 保留区 opid。名单只在这里出现一次；
- * 开关关闭时整段不参与编译，`println` 回到 FOREIGN 原行为。
+ * 三个输出算子的名字 → 保留区 opid。名单只在这里出现一次。
+ *
+ * **不再受 `RUNTIMEC_TEMP_OUTPUT` 控制**：那开关管的是「runtimec **库**自带实现」，
+ * 而本表管的是「编码期认不认得这个名字」。宿主（驱动 / byteseek）通过扩展表提供
+ * 实现，编码期照样要把名字翻成 opid——否则源码里的调用被编成 FOREIGN，
+ * 执行期落进「没有这个能力」，与「宿主忘了注册」无法区分（实测过一次：
+ * 现象是 `blocked op=65281`，查了半天以为扩展没注册，实际是编码期没认出编号）。
  *
  * opid 取 0xFF01..0xFF03（16 位保留区，见 binrwir/instruction.h 的占用记账）——
  * 不是能力表编号，与 FOREIGN(0xFFFE) 不撞。
  */
-static int vmkv_encoder_temp_output_identifier(runtimec_string_view_t name,
-                                               binrwir_operation_identifier_t *output_identifier) {
-    static const struct {
-        const char *name;
-        binrwir_operation_identifier_t identifier;
-    } table[] = {
-        {"println", UINT16_C(0xFF01)},
-        {"print", UINT16_C(0xFF02)},
-        {"cerr", UINT16_C(0xFF03)},
-    };
-
+/*
+ * 槽名是**纯十进制数字**时，把它当保留区 opid（`"65281"` → 0xFF01）。
+ *
+ * 为什么不是名字表：`layout/src/builtin.rs` 是「用户可见名 → 指令编号」的**唯一
+ * 映射点**，它把编号写成十进制字符串。runtimec 侧若再有一张名字表，就是第二份
+ * 真相——而它一定会漂移（实测：layout 早已只产数字，名字表永远匹配不到，
+ * 现象是 `blocked op=65281`）。
+ *
+ * 越界值（> 0xFFFF）与空串一律不认，返回 0 —— 让调用方走 FOREIGN。
+ */
+static int vmkv_encoder_numeric_reserved_identifier(
+    runtimec_string_view_t name,
+    binrwir_operation_identifier_t *output_identifier) {
     *output_identifier = 0U;
-    for (size_t ordinal = 0U; ordinal < sizeof(table) / sizeof(table[0]);
-         ++ordinal) {
-        const size_t size = strlen(table[ordinal].name);
-        if (name.size == size &&
-            memcmp(name.data, table[ordinal].name, size) == 0) {
-            *output_identifier = table[ordinal].identifier;
-            return 1;
+    if (name.data == NULL || name.size == 0U || name.size > 5U) {
+        return 0;
+    }
+    uint32_t value = 0U;
+    for (size_t at = 0U; at < name.size; ++at) {
+        /* 只认十进制数字。前导零也认（`"065281"` 不会出现，但认它不产生歧义）。 */
+        if (name.data[at] < '0' || name.data[at] > '9') {
+            return 0;
+        }
+        value = value * 10U + (uint32_t)(name.data[at] - '0');
+        if (value > UINT16_MAX) {
+            return 0;
         }
     }
-    return 0;
+    /* 只接受**保留区**（>= RESERVED_BASE）：基础区与特化区的编号来自能力表，
+     * 槽名里直接写它们的编号意味着 layout 与能力表已经对不上了，那是错误不是功能。 */
+    if (value < BINRWIR_OPERATION_IDENTIFIER_RESERVED_BASE) {
+        return 0;
+    }
+    *output_identifier = (binrwir_operation_identifier_t)value;
+    return 1;
 }
 
 /*
- * **临时**：按调用点的实参个数展开成 N 个定长读参槽。
+ * 按调用点的实参个数展开成 N 个定长读参槽。
+ *
+ * **不受 `RUNTIMEC_TEMP_OUTPUT` 控制**：那开关管「库自带实现」，而本函数管
+ * 「怎么把这些算子的调用编成指令」。宿主通过扩展表提供实现时，编码期照样要展开。
  *
  * 每个实参走既有 `vmkv_encoder_map_argument`：独立取 argidx、独立登记
  * 字面量/符号池、按引用种类（LITERAL / LOCAL / STATIC / 形参）编码。
@@ -1163,9 +1391,11 @@ static runtimec_status_t vmkv_encoder_encode_temporary_output(
             target->payload = literal_index;
             continue;
         }
+        /* 这条路径不在「按能力行编码实参」的位置上（它是签名槽展开），
+         * 没有角色上下文：传 false，行为不变。 */
         status = vmkv_encoder_map_argument(
             request, builder, local_types, function, source_argument, false,
-            target, logical_program_counter, error);
+            false, target, logical_program_counter, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             return status;
         }
@@ -1181,7 +1411,6 @@ static runtimec_status_t vmkv_encoder_encode_temporary_output(
     output_instruction->aliasing_declared = false;
     return RUNTIMEC_STATUS_SUCCESS;
 }
-#endif /* RUNTIMEC_TEMP_PRINTLN */
 
 /*
  * 该侧在「能力行含 POINTER 位」时是否应拒绝整条指令。
@@ -1424,13 +1653,14 @@ runtimec_status_t vmkv_encode_instruction(
             ? vmkv_rwir_manifest_capability(RUNTIMEC_RWIR_CALL)
             : vmkv_rwir_manifest_find_operation(operation_name);
     if (capability == NULL) {
-#ifdef RUNTIMEC_TEMP_PRINTLN
         /*
-         * **临时**：`println` / `print` / `cerr` 三个输出算子就地实现，仅为让
-         * tutorial 的 runtimec 分组能被 runtimec 自己跑通。正式实现归 byteseek
-         * 扩展 runtime（issue #622 决策 D），它们的进程内 opcode 刻意不进
-         * myrwircaps 能力表。开关默认 OFF；关闭时本分支不参与编译，三条算子回到
-         * 下面的 FOREIGN 原行为。
+         * **保留区编号由 layout 直接写在槽名里**（`layout/src/builtin.rs`：
+         * 「输出算子名 → `"65281"`，即 0xFF01；runtimec 的 encoder 只按『槽名全为
+         * 数字即 opid』处理，一个算子名也不认识」）。
+         *
+         * 所以本分支认的是**十进制数字**，不是名字。这一条是本仓与 layout 之间
+         * 的契约，写反了就会两头都不认：layout 已经不产名字了（早先按名字匹配，
+         * 实测拿到的是 `"65281"`，永远匹配不到）。
          *
          * 形状：`def rwir` 声明 nr=1 + dynamic=1（layout 就这么产，别改它），
          * 编码期按**调用点的实参个数**展开成 N 个定长读参槽——每槽独立取 argidx、
@@ -1442,7 +1672,7 @@ runtimec_status_t vmkv_encode_instruction(
          * 符号池/字面量池，不进帧槽。
          */
         binrwir_operation_identifier_t temporary_identifier = 0U;
-        if (vmkv_encoder_temp_output_identifier(
+        if (vmkv_encoder_numeric_reserved_identifier(
                 instruction_view->operation_name, &temporary_identifier)) {
             runtimec_status_t temp_status =
                 vmkv_encoder_encode_temporary_output(
@@ -1454,10 +1684,9 @@ runtimec_status_t vmkv_encode_instruction(
             }
             return RUNTIMEC_STATUS_SUCCESS;
         }
-#endif
         /*
          * 不在 alias 表里 = 本 runtime 不提供的能力（外部 runtime 就地实现，例如
-         * println）。照常留在 Program 里，编成 FOREIGN 结构标记：只携带 source pc，
+         * 输出算子）。照常留在 Program 里，编成 FOREIGN 结构标记：只携带 source pc，
          * 零读写参数、不进签名、不做类型收敛，因此它的操作数既不登符号池也不
          * 消耗 argidx——这条指令一个字节都不由本 runtime 执行。
          */
@@ -1673,6 +1902,8 @@ runtimec_status_t vmkv_encode_instruction(
         status = vmkv_encoder_map_argument(
             request, builder, local_types, function,
             &instruction_view->read_arguments[ordinal], false,
+            vmkv_encoder_parameter_role_is_key(
+                selected_capability->read_parameter_roles, ordinal),
             &encoder->arguments[target_arguments + ordinal],
             logical_program_counter, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -1685,6 +1916,8 @@ runtimec_status_t vmkv_encode_instruction(
         status = vmkv_encoder_map_argument(
             request, builder, local_types, function,
             &instruction_view->write_arguments[ordinal], false,
+            vmkv_encoder_parameter_role_is_key(
+                selected_capability->write_parameter_roles, ordinal),
             &encoder->arguments[write_region_begin + ordinal],
             logical_program_counter, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {

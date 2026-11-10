@@ -66,6 +66,10 @@ target_compile_options(kvlang_runtimec2 PRIVATE
 
 # 链接 kvspace dispatch 前端：产物只放 repo 内 lib/（后端 lib/kvspace/），不装 /usr。
 # 链接期用 repo 内绝对路径，运行期 rpath 用相对自身的 $ORIGIN（库本身就在 lib/）。
+# **归档目录（TASK-041）**：本文件已移到 oldhero/oldgo/runtimec2/，所以下面的
+# `../lib` 解析成 `oldhero/oldgo/lib`——**归档产物不再落 kvlang/lib**。
+# 这是有意的：旧 c2 冻结在旧 kvspace ABI 上，构建出来是链接已删符号的库，
+# 不该再出现在日常 lib/ 里被误当成可用 runtime。
 set(LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../lib")
 set(BACKEND_DIR "${LIB_DIR}/kvspace")
 if(APPLE)

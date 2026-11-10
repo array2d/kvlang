@@ -39,8 +39,9 @@
 #include "contract/error.h"
 #include "contract/status.h"
 #include "contract/view.h"
-#include "kvspace/kvspace.h"
-#include "kvspace/xvalue_head.h"
+#include "contract/kvspace_interface.h"
+#include <kvspace/kvlang_xvalue.h>
+#include <kvspace/kvspace_xvalue.h>
 #include "vmbin/frame_target_key.h"
 #include "vmbin/handlers/handler_call.h"
 #include "vmbin/value_access.h"
@@ -863,7 +864,7 @@ VMBIN_HANDLER_UNARY_ARRAY(container_numel_handler, container_numel_compute,
 
 /*
  * `compactarray·dim(a) -> d`：维数。形状段 `[a][b]…` 的个数——**就在 langtype 里**，
- * 不读 head（`xvalue_head.h:146`：shape lives in leading `[dims]` of langtype）。
+ * 不读 head（`kvspace_xvalue.h`：shape lives in leading `[dims]` of langtype）。
  */
 /* 与 numel 共用同一段「解析失败即报」的样板：解析只有一条判据。 */
 static inline bool container_parse_or_fail(runtimec_string_view_t langtype,
@@ -1417,9 +1418,10 @@ static runtimec_status_t container_write_member(
         return RUNTIMEC_STATUS_ERROR;
     }
     message[0] = '\0';
-    const int set_status = kvspaceSetValue(
+    const bool wrote = runtimec_kvspace_write_wire(
         frame->kvspace_handle, member_key, wire, (uint32_t)wire_size, message,
         (uint32_t)sizeof(message));
+    const int set_status = wrote ? 0 : 1;
     free(wire);
     return set_status == 0 ? RUNTIMEC_STATUS_SUCCESS : RUNTIMEC_STATUS_ERROR;
 }
@@ -1463,7 +1465,7 @@ static bool container_index_container(
     buffer[key_length] = '/';
     buffer[key_length + 1U] = '\0';
     message[0] = '\0';
-    const int mkindex_status = kvspaceMkindex(frame->kvspace_handle, buffer, 0U,
+    const int mkindex_status = kvspaceMkindex(frame->kvspace_handle, buffer,
                                               message, (uint32_t)sizeof(message));
     buffer[key_length] = '\0';
     if (mkindex_status != 0) {
@@ -1699,13 +1701,13 @@ static bool container_struct_clone(
                                 prototype_path, sizeof(prototype_path),
                                 &prototype_size) ||
         prototype_size == 0U ||
-        kvspaceCpTree(frame->kvspace_handle, prototype_path, slot_key, message,
+        kvspaceCpdir(frame->kvspace_handle, prototype_path, slot_key, message,
                       (uint32_t)sizeof(message)) == 0) {
         return prototype_size != 0U;
     }
     char rollback[256];
     rollback[0] = '\0';
-    (void)kvspaceDelTree(frame->kvspace_handle, slot_key, rollback,
+    (void)kvspaceDeltree(frame->kvspace_handle, slot_key, rollback,
                          (uint32_t)sizeof(rollback));
     vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                        RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,

@@ -42,6 +42,9 @@ CASES_DIR = ROOT / "cases"
 RESULTS_DIR = ROOT / "results"
 BENCH_RE = re.compile(r"__bench_ns:\s*(\d+)")
 INPUT_RE = re.compile(r"__bench_input:\s*(.+)")
+# 输出算子名由**调用方**告诉驱动（TASK-044 后 runtimec 目录 grep 必须为 0，
+# 驱动不内置任何算子名）。这不是 case 契约的一部分，只是运行器管线的输入。
+OPERATORS = "println,print"
 KV_BACKENDS = ("shm", "fs", "redis")  # kvlang 三后端列顺序
 NATIVE = ("python", "rust", "c")
 EXT = {"kvlang": ".kv", "python": ".py", "rust": ".rs", "c": ".c"}
@@ -177,7 +180,7 @@ def run_kvlang(case_dir, label, args, workdir, scale):
         env = {**os.environ, "KVSPACE": dsn}
         # vthread 的创建与运行分两步：create 只建状态并打印 vid，run 从该 vid
         # 的持久化 ‥pc 推进。计时段是 run 的 stdout，不含 create 的 vid 行。
-        create = [args.kvlang_bin, "create", str(src)]
+        create = [args.kvlang_bin, "create", str(src), f"--operators={OPERATORS}"]
         if args.no_stdlib:
             create.append("--no-stdlib")
         created = sh(create, timeout=args.timeout, env=env)
@@ -188,7 +191,8 @@ def run_kvlang(case_dir, label, args, workdir, scale):
         vid = created.stdout.strip().splitlines()[-1] if created.stdout.strip() else ""
         if not vid:
             raise RuntimeError(f"kvlang/{label} create printed no vid")
-        r = sh([args.kvlang_bin, "run", vid], timeout=args.timeout, env=env)
+        r = sh([args.kvlang_bin, "run", vid, f"--operators={OPERATORS}"],
+               timeout=args.timeout, env=env)
         if r.returncode != 0:
             tail = (r.stderr.strip().splitlines() or [""])[-1]
             raise RuntimeError(

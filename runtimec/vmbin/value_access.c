@@ -9,6 +9,7 @@
  *       的事，vmbin 不做，也不回退成按 key 写。
  */
 
+#include "contract/kvspace_interface.h"
 #include "contract/langtype.h"
 #include "value_access.h"
 
@@ -19,8 +20,8 @@
 #include "binrwir/frame_bindings.h"
 #include "frame_slot.h"
 #include "frame_target_key.h"
-#include "kvspace/kvspace.h"
-#include "kvspace/xvalue_head.h"
+#include <kvspace/kvlang_xvalue.h>
+#include <kvspace/kvspace_xvalue.h>
 
 static runtimec_status_t vmbin_value_access_fail(
     runtimec_error_t *error, runtimec_status_t status,
@@ -906,9 +907,10 @@ static runtimec_status_t vmbin_value_access_create_member(
             "member value cannot be encoded as an XValue");
     }
     message[0] = '\0';
-    const int set_status = kvspaceSetValue(frame->kvspace_handle, key_text, wire,
-                                           (uint32_t)wire_size, message,
-                                           sizeof(message));
+    const bool wrote = runtimec_kvspace_write_wire(frame->kvspace_handle, key_text,
+                                                 wire, (uint32_t)wire_size,
+                                                 message, sizeof(message));
+    const int set_status = wrote ? 0 : 1;
     free(wire);
     if (set_status != 0) {
         return vmbin_value_access_fail(
@@ -1099,8 +1101,9 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
             "written value cannot be encoded as an XValue");
     }
     message[0] = '\0';
-    if (kvspaceSetValue(frame->kvspace_handle, key_text, wire,
-                        (uint32_t)wire_size, message, sizeof(message)) != 0) {
+    if (!runtimec_kvspace_write_wire(frame->kvspace_handle, key_text, wire,
+                                   (uint32_t)wire_size, message,
+                                   sizeof(message))) {
         free(wire);
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_ERROR, VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
@@ -1203,9 +1206,10 @@ static runtimec_status_t vmbin_value_access_create_static_target(
     memcpy(key_c_string, key_text.data, key_text.size);
     key_c_string[key_text.size] = '\0';
     message[0] = '\0';
-    const int set_status = kvspaceSetValue(frame->kvspace_handle, key_c_string,
-                                           wire, (uint32_t)wire_size, message,
-                                           sizeof(message));
+    const bool wrote = runtimec_kvspace_write_wire(
+        frame->kvspace_handle, key_c_string, wire, (uint32_t)wire_size, message,
+        sizeof(message));
+    const int set_status = wrote ? 0 : 1;
     free(wire);
     if (set_status != 0) {
         return vmbin_value_access_fail(
@@ -1230,7 +1234,7 @@ static runtimec_status_t vmbin_value_access_create_static_target(
  *
  *     rwfunc test() -> () {
  *         1 + 2 -> /sum        // 写目标是 STATIC 绝对 key，且不存在
- *         println(/sum)
+ *         输出算子(/sum)
  *     }
  *
  * **创建复用 `ensure_zero_value`**，不写第二份创建实现：它按宽度表建定宽零值，
@@ -1432,9 +1436,9 @@ static runtimec_status_t vmbin_value_access_create_dereference_target(
 
         memcpy(key_text, pointer_value.read_bytes, key_size);
         key_text[key_size] = '\0';
-        if (kvspaceSetValue(frame->kvspace_handle, key_text, wire,
-                            (uint32_t)wire_size, message,
-                            sizeof(message)) != 0) {
+        if (!runtimec_kvspace_write_wire(frame->kvspace_handle, key_text, wire,
+                                       (uint32_t)wire_size, message,
+                                       sizeof(message))) {
             free(wire);
             return vmbin_value_access_fail(
                 error, RUNTIMEC_STATUS_ERROR,
@@ -1772,7 +1776,7 @@ runtimec_status_t vmbin_value_access_langtype(
      * **这里不按 `dereference` 剥 `*`。**
      *
      * 直觉上该剥：`argument->dereference` 表示「访问前跟一跳」，调用方要的理应
-     * 是跟过之后那个值的类型。实测不成立——`println(*p)` 走到这里时
+     * 是跟过之后那个值的类型。实测不成立——`输出算子(*p)` 走到这里时
      * `argument->dereference` 是 **0**，而声明的 langtype 仍是 `*int64`。
      * 也就是说这一位在 encoder → program 之间没有传下来（`vmkv_encoder_map_argument`
      * 里 `has_dereference` 已置 1、`output->dereference` 也写了 1，运行期读到的

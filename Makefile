@@ -1,30 +1,31 @@
 # kvlang 统一构建：各自包含在 repo 内（可执行 bin/，库 lib/，后端 lib/kvspace/），
 # 不装 /usr；各组件独立编译。
-#   make runtime    C runtime 库（libkvlang_runtime.so，经 CMake）——可选 A/B 臂
-#   make runtimec2  c2 runtime 库（libkvlang_runtimec2.so，经 CMake）——默认 runtime
+#   make runtime    旧 C runtime（已归档 oldhero/oldgo/runtime，非默认）
+#   make runtimec2  旧 c2 runtime（已归档 oldhero/oldgo/runtimec2，非默认）
 #   make byteseek   功能完整 Rust runtime → 编译为 byteseek（term/json/http/kvlanglayout/networld 就地 rwir）
 #   make layout     Rust layout（kvlanglayout）
-#   make json       Go json 扩展（json-rwirext 可执行文件）
 #   make oldhero    Go 旧 runtime（kvlang-go，兼容保留，即将归档）
 #   make test       全量 tutorial 回归
-#   make all        全部（runtimec2 + byteseek + layout + json；C 版 runtime 不默认构建）
+#   make json       Go json 扩展（json-rwirext；待 TASK-042 升级，当前构建不出）
 #   make clean      清理 bin/ 与各构建目录
 #   make clear      install 的逆操作：删系统目录里 kvspace/kvlang 的 .so 与可执行
 #   make status     列出系统目录里已安装的库 / 可执行 / 头
 # kvspace 后端由 libkvspace dispatch 前端按 DSN 运行时选择，不再编译期切换。
 
-# 默认 runtime = c2（A/B 目标达成后主选）。C 版仍可 `make runtime` 单独构建。
+# runtime / runtimec2 已归档到 oldhero/oldgo/（TASK-041），不再参与默认构建：
+# 它们的源码冻结在旧 kvspace ABI 上，构建出来的是链接旧符号的库。
+# 归档目录的产物落点是 oldhero/oldgo/lib，**不再落 kvlang/lib**，别误用。
 # 两级布局（repo 即 prefix）：可执行 → bin/，库 → lib/（后端在 lib/kvspace/）。
 BIN         := bin
 LIB         := lib
 BACKEND     := lib/kvspace
 
 # 产物后缀：Linux=.so macOS=.dylib（uname 判 Darwin，跨平台确定）。
+# C2_LIB 已随 runtimec2 归档一并删除：它只用于取 c2 产物名，
+# 现在 c2 不进默认构建，留着就是一条指向已归档物的死引用。
 ifeq ($(shell uname -s),Darwin)
-C2_LIB     := libkvlang_runtimec2.dylib
 LAYOUT_LIB := libkvlanglayout.dylib
 else
-C2_LIB     := libkvlang_runtimec2.so
 LAYOUT_LIB := libkvlanglayout.so
 endif
 
@@ -32,7 +33,18 @@ endif
         status clear clear-headers clear-all single \
         kvspace-libs check-kvspace-head
 
-all: runtimec2 byteseek layout json
+# all 只留已迁移干净的组件。两个被摘的组件各有明确原因，不是临时回避：
+#
+#  · byteseek：boot 阶段经 libkvlang_runtimec2 调 kvlangDefRwir，而 c2 已归档、
+#    runtimec 尚无该扩展注册 ABI（TASK-035）。
+#
+#  · json（extruntime_tutorial/go/json）：**不归档**，它是扩展 runtime 实现，
+#    只是升级优先级靠后（排在 TASK-042 之后）。当前源码仍调 13 处旧 kvspace
+#    符号且 cgo 链 -lkvlang_runtimec2，所以此刻构建不出来——等 TASK-042/035
+#    落地后升级。目标保留在下面，不在 all 里。
+#
+# 两者加回 all 的条件见对应位置。
+all: layout
 
 test: all
 	python3 tutorial/test.py --no-build
@@ -41,21 +53,31 @@ test: all
 # RTLD_NOLOAD 复用已加载的后端。payload 固定组装到 build/embed（不读构建 env）。
 # FRONTEND_SO 是构建期参数（不是运行时环境变量）：本分支构建的 libkvspace.so.1。
 FRONTEND_SO ?=
-# 单一二进制（#493）：默认 embed c2 runtime。C 版 A/B 臂：`make runtime` 后
-# 手动替换 lib/libkvlang_runtime.so 再 stage_embed（tools/stage_embed.sh 已同时带 c2）。
-single: runtimec2 layout
-	./tools/stage_embed.sh $(FRONTEND_SO) build/embed $(CURDIR)
-	cargo build --release --manifest-path byteseek/Cargo.toml --features embed
-	cp byteseek/target/release/byteseek $(BIN)/byteseek
+# 单一二进制（#493）：**已停用**。它 embed 的是 runtimec2，而 c2 已归档、
+# runtimec 尚无 kvlangDefRwir 等价 ABI（TASK-035）——现在构建出来的是启动即崩的
+# 二进制。等 TASK-035 落地、embed 源改成 runtimec 后再恢复。
+single:
+	@echo "single 已停用：等待 TASK-035（runtimec 补齐 kvlangDefRwir 等价 ABI）" >&2
+	@echo "原因：embed 源 runtimec2 已归档，boot 阶段扩展注册无对应物。" >&2
+	@exit 1
 
+# 归档靶：源码在 oldhero/oldgo/，产物落 oldhero/oldgo/lib（不进 kvlang/lib）。
+# 仅用于归档构建/取证，**不是**日常构建路径。
 runtime:
-	cmake -S runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
+	cmake -S oldhero/oldgo/runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/runtime --target kvlang_runtime -j
 
-# c2 runtime（默认）：产物 lib/libkvlang_runtimec2.so + bin/binircompiler
-# （编译模块的可执行入口）。C 版 libkvlang_runtime.so 仍由 `make runtime` 单独产出。
+# runtimec 语料/基准驱动（TASK-044 后 `kvlangrun` 已删，`kv_runner` 是唯一入口）。
+# 产物落 build/runtimec/kv_runner，再拷到 bin/。
+runtimec_runner:
+	cmake -S runtimec -B build/runtimec -DCMAKE_BUILD_TYPE=Release \
+	  -DRUNTIMEC_KVSPACE_LIBRARY_DIRECTORY="$(CURDIR)/$(LIB)"
+	cmake --build build/runtimec --target kv_runner -j
+	mkdir -p $(BIN)
+	cp build/runtimec/kv_runner $(BIN)/
+
 runtimec2:
-	cmake -S runtimec2 -B build/runtimec2 -DCMAKE_BUILD_TYPE=Release
+	cmake -S oldhero/oldgo/runtimec2 -B build/runtimec2 -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/runtimec2 --target kvlang_runtimec2 binircompiler -j
 
 # stdlib 是 byteseek 的**编译期输入**：build.rs 用 include_str! 把 stdlib/**/*.kv
@@ -157,6 +179,15 @@ layout:
 	cp layout/target/release/kvlanglayout $(BIN)/
 	cp layout/target/release/$(LAYOUT_LIB) $(LIB)/
 
+# json 扩展（extruntime_tutorial/go/json）→ bin/json-rwirext。
+#
+# **不归档**：它是扩展 runtime 实现，只是升级优先级靠后。**当前不在 all 里**
+# （见上面 all 的注释），需要时显式 `make json`。
+#
+# **当前预期失败**：源码仍调 13 处旧 kvspace 符号（WriteInPlace/WriteNewPlace/
+# Get/SetValue/ListLen/ListAt/Del/DelTree/Mkindex/NewChar），且 cgo LDFLAGS 链
+# -lkvlang_runtimec2——该 .so 已随 c2 归档从 bin/ 删除，不会伪造恢复。
+# 等 TASK-042（runtimec 补齐扩展 ABI）后升级源码并重建。
 json:
 	cd extruntime_tutorial/go/json && CGO_LDFLAGS="-L$(CURDIR)/$(LIB) -lkvspace" go build -o ../../../bin/json-rwirext ./cmd/
 

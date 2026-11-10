@@ -12,7 +12,7 @@ capability_probe <dsn> <能力行标识> [源码文件]
 ```
 
 - **dsn**：kvspace DSN，例如 `shm:///workspace/tmp/coding2/probe/store.shm`
-- **能力行标识**：算子名（`add`、`copy`、`println`…）。工具据此拼默认模板。
+- **能力行标识**：算子名（`add`、`copy`、`输出算子`…）。工具据此拼默认模板。
 - **源码文件**：可选。不给时用内置模板（`rwfunc probe() -> (*int64 $r) { <op> -> *r }`）。
 
 ## 输出（TSV，一行）

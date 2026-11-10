@@ -77,25 +77,30 @@ layout 与 runtime 对**数据 store**不做特化：不 dlopen、不双后端�
 （无下划线 camelCase）：
 
 ```
-kvspaceConnect / Close / Clear
-kvspaceGet                       // 借用读：*out 指向后端常驻/回收空间，调用方不得 free
-kvspaceSetValue                  // 验证并同步写入完整 XValue
-kvspaceListLen / ListAt / Del / DelTree / Cp / CpTree
-kvspaceMkindex / MkindexExt / RmindexExt / Watch
+# 存储层 ABI（kvspace.h；9 操作 + 生命周期 + 地址访问器，见 [[存储层ABI]]）
+# kvspace.h 原名 storage.h；旧 ABI 的公共头与符号都已删除
+kvspaceConnect / Close
+kvspaceResolve / Realloc / Free / Cp
+kvspaceMkindex / Deltree / Cpdir / Listlen / List
+kvspaceXvalueInProcessAddress    // 地址空间访问器，不计入 9 个语义操作
+# attr 区按 tag 读写（不再是扫描器）：
+kvspaceXvalueGetAttr / kvspaceXvalueSetAttr
+# 无句柄的 XValue 构造/读取（字节层 + 语言层，见 [[XValueHead线格式]]）：
 kvspaceXvalueHeadNewNone / NewScalar / NewSlack / NewTensor / NewPtr / NewExt / NewCode / Reserve
 kvspaceNewPtr / NewChar / NewBool / NewInt64 / NewFloat64
-kvspaceResolveRef / GetByRef / SetPartByRef / SetValueByRef
-                                 // 地址寻址：key→64 位地址是派生量，后端可不实现（前端退回按 key）
 ```
 
-**读写模型**：
+**旧 ABI 符号已删除，不设过渡导出**：`kvspaceGet`、`kvspaceSetValue`、`kvspaceWriteInPlace`、
+`kvspaceWriteNewPlace`、`kvspaceListLen`、`kvspaceListAt`、`kvspaceDel*`、`kvspaceWatch`、
+`kvspaceView*` 等**全部不存在**——生产后端只导出上面这份。旧消费者迁移到新 ABI 或退出构建。
 
-- **读**走 `kvspaceGet`——返回后端常驻内存的**借用偏移二进制指针**，调用方只读、**不得** `free`。
-- **写**走 `kvspaceSetValue`，在调用返回前完成整条 XValue 写入。worker 不能把尚未写完的 body
-  保留在进程内，避免进程退出后 PC 已推进而变量仍为空。底层 `WriteInPlace` / `WriteNewPlace`
-  为其他 ABI 调用方保留，runtime 不依赖其待填充缓冲。
-- **前缀枚举**不一次性返回整段名单缓冲：`kvspaceListLen` 只返子项计数，`kvspaceListAt(idx)` 借用回收
-  缓冲逐项取名——遍历即「先 ListLen 定计数、再逐 idx ListAt」。
+**读写模型**（新 ABI 下）：
+
+- **读**：`kvspaceResolve` 拿 `value_offset`，再用 `kvspaceXvalueInProcessAddress(h) + offset`
+  取到映射内地址；durable 无映射（返回 NULL），不适用此路径。
+- **写**：`kvspaceRealloc` 是唯一写原语，按需创建/调整后返回可写偏移；调用方填完即生效。
+- **前缀枚举**：`kvspaceListlen` 返回 N（子项数）与 M（最长名长度），一次分配后
+  `kvspaceList` 整体取全部直接子项名；**不排序**，顺序由上层按 `cmp_coord` 处理。
 
 **native 读参**：函数调用统一传地址；帧参数槽 `**T` 经实参键 `*T` 指向调用方 key。
 `ResolveReadValue` 在执行当前指令时从 KVSpace 读取目标值。初始化 XValue 的指令可直接使用代码槽

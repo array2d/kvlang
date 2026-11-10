@@ -19,6 +19,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "contract/allocator.h"
+#include "binrwir/registry.h"
 #include "contract/kvspace_access.h"
 #include "contract/status.h"
 #include "engine/frame_state.h"
@@ -28,6 +29,31 @@ extern "C" {
 #endif
 
 typedef struct runtimec_session_t runtimec_session_t;
+/*
+ * 扩展表的**内部视图**：字段顺序与公共头 `kvlang_runtime_{extension_entry,
+ * extension_module}_t` 逐项一致。
+ *
+ * 为什么在这里再定义一份：engine 不能依赖 `kvlang/runtimec.h`（那是给外部调用方的
+ * 公共层，反向依赖会破坏分层边）。布局一致性不靠这份声明保证，靠公共接口在
+ * `create` 里校验 `structure_size`——对不上就根本走不到这里。
+ */
+typedef struct runtimec_extension_entry_view {
+    uint32_t structure_size;
+    uint32_t operation_identifier;
+    uint32_t flags;
+    /* 用 **registry 的真实签名**，不是公共头的 `void *` 三参：内部视图只在
+     * runtimec 内部用（驱动侧构造时也拿得到这些类型），而
+     * `binrwir_registry_append` 要的就是这个签名。用 `void *` 会逼出 ISO C
+     * 禁止的「对象指针 → 函数指针」转换（`-Wpedantic` 直接报错）。 */
+    binrwir_registry_handler_t handler;
+} runtimec_extension_entry_view_t;
+
+typedef struct runtimec_extension_module_view {
+    const char *module_name;
+    const runtimec_extension_entry_view_t *entries;
+    size_t entry_count;
+} runtimec_extension_module_view_t;
+
 typedef struct runtimec_session_options_t {
     uint32_t structure_size;
     runtimec_allocator_t allocator;
@@ -42,6 +68,15 @@ typedef struct runtimec_session_options_t {
      * 决定后端；这里只收一个已经打开的句柄。可以为 NULL（不接存储的用例）。
      */
     void *kvspace_handle;
+    /*
+     * 扩展算子表（公共接口的 `kvlang_runtime_extension_module_t` 原样透传）。
+     *
+     * session 不认识「扩展」这个概念，它只把这张表交给 registry 装载——
+     * `binrwir_registry_append` 本来就支持按模块追加。多一层抽象只会让
+     * 「谁负责校验」变模糊。
+     */
+    const void *extension_modules;
+    size_t extension_count;
 } runtimec_session_options_t;
 runtimec_status_t runtimec_session_create(
     runtimec_kvspace_access_t *kvspace_access,

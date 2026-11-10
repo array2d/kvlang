@@ -9,6 +9,7 @@
 
 #include "engine/session.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "binrwir_compiler/compiler.h"
@@ -23,8 +24,8 @@
 #include "vmbin/handlers/scatter.h"
 #include "vmbin/handlers/time.h"
 #include "vmbin/handlers/string.h"
-#ifdef RUNTIMEC_TEMP_PRINTLN
-#include "vmbin/temp_println.h"
+#ifdef RUNTIMEC_TEMP_OUTPUT
+#include "vmbin/temp_output.h"
 #endif
 #include "vmkv/encoder.h"
 
@@ -147,14 +148,14 @@ runtimec_status_t runtimec_session_create(
         status = runtimec_session_forward(error, status, "builtin registry");
         goto fail;
     }
-#ifdef RUNTIMEC_TEMP_PRINTLN
+#ifdef RUNTIMEC_TEMP_OUTPUT
     {
-        size_t temp_println_entry_count = 0U;
-        const binrwir_registry_entry_t *temp_println_entries =
-            runtimec_temp_println_entries(&temp_println_entry_count);
+        size_t temp_output_entry_count = 0U;
+        const binrwir_registry_entry_t *temp_output_entries =
+            runtimec_temp_output_entries(&temp_output_entry_count);
         status = binrwir_registry_append(
-            &session->builtin_registry, "temp_println", temp_println_entries,
-            temp_println_entry_count, error);
+            &session->builtin_registry, "temp_output", temp_output_entries,
+            temp_output_entry_count, error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             status = runtimec_session_forward(error, status, "builtin registry");
             goto fail;
@@ -283,6 +284,63 @@ runtimec_status_t runtimec_session_create(
         if (status != RUNTIMEC_STATUS_SUCCESS) {
             status = runtimec_session_forward(error, status, "builtin registry");
             goto fail;
+        }
+    }
+
+    /*
+     * 扩展算子：由调用方（byteseek）通过 options 传入。
+     *
+     * 装载在**所有内建模块之后**：`binrwir_registry_append` 对重复 opid 拒绝而
+     * 不覆盖，所以内建先到先得——扩展撞了内建 opid 会被具名拒绝，不会被内建悄悄
+     * 顶掉，也不会顶掉内建。顺序即优先级，不需要额外的冲突表。
+     *
+     * 校验（`structure_size`、opid 合法性、handler 非空）在公共接口 `create` 里
+     * 做，这里只把已校验的表转成内部条目形状——校验只有一处，不在这里重复。
+     */
+    if (options->extension_modules != NULL && options->extension_count != 0U) {
+        /*
+         * **不 include 公共头**（`kvlang/runtimec.h`）：那一层是给外部调用方的，
+         * engine 依赖它会让分层边反向。这里只按**字段顺序**读同一块内存——
+         * 公共接口已经校验过 `structure_size`，布局对不上在那一层就失败了。
+         */
+        const runtimec_extension_module_view_t *modules =
+            (const runtimec_extension_module_view_t *)options->extension_modules;
+        for (size_t module = 0U; module < options->extension_count; ++module) {
+            const runtimec_extension_module_view_t *entry_module = &modules[module];
+            for (size_t item = 0U; item < entry_module->entry_count; ++item) {
+                const runtimec_extension_entry_view_t *source =
+                    &entry_module->entries[item];
+                const binrwir_registry_entry_t entry = {
+                    .operation_identifier = source->operation_identifier,
+                    .flags = source->flags,
+                    .handler = (binrwir_registry_handler_t)source->handler,
+                };
+                status = binrwir_registry_append(
+                    &session->builtin_registry, entry_module->module_name,
+                    &entry, 1U, error);
+                if (status != RUNTIMEC_STATUS_SUCCESS) {
+                    /*
+                     * **补一句具名诊断**：registry 的常量消息只说「重复了」，
+                     * 十个扩展一起装载时那等于没定位。模块名与 opid 在这里补，
+                     * 因为消息缓冲必须在失败帧之后仍然有效——在 registry 里拼
+                     * 栈缓冲会悬空（实测出过乱码）。
+                     */
+                    static char extension_error[256];
+                    (void)snprintf(
+                        extension_error, sizeof(extension_error),
+                        "extension module \"%s\" registers opid 0x%04X which is "
+                        "already taken",
+                        entry_module->module_name,
+                        (unsigned)entry.operation_identifier);
+                    runtimec_error_reset(error);
+                    runtimec_error_set(error, status, RUNTIMEC_ERROR_DOMAIN_CONTRACT,
+                                       1,
+                                       runtimec_string_view_from_c_string(
+                                           extension_error),
+                                       RUNTIMEC_PROGRAM_COUNTER_NONE);
+                    goto fail;
+                }
+            }
         }
     }
 

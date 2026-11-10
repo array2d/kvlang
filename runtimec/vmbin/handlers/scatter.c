@@ -13,6 +13,8 @@
  *   0x0111 scatterarray·len    rwir_catalog.def:457  scatterarray-next-index
  */
 
+#include "contract/kvspace_interface.h"
+#include "vmbin/directory_walk.h"
 #include "vmbin/handlers/scatter.h"
 
 #include <stdio.h>
@@ -26,8 +28,8 @@
 #include "contract/error.h"
 #include "contract/status.h"
 #include "contract/view.h"
-#include "kvspace/kvspace.h"
-#include "kvspace/xvalue_head.h"
+#include <kvspace/kvlang_xvalue.h>
+#include <kvspace/kvspace_xvalue.h>
 #include "vmbin/handlers/container.h"
 #include "vmbin/frame_target_key.h"
 #include "vmbin/handlers/handler_call.h"
@@ -38,7 +40,7 @@
 
 /*
  * 成员分隔符：`·`（U+00B7，UTF-8 两个字节）。**不是 `/`**——散列容器的成员是
- * `base·[i]`，`kvspaceListLen` 用这个前缀枚举。写成 `base/` 会建出一条与成员
+ * `base·[i]`，目录枚举用这个前缀。写成 `base/` 会建出一条与成员
  * 不相干的目录：`len` 恒为 0，而成员明明在。
  */
 #define SCATTER_MEMBER_SEPARATOR "\xC2\xB7"
@@ -73,8 +75,9 @@ static bool scatter_container_empty(const binrwir_binvthread_frame_t *frame,
         return false;
     }
     message[0] = '\0';
-    if (kvspaceSetValue(frame->kvspace_handle, base, wire, (uint32_t)wire_size,
-                        message, sizeof(message)) != 0) {
+    if (!runtimec_kvspace_write_wire(frame->kvspace_handle, base, wire,
+                                   (uint32_t)wire_size, message,
+                                   sizeof(message))) {
         free(wire);
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                            VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
@@ -87,7 +90,7 @@ static bool scatter_container_empty(const binrwir_binvthread_frame_t *frame,
         return false;
     }
     message[0] = '\0';
-    if (kvspaceMkindex(frame->kvspace_handle, directory, 0U, message,
+    if (kvspaceMkindex(frame->kvspace_handle, directory, message,
                        (uint32_t)sizeof(message)) != 0) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                            VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
@@ -102,7 +105,7 @@ static bool scatter_container_empty(const binrwir_binvthread_frame_t *frame,
  *   1. base key 写一条**空 body 的 map 头**（langtype 取自写槽声明）；
  *   2. `kvspaceMkindex` 给 base 建目录，之后成员才能被枚举。
  *
- * 只做 1 的话 `kvspaceListLen` 数不到任何成员（`len` 恒 0）；只做 2 的话 base 上
+ * 只做 1 的话目录枚举数不到任何成员（`len` 恒 0）；只做 2 的话 base 上
  * 就没有类型。**两步都必须成功**，否则整体失败。**成功不写哨兵，失败只写 `exit`**。
  */
 static void scatter_container_create(const binrwir_binvthread_frame_t *frame,
@@ -154,8 +157,9 @@ static void scatter_container_create(const binrwir_binvthread_frame_t *frame,
                            output_exit->logical_program_counter);
         return;
     }
-    if (kvspaceSetValue(frame->kvspace_handle, key, wire, (uint32_t)wire_size,
-                        message, sizeof(message)) != 0) {
+    if (!runtimec_kvspace_write_wire(frame->kvspace_handle, key, wire,
+                                   (uint32_t)wire_size, message,
+                                   sizeof(message))) {
         free(wire);
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                            VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
@@ -169,7 +173,7 @@ static void scatter_container_create(const binrwir_binvthread_frame_t *frame,
         return;
     }
     message[0] = '\0';
-    if (kvspaceMkindex(frame->kvspace_handle, directory, 0U, message,
+    if (kvspaceMkindex(frame->kvspace_handle, directory, message,
                        (uint32_t)sizeof(message)) != 0) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                            VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
@@ -300,7 +304,7 @@ static bool scatter_member_copy(const binrwir_binvthread_frame_t *frame,
                                 int64_t target_coordinate, char *source_member,
                                 char *target_member, size_t member_capacity,
                                 binrwir_execution_exit_t *output_exit) {
-    uint8_t *stored = NULL;
+    const uint8_t *stored = NULL;
     uint32_t stored_size = 0U;
     char message[256];
 
@@ -313,14 +317,14 @@ static bool scatter_member_copy(const binrwir_binvthread_frame_t *frame,
                            output_exit->logical_program_counter);
         return false;
     }
-    if (kvspaceGet(frame->kvspace_handle, source_member, 0, &stored,
-                   &stored_size) != 0 ||
+    if (!runtimec_kvspace_read_wire(frame->kvspace_handle, source_member,
+                                    &stored, &stored_size) ||
         stored == NULL) {
         return true; /* 洞：跳过，不是错误。 */
     }
     message[0] = '\0';
-    if (kvspaceSetValue(frame->kvspace_handle, target_member, stored,
-                        stored_size, message, sizeof(message)) != 0) {
+    if (!runtimec_kvspace_write_wire(frame->kvspace_handle, target_member, stored,
+                                   stored_size, message, sizeof(message))) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                            VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
                            output_exit->logical_program_counter);
@@ -345,7 +349,7 @@ static void scatter_member_read(const binrwir_binvthread_frame_t *frame,
     char base[SCATTER_KEY_CAPACITY];
     char member[SCATTER_KEY_CAPACITY];
     vmbin_value_location_t coordinate_position;
-    uint8_t *stored = NULL;
+    const uint8_t *stored = NULL;
     uint32_t stored_size = 0U;
     int64_t coordinate = 0;
     runtimec_error_t error;
@@ -374,7 +378,8 @@ static void scatter_member_read(const binrwir_binvthread_frame_t *frame,
         return;
     }
     /* resolve = 0：成员是独立键，读它就得到它，不沿 Ptr 跳。 */
-    if (kvspaceGet(frame->kvspace_handle, member, 0, &stored, &stored_size) != 0 ||
+    if (!runtimec_kvspace_read_wire(frame->kvspace_handle, member, &stored,
+                                    &stored_size) ||
         stored == NULL || stored_size < KVSPACE_XVALUE_HEAD_LEN) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                            VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
@@ -413,8 +418,9 @@ static void scatter_member_write(const binrwir_binvthread_frame_t *frame,
     char message[256];
 
     message[0] = '\0';
-    if (kvspaceSetValue(frame->kvspace_handle, member, value->data,
-                        (uint32_t)value->size, message, sizeof(message)) != 0) {
+    if (!runtimec_kvspace_write_wire(frame->kvspace_handle, member, value->data,
+                                   (uint32_t)value->size, message,
+                                   sizeof(message))) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                            VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
                            output_exit->logical_program_counter);
@@ -478,27 +484,33 @@ static void scatter_largest_coordinate(const binrwir_binvthread_frame_t *frame,
                                        binrwir_execution_exit_t *output_exit) {
     char directory[SCATTER_KEY_CAPACITY + 2U];
     char name[SCATTER_KEY_CAPACITY];
-    int32_t count = 0;
+    int64_t count = 0;
 
     *output_largest = -1;
     if (!scatter_member_prefix(base, directory, sizeof(directory),
                                output_exit)) {
         return;
     }
-    if (kvspaceListLen(frame->kvspace_handle, directory, 0, 0, &count) != 0) {
+    runtimec_directory_walk_t walk;
+    if (!runtimec_directory_walk_open(&walk, NULL, frame->kvspace_handle,
+                                      directory, false, false) ||
+        !runtimec_directory_walk_count(&walk, &count)) {
+        (void)runtimec_directory_walk_close(&walk);
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                            VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
                            output_exit->logical_program_counter);
         return;
     }
-    for (int32_t ordinal = 0; ordinal < count; ++ordinal) {
+    for (int64_t ordinal = 0; ordinal < count; ++ordinal) {
+        const char *entry_name = NULL;
         uint32_t name_size = 0U;
 
-        if (kvspaceListAt(frame->kvspace_handle, directory, 0, 0, ordinal,
-                          (uint8_t *)name, (uint32_t)sizeof(name),
-                          &name_size) != 0) {
+        if (!runtimec_directory_walk_at(&walk, ordinal, &entry_name,
+                                        &name_size) ||
+            name_size >= sizeof(name)) {
             continue;
         }
+        memcpy(name, entry_name, name_size);
         name[name_size] = '\0';
         if (name[0] == '[') {
             char *end_of_number = NULL;
@@ -510,6 +522,7 @@ static void scatter_largest_coordinate(const binrwir_binvthread_frame_t *frame,
             }
         }
     }
+    (void)runtimec_directory_walk_close(&walk);
 }
 
 /*
@@ -640,9 +653,9 @@ static void scatter_expand_from_compact(
                 return;
             }
             message[0] = '\0';
-            if (kvspaceSetValue(frame->kvspace_handle, member, wire,
-                                (uint32_t)wire_size, message,
-                                sizeof(message)) != 0) {
+            if (!runtimec_kvspace_write_wire(frame->kvspace_handle, member, wire,
+                                           (uint32_t)wire_size, message,
+                                           sizeof(message))) {
                 free(wire);
                 vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                                    VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
@@ -681,7 +694,7 @@ static void scatter_pack_to_compact(
     char directory[SCATTER_KEY_CAPACITY + 2U];
     char member[SCATTER_KEY_CAPACITY];
     runtimec_string_view_t target_langtype;
-    int32_t member_count = 0;
+    int64_t member_count = 0;
     int64_t declared_count;
     uint8_t body[SCATTER_BODY_CAPACITY];
     size_t body_size = 0U;
@@ -712,13 +725,17 @@ static void scatter_pack_to_compact(
         }
         return;
     }
-    if (kvspaceListLen(frame->kvspace_handle, directory, 0, 0,
-                       &member_count) != 0) {
+    runtimec_directory_walk_t walk;
+    if (!runtimec_directory_walk_open(&walk, NULL, frame->kvspace_handle,
+                                      directory, false, false) ||
+        !runtimec_directory_walk_count(&walk, &member_count)) {
+        (void)runtimec_directory_walk_close(&walk);
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                            VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
                            output_exit->logical_program_counter);
         return;
     }
+    (void)runtimec_directory_walk_close(&walk);
     if ((int64_t)member_count != declared_count) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                            RUNTIMEC_CONTAINER_DIAG_ELEMENT_COUNT_MISMATCH,
@@ -727,7 +744,7 @@ static void scatter_pack_to_compact(
     }
     /* 逐个坐标读：缺一个就是洞——不是「跳过」，是拒绝。 */
     for (int64_t ordinal = 0; ordinal < declared_count; ++ordinal) {
-        uint8_t *stored = NULL;
+        const uint8_t *stored = NULL;
         uint32_t stored_size = 0U;
         uint64_t element_length;
 
@@ -738,8 +755,8 @@ static void scatter_pack_to_compact(
                                output_exit->logical_program_counter);
             return;
         }
-        if (kvspaceGet(frame->kvspace_handle, member, 0, &stored,
-                       &stored_size) != 0 ||
+        if (!runtimec_kvspace_read_wire(frame->kvspace_handle, member,
+                                       &stored, &stored_size) ||
             stored == NULL || stored_size < KVSPACE_XVALUE_HEAD_LEN) {
             vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                                RUNTIMEC_CONTAINER_DIAG_SCATTER_HAS_HOLE,
@@ -793,7 +810,7 @@ static void scatter_slice_between(const binrwir_binvthread_frame_t *frame,
     char target_member[SCATTER_KEY_CAPACITY];
     int64_t lo = 0;
     int64_t hi = 0;
-    int32_t count = 0;
+    int64_t count = 0;
 
     if (!scatter_base_key(frame, &instruction->read_arguments.data[0],
                           source_base, sizeof(source_base), output_exit) ||
@@ -815,11 +832,18 @@ static void scatter_slice_between(const binrwir_binvthread_frame_t *frame,
         return;
     }
     /* 成员数才是边界：`hi` 不能超过实存成员数（与「最大坐标+1」无关）。 */
-    if (kvspaceListLen(frame->kvspace_handle, directory, 0, 0, &count) != 0) {
-        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                           VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
-                           output_exit->logical_program_counter);
-        return;
+    {
+        runtimec_directory_walk_t walk;
+        if (!runtimec_directory_walk_open(&walk, NULL, frame->kvspace_handle,
+                                          directory, false, false) ||
+            !runtimec_directory_walk_count(&walk, &count)) {
+            (void)runtimec_directory_walk_close(&walk);
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                               VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                               output_exit->logical_program_counter);
+            return;
+        }
+        (void)runtimec_directory_walk_close(&walk);
     }
     if (hi > count) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
@@ -888,7 +912,7 @@ static void scatter_member_count(const binrwir_binvthread_frame_t *frame,
                                  binrwir_execution_exit_t *output_exit) {
     char base[SCATTER_KEY_CAPACITY];
     char directory[SCATTER_KEY_CAPACITY + 2U];
-    int32_t count = 0;
+    int64_t count = 0;
 
     if (!scatter_base_key(frame, &instruction->read_arguments.data[0], base,
                           sizeof(base), output_exit)) {
@@ -898,11 +922,18 @@ static void scatter_member_count(const binrwir_binvthread_frame_t *frame,
                                output_exit)) {
         return;
     }
-    if (kvspaceListLen(frame->kvspace_handle, directory, 0, 0, &count) != 0) {
-        vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
-                           VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
-                           output_exit->logical_program_counter);
-        return;
+    {
+        runtimec_directory_walk_t walk;
+        if (!runtimec_directory_walk_open(&walk, NULL, frame->kvspace_handle,
+                                          directory, false, false) ||
+            !runtimec_directory_walk_count(&walk, &count)) {
+            (void)runtimec_directory_walk_close(&walk);
+            vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
+                               VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
+                               output_exit->logical_program_counter);
+            return;
+        }
+        (void)runtimec_directory_walk_close(&walk);
     }
     *out = (int64_t)count;
 }

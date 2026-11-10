@@ -28,8 +28,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "contract/kvspace_interface.h"
 #include "contract/kvspace_access.h"
-#include <kvspace/kvspace.h>
 
 /* kvspace 前端的装载名：Linux 用 .so，macOS 用 .dylib。 */
 #if defined(__APPLE__)

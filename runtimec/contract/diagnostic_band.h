@@ -14,7 +14,7 @@
  * ── 为什么需要它 ──────────────────────────────────────────────────────
  *
  * 在 2026-11-05 之前，五个模块各自从 1 开始编号。于是同一个 `3` 同时意味着
- * 「解释器：指令非法」与「println：值格式非法」，`7` 同时意味着「解释器：值访问」
+ * 「解释器：指令非法」与「输出算子：值格式非法」，`7` 同时意味着「解释器：值访问」
  * 与「窗口：编译产物非法」。一晚上因此误判五次——每次分析前都得先问
  * **「这是谁的 3」**。
  *
@@ -53,7 +53,7 @@ extern "C" {
 #define RUNTIMEC_DIAGNOSTIC_BAND_CALL UINT32_C(0x4200)
 #define RUNTIMEC_DIAGNOSTIC_BAND_CONTAINER UINT32_C(0x4300)
 #define RUNTIMEC_DIAGNOSTIC_BAND_VALUE_ACCESS UINT32_C(0x4400)
-#define RUNTIMEC_DIAGNOSTIC_BAND_TEMP_PRINTLN UINT32_C(0x4500)
+#define RUNTIMEC_DIAGNOSTIC_BAND_TEMP_OUTPUT UINT32_C(0x4500)
 #define RUNTIMEC_DIAGNOSTIC_BAND_HOST UINT32_C(0x4600)
 #define RUNTIMEC_DIAGNOSTIC_BAND_HANDLER_CALL UINT32_C(0x4A00)
 #define RUNTIMEC_DIAGNOSTIC_BAND_HANDLER_CALL_TEXT UINT32_C(0x4B00)

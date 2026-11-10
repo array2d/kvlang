@@ -30,8 +30,9 @@ stringkeymap 元素的成员名是坐标段，物理 key 形如 `m·[i]`（一�
 
 - 结构判定 `is_coord`：`[` 开头、`]` 结尾、内部不含嵌套 `[`/`]`；判定不要求整数（允许含点或字符串坐
   标）。
-- 排序 `cmp_coord`（row-major）：坐标段恒排在非坐标段之前；两个可按整数解析的坐标段按数值升序，否则
-  字典序。
+- 排序 `cmp_coord`（row-major）：坐标段恒排在非坐标段之前；两个可按整数解析的坐标段按数值升序，
+  **否则（含仅一侧可解析）按字典序**。坐标判等后用**原始名字（含尾 `/`）**兜底，以区分
+  `[1]` 与 `[1]/`、`[1]` 与 `[01]`；排序只交换偏移，不搬字节。
 - 访问：源码 `m·[i]` 对散 key 元素走普通 key 读（member 名 `[i]`）；compact 的 `arr[i]` 走 `compactarray·at`。二
   者由括号与形态区分。
 
@@ -78,7 +79,7 @@ langtype 以 `@` 开头表示值本体在扩展世界（SHM/GPU/文件），前�
 
 ## 成员枚举
 
-散 key 数组的 base key 是空 body 的 map 头（key 不以 `/` 结尾）；元素落在 `base·[i]` 等物理 key。KVSpace 按此前缀枚举成员，不保存独立索引矩阵。`kvspaceMkindex` 为目录创建 key，目录成员按 `/` 前缀枚举。
+散 key 数组的 base key 是空 body 的 map 头（key 不以 `/` 结尾）；元素落在 `base·[i]` 等物理 key。KVSpace 按此前缀枚举成员，不保存独立索引矩阵。`kvspaceMkindex` 只为目录建位置，**body 与 langtype 归上层**、不带 capacity（见 [[存储层ABI]]）；成员按 `/` 前缀枚举。
 
 "#### -> /lib/kvlang/spec/kvspace模型/数组两种物理形态
 }
