@@ -60,9 +60,12 @@ PY
     fi
   fi
   # 可选可执行（kvspace 的 CLI）→ bin/
+  # 用 `install -m 755` 一步「拷 + 给权限」：**不能对 `$PREFIX/bin/*` 通配 chmod**——
+  # prefix 是 `/usr` 时那会遍历整个系统 bin，撞上悬空链接（runner 的
+  # `/usr/bin/grub-ntldr-img`）就 `set -e` 终止；即使不撞，也没有理由改系统里其它
+  # 程序的权限。
   if [ -d "$tmp/bin" ]; then
-    cp "$tmp/bin/"* "$PREFIX/bin/"
-    chmod 755 "$PREFIX/bin/"*
+    install -m 755 "$tmp/bin/"* "$PREFIX/bin/"
   fi
   rm -rf "$tmp"
 done
