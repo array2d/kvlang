@@ -1386,9 +1386,12 @@ pub fn write_func(
         kvkind::KIND_RWFUNC.to_string(),
         kvkind::new_rwfunc_anchor(nr, nw, fn_.sig.dynamic())?,
     ));
+    // `.src` 是**源码副本槽**：字符串在这里只能以数组形态存在。裸 `char/utf8`
+    // 表示「单个 UTF-8 字符」，而这里存的是整段源码——两者不是一回事。
+    // 与 runtimec 的系统槽常量 `RUNTIMEC_KVSPACE_SYSTEM_LANGTYPE` 同值。
     pairs.push((
         keytree::lib_src(pkg, &fn_.sig.name),
-        "char/utf8".to_string(),
+        "[]char/utf8".to_string(),
         ffi::new_char_byte(fn_.full_text().as_bytes())?,
     ));
     // 参数定义键 funcDir.[0,±k]（点后缀，与坐标斜杠键 /[0,±k] 区分）：langtype=def langtype，
