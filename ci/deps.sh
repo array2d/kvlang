@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # 下载 ABI 依赖（deps.json: repo → tag），安装到**系统最终位置**（不写 repo）：
 #   头   → <prefix>/include/
-#   前端 → <prefix>/lib/
-#   后端 → <prefix>/lib/kvspace/（kvspace-durable）
+#   库   → <prefix>/lib/
 #   可执行 → <prefix>/bin/
+#
+# 不发 durable（先不管）：没有 libkvspace_durable，也没有 <prefix>/lib/kvspace/。
 #
 # 为什么装系统位置而不是 repo：repo 内的依赖副本是**二义来源**——同一个
 # `include/kvspace/` 被两个消费者以相反要求使用（runtimec 的 stale-copy 闸要求它
@@ -23,7 +24,7 @@ if [ -z "$PREFIX" ]; then
   echo "用法: $0 <prefix>（Linux: /usr；macOS: /usr/local）" >&2
   exit 2
 fi
-mkdir -p "$PREFIX/include" "$PREFIX/lib/kvspace" "$PREFIX/bin"
+mkdir -p "$PREFIX/include" "$PREFIX/lib" "$PREFIX/bin"
 
 # 依赖清单用 python3 读，不用 jq：jq 不是必装项，缺了会让整段静默空转（见下）。
 #
@@ -46,18 +47,13 @@ PY
   tmp="$(mktemp -d)"
   gh release download "$ver" -R "array2d/$repo" -p "${repo}-abi-*-linux-x86_64.tar.gz" -D "$tmp"
   tar xzf "$tmp"/*.tar.gz -C "$tmp" --strip-components=1
-  if [ "$repo" = "kvspace-durable" ]; then
-    # 后端单独放 <prefix>/lib/kvspace。
-    cp -P "$tmp/lib/"*.so* "$PREFIX/lib/kvspace/"
-  else
-    # 其余（kvspace / blockmalloc / slotsboxmalloc）：头与库都直接落系统位置。
-    # kvspace 的头落 <prefix>/include/kvspace/ 是**对的**——那是系统最终位置，
-    # 不是 repo 副本；runtimec 的 stale-copy 闸查的是 `kvlang/include/kvspace`。
-    if [ -d "$tmp/include" ]; then cp -r "$tmp/include/"* "$PREFIX/include/"; fi
-    if [ -d "$tmp/lib" ]; then
-      # blockmalloc / slotsboxmalloc are header-only (no shared libs).
-      cp -P "$tmp/lib/"*.so* "$PREFIX/lib/"
-    fi
+  # kvspace / blockmalloc / slotsboxmalloc：头与库都直接落系统位置。
+  # kvspace 的头落 <prefix>/include/kvspace/ 是**对的**——那是系统最终位置，
+  # 不是 repo 副本；runtimec 的 stale-copy 闸查的是 `kvlang/include/kvspace`。
+  if [ -d "$tmp/include" ]; then cp -r "$tmp/include/"* "$PREFIX/include/"; fi
+  if [ -d "$tmp/lib" ]; then
+    # blockmalloc / slotsboxmalloc are header-only (no shared libs).
+    cp -P "$tmp/lib/"*.so* "$PREFIX/lib/"
   fi
   # 可选可执行（kvspace 的 CLI）→ bin/
   # 用 `install -m 755` 一步「拷 + 给权限」：**不能对 `$PREFIX/bin/*` 通配 chmod**——
@@ -69,4 +65,4 @@ PY
   fi
   rm -rf "$tmp"
 done
-echo "✅ ABI deps → $PREFIX/{include,lib,lib/kvspace,bin}"
+echo "✅ ABI deps → $PREFIX/{include,lib,bin}"
