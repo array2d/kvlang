@@ -3,8 +3,8 @@
 //! 入口：`parse_code(src) → Result<(File, Vec<Diagnostic>), String>`。
 
 use super::ast::{
-    self, Expr, Field, Func, FuncSig, Instruction, MEMBER_READ_OP, Param, RwirDecl, Stmt,
-    StructDecl,
+    self, Expr, Field, Func, FuncSig, Instruction, Param, RwirDecl, Stmt, StructDecl,
+    MEMBER_READ_OP,
 };
 use super::keytree;
 use super::scanner::{scan_with_diags, Diagnostic, Kind, Pos, Token};
@@ -205,14 +205,22 @@ impl Parser {
                 };
                 self.error_at(
                     pos,
-                    format!("{} expects {want} argument(s) — {shape}; got {}", e.op, e.args.len()),
+                    format!(
+                        "{} expects {want} argument(s) — {shape}; got {}",
+                        e.op,
+                        e.args.len()
+                    ),
                 );
                 continue;
             }
             for &i in label_args {
                 let a = &e.args[i];
                 if !a.is_leaf() || a.quote != 0 || !defined.contains_key(&a.val) {
-                    let shown = if a.is_leaf() { a.val.clone() } else { a.to_string() };
+                    let shown = if a.is_leaf() {
+                        a.val.clone()
+                    } else {
+                        a.to_string()
+                    };
                     self.error_at(
                         pos,
                         format!(
@@ -537,9 +545,7 @@ impl Parser {
             .params
             .iter()
             .chain(sig.returns.iter())
-            .filter(|p| {
-                !p.by_ref.is_empty() || p.ty.starts_with('/') || p.ty.contains('\u{b7}')
-            })
+            .filter(|p| !p.by_ref.is_empty() || p.ty.starts_with('/') || p.ty.contains('\u{b7}'))
             .map(|p| p.name.clone())
             .collect();
         self.value_params = sig
@@ -762,8 +768,43 @@ impl Parser {
                     sb.push(')');
                     self.advance();
                 }
-                // `$name` 是参数声明的名字标记，不属于类型：遇到就收尾，留给调用方剥 `$`。
-                Kind::Ident | Kind::Literal if t.value.starts_with('$') => return sb,
+                /*
+                 * `#name` 是参数的**注释名**（Comment token），不属于类型：遇到就收尾，
+                 * 由参数声明处读走。注释 token 是类型与名字的边界——不是新加的
+                 * 「取最后一个标识符」歧义规则。
+                 *
+                 * `inplace` 写在类型**之前**，不在这里收尾：它由参数声明处先吃。
+                 */
+                Kind::Comment => return sb,
+                /*
+                 * `inplace` 不是类型的一部分，也不是类型名的一节：它写在参数类型
+                 * **之前**。这里在类型层收尾，交给参数声明处判「写在名字之后」的错误——
+                 * 否则 `int64 inplace` 会被拼成类型 `int64inplace`，报成一条
+                 * 莫名其妙的 TypeError。
+                 */
+                Kind::Ident if t.value == "inplace" && depth == 0 && !sb.is_empty() => return sb,
+                /*
+                 * `$name` **已废除**（2026-11-11 裁决）。它不是分隔符，若当普通标识符收进
+                 * 类型串，`int64 $n` 会静默变成类型 `int64$n`——一个坏类型，而不是一条
+                 * 「写错了」的诊断。所以在这里就地拒绝并吃掉它：错误只有一条，且指认写法。
+                 */
+                Kind::Ident | Kind::Literal if t.value.starts_with('#') => {
+                    self.errors.push(Diagnostic {
+                        pos: t.pos,
+                        warn: false,
+                        info: false,
+                        message: format!(
+                            "参数名不带 `$`：`{}` 已废除，写成 `#{}`",
+                            t.value,
+                            t.value.trim_start_matches('#')
+                        ),
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                    self.advance();
+                    return sb;
+                }
                 /*
                  * **类型位置的单引号串是 formatter**（issue #631）：
                  * `'[int64,int64]'[]char/utf8` 里的 `'[int64,int64]'`。
@@ -812,10 +853,11 @@ impl Parser {
         }
     }
 
-    /// 参数声明只有两种形态（spec 04-layout语义/03-函数）：`*T $name` 传址、
-    /// `T $name` 标量值复制。**类型在前、`$name` 在后**；`$` 只是声明的标记，
-    /// 解析后剥掉——函数体内的引用写裸名（指针参数写 `*name`）。
-    /// 旧写法 `name: type` 不再接受。
+    /// 参数声明只有两种形态（spec 04-layout语义/03-函数）：`*T #name` 传址、
+    /// `T #name` 标量值复制。**类型在前、`#name` 在后**；`#name` 是**注释名**，
+    /// 只作注释——函数体内的引用写裸名（指针参数写 `*name`）。
+    /// 写参修饰符 `inplace` 写在**类型之前**：`inplace *T #name`。
+    /// 旧写法 `name: type` 与 `$name` 都不再接受。
     /// `is_read_side` = 本次解析的是读参列表（`(` 那一侧）还是写参列表（`-> (` 那一侧）。
     fn parse_param_list_side(&mut self, stop: Kind, is_read_side: bool) -> Vec<Param> {
         let mut params = Vec::new();
@@ -827,12 +869,63 @@ impl Parser {
             if self.eat(Kind::Comma) {
                 continue;
             }
+            /*
+             * 修饰符在**类型之前**（2026-11-11 裁决）：先吃 `inplace`，再解析类型。
+             * 只认写参——读参上出现它是错误（读参不得作写槽）。
+             */
+            let mut inplace = false;
+            let at = self.peek();
+            if at.kind == Kind::Ident && at.value == "inplace" {
+                self.advance();
+                if is_read_side {
+                    self.errors.push(Diagnostic {
+                        pos: at.pos,
+                        warn: false,
+                        info: false,
+                        message: "`inplace` 只能修饰 rwfunc 或 rwir 的写参；读参不得标记 \
+                                  ——正确形态是写参列表里的 `inplace T #name`，读参直接写 `T #name`"
+                            .to_string(),
+                        source: String::new(),
+                        src_file: String::new(),
+                        src_name: String::new(),
+                    });
+                } else {
+                    inplace = true;
+                }
+            }
+            /*
+             * 只有 `#name`、没有类型（`rwfunc f(#a)`）：注释在类型位置，是「缺类型」。
+             * 这是**一条诊断**，不是「类型为空 → 后面解析全乱」：先取名字，报缺类型，
+             * 这个参数就当未知类型收掉，不留级联错误。省略名字的形态不含注释 token，
+             * 走不到这里；省略名字 + 省略类型（`rwfunc f()` 的逗号残迹）由下面的
+             * 类型白名单 break 出去，交给调用方的 `)` 断言。
+             */
+            if self.peek().kind == Kind::Comment {
+                let t = self.peek().clone();
+                let name = self.take_param_name(&t).unwrap_or_default();
+                self.errors.push(Diagnostic {
+                    pos: t.pos,
+                    warn: false,
+                    info: false,
+                    message: format!(
+                        "参数必须声明类型：`{name}` 的类型为空 —— 注释名 `#name` 只是名字，类型要写在前面的类型位置（`*int64 #{name}`）"
+                    ),
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
+                params.push(Param {
+                    name,
+                    ty: String::new(),
+                    by_ref: String::new(),
+                    has_ty: false,
+                    inplace,
+                });
+                continue;
+            }
             let start = self.peek();
             // 类型可以以 `[` 起头（`[]char/utf32`、`[int64]·int64`），也可以带 `*`/`@` 前缀。
-            if !matches!(
-                start.kind,
-                Kind::Ident | Kind::Literal | Kind::LBrack
-            ) {
+            if !matches!(start.kind, Kind::Ident | Kind::Literal | Kind::LBrack) {
                 break;
             }
             // 旧写法：`name: type`——第一个词后跟冒号。
@@ -845,7 +938,7 @@ impl Parser {
                     warn: false,
                     info: false,
                     message: format!(
-                        "参数声明必须是 `*T $name` 或 `T $name`；旧写法 `{}:{}` 不再接受",
+                        "参数声明必须是 `*T #name` 或 `T #name`；旧写法 `{}:{}` 不再接受",
                         start.value, ty
                     ),
                     source: String::new(),
@@ -861,38 +954,25 @@ impl Parser {
                 });
                 continue;
             }
-            // 新写法：`*T $name` / `T $name`——类型在前。`$` 不是分隔符，故
-            // `$name` 整个是一个 Ident；剥掉 `$` 即得体内引用的裸名。
+            // 新写法：`*T #name` / `T #name`——类型在前，`#name` 是紧邻的注释 token。
+            // 省略 `#name` 合法（rwir 常见）；省略之外的下一个词一律是错。
             let ty = self.parse_type();
-            let t = self.peek();
-            let name = match t.value.strip_prefix('$').filter(|_| t.kind == Kind::Ident) {
-                Some(n) => {
-                    self.advance();
-                    n.to_string()
-                }
-                None => {
-                    self.errors.push(Diagnostic {
-                        pos: t.pos,
-                        warn: false,
-                        info: false,
-                        message: format!(
-                            "参数声明必须是 `*T $name` 或 `T $name`；类型 {ty:?} 后面缺少 `$name`"
-                        ),
-                        source: String::new(),
-                        src_file: String::new(),
-                        src_name: String::new(),
-                    });
-                    String::new()
-                }
+            let t = self.peek().clone();
+            let name = match self.take_param_name(&t) {
+                Some(n) => n,
+                None => self.reject_param_name_junk(&t, &ty),
             };
             // 传递方式（`*`/`@`）与类型分开存：`ty` 只留类型表达式，
             // `*int64|float64` 的 `*` 作用于整个 union，剥掉后是 `int64|float64`。
-            let by_ref = ty.chars().take_while(|c| *c == '*' || *c == '@').collect::<String>();
+            let by_ref = ty
+                .chars()
+                .take_while(|c| *c == '*' || *c == '@')
+                .collect::<String>();
             let ty_value = ty.trim_start_matches(['*', '@']).to_string();
             // **参数必须声明类型**（spec 05-runtime语义/04-函数调用:27：
-            // 「`$a`、`* $a`、`a:` 都是错误」）。空 kindexp 在**值类型**层面合法
+            // 「无类型 `#a`、`* #a`、`a:` 都是错误」）。空 kindexp 在**值类型**层面合法
             // （Ptr 目标可空），但参数声明是绑定、不是值类型表达式——没有类型就没有
-            // 可绑定的契约，`$a` 与 `* $a` 都是缺注解。
+            // 可绑定的契约，裸 `#a` 与 `* #a` 都是缺注解。
             if ty_value.is_empty() {
                 self.errors.push(Diagnostic {
                     pos: t.pos,
@@ -904,32 +984,22 @@ impl Parser {
                     src_name: String::new(),
                 });
             }
-            /*
-             * 写参修饰符 `inplace`（spec [[函数写槽与布局]]）：该参数在**同一指令内
-             * 既读又写**。写法是 `*T $name inplace`——跟在名字之后，与现有
-             * 「类型在前、`$name` 在后」的风格一致。
-             *
-             * **只认写参**：读参上出现它是错误（语义不成立——读参不得作写槽）。
-             * `is_read_side` 由调用方按列表位置传入。
-             */
-            let mut inplace = false;
-            if self.peek().kind == Kind::Ident && self.peek().value == "inplace" {
-                let at = self.advance();
-                if is_read_side {
-                    self.errors.push(Diagnostic {
-                        pos: at.pos,
-                        warn: false,
-                        info: false,
-                        message: format!(
-                            "`inplace` 只能修饰 rwfunc 或 rwir 的写参；读参 `{name}` 不得标记"
-                        ),
-                        source: String::new(),
-                        src_file: String::new(),
-                        src_name: String::new(),
-                    });
-                } else {
-                    inplace = true;
-                }
+            // `inplace` 已在进入本参数时（类型之前）读走；写在名字之后现在是语法错误。
+            let after = self.peek();
+            if after.kind == Kind::Ident && after.value == "inplace" {
+                self.advance();
+                self.errors.push(Diagnostic {
+                    pos: after.pos,
+                    warn: false,
+                    info: false,
+                    message: format!(
+                        "`inplace` 写在参数类型之前：`inplace {}`；写在名字之后不再接受",
+                        ty.trim()
+                    ),
+                    source: String::new(),
+                    src_file: String::new(),
+                    src_name: String::new(),
+                });
             }
             params.push(Param {
                 name,
@@ -940,6 +1010,69 @@ impl Parser {
             });
         }
         params
+    }
+
+    /// 取参数的注释名：紧邻类型之后的 Comment token（`#name`）。
+    ///
+    /// `#` 是行内注释的开始，注释体只有**一个词**，故 value 就是 `#name`；剥掉首个
+    /// `#` 即得体内引用的裸名。
+    fn take_param_name(&mut self, t: &Token) -> Option<String> {
+        if t.kind != Kind::Comment {
+            return None;
+        }
+        let name = t.value.strip_prefix('#')?;
+        if name.is_empty() {
+            return None;
+        }
+        self.advance();
+        Some(name.to_string())
+    }
+
+    /// 类型之后既没有 `#name`、也不是列表边界（`,` / `)` / 换行 / EOF）时，那里必然
+    /// 是一个**旧写法的名字**（`$name`、`n`、`n: int64`）：拒绝并给正确形态。
+    ///
+    /// 省略 `#name` 本身合法，所以这里只在「确实多出一个词」时报错——否则省略形态
+    /// 会被当成错误，rwir 签名就写不出来了。
+    fn reject_param_name_junk(&mut self, t: &Token, ty: &str) -> String {
+        let boundary = matches!(
+            t.kind,
+            Kind::Comma
+                | Kind::RParen
+                | Kind::Newline
+                | Kind::EOF
+                | Kind::LBrace
+                | Kind::RBrace
+                | Kind::Arrow
+        );
+        if boundary {
+            return String::new();
+        }
+        // 跳过多余的词，让本参数其余部分照常解析（诊断已给出，别再级联）。
+        while !matches!(
+            self.peek().kind,
+            Kind::Comma | Kind::RParen | Kind::Newline | Kind::EOF
+        ) {
+            self.advance();
+        }
+        self.errors.push(Diagnostic {
+            pos: t.pos,
+            warn: false,
+            info: false,
+            message: format!(
+                "参数声明必须是 `{} #name`{}；类型之后多出的 `{}` 不是注释名",
+                ty.trim(),
+                if t.value == "inplace" {
+                    "，且 `inplace` 写在类型之前：`inplace <类型> #name`"
+                } else {
+                    ""
+                },
+                t.value
+            ),
+            source: String::new(),
+            src_file: String::new(),
+            src_name: String::new(),
+        });
+        String::new()
     }
 
     fn check_param_types(&mut self, sig: &FuncSig, site: SignatureSite) {
@@ -966,10 +1099,13 @@ impl Parser {
                     info: false,
                     message: format!(
                         "参数 {:?}: `*` 作用于整个类型表达式，不能逐成员写 —— 写 `{}`",
-                        param.name, {
-                            let stripped: Vec<&str> =
-                                members.iter().map(|m| m.trim().trim_start_matches('*')).collect();
-                            format!("*{} ${}", stripped.join("|"), param.name)
+                        param.name,
+                        {
+                            let stripped: Vec<&str> = members
+                                .iter()
+                                .map(|m| m.trim().trim_start_matches('*'))
+                                .collect();
+                            format!("*{} #{}", stripped.join("|"), param.name)
                         }
                     ),
                     source: String::new(),
@@ -993,7 +1129,7 @@ impl Parser {
             self.errors.push(Diagnostic {
                 pos: Pos { line: 0, col: 0 },
                 message: format!(
-                    "func {}: param {:?}: 值复制参数只能是字符串、数值或 bool —— 容器请写 `{} ${}`",
+                    "func {}: param {:?}: 值复制参数只能是字符串、数值或 bool —— 容器请写 `{} #{}`",
                     sig.name, param.name, pointer_form, param.name
                 ),
                 warn: false,
@@ -1170,6 +1306,9 @@ impl Parser {
     /// 参数名在函数内**全局唯一**（见 [[函数]] 的参数同名规则）：读参列表内、写参列表内、读写之间
     /// 均不得同名——变量名即指针，同名即同址。**调用**时不受限：同一变量可同时占读槽与写槽
     /// （`inc(x) -> x` 合法）。
+    ///
+    /// 名字是**注释**：省略 `#name` 的参数没有名字，不参与同名规则（空名不是地址，
+    /// 否则每个省略名字的参数都会互相「同名」）。
     fn check_param_dup(&mut self, sig: &FuncSig) {
         let mut reads = std::collections::HashSet::new();
         let mut writes = std::collections::HashSet::new();
@@ -1184,12 +1323,13 @@ impl Parser {
                 src_name: String::new(),
             });
         };
-        for p in &sig.params {
+        let named = |p: &Param| !p.name.is_empty();
+        for p in sig.params.iter().filter(|p| named(p)) {
             if !reads.insert(p.name.as_str()) {
                 err(self, format!("func {}: duplicate param {:?} in read-params — read-params, write-params and their union must all be name-unique (a name is an address)", sig.name, p.name));
             }
         }
-        for r in &sig.returns {
+        for r in sig.returns.iter().filter(|r| named(r)) {
             if reads.contains(r.name.as_str()) {
                 err(self, format!("func {}: param {:?} appears in both read-params and write-params — a param is either read-only or write-only, pick one", sig.name, r.name));
             } else if !writes.insert(r.name.as_str()) {
@@ -1200,7 +1340,7 @@ impl Parser {
 
     fn check_read_only_params(&mut self, func: &Func) {
         let mut ro = std::collections::HashSet::new();
-        for p in func.sig.params.iter() {
+        for p in func.sig.params.iter().filter(|p| !p.name.is_empty()) {
             ro.insert(p.name.clone());
         }
         if ro.is_empty() {
@@ -1403,8 +1543,15 @@ impl Parser {
                 self.eat(Kind::Newline);
                 if self.flow.loop_depth == 0 {
                     // Still return the statement so `lib` block parsing continues; the recorded error blocks lowering.
-                    let kw = if t.kind == Kind::Break { "break" } else { "continue" };
-                    self.error_at(t.pos, format!("{kw} outside loop (only allowed inside while/for)"));
+                    let kw = if t.kind == Kind::Break {
+                        "break"
+                    } else {
+                        "continue"
+                    };
+                    self.error_at(
+                        t.pos,
+                        format!("{kw} outside loop (only allowed inside while/for)"),
+                    );
                 }
                 if t.kind == Kind::Break {
                     vec![Stmt::Break(ast::BreakStmt {
@@ -1550,9 +1697,10 @@ impl Parser {
     /// 判具名用「首参是字符串字面量」：`{k=v …}` 的键由 parser 包成 `str_lit`，
     /// 位置型 `{v0, v1 …}` 的首参是值本身。这是解析期就确定的事实，不靠算子名区分。
     fn dispatch_struct_literal(&mut self, inst: &mut Instruction) {
-        let is_named_map = inst.expr.as_ref().is_some_and(|e| {
-            e.op == "map·new" && e.args.first().is_some_and(|a| a.quote != 0)
-        });
+        let is_named_map = inst
+            .expr
+            .as_ref()
+            .is_some_and(|e| e.op == "map·new" && e.args.first().is_some_and(|a| a.quote != 0));
         /*
          * 空字面量 `{}` 同样是「按写目标落地」：structref 目标要克隆原型
          * （`p:Point = {}` 等价于带默认字段的原型实例），map 目标才是 `map·new`。
@@ -1796,7 +1944,7 @@ impl Parser {
                 arrow_left,
                 operator: false,
                 operand_kind: String::new(),
-            pos: Pos::default(),
+                pos: Pos::default(),
             };
             self.dispatch_struct_literal(&mut i);
             self.lower_array_fill(&mut i);
@@ -1864,10 +2012,7 @@ impl Parser {
                 if chain_base.is_none() && chain_segs.is_empty() {
                     if let Some(name) = bare_ptr_param(self, &left) {
                         // `·[i]` 是坐标访问（元组键/散 key 下标），报另一条文本。
-                        let coordinate = matches!(
-                            self.peek_at(1).kind,
-                            Kind::LBrack
-                        );
+                        let coordinate = matches!(self.peek_at(1).kind, Kind::LBrack);
                         let pos = self.peek().pos;
                         let message = if coordinate {
                             format!("对指针类型的坐标访问必须显式解引用：写 (*{name})·[i]")
@@ -1901,7 +2046,8 @@ impl Parser {
                     if self.peek().kind != Kind::Literal {
                         self.error_at(
                             star.pos,
-                            "dynamic member read: expected a name after `·*` (`base·*k`)".to_string(),
+                            "dynamic member read: expected a name after `·*` (`base·*k`)"
+                                .to_string(),
                         );
                         return None;
                     }
@@ -1968,8 +2114,7 @@ impl Parser {
                         None => base,
                     };
                     for segment in segments {
-                        position =
-                            ast::call("kvlang·resolvekey", vec![position, segment]);
+                        position = ast::call("kvlang·resolvekey", vec![position, segment]);
                     }
                     /*
                      * **读侧还要解引用**（spec §一：「读同形：`newm := kvlang·resolvekey(...)`，
@@ -2005,9 +2150,7 @@ impl Parser {
                         pos,
                         warn: false,
                         info: false,
-                        message: format!(
-                            "对指针类型的坐标访问必须显式解引用：写 (*{name})[i]"
-                        ),
+                        message: format!("对指针类型的坐标访问必须显式解引用：写 (*{name})[i]"),
                         source: String::new(),
                         src_file: String::new(),
                         src_name: String::new(),
@@ -2026,7 +2169,14 @@ impl Parser {
                 let mut args = vec![left];
                 args.extend(indices);
                 // 路径字面量 + [idx] → 成员路径读（`=` 读，KV 路径下标访问）；否则 xv.at（compact 数组元素）。
-                left = ast::call(if is_path { MEMBER_READ_OP } else { "compactarray·at" }, args);
+                left = ast::call(
+                    if is_path {
+                        MEMBER_READ_OP
+                    } else {
+                        "compactarray·at"
+                    },
+                    args,
+                );
                 continue;
             }
             let t = self.peek();
@@ -2286,7 +2436,9 @@ impl Parser {
                     // `{k=v …}`：键是标识符，值接在后面，键值交错。
                     let key = self.advance().value;
                     self.advance(); // consume =
-                    let Some(val) = self.parse_pratt(0) else { break };
+                    let Some(val) = self.parse_pratt(0) else {
+                        break;
+                    };
                     elems.push(ast::str_lit(&key));
                     elems.push(val);
                 } else {
@@ -2587,9 +2739,7 @@ impl Parser {
                         pos: base_token.pos,
                         warn: false,
                         info: false,
-                        message: format!(
-                            "对指针类型的成员访问必须显式解引用：写 `(*{w})·name`"
-                        ),
+                        message: format!("对指针类型的成员访问必须显式解引用：写 `(*{w})·name`"),
                         source: String::new(),
                         src_file: String::new(),
                         src_name: String::new(),
@@ -3152,11 +3302,7 @@ impl Parser {
     /// 写槽脱糖。`outputs` 用于**一条写语句变两条指令**（动态键要先算位置再写）：
     /// 追加的指令由调用方接在 `inst` 之后，`source_logical_program_counter`
     /// 与 `inst` 相同——恢复/重放/诊断都按 pc 定位源码行。
-    fn desugar_member_write(
-        &mut self,
-        inst: &mut Instruction,
-        outputs: &mut Vec<Instruction>,
-    ) {
+    fn desugar_member_write(&mut self, inst: &mut Instruction, outputs: &mut Vec<Instruction>) {
         if inst.writes.len() != 1 || !inst.writes[0].contains(keytree::MEMBER_SEP) {
             return;
         }
@@ -3285,10 +3431,7 @@ impl Parser {
             };
             let mut position = ast::leaf(&base);
             for field in s.split(keytree::MEMBER_SEP).skip(1) {
-                position = ast::call(
-                    "kvlang·resolvekey",
-                    vec![position, ast::leaf(&field[1..])],
-                );
+                position = ast::call("kvlang·resolvekey", vec![position, ast::leaf(&field[1..])]);
             }
             /*
              * 位置槽的名字用 `_p<N>`，**不复用 lowering 的 `_N`**。
@@ -3327,7 +3470,7 @@ impl Parser {
                 arrow_left: inst.arrow_left,
                 operator: false,
                 operand_kind: String::new(),
-            pos: Pos::default(),
+                pos: Pos::default(),
             });
             return;
         }
@@ -3533,8 +3676,7 @@ fn is_fixed_dim_array(t: &str) -> bool {
 ///
 /// 传递方式不参与判断：`*` 已由 `Param::by_ref` 单独承载，`ty` 只剩类型表达式。
 fn is_value_container_ty(ty: &str) -> bool {
-    ty.split('|')
-        .any(|a| a.starts_with('/') || a.contains('·'))
+    ty.split('|').any(|a| a.starts_with('/') || a.contains('·'))
 }
 
 fn type_error(_kind: &str) -> String {

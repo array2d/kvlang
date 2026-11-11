@@ -2,7 +2,7 @@
 //   n= 3
 
 // 列出 prefix 下的子键并计数
-rwfunc count_children(*[]char/utf32 $prefix) -> (*int64 $n) {
+rwfunc count_children(*[]char/utf32 #prefix) -> (*int64 #n) {
 	kvspace·listlen(*prefix) -> *n
 }
 

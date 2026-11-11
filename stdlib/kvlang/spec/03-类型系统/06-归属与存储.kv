@@ -22,7 +22,7 @@ runtime 写扩展，按同一文法写入。签名**不写
    - `def rwir` → **位置化签名行 `[0,x]`**（`x<0` 读参、`x>0` 写参、`[0,0]` 锚点），每槽 `def langtype`，
      body = 该参数完整 langtype 串（跨 runtime 队列按位置收参，故须有序）。
    - `rwfunc` → **参数定义键 `funcDir.[0,±j]`**（点后缀，与坐标斜杠键 `/[0,±j]` 不同名），每键
-     `def langtype`，body = 参数名 + NUL + 类型串；函数体形参引用改走帧坐标，运行期不查此键（见
+     `def langtype`，body = 类型串（写参可带 ` inplace`）；参数名是源码注释（`#name`），不落库；函数体形参引用改走帧坐标，运行期不查此键（见
      [[ptr]]）。
 
 故计数头节点的 langtype 就是裸种类名 `rwfunc`（rwfunc 的 `[0,0]`）/`def rwir`

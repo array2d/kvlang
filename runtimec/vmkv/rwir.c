@@ -186,7 +186,6 @@ static bool vmkv_rwir_classify_argument(const vmkv_source_slot_t *slot,
         !vmkv_rwir_langtype_is(slot, "rwfunc")) {
         /* 内联字面量：没有计数头，没有相对指针；key 指向槽自身，
          * 同时给出该槽的完整 wire 字节（encoder 不再二次读取）。 */
-        output->parameter_name = runtimec_string_view_make(NULL, 0U);
         output->parameter_type_name = slot->langtype;
         output->key = runtimec_key_view_make(NULL, 0U);
         output->key_addressability = VMKV_KEY_ADDRESSABILITY_STATIC;
@@ -226,7 +225,6 @@ static bool vmkv_rwir_classify_argument(const vmkv_source_slot_t *slot,
     } else {
         output->parameter_type_name = runtimec_string_view_make(NULL, 0U);
     }
-    output->parameter_name = runtimec_string_view_make(NULL, 0U);
     return true;
 }
 
@@ -236,12 +234,12 @@ static bool vmkv_rwir_type_is_concrete(runtimec_string_view_t type_name) {
            memchr(type_name.data, '|', type_name.size) == NULL;
 }
 
-/* 变量引用 `*[0,±k]` 解析成参数定义，补上参数名与声明类型。 */
+/* 变量引用 `*[0,±k]` 解析成参数定义，补上声明类型。 */
 static void vmkv_rwir_attach_parameter(const vmkv_function_source_t *function,
                                        const runtimec_key_view_t *key,
                                        vmkv_rwir_argument_view_t *argument) {
-    if (argument->parameter_name.size != 0U || key->size < 6U ||
-        key->data[0] != '*' || memcmp(key->data, "*[0,", 4U) != 0) {
+    if (key->size < 6U || key->data[0] != '*' ||
+        memcmp(key->data, "*[0,", 4U) != 0) {
         return;
     }
     size_t cursor = 4U;
@@ -275,8 +273,6 @@ static void vmkv_rwir_attach_parameter(const vmkv_function_source_t *function,
     if (definition == NULL || !definition->present) {
         return;
     }
-    argument->parameter_name =
-        runtimec_string_view_make(definition->name, definition->name_size);
     /* 具体优先：槽上是实参的实际类型（layout 静态可知时写出），声明类型只是
      * 匹配类，可以含并集。槽上没有具体类型时才回落到声明类型。 */
     if (!vmkv_rwir_type_is_concrete(argument->parameter_type_name)) {
@@ -416,7 +412,6 @@ static runtimec_status_t vmkv_rwir_read_argument(
     if (output->key_addressability == VMKV_KEY_ADDRESSABILITY_DYNAMIC) {
         vmkv_rwir_attach_parameter(reader->function, &output->key, output);
     } else if (output->parameter_type_name.size != 0U &&
-               output->parameter_name.size == 0U &&
                output->key.size == 0U) {
         /* 内联字面量：key 指向槽自身，供消费方取原始字节。 */
         if (!vmkv_rwir_build_slot_key(reader, slot, &output->key)) {

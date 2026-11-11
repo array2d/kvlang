@@ -3,7 +3,7 @@
 // 期望输出:
 //   1
 //   0
-rwfunc is_pal(*[]char/utf32 $s) -> () {
+rwfunc is_pal(*[]char/utf32 #s) -> () {
 	n:int64 = string·len(*s)
 	0 -> l:int64
 	r:int64 = n - 1

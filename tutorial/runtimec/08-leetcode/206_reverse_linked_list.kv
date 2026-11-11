@@ -11,7 +11,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc reverse() -> (**Node $head) {
+rwfunc reverse() -> (**Node #head) {
 	prev:*/lib/Node = None
 	cur:*/lib/Node = *head
 	while (cur != None) {

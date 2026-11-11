@@ -13,7 +13,7 @@
 //   11
 //   12
 //   15
-rwfunc is_self(*int64 $n) -> (*bool $r) {
+rwfunc is_self(*int64 #n) -> (*bool #r) {
 	*n -> num:int64
 	ok:bool = true
 	while (num > 0) {

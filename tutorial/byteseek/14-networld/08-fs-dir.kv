@@ -9,7 +9,7 @@
 //   delfile= 0
 //   deldir= 0
 // print_dir 列目录成员（map 两步遍历）并打印成员数与逐个名字
-rwfunc print_dir(*[]char/utf32 $d) -> () {
+rwfunc print_dir(*[]char/utf32 #d) -> () {
 	networld/fs·list(*d) -> names:'[int64]'[]char/utf32
 	kvspace·listlen(names) -> nc:int64
 	println("count=", nc)

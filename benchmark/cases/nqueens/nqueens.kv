@@ -2,7 +2,7 @@
 // 棋盘规模 N 由 __SCALE__ 占位，run.py 按扫描点替换（勿改逻辑）
 // 期望输出（N=5 时）:
 //   queens = 10
-rwfunc nq(*int64 $cols, *int64 $d1, *int64 $d2, *int64 $all) -> (*int64 $cnt) {
+rwfunc nq(*int64 #cols, *int64 #d1, *int64 #d2, *int64 #all) -> (*int64 #cnt) {
 	if (*cols == *all) {
 		1 -> *cnt
 	} else {

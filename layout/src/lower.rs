@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use super::ast::{self, Expr, Func, Instruction, LitKind, MEMBER_READ_OP, Stmt};
+use super::ast::{self, Expr, Func, Instruction, LitKind, Stmt, MEMBER_READ_OP};
 use super::scanner::{Diagnostic, Pos};
 use super::{builtin, keytree, symbol};
 
@@ -643,10 +643,17 @@ fn annotate_position_slots_in(body: &mut [Stmt], tm: &HashMap<String, String>) {
         .map(|(index, _)| index)
         .collect();
     for index in positions {
-        let Some(next) = body.get(index + 1) else { continue };
-        let Stmt::Instruction(write_inst) = next else { continue };
+        let Some(next) = body.get(index + 1) else {
+            continue;
+        };
+        let Stmt::Instruction(write_inst) = next else {
+            continue;
+        };
         if write_inst.writes.len() != 1
-            || write_inst.write_types.first().is_some_and(|t| !t.is_empty())
+            || write_inst
+                .write_types
+                .first()
+                .is_some_and(|t| !t.is_empty())
         {
             continue;
         }
@@ -685,7 +692,11 @@ fn annotate_position_slots_in(body: &mut [Stmt], tm: &HashMap<String, String>) {
         let Stmt::Instruction(position_inst) = &mut body[index] else {
             continue;
         };
-        if position_inst.write_types.first().is_none_or(|t| t.is_empty()) {
+        if position_inst
+            .write_types
+            .first()
+            .is_none_or(|t| t.is_empty())
+        {
             /* `_pN` 是**位置槽**，类型是 `*T`（不是 `T`）——`kvlang·resolvekey` 的写参
              * 语义就是「产出一个指向成员的 Ptr」。写成裸 `T` 会让编码器把
              * `kvlang·resolvekey` 的结果类型判成非指针，撞能力掩码
@@ -874,7 +885,7 @@ fn annotate_returns_inst(inst: &mut Instruction, sigs: &SigTable) {
         // 调用 `t·f(*p) -> x` 的结果值就是 `int64`，不是 `*int64`。不剥这一层，
         // 后续 `x + 1` 会报「add expects numeric operand, got "*int64"」。
         //
-        // 必须先拼回 `by_ref`：`**N $h` 的 `ret.ty` 只是 `/lib/N`（传递方式单独存），
+        // 必须先拼回 `by_ref`：`**N #h` 的 `ret.ty` 只是 `/lib/N`（传递方式单独存），
         // 直接剥它得 `/lib/N`，而正确结果是 `*N`——调用点的 `eh` 于是被判成值。
         let full = ret.pointer_type();
         let value_type = deref_value_type(&full);
@@ -899,12 +910,10 @@ fn annotate_returns_inst(inst: &mut Instruction, sigs: &SigTable) {
 ///
 /// 注意：这里**只取内存里的签名表**，绝不调用 `write_rwir_decl`——那会往 `/lib`
 /// 写 native rwir 的声明，让每次 layout 都产生一次副作用写。
-const NATIVE_RWIR_DECLS: &str =
-    include_str!("../../runtimec/specification/native_rwir_decls.kv");
+const NATIVE_RWIR_DECLS: &str = include_str!("../../runtimec/specification/native_rwir_decls.kv");
 
 fn native_rwir_signatures() -> &'static HashMap<String, ast::FuncSig> {
-    static TABLE: std::sync::OnceLock<HashMap<String, ast::FuncSig>> =
-        std::sync::OnceLock::new();
+    static TABLE: std::sync::OnceLock<HashMap<String, ast::FuncSig>> = std::sync::OnceLock::new();
     TABLE.get_or_init(|| {
         /* 表是编译期固定输入：解析不出声明说明生成器漏产，属构建产物损坏，
          * 不是运行期可恢复的状态。与「查表未命中」是两件事——后者保持现状，
@@ -943,8 +952,7 @@ fn native_rwir_signatures() -> &'static HashMap<String, ast::FuncSig> {
 /// 由调用方保持现状（裸名、无类型），**不在这里猜**。
 pub fn sig_lookup<'a>(sigs: &'a SigTable, op: &str) -> Option<&'a ast::FuncSig> {
     let key = op.strip_prefix("/lib/").unwrap_or(op);
-    sigs.get(key)
-        .or_else(|| native_rwir_signatures().get(key))
+    sigs.get(key).or_else(|| native_rwir_signatures().get(key))
 }
 
 /// Signature of a native rwir from the generated declaration table.
@@ -1053,7 +1061,9 @@ fn desugar_string_subscript_expr(e: &mut Expr, tm: &HashMap<String, String>) {
     if !base.is_leaf() || base.val.is_empty() {
         return;
     }
-    let Some(base_type) = tm.get(&base.val) else { return };
+    let Some(base_type) = tm.get(&base.val) else {
+        return;
+    };
     /* 判据是「字符串种类 vs 定宽数组」，不是「有没有 `[` 前缀」：
      *   `[]char/X`    —— 变长字符串，走 `string·char`（按码点）；
      *   `[N]char/X`   —— 定宽数组，保持 `compactarray·at`（真按元素大小乘）。
@@ -1095,7 +1105,7 @@ fn return_inst() -> Stmt {
         arrow_left: false,
         operator: false,
         operand_kind: String::new(),
-            pos: Pos::default(),
+        pos: Pos::default(),
     })
 }
 
@@ -1207,8 +1217,7 @@ fn lower_body(
                 let mut s = s.clone();
                 s.body = lower_body(&s.body, lg, lc, tm, targets, true);
                 // Omit fall-through `goto` into a targeted label only when `preamble` is empty and `adjacent` holds.
-                let enters_directly =
-                    preamble.is_empty() && adjacent && targets.contains(&s.label);
+                let enters_directly = preamble.is_empty() && adjacent && targets.contains(&s.label);
                 if !preamble_ends_with_terminator(&preamble) && !enters_directly {
                     preamble.push(goto_label(&s.label));
                 }
@@ -1260,8 +1269,14 @@ fn lower_if_with_cont(
     let mut cond_body = cond_eval;
     cond_body.push(br_inst(&cond_slot, &then_label, &else_label));
 
-    let then_ = inject_goto(lower_body(&s.then_, lg, lc, tm, targets, false), &merge_label);
-    let else_ = inject_goto(lower_body(&s.else_, lg, lc, tm, targets, false), &merge_label);
+    let then_ = inject_goto(
+        lower_body(&s.then_, lg, lc, tm, targets, false),
+        &merge_label,
+    );
+    let else_ = inject_goto(
+        lower_body(&s.else_, lg, lc, tm, targets, false),
+        &merge_label,
+    );
     let (then_insts, mut then_blocks) = split_insts_and_blocks(then_);
     let (else_insts, mut else_blocks) = split_insts_and_blocks(else_);
     let (cont_insts, cont_blocks) = split_insts_and_blocks(cont);
@@ -1378,7 +1393,8 @@ fn lower_for_with_cont(
     // `key·value` 的那个 `·`（`[int64]·int64`、`[]char/utf8·int64`），compact 数组不含。
     let is_container = s.iter.op == "map·new"
         || (s.iter.is_leaf()
-            && tm.get(&s.iter.val)
+            && tm
+                .get(&s.iter.val)
                 .is_some_and(|t| super::kvkind::is_map_langtype(t)));
 
     // 迭代源：裸标识符直接原地遍历；表达式（如数组字面量）先物化到临时槽。
@@ -1439,7 +1455,7 @@ fn lower_for_with_cont(
         arrow_left: false,
         operator: false,
         operand_kind: String::new(),
-            pos: Pos::default(),
+        pos: Pos::default(),
     };
     let lt_inst = Instruction {
         comments: Vec::new(),
@@ -1452,7 +1468,7 @@ fn lower_for_with_cont(
         arrow_left: false,
         operator: false,
         operand_kind: String::new(),
-            pos: Pos::default(),
+        pos: Pos::default(),
     };
     let cond_body = vec![
         Stmt::Instruction(add_inst),
@@ -1581,9 +1597,7 @@ fn flatten_nested_calls(inst: &Instruction, lg: &mut LabelGen) -> (Instruction, 
 /// 成员的「值」是 0 字节的 None——写进标量槽必报 `0x4406`，判存在根本执行不到。
 /// 所以在这一支里让父指令**直接**拿指针槽并置 `dereference`（解引用回到「读参
 /// 上的标记」这个既有约定），不插中间取值指令。
-fn flatten_expr_with(
-    e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>, none_test: bool,
-) -> Expr {
+fn flatten_expr_with(e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>, none_test: bool) -> Expr {
     if e.is_leaf() {
         return e.clone();
     }
@@ -1613,7 +1627,7 @@ fn flatten_expr_with(
                     arrow_left: false,
                     operator: false,
                     operand_kind: String::new(),
-            pos: Pos::default(),
+                    pos: Pos::default(),
                 }));
                 return ast::leaf(&format!("*{position_slot}"));
             }
@@ -1696,7 +1710,7 @@ fn br_inst(cond: &str, t_label: &str, f_label: &str) -> Stmt {
         arrow_left: false,
         operator: false,
         operand_kind: String::new(),
-            pos: Pos::default(),
+        pos: Pos::default(),
     })
 }
 
@@ -1709,7 +1723,7 @@ fn goto_label(label: &str) -> Stmt {
         arrow_left: false,
         operator: false,
         operand_kind: String::new(),
-            pos: Pos::default(),
+        pos: Pos::default(),
     })
 }
 
@@ -1761,7 +1775,7 @@ fn make_copy_inst(val: &str, dest: &str) -> Stmt {
         arrow_left: false,
         operator: false,
         operand_kind: String::new(),
-            pos: Pos::default(),
+        pos: Pos::default(),
     })
 }
 
@@ -1886,7 +1900,8 @@ impl SourceLangtypes {
     pub fn new(sig: &ast::FuncSig) -> Self {
         let mut entries = HashMap::new();
         for parameter in sig.params.iter().chain(sig.returns.iter()) {
-            if !parameter.ty.is_empty() {
+            // 省略 `#name` 的参数没有名字：它不是任何变量，不进类型表（空名不是键）。
+            if !parameter.ty.is_empty() && !parameter.name.is_empty() {
                 entries.insert(parameter.name.clone(), parameter.declared_type());
             }
         }
@@ -1903,7 +1918,7 @@ impl SourceLangtypes {
         merged
     }
 
-    /// 值的类型：`*T $x` 的 `*` 是传递方式，不是值类型的一部分——
+    /// 值的类型：`*T #x` 的 `*` 是传递方式，不是值类型的一部分——
     /// （当前唯一消费方在第 5 步「`tm`/`declared` 并入」；那之前允许暂时无人调用。）
     /// 标量剥掉（`*int64` → `int64`），引用类保留（`*TNode` 的值本身即指针）。
     pub fn langtype_value(&self, name: &str) -> Option<String> {
@@ -1932,7 +1947,6 @@ impl SourceLangtypes {
     }
 }
 
-
 /// 形参/返回的**值类型**（Value 形态，见 `ast::Param::value_type`）。
 /// 推断类型不是声明（[[赋值转换]]），故不得进入指令槽的 langtype。
 pub fn value_langtypes(fn_: &Func) -> HashMap<String, String> {
@@ -1941,7 +1955,7 @@ pub fn value_langtypes(fn_: &Func) -> HashMap<String, String> {
     let source = SourceLangtypes::new(&fn_.sig);
     let mut d = HashMap::new();
     for p in fn_.sig.params.iter().chain(fn_.sig.returns.iter()) {
-        if !p.ty.is_empty() {
+        if !p.ty.is_empty() && !p.name.is_empty() {
             if let Some(value) = source.langtype_value(&p.name) {
                 d.insert(p.name.clone(), value);
             }
@@ -2029,8 +2043,7 @@ fn per_write_types(
             String::new()
         } else {
             let annotated = inst.write_types.first().map(String::as_str).unwrap_or("");
-            infer_op_type(&opcode, &reads, tm, annotated, structs,
-                          output_type_failure)
+            infer_op_type(&opcode, &reads, tm, annotated, structs, output_type_failure)
         }
     };
     (0..inst.writes.len())
@@ -2072,7 +2085,7 @@ pub fn infer_type_sets(fn_: &Func, structs: &StructTable) -> HashMap<String, Vec
         /*
          * **用 `declared_type()` 而不是 `p.ty`。**
          *
-         * `by_ref` 是**传递方式**且是类型的一部分：`*Node $head` 的 `p.ty` 只是
+         * `by_ref` 是**传递方式**且是类型的一部分：`*Node #head` 的 `p.ty` 只是
          * 裸 `/lib/Node`，`declared_type()` 才带上那个星号前缀。早先这里用 `p.ty`，
          * 于是 `head -> cur` 的 `slot_type("head")` 拿到剥掉星的值，与
          * `(*cur)·next`（得指针形态）打架 → 并集 → vmkv 报
@@ -2081,8 +2094,11 @@ pub fn infer_type_sets(fn_: &Func, structs: &StructTable) -> HashMap<String, Vec
          * `value_langtypes` 走的是 `SourceLangtypes::langtype_value`（同 `by_ref`
          * 语义），两处必须**同一个**形态来源，否则同一个形参在两个表里是两种类型。
          */
+        if p.name.is_empty() {
+            continue;
+        }
         insert_type_set(&mut base_sets, &p.name, &p.declared_type());
-        if !p.name.is_empty() && !p.ty.is_empty() {
+        if !p.ty.is_empty() {
             base_work.insert(p.name.clone(), p.declared_type());
         }
     }
@@ -2109,7 +2125,13 @@ pub fn infer_type_sets(fn_: &Func, structs: &StructTable) -> HashMap<String, Vec
     for _ in 0..4 {
         let mut next_sets = base_sets.clone();
         let mut next_unknown: HashSet<String> = HashSet::new();
-        collect_type_sets(&fn_.body, &mut next_sets, &mut next_unknown, &mut work, structs);
+        collect_type_sets(
+            &fn_.body,
+            &mut next_sets,
+            &mut next_unknown,
+            &mut work,
+            structs,
+        );
         for (name, set) in &next_sets {
             if !next_unknown.contains(name) || declared.contains_key(name) {
                 let joined = join_type_members(set.clone());
@@ -2142,18 +2164,16 @@ pub fn infer_type_sets(fn_: &Func, structs: &StructTable) -> HashMap<String, Vec
         .collect()
 }
 
-fn insert_type_set(
-    sets: &mut HashMap<String, BTreeSet<String>>,
-    name: &str,
-    ty: &str,
-) {
+fn insert_type_set(sets: &mut HashMap<String, BTreeSet<String>>, name: &str, ty: &str) {
     if name.is_empty() || ty.is_empty() {
         return;
     }
     for part in ty.split('|') {
         let part = part.trim();
         if !part.is_empty() {
-            sets.entry(name.to_string()).or_default().insert(part.to_string());
+            sets.entry(name.to_string())
+                .or_default()
+                .insert(part.to_string());
         }
     }
 }
@@ -2226,7 +2246,7 @@ fn record_inst_sets(
         }
         match types.get(j).and_then(|t| t.as_ref()) {
             Some(t) if !t.is_empty() => {
-                        insert_type_set(sets, w, t);
+                insert_type_set(sets, w, t);
                 if let Some(set) = sets.get(w) {
                     let joined = join_type_members(set.clone());
                     if !joined.is_empty() {
@@ -2243,7 +2263,10 @@ fn record_inst_sets(
 
 /// 有限 union 的成员（`a|b|c` → [a,b,c]）。
 pub fn type_members(t: &str) -> Vec<&str> {
-    t.split('|').map(str::trim).filter(|s| !s.is_empty()).collect()
+    t.split('|')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// 成员排序后重新拼回 union 串；单成员时就是普通类型。
@@ -2496,8 +2519,11 @@ fn infer_op_type(
                          * 记下成因与两侧编码，由调用方产出具名诊断。 */
                         *output_type_failure = Some(format!(
                             "concat 的结果类型无法确定：操作数编码 {} 没有共同编码",
-                            operand_types.iter().map(|t| format!("`{t}`"))
-                                .collect::<Vec<_>>().join(" 与 ")
+                            operand_types
+                                .iter()
+                                .map(|t| format!("`{t}`"))
+                                .collect::<Vec<_>>()
+                                .join(" 与 ")
                         ));
                         String::new()
                     }
@@ -2591,8 +2617,16 @@ fn infer_op_type(
         return annotated.to_string();
     }
     match opcode {
-        "kvlen" | "compactarray·numel" | "compactarray·dim" | "kvspace·listlen" | "string·len"
-        | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "compactarray·bodylen"
+        "kvlen"
+        | "compactarray·numel"
+        | "compactarray·dim"
+        | "kvspace·listlen"
+        | "string·len"
+        | "string·ord"
+        | "string·cmp"
+        | "string·find"
+        | "string·parseint"
+        | "compactarray·bodylen"
         | "scatterarray·len" => {
             return "int64".to_string();
         }
@@ -2766,16 +2800,11 @@ fn arg_type(e: &Expr, tm: &HashMap<String, String>) -> String {
                  * 这是**同一个事实的第二份答案**：`expr_result_type` 早就走
                  * `member_chain_type`，本处却自己推一遍，两边一旦分叉就是这个症状。
                  */
-                let base = e
-                    .args
-                    .first()
-                    .map(|a| arg_type(a, tm))
-                    .unwrap_or_default();
+                let base = e.args.first().map(|a| arg_type(a, tm)).unwrap_or_default();
                 if base.is_empty() {
                     return String::new();
                 }
-                let tail: Vec<&str> =
-                    e.args.iter().skip(1).map(|a| a.val.as_str()).collect();
+                let tail: Vec<&str> = e.args.iter().skip(1).map(|a| a.val.as_str()).collect();
                 return member_chain_type(
                     &base,
                     &tail.join(&keytree::MEMBER_SEP.to_string()),
@@ -2786,7 +2815,11 @@ fn arg_type(e: &Expr, tm: &HashMap<String, String>) -> String {
             // `*p` 解引用：表达式类型是**指针指向的类型**，不是 `*T` 本身。
             // 形参名在 tm 里记作 `*T`（新参数模型的传递方式），剥一层即得值类型。
             if e.op == ast::DEREF_OP {
-                let inner = e.args.first().map(|a| slot_type(&a.val, tm)).unwrap_or_default();
+                let inner = e
+                    .args
+                    .first()
+                    .map(|a| slot_type(&a.val, tm))
+                    .unwrap_or_default();
                 return deref_value_type(&inner).to_string();
             }
             slot_type(&e.val, tm)
@@ -3068,14 +3101,20 @@ fn exact_kind(
         // `*p` 的值类型 = 指针指向的类型。新参数模型下形参名在 declared 里记作 `*T`，
         // 剥掉一层即得。旧实现无条件返回 None，导致 `*a + *b` 推不出字符串、
         // 拼接待糖退化成数值加法。
-        let inner = e.args.first().and_then(|a| exact_kind(a, declared, stable))?;
+        let inner = e
+            .args
+            .first()
+            .and_then(|a| exact_kind(a, declared, stable))?;
         return Some(deref_value_type(&inner).to_string());
     }
     if op == "kvspace/key·abs" {
         // `&x` 产 kvlang 指针：结果类型 = `*` + 目标类型（与 `infer_op_type` 同一规则）。
         // 旧实现返回 None，于是 `&x -> eh` 的 `eh` 推不出类型，
         // 再传给 `**T` 形参时判成值与指针不符。
-        let inner = e.args.first().and_then(|a| exact_kind(a, declared, stable))?;
+        let inner = e
+            .args
+            .first()
+            .and_then(|a| exact_kind(a, declared, stable))?;
         return Some(format!("*{inner}"));
     }
     let entry = symbol::lookup(op);
@@ -3099,7 +3138,10 @@ fn exact_kind(
     }
     match word.as_str() {
         // 容器读：基座类型声明/稳定且元素 kind 具体 → 结果 kind 精确。
-        "compactarray·at" | "scatterarray·at" | "scatterarray·newcompact" | "compactarray·newreshape" => {
+        "compactarray·at"
+        | "scatterarray·at"
+        | "scatterarray·newcompact"
+        | "compactarray·newreshape" => {
             let base = e.args.first()?;
             let t = exact_kind(base, declared, stable)?;
             return container_elem(&t);
@@ -3115,9 +3157,18 @@ fn exact_kind(
         | "math·hypot" => return Some("float64".to_string()),
         "math·isnan" | "math·isinf" | "math·isfinite" => return Some("bool".to_string()),
         "sign" => return Some("int64".to_string()),
-        "kvlen" | "compactarray·numel" | "compactarray·dim" | "kvspace·listlen" | "string·len"
-        | "string·ord" | "string·cmp" | "string·find" | "string·parseint" | "compactarray·bodylen"
-        | "scatterarray·len" | "random.int63" => return Some("int64".to_string()),
+        "kvlen"
+        | "compactarray·numel"
+        | "compactarray·dim"
+        | "kvspace·listlen"
+        | "string·len"
+        | "string·ord"
+        | "string·cmp"
+        | "string·find"
+        | "string·parseint"
+        | "compactarray·bodylen"
+        | "scatterarray·len"
+        | "random.int63" => return Some("int64".to_string()),
         "random·intn" | "random.uint64" | "string·parseuint" => {
             return Some("uint64".to_string())
         }
@@ -3311,9 +3362,8 @@ pub fn assigned_concrete_kinds(
                 !sources
                     .get(*v)
                     .map(|es| {
-                        es.iter().all(|e| {
-                            exact_kind(e, declared, &found).as_deref() == Some(k.as_str())
-                        })
+                        es.iter()
+                            .all(|e| exact_kind(e, declared, &found).as_deref() == Some(k.as_str()))
                     })
                     .unwrap_or(false)
             })
@@ -3613,9 +3663,7 @@ fn untyped_int_literal(e: &Expr) -> Option<&str> {
     }
     match e.lit {
         LitKind::LitInt => Some(e.val.as_str()),
-        LitKind::LitNone
-            if matches!(literal_text_kind(&e.val), Some("int64")) =>
-        {
+        LitKind::LitNone if matches!(literal_text_kind(&e.val), Some("int64")) => {
             Some(e.val.as_str())
         }
         _ => None,
@@ -3907,7 +3955,9 @@ pub fn call_result_type(
         // 的后门。运行时确实会再校验一次（`container_replace_langtype` 取该串做新
         // kindexpr，`container_langtype_text` 不认就失败），但 layout 必须更早拦住。
         "compactarray·newreinterpret" => reinterpret_target_type(
-            argument_literals.get(1).and_then(|literal| literal.as_deref()),
+            argument_literals
+                .get(1)
+                .and_then(|literal| literal.as_deref()),
         ),
         _ => None,
     }
@@ -3982,9 +4032,16 @@ pub fn container_key_type(ty: &str) -> Option<String> {
     if key.starts_with("/lib/") {
         return None;
     }
-    let Some(inner) = key.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) else {
+    let Some(inner) = key
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+    else {
         // 裸标量键（`int32·int32`）：键类型就是它自己。
-        return if key.is_empty() { None } else { Some(key.to_string()) };
+        return if key.is_empty() {
+            None
+        } else {
+            Some(key.to_string())
+        };
     };
     // `[]X` 是字符串/数组类型（键本身就是数组），原样返回；
     // `[T]` 是一元元组键，取里面那个类型。
@@ -4254,13 +4311,19 @@ pub fn check_field_default(name: &str, ty: &str, e: &Expr) -> Vec<Diagnostic> {
         if e.quote != 0 || (e.val != "true" && e.val != "false") {
             push_write_diag(
                 &mut diags,
-                format!("struct field {name:?}: bool default must be true/false, got {:?}", e.val),
+                format!(
+                    "struct field {name:?}: bool default must be true/false, got {:?}",
+                    e.val
+                ),
             );
         }
     } else if !check_literal(&base, e, &mut diags) {
         push_write_diag(
             &mut diags,
-            format!("struct field {name:?}: default for {ty} must be a numeric literal, got {:?}", e.val),
+            format!(
+                "struct field {name:?}: default for {ty} must be a numeric literal, got {:?}",
+                e.val
+            ),
         );
     }
     diags
@@ -4333,13 +4396,7 @@ fn check_assignable(target: &str, rhs: &str, diags: &mut Vec<Diagnostic>) {
     }
 }
 
-fn check_rhs(
-    target: &str,
-    e: &Expr,
-    rhs: &str,
-    nullable: bool,
-    diags: &mut Vec<Diagnostic>,
-) {
+fn check_rhs(target: &str, e: &Expr, rhs: &str, nullable: bool, diags: &mut Vec<Diagnostic>) {
     if e.is_leaf() {
         if check_literal(target, e, diags) {
             return;
@@ -4428,11 +4485,7 @@ fn expr_result_type(
     // 这一支缺失时 `*root` 的 rhs 为空，`check_assignable` 因 rhs 空直接放行，
     // 「值写进指针槽」就漏过去了。
     if e.op == ast::DEREF_OP {
-        let inner = e
-            .args
-            .first()
-            .map(|a| arg_type(a, tm))
-            .unwrap_or_default();
+        let inner = e.args.first().map(|a| arg_type(a, tm)).unwrap_or_default();
         return deref_value_type(&inner).to_string();
     }
     /*
@@ -4571,8 +4624,14 @@ fn expr_result_type(
     }
     let mut tm2 = tm.clone();
     let reads: Vec<String> = e.args.iter().map(|a| a.val.clone()).collect();
-    infer_op_type(&e.op, &reads, &mut tm2, annotated, structs,
-                  output_type_failure)
+    infer_op_type(
+        &e.op,
+        &reads,
+        &mut tm2,
+        annotated,
+        structs,
+        output_type_failure,
+    )
 }
 
 fn collect_declared(body: &[Stmt], declared: &mut HashMap<String, String>) {
@@ -4601,8 +4660,6 @@ fn collect_declared(body: &[Stmt], declared: &mut HashMap<String, String>) {
         }
     }
 }
-
-
 
 fn walk_writes(
     body: &[Stmt],
@@ -4668,7 +4725,9 @@ fn check_call_args(
     diags: &mut Vec<Diagnostic>,
 ) {
     let sym = symbol::lookup(&e.op);
-    if sym.arith || sym.cmp || is_cast_op(&e.op)
+    if sym.arith
+        || sym.cmp
+        || is_cast_op(&e.op)
         || matches!(e.op.as_str(), "compactarray·new" | "map·new")
     {
         return;
@@ -4685,7 +4744,7 @@ fn check_call_args(
         } else {
             break;
         };
-        // 用 `pointer_type()` 拼回 `*`/`@` 前缀：`**Node $head` 的 `param.ty` 只有
+        // 用 `pointer_type()` 拼回 `*`/`@` 前缀：`**Node #head` 的 `param.ty` 只有
         // `Node`，传递方式单独存在 `by_ref` 里。只读 `ty` 会让实参要求少一层指针。
         // `...` 是签名层变参标记，仍在拼回后剥掉。
         let raw = param
@@ -4775,10 +4834,7 @@ fn check_call_args(
 /// 判据只能与 `literal_slot_type` 同源，否则 `true` 会被当成变量（实测过：
 /// 并集坏实参因此报两条）。
 fn is_variable_arg(e: &Expr) -> bool {
-    e.is_leaf()
-        && e.quote == 0
-        && !e.val.is_empty()
-        && literal_slot_type(&e.val).is_empty()
+    e.is_leaf() && e.quote == 0 && !e.val.is_empty() && literal_slot_type(&e.val).is_empty()
 }
 
 /// 该声明类型能不能用 `value_matches` 匹配（即它是不是一条 kindexpr）。
@@ -4885,9 +4941,7 @@ fn is_concat_instruction(s: &Instruction, tm: &HashMap<String, String>) -> bool 
     if e.op == "string·concat" {
         return true;
     }
-    e.args
-        .iter()
-        .any(|a| is_string_kind(&arg_type(a, tm)))
+    e.args.iter().any(|a| is_string_kind(&arg_type(a, tm)))
 }
 
 /// 拼接编码冲突的消息：带**两侧编码**，不只说「无效类型」。
@@ -5128,10 +5182,7 @@ fn walk_inst(
 /// 已知限制：嵌套容器字面量（`[[1,2],[3,4]]`）推导不出来（`container_literal_type`
 /// 要求元素是数值/布尔），于是整段跳过。那是**没判**，不是判过——spec 尚未规定嵌套
 /// 字面量的形状，属 spec 缺口（见 workspace/622/coding3/shape-matching-fix.md §六）。
-pub fn check_call_shapes(
-    fn_: &Func,
-    sigs: &SigTable,
-) -> Vec<Diagnostic> {
+pub fn check_call_shapes(fn_: &Func, sigs: &SigTable) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     let empty = HashMap::new();
     walk_call_shapes(&fn_.body, sigs, &empty, &mut diags);
@@ -5259,16 +5310,20 @@ pub fn check_inplace_unit(
     /* (read, written, same instruction) for `name` under the current credits. */
     let judge = |fi: usize, name: &str, credited: &[Vec<bool>]| -> (bool, bool, bool) {
         let f = &facts[fi];
-        let delegated = f.calls.iter().zip(&resolved[fi]).any(|((_, slots), callee)| {
-            slots.iter().enumerate().any(|(j, slot)| {
-                slot == name
-                    && match callee {
-                        InplaceCallee::Unit(g) => credited[*g].get(j).copied().unwrap_or(false),
-                        InplaceCallee::Marks(marks) => marks.get(j).copied().unwrap_or(false),
-                        InplaceCallee::Unknown => false,
-                    }
-            })
-        });
+        let delegated = f
+            .calls
+            .iter()
+            .zip(&resolved[fi])
+            .any(|((_, slots), callee)| {
+                slots.iter().enumerate().any(|(j, slot)| {
+                    slot == name
+                        && match callee {
+                            InplaceCallee::Unit(g) => credited[*g].get(j).copied().unwrap_or(false),
+                            InplaceCallee::Marks(marks) => marks.get(j).copied().unwrap_or(false),
+                            InplaceCallee::Unknown => false,
+                        }
+                })
+            });
         (
             f.reads.contains(name) || delegated,
             f.writes.contains(name),
@@ -5393,7 +5448,11 @@ fn usage_name(
 
 /// Slot base: cut at `·` and non-coordinate `[...]`, then `normalize_slot_name`.
 fn inplace_slot_base(text: &str) -> String {
-    let base = text.split(keytree::MEMBER_SEP).next().unwrap_or(text).trim();
+    let base = text
+        .split(keytree::MEMBER_SEP)
+        .next()
+        .unwrap_or(text)
+        .trim();
     let trimmed_star = base.trim_start_matches('*').trim();
     let base = if !trimmed_star.starts_with('[') {
         base.split('[').next().unwrap_or(base).trim()
@@ -5432,7 +5491,10 @@ fn record_inst_inplace_usage(
     if let Some(e) = &inst.expr {
         collect_operand_names(e, &mut raw);
     }
-    let reads: Vec<String> = raw.iter().map(|r| usage_name(r, coords, positions)).collect();
+    let reads: Vec<String> = raw
+        .iter()
+        .map(|r| usage_name(r, coords, positions))
+        .collect();
     let writes: Vec<String> = inst
         .writes
         .iter()
@@ -5553,10 +5615,12 @@ pub fn validate_writes(
 ) -> Vec<Diagnostic> {
     let mut diags = Vec::new();
     // 用 `pointer_type()`（带传递方式前缀），与 `declared_langtypes_by_origin()` 同一来源——
-    // 这里曾用 `p.ty.clone()`（剥过前缀），于是 `**N $h` 的 `h` 记成 `/lib/N`，
+    // 这里曾用 `p.ty.clone()`（剥过前缀），于是 `**N #h` 的 `h` 记成 `/lib/N`，
     // 写侧 `*h` 就比读侧少一层 `*`。**同一事实不能有两份构造**。
     let declared = declared_langtypes_by_origin(fn_);
-    walk_writes(&fn_.body, sigs, tm, structs, &declared, annotated, &mut diags);
+    walk_writes(
+        &fn_.body, sigs, tm, structs, &declared, annotated, &mut diags,
+    );
     diags
 }
 
@@ -5730,7 +5794,10 @@ mod union_match_tests {
         );
         assert_eq!(normalize_slot_name("a·b"), ("a·b".to_string(), false));
         assert_eq!(normalize_slot_name("/lib/x"), ("/lib/x".to_string(), false));
-        assert_eq!(normalize_slot_name("(a) + (b)"), (("(a) + (b)").to_string(), false));
+        assert_eq!(
+            normalize_slot_name("(a) + (b)"),
+            (("(a) + (b)").to_string(), false)
+        );
         assert_eq!(normalize_slot_name(""), ("".to_string(), false));
     }
 
@@ -5744,7 +5811,7 @@ mod union_match_tests {
         assert!(!value_matches("int64", "int64|float64"));
     }
 
-    /// 第 5 步的对照用例：形参 `*int64 $p` 的**源级** `*int64` 与**值** `int64`
+    /// 第 5 步的对照用例：形参 `*int64 #p` 的**源级** `*int64` 与**值** `int64`
     /// 在 `value_matches` 上行为不同，而且**值形态才是对的**。
     ///
     ///   `value_matches("*int64", "int64") == false` —— 源级会把「实参是 int64」的
@@ -5752,7 +5819,7 @@ mod union_match_tests {
     ///   `value_matches("int64",  "int64") == true` —— 这才是「实参值 vs 形参要求的值」。
     ///
     /// 依据：spec `04-layout语义/03-函数:17`（wire langtype 不含 `*`/`@`，传递方式由
-    /// 帧槽指针位承载）与 `03-类型系统/16-ptr`（`*T $x` 的 `*` 是传递方式，不是值类型
+    /// 帧槽指针位承载）与 `03-类型系统/16-ptr`（`*T #x` 的 `*` 是传递方式，不是值类型
     /// 的一部分）。调用点因此先 `deref_value_type(&param.pointer_type())` 再比
     /// （见 `check_call_shapes` 与 `walk_inst` 的两处）。
     ///
@@ -5853,15 +5920,27 @@ mod call_result_type_tests {
         // 键值异型：`[]char/utf32·int64` 的键是字符串、值是 int64。
         // 若这里返回 int64，就是「碰巧在 [int64]·int64 上对」的那个错。
         assert_eq!(
-            call_result_type("kvspace·listat", &types(&["\'[]char/utf32\'int64"]), &no_literals()),
+            call_result_type(
+                "kvspace·listat",
+                &types(&["\'[]char/utf32\'int64"]),
+                &no_literals()
+            ),
             Some("[]char/utf32".to_string())
         );
         assert_eq!(
-            call_result_type("kvspace·listat", &types(&["\'[int64]\'int64"]), &no_literals()),
+            call_result_type(
+                "kvspace·listat",
+                &types(&["\'[int64]\'int64"]),
+                &no_literals()
+            ),
             Some("int64".to_string())
         );
         assert_eq!(
-            call_result_type("kvspace·listat", &types(&["\'int32\'int32"]), &no_literals()),
+            call_result_type(
+                "kvspace·listat",
+                &types(&["\'int32\'int32"]),
+                &no_literals()
+            ),
             Some("int32".to_string())
         );
     }
@@ -5873,40 +5952,74 @@ mod call_result_type_tests {
             None
         );
         assert_eq!(
-            call_result_type("kvspace·listat", &types(&["\'[int64,int64]\'int64"]), &no_literals()),
+            call_result_type(
+                "kvspace·listat",
+                &types(&["\'[int64,int64]\'int64"]),
+                &no_literals()
+            ),
             None
         );
-        assert_eq!(call_result_type("kvspace·listat", &[None], &no_literals()), None);
-        assert_eq!(call_result_type("kvspace·listat", &[], &no_literals()), None);
+        assert_eq!(
+            call_result_type("kvspace·listat", &[None], &no_literals()),
+            None
+        );
+        assert_eq!(
+            call_result_type("kvspace·listat", &[], &no_literals()),
+            None
+        );
     }
 
     #[test]
     fn form_transforms_are_symmetric_and_fail_closed() {
         // compact ↔ 散列：`[]T` ↔ `[int64]·T`
         assert_eq!(
-            call_result_type("scatterarray·newscatter", &types(&["[]int64"]), &no_literals()),
+            call_result_type(
+                "scatterarray·newscatter",
+                &types(&["[]int64"]),
+                &no_literals()
+            ),
             Some("\'[int64]\'int64".to_string())
         );
         assert_eq!(
-            call_result_type("scatterarray·newcompact", &types(&["\'[int64]\'int64"]), &no_literals()),
+            call_result_type(
+                "scatterarray·newcompact",
+                &types(&["\'[int64]\'int64"]),
+                &no_literals()
+            ),
             Some("[]int64".to_string())
         );
         // 已是目标形态 → None，不做隐式跨形态转换
         assert_eq!(
-            call_result_type("scatterarray·newscatter", &types(&["\'[int64]\'int64"]), &no_literals()),
+            call_result_type(
+                "scatterarray·newscatter",
+                &types(&["\'[int64]\'int64"]),
+                &no_literals()
+            ),
             None
         );
         assert_eq!(
-            call_result_type("scatterarray·newcompact", &types(&["[]int64"]), &no_literals()),
+            call_result_type(
+                "scatterarray·newcompact",
+                &types(&["[]int64"]),
+                &no_literals()
+            ),
             None
         );
         // 切片结果与源同型；源不是 compact → None
         assert_eq!(
-            call_result_type("compactarray·newslice", &types(&["[]int64"]), &no_literals()),
+            call_result_type(
+                "compactarray·newslice",
+                &types(&["[]int64"]),
+                &no_literals()
+            ),
             Some("[]int64".to_string())
         );
         assert_eq!(
-            call_result_type("compactarray·newslice", &types(&["\'[int64]\'int64"]), &no_literals()),
+            call_result_type(
+                "compactarray·newslice",
+                &types(&["\'[int64]\'int64"]),
+                &no_literals()
+            ),
             None
         );
         // 取元素
@@ -5920,24 +6033,44 @@ mod call_result_type_tests {
     fn reinterpret_reads_the_literal_but_still_validates_it() {
         let with = |text: &str| vec![None, Some(text.to_string())];
         assert_eq!(
-            call_result_type("compactarray·newreinterpret", &types(&["[]int64"]), &with("[]uint8")),
+            call_result_type(
+                "compactarray·newreinterpret",
+                &types(&["[]int64"]),
+                &with("[]uint8")
+            ),
             Some("[]uint8".to_string())
         );
         // 非法 langtype：并集、垃圾串、空串 → 一律 None（不许原样塞）
         assert_eq!(
-            call_result_type("compactarray·newreinterpret", &types(&["[]int64"]), &with("int64|float64")),
+            call_result_type(
+                "compactarray·newreinterpret",
+                &types(&["[]int64"]),
+                &with("int64|float64")
+            ),
             None
         );
         assert_eq!(
-            call_result_type("compactarray·newreinterpret", &types(&["[]int64"]), &with("garbage")),
+            call_result_type(
+                "compactarray·newreinterpret",
+                &types(&["[]int64"]),
+                &with("garbage")
+            ),
             None
         );
         assert_eq!(
-            call_result_type("compactarray·newreinterpret", &types(&["[]int64"]), &with("")),
+            call_result_type(
+                "compactarray·newreinterpret",
+                &types(&["[]int64"]),
+                &with("")
+            ),
             None
         );
         assert_eq!(
-            call_result_type("compactarray·newreinterpret", &types(&["[]int64"]), &no_literals()),
+            call_result_type(
+                "compactarray·newreinterpret",
+                &types(&["[]int64"]),
+                &no_literals()
+            ),
             None
         );
     }
@@ -5955,7 +6088,10 @@ mod call_result_type_tests {
             call_result_type("string·concat", &types(&["char/utf32"]), &no_literals()),
             Some("[]char/utf32".to_string())
         );
-        assert_eq!(call_result_type("compactarray·fill", &types(&["[]int64"]), &no_literals()), None);
+        assert_eq!(
+            call_result_type("compactarray·fill", &types(&["[]int64"]), &no_literals()),
+            None
+        );
         assert_eq!(container_key_type("int64"), None);
         assert!(container_key_type("").is_none());
     }

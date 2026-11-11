@@ -27,7 +27,7 @@
 //   u64 big<3 = false
 //   u8 200+100 = 44
 //   u8 200/3 = 66
-rwfunc divmod_loop(*int64 $n) -> (*int64 $q) {
+rwfunc divmod_loop(*int64 #n) -> (*int64 #q) {
 	// Exercise int64 div/mod inside a loop (fast kernel hot path).
 	*q = 0
 	m:int64 = -9223372036854775807 - 1
@@ -37,7 +37,7 @@ rwfunc divmod_loop(*int64 $n) -> (*int64 $q) {
 		i:int64 = i + 1
 	}
 }
-rwfunc mod_loop(*int64 $n) -> (*int64 $r) {
+rwfunc mod_loop(*int64 #n) -> (*int64 #r) {
 	*r = 7
 	m:int64 = -9223372036854775807 - 1
 	i:int64 = 0

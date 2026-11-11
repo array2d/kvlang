@@ -3,7 +3,7 @@
 // 依据：04-layout语义/01-指令架构.kv（多赋值）、03-函数.kv。
 // 期望输出:
 //   3 2
-rwfunc divmod(*int64 $n, *int64 $d) -> (*int64 $q, *int64 $r) {
+rwfunc divmod(*int64 #n, *int64 #d) -> (*int64 #q, *int64 #r) {
 	*n ÷ *d -> *q
 	*n % *d -> *r
 }

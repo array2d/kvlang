@@ -46,7 +46,6 @@ fn ops(kv: &mut Kv, func: &str) -> Vec<String> {
     out
 }
 
-
 /// 字面量操作数落槽用的 kind：读参槽 body 是裸字面量文本时，其 attr langtype
 /// 就是该字面量的 kind（变量读参的 attr langtype 恒为 `rwir`）。
 fn literal_kinds(kv: &mut Kv, func: &str) -> Vec<String> {
@@ -72,8 +71,6 @@ fn write_kind(kv: &mut Kv, key: &str) -> String {
     text.rsplit('\0').next().unwrap_or("").to_string()
 }
 
-
-
 #[test]
 fn cast_plus_literal_adapts_to_unsigned() {
     for src in [
@@ -84,7 +81,10 @@ fn cast_plus_literal_adapts_to_unsigned() {
         let (_store, mut kv) = fresh_kv("cast");
         compile(&mut kv, src).unwrap();
         let os = ops(&mut kv, "f");
-        assert!(os.iter().any(|o| o == "add"), "应发语义算子 add：{os:?} src={src}");
+        assert!(
+            os.iter().any(|o| o == "add"),
+            "应发语义算子 add：{os:?} src={src}"
+        );
         assert!(
             literal_kinds(&mut kv, "f").contains(&"uint64".to_string()),
             "字面量操作数应按 uint64 落槽：src={src}"
@@ -95,11 +95,7 @@ fn cast_plus_literal_adapts_to_unsigned() {
 #[test]
 fn write_slot_kind_matches_specialized_op() {
     let (_store, mut kv) = fresh_kv("kind");
-    compile(
-        &mut kv,
-        "rwfunc f() -> () {\n    uint64(5) + 1 -> r\n}\n",
-    )
-    .unwrap();
+    compile(&mut kv, "rwfunc f() -> () {\n    uint64(5) + 1 -> r\n}\n").unwrap();
     // [2] 是 add；写槽 [2,1] 的 kind 必须是 uint64（不能算对却记 int64）。
     let k = write_kind(&mut kv, "/lib/f/[2,1]");
     assert_eq!(k, "uint64", "写槽 kind 应为 uint64，实际 {k}");
@@ -169,7 +165,10 @@ fn confirmed_mixed_signs_stay_untyped() {
         os.iter().any(|o| o == "add" || o == "+"),
         "应发通用算子（add/+）：{os:?}"
     );
-    assert!(!os.iter().any(|o| o.contains('·')), "不得发 typed opcode：{os:?}");
+    assert!(
+        !os.iter().any(|o| o.contains('·')),
+        "不得发 typed opcode：{os:?}"
+    );
     assert!(
         !literal_kinds(&mut kv, "f").contains(&"uint64".to_string()),
         "符号冲突时不得把字面量适配成无符号"

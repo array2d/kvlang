@@ -2,7 +2,7 @@
 // 循环次数 N 由 __SCALE__ 占位（勿改逻辑）
 // 期望输出（N=2000 时）:
 //   iops a = 2000
-rwfunc iops(*int64 $n) -> (*int64 $a) {
+rwfunc iops(*int64 #n) -> (*int64 #a) {
 	*a = 0
 	1 -> i:int64
 	while (i <= *n) {

@@ -14,24 +14,24 @@ struct P {
 	x:int64=0
 	y:int64=0
 }
-rwfunc isnone(*N $root) -> (*int64 $r) {
+rwfunc isnone(*N #root) -> (*int64 #r) {
 	if (root == None) { 1 -> *r } else { 0 -> *r }
 }
-rwfunc rootval(*N $root) -> (*int64 $r) {
+rwfunc rootval(*N #root) -> (*int64 #r) {
 	*r = (*root)·val
 }
-rwfunc depth(*N $root) -> (*int64 $d) {
+rwfunc depth(*N #root) -> (*int64 #d) {
 	if (root == None) { 0 -> *d }
 	else {
 		l = depth((*root)·left)
 		*d = l + 1
 	}
 }
-rwfunc mk(*int64 $a, *int64 $b) -> (*P $r) {
+rwfunc mk(*int64 #a, *int64 #b) -> (*P #r) {
 	*a + 1 -> (*r)·x
 	*b -> (*r)·y
 }
-rwfunc mk2(*int64 $a) -> (*P $s, *P $t) {
+rwfunc mk2(*int64 #a) -> (*P #s, *P #t) {
 	println("mk2 runs")
 	*a -> (*s)·x
 	*a + 10 -> (*t)·x

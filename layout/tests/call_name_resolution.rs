@@ -22,14 +22,12 @@ fn fresh_kv(tag: &str) -> (TempStore, Kv) {
     (store, kv)
 }
 
-
-
 #[test]
 fn same_package_bare_call_is_rejected() {
     let (_store, mut kv) = fresh_kv("bare");
     let err = compile(
         &mut kv,
-        "lib p {\n    rwfunc helper_int(*int64 $x) -> (*int64 $r) { *x -> *r }\n    rwfunc caller() -> (*int64 $r) { helper_int(1) -> *r }\n}\n",
+        "lib p {\n    rwfunc helper_int(*int64 #x) -> (*int64 #r) { *x -> *r }\n    rwfunc caller() -> (*int64 #r) { helper_int(1) -> *r }\n}\n",
     )
     .unwrap_err();
     assert!(err.contains("未定义函数 helper_int"), "{err}");
@@ -41,7 +39,7 @@ fn same_package_qualified_call_is_accepted() {
     let (_store, mut kv) = fresh_kv("qual");
     compile(
         &mut kv,
-        "lib p {\n    rwfunc helper_int(*int64 $x) -> (*int64 $r) { *x -> *r }\n    rwfunc caller() -> (*int64 $r) { p·helper_int(1) -> *r }\n}\n",
+        "lib p {\n    rwfunc helper_int(*int64 #x) -> (*int64 #r) { *x -> *r }\n    rwfunc caller() -> (*int64 #r) { p·helper_int(1) -> *r }\n}\n",
     )
     .unwrap();
 }
@@ -51,7 +49,7 @@ fn global_bare_call_is_accepted() {
     let (_store, mut kv) = fresh_kv("global");
     compile(
         &mut kv,
-        "rwfunc helper_int(*int64 $x) -> (*int64 $r) { *x -> *r }\nrwfunc caller() -> (*int64 $r) { helper_int(1) -> *r }\n",
+        "rwfunc helper_int(*int64 #x) -> (*int64 #r) { *x -> *r }\nrwfunc caller() -> (*int64 #r) { helper_int(1) -> *r }\n",
     )
     .unwrap();
 }
@@ -61,7 +59,7 @@ fn absolute_lib_path_is_accepted() {
     let (_store, mut kv) = fresh_kv("abs");
     compile(
         &mut kv,
-        "lib p {\n    rwfunc helper_int(*int64 $x) -> (*int64 $r) { *x -> *r }\n    rwfunc caller() -> (*int64 $r) { /lib/p·helper_int(1) -> *r }\n}\n",
+        "lib p {\n    rwfunc helper_int(*int64 #x) -> (*int64 #r) { *x -> *r }\n    rwfunc caller() -> (*int64 #r) { /lib/p·helper_int(1) -> *r }\n}\n",
     )
     .unwrap();
 }
@@ -71,7 +69,7 @@ fn absolute_global_path_is_accepted() {
     let (_store, mut kv) = fresh_kv("absg");
     compile(
         &mut kv,
-        "rwfunc helper_int(*int64 $x) -> (*int64 $r) { *x -> *r }\nrwfunc caller() -> (*int64 $r) { /lib/helper_int(1) -> *r }\n",
+        "rwfunc helper_int(*int64 #x) -> (*int64 #r) { *x -> *r }\nrwfunc caller() -> (*int64 #r) { /lib/helper_int(1) -> *r }\n",
     )
     .unwrap();
 }
@@ -82,7 +80,7 @@ fn global_wins_over_same_package_function() {
     let (_store, mut kv) = fresh_kv("shadow");
     compile(
         &mut kv,
-        "rwfunc f(*int64 $x) -> (*int64 $r) { *x -> *r }\nlib p {\n    rwfunc f(*int64 $x) -> (*int64 $r) { *x -> *r }\n    rwfunc caller() -> (*int64 $r) { f(1) -> *r }\n}\n",
+        "rwfunc f(*int64 #x) -> (*int64 #r) { *x -> *r }\nlib p {\n    rwfunc f(*int64 #x) -> (*int64 #r) { *x -> *r }\n    rwfunc caller() -> (*int64 #r) { f(1) -> *r }\n}\n",
     )
     .unwrap();
 }
@@ -92,11 +90,7 @@ fn unknown_bare_call_is_rejected() {
     // 未实现的内建（如 debugger）：既不是全局函数、也未 def rwir 声明 → 明确报错，
     // 不放行到运行期（运行期同样 unknown rwir，只会把失败推迟）。
     let (_store, mut kv) = fresh_kv("unknown");
-    let err = compile(
-        &mut kv,
-        "rwfunc t() -> () {\n    debugger()\n}\n",
-    )
-    .unwrap_err();
+    let err = compile(&mut kv, "rwfunc t() -> () {\n    debugger()\n}\n").unwrap_err();
     assert!(err.contains("未定义函数 debugger"), "{err}");
     assert!(err.contains("未给出被调函数的完整路径"), "{err}");
 }

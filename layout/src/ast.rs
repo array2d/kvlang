@@ -101,9 +101,9 @@ impl Param {
 
     /// 形参/返回**值的类型**（进 `declared` / 类型集合）。
     ///
-    /// `*T $x` 的 `*` 是**传递方式**，不是值类型的一部分：
-    ///   - `*int64 $x`：`x` 的值是 `int64`——标量不可空，`x == None` 非法；
-    ///   - `*TNode $root`：`TNode` 是结构体引用，值本身即指针 `*TNode`，`root == None` 合法。
+    /// `*T #x` 的 `*` 是**传递方式**，不是值类型的一部分：
+    ///   - `*int64 #x`：`x` 的值是 `int64`——标量不可空，`x == None` 非法；
+    ///   - `*TNode #root`：`TNode` 是结构体引用，值本身即指针 `*TNode`，`root == None` 合法。
     ///
     /// 判据落在「被指向的 T 是不是引用类」：结构体引用（`/lib/…`）或已带 `*` 的类型
     /// 保留 `*` 前缀，其余标量剥掉。这条直接决定 `None` 判空左值是否合法
@@ -125,6 +125,28 @@ pub struct FuncSig {
     pub returns: Vec<Param>,
 }
 
+/// 一个参数声明的规范文本：`[inplace ]<by_ref><ty>[ #name]`。
+///
+/// 名字是**注释**（`#name`），落在类型之后；`inplace` 是修饰符，落在类型**之前**。
+/// 省略名字时不留尾随空格——这样 format/printlib 的输出能被 parser 重新读回
+/// （往返幂等），省略形态也不被写成 `#`。
+fn param_decl(p: &Param) -> String {
+    let mut sb = String::new();
+    if p.inplace {
+        sb.push_str("inplace ");
+    }
+    sb.push_str(&p.by_ref);
+    sb.push_str(&p.ty);
+    if !p.name.is_empty() {
+        if !p.by_ref.is_empty() || !p.ty.is_empty() {
+            sb.push(' ');
+        }
+        sb.push('#');
+        sb.push_str(&p.name);
+    }
+    sb
+}
+
 impl FuncSig {
     fn sig_string(&self, prefix: &str) -> String {
         let mut sb = String::new();
@@ -136,36 +158,14 @@ impl FuncSig {
             if i > 0 {
                 sb.push_str(", ");
             }
-            // 参数声明是 `*T $name` / `T $name`（类型在前）；空 kindexpr 的指针形态写
-            // `* $name`（`*` 与名字间有空格，与 `*T` 区分），这样 format/printlib 的
-            // 输出能被 parser 重新读回（往返幂等）。
-            // 传递方式（`by_ref`）与类型分开存，输出时拼回前缀。
-            let (by_ref, ty) = (p.by_ref.as_str(), p.ty.as_str());
-            sb.push_str(by_ref);
-            sb.push_str(ty);
-            // 前缀后、有类型或有名字时要分隔：`*int64 $a` / `* $a`。
-            if !by_ref.is_empty() || !ty.is_empty() {
-                sb.push(' ');
-            }
-            sb.push('$');
-            sb.push_str(&p.name);
+            sb.push_str(&param_decl(p));
         }
         sb.push_str(") -> (");
         for (i, p) in self.returns.iter().enumerate() {
             if i > 0 {
                 sb.push_str(", ");
             }
-            let (by_ref, ty) = (p.by_ref.as_str(), p.ty.as_str());
-            sb.push_str(by_ref);
-            sb.push_str(ty);
-            if !by_ref.is_empty() || !ty.is_empty() {
-                sb.push(' ');
-            }
-            sb.push('$');
-            sb.push_str(&p.name);
-            if p.inplace {
-                sb.push_str(" inplace");
-            }
+            sb.push_str(&param_decl(p));
         }
         sb.push(')');
         sb
@@ -1062,6 +1062,11 @@ fn is_bare_member_key(v: &str) -> bool {
     ident_start
         && !super::scanner::has_token_delim(v)
         && !v.contains(['"', '\'', '.'])
-        && !symbol::unicode_ops().iter().any(|op| v.contains(op.as_str()))
-        && !matches!(v, "return" | "if" | "else" | "for" | "while" | "break" | "continue")
+        && !symbol::unicode_ops()
+            .iter()
+            .any(|op| v.contains(op.as_str()))
+        && !matches!(
+            v,
+            "return" | "if" | "else" | "for" | "while" | "break" | "continue"
+        )
 }

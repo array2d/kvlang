@@ -18,8 +18,8 @@ lib networld/edit {
 	//   from < 1 视为 1，lines <= 0 视为到末尾。sz = 字节数（-1 = 不可读）；
 	//   超过 8MB 不返回内容：view 空、total = -1（改用 fs·read 分片读）；
 	//   非 UTF-8 文件同样不返回：view 空、total = -2。
-	rwfunc read(*[]char/utf32 $p, *int64 $from, *int64 $lines) -> (
-	          *[]char/utf32 $view, *int64 $total, *int64 $sz) {
+	rwfunc read(*[]char/utf32 #p, *int64 #from, *int64 #lines) -> (
+	          *[]char/utf32 #view, *int64 #total, *int64 #sz) {
 		networld/fs·readtext(*p) -> (t:[]char/utf32, *sz)
 		"" -> *view
 		*total = 0
@@ -55,7 +55,7 @@ lib networld/edit {
 
 	// commit(p, t) -> code：**原子落盘** —— 写 `<p>.tmp` → rename 覆盖 p → 回读校验。
 	//   4 写失败 / 5 回读不一致 / 0 成功；失败时 p 保持原样（不留半截文件）。
-	rwfunc commit(*[]char/utf32 $p, *[]char/utf32 $t) -> (*int64 $code) {
+	rwfunc commit(*[]char/utf32 #p, *[]char/utf32 #t) -> (*int64 #code) {
 		*code = 4
 		string·concat(*p, ".tmp") -> tp:[]char/utf32
 		networld/fs·writetext(tp, *t) -> wn:int64
@@ -70,7 +70,7 @@ lib networld/edit {
 
 	// write(p, t) -> (n, code)：UTF-8 覆盖写（原子：临时文件 + rename）+ 回读校验。
 	//   n = 写入字节数（失败 -1）
-	rwfunc write(*[]char/utf32 $p, *[]char/utf32 $t) -> (*int64 $n, *int64 $code) {
+	rwfunc write(*[]char/utf32 #p, *[]char/utf32 #t) -> (*int64 #n, *int64 #code) {
 		*n = 0
 		networld/edit·commit(*p, *t) -> *code
 		if (*code == 0) { string·len(*t) -> *n }
@@ -78,8 +78,8 @@ lib networld/edit {
 
 	// replace(p, old, new, dry) -> (done, hit, code)：单处精确替换。
 	//   dry = 1 只预演（不落盘）；old 命中数必须恰为 1，否则一个字节都不动。
-	rwfunc replace(*[]char/utf32 $p, *[]char/utf32 $old, *[]char/utf32 $new,
-	               *int64 $dry) -> (*int64 $done, *int64 $hit, *int64 $code) {
+	rwfunc replace(*[]char/utf32 #p, *[]char/utf32 #old, *[]char/utf32 #new,
+	               *int64 #dry) -> (*int64 #done, *int64 #hit, *int64 #code) {
 		*done = 0
 		*hit = 0
 		networld/fs·isutf8(*p) -> u8ok:bool
@@ -114,9 +114,9 @@ lib networld/edit {
 	// multi(p, olds, news, dry) -> (done, bad, code)：事务式多处替换。
 	//   逐条精确替换（每条 old 须恰命中 1 处），全部成功才落盘；
 	//   bad = 失败下标（-1 = 无失败），dry = 1 只预演。
-	rwfunc multi(*[]char/utf32 $p, *'[int64]'[]char/utf32 $olds,
-	             *'[int64]'[]char/utf32 $news, *int64 $dry) -> (
-	             *int64 $done, *int64 $bad, *int64 $code) {
+	rwfunc multi(*[]char/utf32 #p, *'[int64]'[]char/utf32 #olds,
+	             *'[int64]'[]char/utf32 #news, *int64 #dry) -> (
+	             *int64 #done, *int64 #bad, *int64 #code) {
 		kvspace·listlen(*olds) -> cnt:int64
 		kvspace·listlen(*news) -> m:int64
 		*done = 0

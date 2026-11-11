@@ -8,7 +8,7 @@
 //   cmp_var(10) = 45
 //   lt5(3) = true
 //   lt5(7) = false
-rwfunc sum_alias(*int64 $n) -> (*int64 $total) {
+rwfunc sum_alias(*int64 #n) -> (*int64 #total) {
 	*total = 0
 	i:int64 = 0
 	while (i < *n) {
@@ -16,7 +16,7 @@ rwfunc sum_alias(*int64 $n) -> (*int64 $total) {
 		i:int64 = i + 1
 	}
 }
-rwfunc alias_dst(*int64 $n) -> (*int64 $r) {
+rwfunc alias_dst(*int64 #n) -> (*int64 #r) {
 	*r = 1
 	i:int64 = 0
 	while (i < *n) {
@@ -26,7 +26,7 @@ rwfunc alias_dst(*int64 $n) -> (*int64 $r) {
 		i:int64 = i + 1
 	}
 }
-rwfunc locals8(*int64 $n) -> (*int64 $r) {
+rwfunc locals8(*int64 #n) -> (*int64 #r) {
 	*r = 0
 	a:int64 = 1
 	b:int64 = 2
@@ -46,7 +46,7 @@ rwfunc locals8(*int64 $n) -> (*int64 $r) {
 		i:int64 = i + 1
 	}
 }
-rwfunc locals9(*int64 $n) -> (*int64 $r) {
+rwfunc locals9(*int64 #n) -> (*int64 #r) {
 	*r = 0
 	a:int64 = 1
 	b:int64 = 2
@@ -68,7 +68,7 @@ rwfunc locals9(*int64 $n) -> (*int64 $r) {
 		i:int64 = i + 1
 	}
 }
-rwfunc cmp_var(*int64 $n) -> (*int64 $r) {
+rwfunc cmp_var(*int64 #n) -> (*int64 #r) {
 	// Store comparison result in a local before `while` to exercise standalone setcc.
 	*r = 0
 	i = 0
@@ -79,7 +79,7 @@ rwfunc cmp_var(*int64 $n) -> (*int64 $r) {
 		c = i < *n
 	}
 }
-rwfunc lt5(*int64 $n) -> (*bool $r) {
+rwfunc lt5(*int64 #n) -> (*bool #r) {
 	*r = *n < 5
 }
 rwfunc test() -> () {

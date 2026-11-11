@@ -13,7 +13,7 @@
 
 lib networld/fs {
 	// readtext(p) -> (t, sz)：整文件读为文本；sz = 字节数（缺失 = -1，t = ""）
-	rwfunc readtext(*[]char/utf32 $p) -> (*[]char/utf32 $t, *int64 $sz) {
+	rwfunc readtext(*[]char/utf32 #p) -> (*[]char/utf32 #t, *int64 #sz) {
 		networld/fs·size(*p) -> *sz
 		"" -> *t
 		if (*sz > 0) {
@@ -26,19 +26,19 @@ lib networld/fs {
 		}
 	}
 	// writetext(p, t) -> n：文本按 UTF-8 覆盖写盘，返回字节数（失败 -1）
-	rwfunc writetext(*[]char/utf32 $p, *[]char/utf32 $t) -> (*int64 $n) {
+	rwfunc writetext(*[]char/utf32 #p, *[]char/utf32 #t) -> (*int64 #n) {
 		char/utf8(*t) -> u8:[]char/utf8
 		compactarray·newreinterpret(u8, "[]uint8") -> bytes:[]uint8
 		networld/fs·write(*p, bytes) -> *n
 	}
 	// appendtext(p, t) -> n：文本按 UTF-8 追加到文件末尾，返回追加字节数（失败 -1）
-	rwfunc appendtext(*[]char/utf32 $p, *[]char/utf32 $t) -> (*int64 $n) {
+	rwfunc appendtext(*[]char/utf32 #p, *[]char/utf32 #t) -> (*int64 #n) {
 		char/utf8(*t) -> u8:[]char/utf8
 		compactarray·newreinterpret(u8, "[]uint8") -> bytes:[]uint8
 		networld/fs·append(*p, bytes) -> *n
 	}
 	// copyfile(src, dst) -> n：字节级整文件拷贝，返回写入字节数（源不存在/失败 -1）
-	rwfunc copyfile(*[]char/utf32 $src, *[]char/utf32 $dst) -> (*int64 $n) {
+	rwfunc copyfile(*[]char/utf32 #src, *[]char/utf32 #dst) -> (*int64 #n) {
 		networld/fs·size(*src) -> sz:int64
 		if (sz < 0) {
 			-1 -> *n
@@ -48,7 +48,7 @@ lib networld/fs {
 		}
 	}
 	// basename(p) -> name：路径末段（剥除末尾连续 '/'；无 '/' 原样；全 '/' 返 "/"）
-	rwfunc basename(*[]char/utf32 $p) -> (*[]char/utf32 $name) {
+	rwfunc basename(*[]char/utf32 #p) -> (*[]char/utf32 #name) {
 		hi:int64 = string·len(*p)
 		if (hi == 0) {
 			"" -> *name
@@ -74,7 +74,7 @@ lib networld/fs {
 		}
 	}
 	// dirname(p) -> dir：路径父目录（剥除末尾连续 '/' 后取最后一个 '/' 之前；无 '/' 返 "."；根返 "/"）
-	rwfunc dirname(*[]char/utf32 $p) -> (*[]char/utf32 $dir) {
+	rwfunc dirname(*[]char/utf32 #p) -> (*[]char/utf32 #dir) {
 		hi:int64 = string·len(*p)
 		if (hi == 0) {
 			"." -> *dir
@@ -100,7 +100,7 @@ lib networld/fs {
 		}
 	}
 	// ext(p) -> e：文件扩展名（含前导 '.'，如 ".kv"；无 '.' 或末段以单 '.' 开头无后续 '.' 返 ""）
-	rwfunc ext(*[]char/utf32 $p) -> (*[]char/utf32 $e) {
+	rwfunc ext(*[]char/utf32 #p) -> (*[]char/utf32 #e) {
 		networld/fs·basename(*p) -> base:[]char/utf32
 		bl:int64 = string·len(base)
 		string·rfind(base, ".") -> idx:int64
@@ -111,7 +111,7 @@ lib networld/fs {
 		}
 	}
 	// joinpath(a, b) -> p：拼接两段路径（自动处理连接处单 '/'；一方为空则返另一方）
-	rwfunc joinpath(*[]char/utf32 $a, *[]char/utf32 $b) -> (*[]char/utf32 $p) {
+	rwfunc joinpath(*[]char/utf32 #a, *[]char/utf32 #b) -> (*[]char/utf32 #p) {
 		if (string·empty(*a)) {
 			*b -> *p
 		} else {
@@ -129,7 +129,7 @@ lib networld/fs {
 		}
 	}
 	// match(name, pat) -> b：名字段通配匹配（* 任意串、? 单字符，其余按字面）
-	rwfunc match(*[]char/utf32 $name, *[]char/utf32 $pat) -> (*bool $b) {
+	rwfunc match(*[]char/utf32 #name, *[]char/utf32 #pat) -> (*bool #b) {
 		nn:int64 = string·len(*name)
 		pn:int64 = string·len(*pat)
 		if (pn == 0) {
@@ -164,7 +164,7 @@ lib networld/fs {
 	}
 	// glob(pat) -> paths：按通配展开路径（\n 连接；无匹配 = 空串）。
 	// 仅最后一段可含 *?，其前目录须为字面路径，如 "/tmp/*.kv"、"src/*.c"。
-	rwfunc glob(*[]char/utf32 $pat) -> (*[]char/utf32 $paths) {
+	rwfunc glob(*[]char/utf32 #pat) -> (*[]char/utf32 #paths) {
 		"" -> *paths
 		ln:int64 = string·len(*pat)
 		cut:int64 = -1
@@ -204,8 +204,8 @@ lib networld/fs {
 		}
 	}
 	// scan(text, path, pat) -> hits：逐行找含 pat 的行，输出 "path:行号:文本"\n
-	rwfunc scan(*[]char/utf32 $text, *[]char/utf32 $path,
-	            *[]char/utf32 $pat) -> (*[]char/utf32 $hits) {
+	rwfunc scan(*[]char/utf32 #text, *[]char/utf32 #path,
+	            *[]char/utf32 #pat) -> (*[]char/utf32 #hits) {
 		"" -> *hits
 		ln:int64 = string·len(*text)
 		pos:int64 = 0
@@ -235,8 +235,8 @@ lib networld/fs {
 	}
 	// grep(pat, path, glob) -> hits：path 是文件则扫它本身；是目录则扫其下匹配
 	// glob 的成员（glob 空 = 全部成员）。命中输出 "路径:行号:文本"，多行 \n 连接。
-	rwfunc grep(*[]char/utf32 $pat, *[]char/utf32 $path,
-	            *[]char/utf32 $glob) -> (*[]char/utf32 $hits) {
+	rwfunc grep(*[]char/utf32 #pat, *[]char/utf32 #path,
+	            *[]char/utf32 #glob) -> (*[]char/utf32 #hits) {
 		"" -> *hits
 		networld/fs·list(*path) -> ns:'[int64]'[]char/utf32
 		kvspace·listlen(ns) -> nc:int64

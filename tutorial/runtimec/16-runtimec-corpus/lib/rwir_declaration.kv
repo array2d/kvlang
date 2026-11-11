@@ -3,7 +3,7 @@
 // 依据：runtimec/specification/native_rwir_decls.kv 的语法说明。
 // 期望输出:
 //   1
-rwir demo·echo(*int64 $x) -> (*int64 $r)
+rwir demo·echo(*int64 #x) -> (*int64 #r)
 
 rwfunc test() -> () {
 	println(1)

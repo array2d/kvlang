@@ -2,7 +2,7 @@
 // 算法: while + 条件分支，start=27
 // 期望输出:
 //   steps = 111
-rwfunc collatz(*int64 $n) -> (*int64 $steps) {
+rwfunc collatz(*int64 #n) -> (*int64 #steps) {
 	*n -> nv:int64
 	0 -> *steps
 	while (nv > 1) {

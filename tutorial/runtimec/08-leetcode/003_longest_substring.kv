@@ -4,7 +4,7 @@
 //   3
 //   1
 //   5
-rwfunc length_of_longest(*[]char/utf32 $s) -> (*int64 $max_len) {
+rwfunc length_of_longest(*[]char/utf32 #s) -> (*int64 #max_len) {
 	n:int64 = string·len(*s)
 	last:'[]char/utf8'int64 = {}
 	*max_len = 0

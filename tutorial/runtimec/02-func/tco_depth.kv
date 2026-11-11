@@ -2,7 +2,7 @@
 // 期望输出:
 //   sum = 5050
 //   fact = 3628800
-rwfunc sum_while(*int64 $N) -> (*int64 $total) {
+rwfunc sum_while(*int64 #N) -> (*int64 #total) {
 	*total = 0
 	1 -> i:int64
 	while (i <= *N) {
@@ -11,7 +11,7 @@ rwfunc sum_while(*int64 $N) -> (*int64 $total) {
 	}
 }
 
-rwfunc tailrec_fact(*int64 $N, *int64 $acc) -> (*int64 $r) {
+rwfunc tailrec_fact(*int64 #N, *int64 #acc) -> (*int64 #r) {
 	if (*N <= 1) {
 		*acc + 0 -> *r
 	} else {

@@ -19,7 +19,7 @@ struct Point {
 	y:int64=0
 }
 
-rwfunc xcoord(**/lib/Point $p) -> (*int64 $r) {
+rwfunc xcoord(**/lib/Point #p) -> (*int64 #r) {
 	(*p)·x -> *r
 }
 

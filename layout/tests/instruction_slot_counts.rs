@@ -16,8 +16,6 @@ use kvlanglayout::{init_dirs, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
-
-
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
 }
@@ -35,7 +33,6 @@ impl Drop for TempDir {
 }
 
 impl TempDir {
-
     fn join<P: AsRef<std::path::Path>>(&self, p: P) -> PathBuf {
         self.0.join(p)
     }
@@ -75,7 +72,10 @@ fn count_slots(kv: &mut Kv, dir: &str, instruction: usize) -> (usize, usize) {
     let mut reads = 0;
     let mut writes = 0;
     for child in kv.list(&format!("{dir}/"), false, false) {
-        let name = child.trim_end_matches('/').trim_start_matches('[').to_string();
+        let name = child
+            .trim_end_matches('/')
+            .trim_start_matches('[')
+            .to_string();
         let Some((row, col)) = name.split_once(',') else {
             continue;
         };
@@ -384,7 +384,7 @@ fn numeric_op_after_member_read_is_a_known_gap() {
     let (_dir_b, mut kv_b) = compile(
         "numop-b",
         "struct P {\n\tx:int64=0\n}\n\
-         rwfunc f(*P $p) -> () {\n\tnv:int64 = (*p)·x\n\tq:int64 = nv % 2\n}\n",
+         rwfunc f(*P #p) -> () {\n\tnv:int64 = (*p)·x\n\tq:int64 = nv % 2\n}\n",
     );
     let op_b = slot_text(&mut kv_b, "/lib/f", 3, 0);
     /* 缺口已修：`nv:int64` 有了声明类型，算子与其他算术一样归一成 `mod`。
@@ -397,7 +397,13 @@ fn slot_text(kv: &mut Kv, dir: &str, instruction: usize, column: i32) -> String 
     let wire = kv.get_one(&format!("{dir}/[{instruction},{column}]"));
     let text: String = wire
         .iter()
-        .map(|byte| if byte.is_ascii_graphic() || *byte == b' ' { *byte as char } else { ' ' })
+        .map(|byte| {
+            if byte.is_ascii_graphic() || *byte == b' ' {
+                *byte as char
+            } else {
+                ' '
+            }
+        })
         .collect();
     text.split_whitespace()
         .filter(|piece| *piece != "rwir" && *piece != "rwfunc")

@@ -3,7 +3,7 @@
 // 期望输出:
 //   true
 //   false
-rwfunc is_anagram(*[]char/utf32 $s, *[]char/utf32 $t) -> () {
+rwfunc is_anagram(*[]char/utf32 #s, *[]char/utf32 #t) -> () {
 	ns:int64 = string·len(*s)
 	nt:int64 = string·len(*t)
 	ok:bool = true

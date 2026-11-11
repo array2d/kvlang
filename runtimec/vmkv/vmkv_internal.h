@@ -47,10 +47,8 @@ typedef struct vmkv_allocation {
     size_t alignment;
 } vmkv_allocation_t;
 
-/* Param key `.[0,±j]`: body = name NUL langtype[ inplace]. */
+/* Param key `.[0,±j]`: body = langtype[ inplace]（**不存名字**：`#name` 是源码注释）. */
 typedef struct vmkv_param_definition {
-    const char *name;
-    size_t name_size;
     const char *type_name;
     size_t type_name_size;
     bool inplace;

@@ -6,20 +6,20 @@
 //   outer a= 3  b= 4
 //   f= 3  g= 4
 //   fib(10) = 34 55
-rwfunc inner(*int64 $n) -> (*int64 $a, *int64 $b) {
+rwfunc inner(*int64 #n) -> (*int64 #a, *int64 #b) {
 	*a = *n
 	*b = 4
 }
-rwfunc outer1(*int64 $n) -> (*int64 $a) {
+rwfunc outer1(*int64 #n) -> (*int64 #a) {
 	inner(*n) -> (*a, _)
 	println("outer1 a=", *a)
 	x:int64 = *a + 1
 }
-rwfunc outer(*int64 $n) -> (*int64 $a, *int64 $b) {
+rwfunc outer(*int64 #n) -> (*int64 #a, *int64 #b) {
 	inner(*n) -> (*a, *b)
 	println("outer a=", *a, " b=", *b)
 }
-rwfunc fib(*int64 $n) -> (*int64 $a, *int64 $b) {
+rwfunc fib(*int64 #n) -> (*int64 #a, *int64 #b) {
 	if (*n <= 1) {
 		*a = 0
 		1 -> *b

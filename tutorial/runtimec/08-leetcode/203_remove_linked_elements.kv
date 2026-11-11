@@ -11,7 +11,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc remove(*Node $head, *int64 $val) -> () {
+rwfunc remove(*Node #head, *int64 #val) -> () {
 	head -> p:*/lib/Node
 	while (p != None) {
 		v:int64 = (*p)·val

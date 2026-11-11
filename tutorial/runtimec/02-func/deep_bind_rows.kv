@@ -2,7 +2,7 @@
 // 目的：覆盖 P0-2 的 row/bind 模板在 binds 数组 realloc、ctx free 后不悬空。
 // 期望输出:
 //   deep(6) = 49
-rwfunc deep(*int64 $n) -> (*int64 $r) {
+rwfunc deep(*int64 #n) -> (*int64 #r) {
 	x0:int64 = *n + 0
 	x1:int64 = x0 + 1
 	x2:int64 = x1 + 1

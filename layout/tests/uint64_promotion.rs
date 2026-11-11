@@ -12,7 +12,6 @@ use kvlanglayout::{init_dirs, kvkind, Kv};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-
 /// 测试用的临时目录，**离开作用域即删**（含 panic 展开时）。
 /// 普通清理语句在断言失败时会被跳过——测试红了反而留下最多垃圾。
 struct TempDir(PathBuf);
@@ -28,8 +27,6 @@ impl TempDir {
         self.0.join(p)
     }
 }
-
-
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
@@ -180,7 +177,6 @@ fn literal_and_result_slots_use_promoted_kind() {
         write_kinds.iter().any(|t| t == "uint64"),
         "max 的写槽应推断为 uint64：{write_kinds:?}"
     );
-
 }
 
 /// 执行层：真跑一遍，断言值。缺 `byteseek` 或运行时库时跳过。
@@ -200,12 +196,7 @@ fn uint64_comparison_and_max_yield_unsigned_values() {
     let file = dir.join("p.kv");
     std::fs::write(&file, RUN_SRC).unwrap();
     let dsn = format!("shm://{}", dir.join("db").display());
-    let env = |key: &str, value: &str| {
-        (
-            key.to_string(),
-            value.to_string(),
-        )
-    };
+    let env = |key: &str, value: &str| (key.to_string(), value.to_string());
     let lib = format!(
         "{}:{}:{}",
         root.join("lib").display(),
@@ -268,7 +259,10 @@ fn uint64_comparison_and_max_yield_unsigned_values() {
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
 
-    assert!(out.status.success(), "run failed: {stderr}\nstdout:\n{stdout}");
+    assert!(
+        out.status.success(),
+        "run failed: {stderr}\nstdout:\n{stdout}"
+    );
 
     // 值断言：无符号比较为 true、max 取大者、÷2 得 2^63-1、动态槽不得打出 -1。
     assert!(

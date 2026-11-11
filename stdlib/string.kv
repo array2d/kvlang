@@ -8,19 +8,19 @@
 
 lib string {
 	// ── 判定 ──────────────────────────────────────────────────────────
-	rwfunc eq(*[]char/utf32 $a, *[]char/utf32 $b) -> (*bool $r) {
+	rwfunc eq(*[]char/utf32 #a, *[]char/utf32 #b) -> (*bool #r) {
 		string·cmp(*a, *b) == 0 -> *r
 	}
-	rwfunc ne(*[]char/utf32 $a, *[]char/utf32 $b) -> (*bool $r) {
+	rwfunc ne(*[]char/utf32 #a, *[]char/utf32 #b) -> (*bool #r) {
 		string·cmp(*a, *b) != 0 -> *r
 	}
-	rwfunc empty(*[]char/utf32 $s) -> (*bool $r) {
+	rwfunc empty(*[]char/utf32 #s) -> (*bool #r) {
 		string·len(*s) == 0 -> *r
 	}
-	rwfunc contains(*[]char/utf32 $s, *[]char/utf32 $sub) -> (*bool $r) {
+	rwfunc contains(*[]char/utf32 #s, *[]char/utf32 #sub) -> (*bool #r) {
 		string·find(*s, *sub) != -1 -> *r
 	}
-	rwfunc startswith(*[]char/utf32 $s, *[]char/utf32 $pre) -> (*bool $r) {
+	rwfunc startswith(*[]char/utf32 #s, *[]char/utf32 #pre) -> (*bool #r) {
 		sl:int64 = string·len(*s)
 		pl:int64 = string·len(*pre)
 		if (pl > sl) {
@@ -30,7 +30,7 @@ lib string {
 			string·cmp(prefix, *pre) == 0 -> *r
 		}
 	}
-	rwfunc endswith(*[]char/utf32 $s, *[]char/utf32 $suf) -> (*bool $r) {
+	rwfunc endswith(*[]char/utf32 #s, *[]char/utf32 #suf) -> (*bool #r) {
 		sl:int64 = string·len(*s)
 		fl:int64 = string·len(*suf)
 		if (fl > sl) {
@@ -43,7 +43,7 @@ lib string {
 	}
 	// eqfold(a, b) -> r：忽略 ASCII 大小写相等（Go EqualFold / Rust
 	// eq_ignore_ascii_case）
-	rwfunc eqfold(*[]char/utf32 $a, *[]char/utf32 $b) -> (*bool $r) {
+	rwfunc eqfold(*[]char/utf32 #a, *[]char/utf32 #b) -> (*bool #r) {
 		string·upper(*a) -> ua:[]char/utf32
 		string·upper(*b) -> ub:[]char/utf32
 		string·cmp(ua, ub) == 0 -> *r
@@ -51,7 +51,7 @@ lib string {
 
 	// ── 查找与计数 ────────────────────────────────────────────────────
 	// count(s, sub) -> n：sub 不重叠出现次数；sub 空 = len+1（Py/Go/Rust/JS 一致）
-	rwfunc count(*[]char/utf32 $s, *[]char/utf32 $sub) -> (*int64 $n) {
+	rwfunc count(*[]char/utf32 #s, *[]char/utf32 #sub) -> (*int64 #n) {
 		ln:int64 = string·len(*s)
 		m:int64 = string·len(*sub)
 		*n = 0
@@ -72,7 +72,7 @@ lib string {
 	}
 	// rfind(s, sub) -> i：最后一次出现的下标，无则 -1（Py/Rust rfind、Go
 	// LastIndex、C strrchr）
-	rwfunc rfind(*[]char/utf32 $s, *[]char/utf32 $sub) -> (*int64 $i) {
+	rwfunc rfind(*[]char/utf32 #s, *[]char/utf32 #sub) -> (*int64 #i) {
 		ln:int64 = string·len(*s)
 		m:int64 = string·len(*sub)
 		*i = -1
@@ -91,13 +91,13 @@ lib string {
 	// ── 修剪与填充 ────────────────────────────────────────────────────
 	// trim(s) -> r：去两侧空白（Go TrimSpace / Rust trim / TS trim； 空白集同 C
 	// isspace）
-	rwfunc trim(*[]char/utf32 $s) -> (*[]char/utf32 $r) {
+	rwfunc trim(*[]char/utf32 #s) -> (*[]char/utf32 #r) {
 		string·trimstart(*s) -> t:[]char/utf32
 		string·trimend(t) -> *r
 	}
 	// trimstart(s) -> r：去左侧空白（Python lstrip / Go TrimLeft / Rust
 	// trim_start）
-	rwfunc trimstart(*[]char/utf32 $s) -> (*[]char/utf32 $r) {
+	rwfunc trimstart(*[]char/utf32 #s) -> (*[]char/utf32 #r) {
 		lo:int64 = 0
 		hi:int64 = string·len(*s)
 		while (lo < hi) {
@@ -111,7 +111,7 @@ lib string {
 		string·slice(*s, lo, hi) -> *r
 	}
 	// trimend(s) -> r：去右侧空白（Python rstrip / Go TrimRight / Rust trim_end）
-	rwfunc trimend(*[]char/utf32 $s) -> (*[]char/utf32 $r) {
+	rwfunc trimend(*[]char/utf32 #s) -> (*[]char/utf32 #r) {
 		lo:int64 = 0
 		hi:int64 = string·len(*s)
 		while (hi > lo) {
@@ -125,7 +125,7 @@ lib string {
 		string·slice(*s, lo, hi) -> *r
 	}
 	// trimprefix(s, pre) -> r：若以 pre 开头则剥除该前缀，否则原样返回（Go TrimPrefix / Python removeprefix / Rust strip_prefix）
-	rwfunc trimprefix(*[]char/utf32 $s, *[]char/utf32 $pre) -> (*[]char/utf32 $r) {
+	rwfunc trimprefix(*[]char/utf32 #s, *[]char/utf32 #pre) -> (*[]char/utf32 #r) {
 		string·startswith(*s, *pre) -> ok:bool
 		if (ok) {
 			pl:int64 = string·len(*pre)
@@ -136,7 +136,7 @@ lib string {
 		}
 	}
 	// trimsuffix(s, suf) -> r：若以 suf 结尾则剥除该后缀，否则原样返回（Go TrimSuffix / Python removesuffix / Rust strip_suffix）
-	rwfunc trimsuffix(*[]char/utf32 $s, *[]char/utf32 $suf) -> (*[]char/utf32 $r) {
+	rwfunc trimsuffix(*[]char/utf32 #s, *[]char/utf32 #suf) -> (*[]char/utf32 #r) {
 		string·endswith(*s, *suf) -> ok:bool
 		if (ok) {
 			fl:int64 = string·len(*suf)
@@ -148,8 +148,8 @@ lib string {
 	}
 	// padstart(s, n, pad) -> r：左侧补到长度 n（TS padStart / Python rjust），
 	// pad 超长取前段
-	rwfunc padstart(*[]char/utf32 $s, *int64 $n,
-	                *[]char/utf32 $pad) -> (*[]char/utf32 $r) {
+	rwfunc padstart(*[]char/utf32 #s, *int64 #n,
+	                *[]char/utf32 #pad) -> (*[]char/utf32 #r) {
 		need:int64 = *n - string·len(*s)
 		pl:int64 = string·len(*pad)
 		"" -> pre:[]char/utf32
@@ -163,8 +163,8 @@ lib string {
 		string·concat(pre, *s) -> *r
 	}
 	// padend(s, n, pad) -> r：右侧补到长度 n（TS padEnd / Python ljust）
-	rwfunc padend(*[]char/utf32 $s, *int64 $n,
-	              *[]char/utf32 $pad) -> (*[]char/utf32 $r) {
+	rwfunc padend(*[]char/utf32 #s, *int64 #n,
+	              *[]char/utf32 #pad) -> (*[]char/utf32 #r) {
 		*s -> *r
 		need:int64 = *n - string·len(*s)
 		pl:int64 = string·len(*pad)
@@ -184,8 +184,8 @@ lib string {
 	// 全切（Go SplitN）
 	// sep 空 = 逐码点切（Go/TS 阵营； Python 此处报错）。parts
 	// 由调用方先声明空容器。
-	rwfunc splitn(*[]char/utf32 $s, *[]char/utf32 $sep, *int64 $n) -> (
-	              *'[int64]'[]char/utf32 $parts, *int64 $k) {
+	rwfunc splitn(*[]char/utf32 #s, *[]char/utf32 #sep, *int64 #n) -> (
+	              *'[int64]'[]char/utf32 #parts, *int64 #k) {
 		*k = 0
 		if (*n != 0) {
 			ln:int64 = string·len(*s)
@@ -233,14 +233,14 @@ lib string {
 	}
 	// split(s, sep) -> (parts, k) ：全切（Go Split / Python split / TS split /
 	// Rust split）
-	rwfunc split(*[]char/utf32 $s, *[]char/utf32 $sep) -> (
-	             *'[int64]'[]char/utf32 $parts, *int64 $k) {
+	rwfunc split(*[]char/utf32 #s, *[]char/utf32 #sep) -> (
+	             *'[int64]'[]char/utf32 #parts, *int64 #k) {
 		string·splitn(*s, *sep, -1) -> (*parts, *k)
 	}
 	// lines(s) -> (parts, k) ：按 \n 切行，行尾 \r 剥除，末尾空行丢弃（Go Lines
 	// / Rust lines）
-	rwfunc lines(*[]char/utf32 $s) -> (
-	             *'[int64]'[]char/utf32 $parts, *int64 $k) {
+	rwfunc lines(*[]char/utf32 #s) -> (
+	             *'[int64]'[]char/utf32 #parts, *int64 #k) {
 		*k = 0
 		ln:int64 = string·len(*s)
 		pos:int64 = 0
@@ -269,8 +269,8 @@ lib string {
 	}
 	// fields(s) -> (parts, k) ：按空白连续段切词，跳过首尾空白（Go Fields /
 	// Python s.split())
-	rwfunc fields(*[]char/utf32 $s) -> (
-	              *'[int64]'[]char/utf32 $parts, *int64 $k) {
+	rwfunc fields(*[]char/utf32 #s) -> (
+	              *'[int64]'[]char/utf32 #parts, *int64 #k) {
 		*k = 0
 		ln:int64 = string·len(*s)
 		i:int64 = 0
@@ -300,8 +300,8 @@ lib string {
 		}
 	}
 	// join(parts, sep) -> r：用 sep 连接各成员（Go Join / Rust join）
-	rwfunc join(*'[int64]'[]char/utf32 $parts,
-	            *[]char/utf32 $sep) -> (*[]char/utf32 $r) {
+	rwfunc join(*'[int64]'[]char/utf32 #parts,
+	            *[]char/utf32 #sep) -> (*[]char/utf32 #r) {
 		"" -> *r
 		kvspace·listlen(*parts) -> c:int64
 		i:int64 = 0
@@ -317,8 +317,8 @@ lib string {
 	}
 	// cut(s, sep) -> (before, after, found) ：首次出现处切成两段（Go Cut； sep
 	// 空同 Go 语义）
-	rwfunc cut(*[]char/utf32 $s, *[]char/utf32 $sep) -> (
-	            *[]char/utf32 $before, *[]char/utf32 $after, *bool $found) {
+	rwfunc cut(*[]char/utf32 #s, *[]char/utf32 #sep) -> (
+	            *[]char/utf32 #before, *[]char/utf32 #after, *bool #found) {
 		string·find(*s, *sep) -> j:int64
 		m:int64 = string·len(*sep)
 		ln:int64 = string·len(*s)
@@ -337,8 +337,8 @@ lib string {
 	// replacen(s, old, new, limit) -> (out, k) ：替换前 limit 处（limit < 0 =
 	// 全部，Go Replace）
 	// old 空 = 在每个码点边界插入 new（Py/Go/Rust/JS 一致）；k = 实际替换处数
-	rwfunc replacen(*[]char/utf32 $s, *[]char/utf32 $old, *[]char/utf32 $new,
-	                *int64 $limit) -> (*[]char/utf32 $out, *int64 $k) {
+	rwfunc replacen(*[]char/utf32 #s, *[]char/utf32 #old, *[]char/utf32 #new,
+	                *int64 #limit) -> (*[]char/utf32 #out, *int64 #k) {
 		ln:int64 = string·len(*s)
 		m:int64 = string·len(*old)
 		"" -> *out
@@ -384,13 +384,13 @@ lib string {
 	}
 	// replace(s, old, new) -> (out, k) ：全部替换（Go ReplaceAll / Py replace /
 	// Rust replace）
-	rwfunc replace(*[]char/utf32 $s, *[]char/utf32 $old,
-	               *[]char/utf32 $new) -> (*[]char/utf32 $out, *int64 $k) {
+	rwfunc replace(*[]char/utf32 #s, *[]char/utf32 #old,
+	               *[]char/utf32 #new) -> (*[]char/utf32 #out, *int64 #k) {
 		string·replacen(*s, *old, *new, -1) -> (*out, *k)
 	}
 
 	// ── 变换 ──────────────────────────────────────────────────────────
-	rwfunc reverse(*[]char/utf32 $s) -> (*[]char/utf32 $r) {
+	rwfunc reverse(*[]char/utf32 #s) -> (*[]char/utf32 #r) {
 		n:int64 = string·len(*s)
 		"" -> *r
 		i:int64 = n - 1
@@ -400,7 +400,7 @@ lib string {
 			i = i - 1
 		}
 	}
-	rwfunc repeat(*[]char/utf32 $s, *int64 $n) -> (*[]char/utf32 $r) {
+	rwfunc repeat(*[]char/utf32 #s, *int64 #n) -> (*[]char/utf32 #r) {
 		"" -> *r
 		i:int64 = 0
 		while (i < *n) {
@@ -408,7 +408,7 @@ lib string {
 			i = i + 1
 		}
 	}
-	rwfunc upper(*[]char/utf32 $s) -> (*[]char/utf32 $r) {
+	rwfunc upper(*[]char/utf32 #s) -> (*[]char/utf32 #r) {
 		"" -> *r
 		n:int64 = string·len(*s)
 		i:int64 = 0
@@ -424,7 +424,7 @@ lib string {
 			i = i + 1
 		}
 	}
-	rwfunc lower(*[]char/utf32 $s) -> (*[]char/utf32 $r) {
+	rwfunc lower(*[]char/utf32 #s) -> (*[]char/utf32 #r) {
 		"" -> *r
 		n:int64 = string·len(*s)
 		i:int64 = 0
@@ -441,7 +441,7 @@ lib string {
 		}
 	}
 	// capitalize(s) -> r：首字母大写、其余小写（Python capitalize）
-	rwfunc capitalize(*[]char/utf32 $s) -> (*[]char/utf32 $r) {
+	rwfunc capitalize(*[]char/utf32 #s) -> (*[]char/utf32 #r) {
 		ln:int64 = string·len(*s)
 		if (ln == 0) {
 			"" -> *r
@@ -455,7 +455,7 @@ lib string {
 	}
 	// title(s) -> r：每个字母词首字母大写、其余小写（Python title；
 	// 非字母即词边界）
-	rwfunc title(*[]char/utf32 $s) -> (*[]char/utf32 $r) {
+	rwfunc title(*[]char/utf32 #s) -> (*[]char/utf32 #r) {
 		"" -> *r
 		n:int64 = string·len(*s)
 		i:int64 = 0
@@ -479,7 +479,7 @@ lib string {
 		}
 	}
 	// swapcase(s) -> r：字母大小写互换（Python swapcase）
-	rwfunc swapcase(*[]char/utf32 $s) -> (*[]char/utf32 $r) {
+	rwfunc swapcase(*[]char/utf32 #s) -> (*[]char/utf32 #r) {
 		"" -> *r
 		n:int64 = string·len(*s)
 		i:int64 = 0
@@ -498,7 +498,7 @@ lib string {
 
 	// ── 字符分类（ASCII）─────────────────────────────────────────────
 	// allinset(s, set) -> r：s 非空且每个码点都在 set 中（各 is* 的分类原语）
-	rwfunc allinset(*[]char/utf32 $s, *[]char/utf32 $set) -> (*bool $r) {
+	rwfunc allinset(*[]char/utf32 #s, *[]char/utf32 #set) -> (*bool #r) {
 		n:int64 = string·len(*s)
 		*r = n > 0
 		i:int64 = 0
@@ -512,25 +512,25 @@ lib string {
 			i = i + 1
 		}
 	}
-	rwfunc isalpha(*[]char/utf32 $s) -> (*bool $r) {
+	rwfunc isalpha(*[]char/utf32 #s) -> (*bool #r) {
 		set:[]char/utf32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 		string·allinset(*s, set) -> *r
 	}
-	rwfunc isdigit(*[]char/utf32 $s) -> (*bool $r) {
+	rwfunc isdigit(*[]char/utf32 #s) -> (*bool #r) {
 		string·allinset(*s, "0123456789") -> *r
 	}
-	rwfunc isalnum(*[]char/utf32 $s) -> (*bool $r) {
+	rwfunc isalnum(*[]char/utf32 #s) -> (*bool #r) {
 		set:[]char/utf32 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 		string·allinset(*s, set) -> *r
 	}
-	rwfunc isxdigit(*[]char/utf32 $s) -> (*bool $r) {
+	rwfunc isxdigit(*[]char/utf32 #s) -> (*bool #r) {
 		string·allinset(*s, "0123456789abcdefABCDEF") -> *r
 	}
-	rwfunc isspace(*[]char/utf32 $s) -> (*bool $r) {
+	rwfunc isspace(*[]char/utf32 #s) -> (*bool #r) {
 		string·allinset(*s, " \t\n\r\v\f") -> *r
 	}
 	// isupper(s) -> r：至少一个字母且无小写（Python isupper：数字/符号不影响判定）
-	rwfunc isupper(*[]char/utf32 $s) -> (*bool $r) {
+	rwfunc isupper(*[]char/utf32 #s) -> (*bool #r) {
 		up:bool = false
 		bad:bool = false
 		n:int64 = string·len(*s)
@@ -550,7 +550,7 @@ lib string {
 		*r = up && !bad
 	}
 	// islower(s) -> r：至少一个字母且无大写（Python islower）
-	rwfunc islower(*[]char/utf32 $s) -> (*bool $r) {
+	rwfunc islower(*[]char/utf32 #s) -> (*bool #r) {
 		lo:bool = false
 		bad:bool = false
 		n:int64 = string·len(*s)
@@ -571,7 +571,7 @@ lib string {
 	}
 	// ispunct(s) -> r：非空且全为可见 ASCII 标点（C ispunct：33..126
 	// 中非字母数字）
-	rwfunc ispunct(*[]char/utf32 $s) -> (*bool $r) {
+	rwfunc ispunct(*[]char/utf32 #s) -> (*bool #r) {
 		al:[]char/utf32 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 		n:int64 = string·len(*s)
 		*r = n > 0
@@ -591,7 +591,7 @@ lib string {
 	// 假名 > 谚文 > 汉字 > 拉丁；都不命中（数字 / 标点 / 空串）= "other"。
 	// 命名对齐主流：HTML `lang`、ICU `uloc_getLanguage`、Go `x/text/language`、
 	// JS `Intl.Locale.language`（不叫 script——与「脚本」撞词，且 script ≠ 语言）。
-	rwfunc lang(*[]char/utf32 $s) -> (*[]char/utf32 $lg) {
+	rwfunc lang(*[]char/utf32 #s) -> (*[]char/utf32 #lg) {
 		han:bool = false
 		kana:bool = false
 		hangul:bool = false

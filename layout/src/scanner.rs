@@ -241,7 +241,11 @@ fn scan_block_comment(src: &[u8], i: usize) -> (String, usize, bool) {
         }
         j += 1;
     }
-    (String::from_utf8_lossy(&src[i..j]).into_owned(), j, depth == 0)
+    (
+        String::from_utf8_lossy(&src[i..j]).into_owned(),
+        j,
+        depth == 0,
+    )
 }
 
 /// 跨行字面量消费后同步 line/line_start（字面量内部换行不产生 Newline Token，但行号需前进）。
@@ -398,7 +402,10 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             let (val, next, ok, closed) = scan_raw(src, i);
             if ok {
                 if !closed {
-                    diags.push(lex_error(p, "unterminated raw string literal (missing closing `\"#…`)"));
+                    diags.push(lex_error(
+                        p,
+                        "unterminated raw string literal (missing closing `\"#…`)",
+                    ));
                 }
                 tokens.push(Token {
                     kind: Kind::Literal,
@@ -478,6 +485,33 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
                 quote: 0,
             });
             i += 1;
+            continue;
+        }
+
+        /*
+         * `#` — **行内注释**（参数注释名，见 workspace/param-comment-name.md）。
+         *
+         * 终止符是「空白或 token 分隔符」，不是只认空格：纯空格规则会让 `#acc)`
+         * 把右括号一起吞进注释，参数列表从此缺一个 `)`。
+         *
+         * 原始字符串 `r#"…"#` 在上面已被消费，块注释/行注释不经过这里，
+         * 所以本条规则只在**字符串与注释之外**生效。
+         *
+         * value 保留 `#` 本身（与 `//`/`/* */` 保留定界符同一约定）：注释文本原样
+         * 回写才幂等；取参数名时由 parser 剥掉首个 `#`。
+         */
+        if c == b'#' {
+            let start = i;
+            i += 1;
+            while i < src.len() && !is_token_delim_at(src, i) {
+                i += 1;
+            }
+            tokens.push(Token {
+                kind: Kind::Comment,
+                value: String::from_utf8_lossy(&src[start..i]).into_owned(),
+                pos: p,
+                quote: 0,
+            });
             continue;
         }
 
@@ -713,13 +747,47 @@ mod tests {
     }
 
     #[test]
+    fn hash_starts_inline_comment_ending_at_delimiter() {
+        let cs = |src: &str| -> Vec<String> {
+            scan(src)
+                .into_iter()
+                .filter(|t| t.kind == Kind::Comment)
+                .map(|t| t.value)
+                .collect()
+        };
+        // 终止符是分隔符集，不是只认空格：`)` 必须留在注释之外。
+        assert_eq!(cs("(*int64 #acc)"), vec!["#acc"]);
+        assert_eq!(
+            toks("f(*int64 #delta) -> ()"),
+            vec!["I:f", "?:(", "I:*", "I:int64", "?:#delta", "?:)", "?:->", "?:(", "?:)"]
+        );
+        // 注释体是**一个词**：空白与分隔符都终止它（`#` 不是通用注释标记，
+        // 它标的是单个词——参数名）。字符串内的 `#` 不是注释。
+        assert_eq!(cs("#acc\nx = 1\n"), vec!["#acc"]);
+        assert_eq!(cs("# trailing note\n"), vec!["#"]);
+        assert_eq!(cs("println(\"guess #\", n)"), Vec::<String>::new());
+        // 原始字符串先被消费，其中的 `#` 不另起作用。
+        assert_eq!(cs("x = r#\"a # b\"#"), Vec::<String>::new());
+        assert_eq!(cs("x = r####\"a # b\"# c\"####"), Vec::<String>::new());
+        // `//` 与 `/* */` 内的 `#` 不另起作用。
+        assert_eq!(cs("// # one\nx = 1\n"), vec!["// # one"]);
+        assert_eq!(
+            cs("/* # one\n # two */ x = 1\n"),
+            vec!["/* # one\n # two */"]
+        );
+    }
+
+    #[test]
     fn unterminated_literals_are_errors() {
         for (src, want) in [
             ("x = \"abc\nprintln(x)\n", "unterminated string literal"),
             ("x = 'abc\n", "unterminated string literal"),
             ("x = r#\"abc\"\n", "unterminated raw string literal"),
             ("/* never closed\nx = 1\n", "unterminated block comment"),
-            ("/* a /* nested */ still open\n", "unterminated block comment"),
+            (
+                "/* a /* nested */ still open\n",
+                "unterminated block comment",
+            ),
         ] {
             let (_, d) = scan_with_diags(src);
             assert_eq!(d.len(), 1, "{src:?}");
@@ -727,7 +795,11 @@ mod tests {
             assert!(d[0].message.starts_with(want), "{src:?}: {}", d[0].message);
             assert_eq!((d[0].pos.line, d[0].pos.col > 0), (1, true), "{src:?}");
         }
-        for src in ["x = \"a\\\"b\"\n", "x = r#\"a\"b\"#\n", "/* a /* b */ c */\nx = 1\n"] {
+        for src in [
+            "x = \"a\\\"b\"\n",
+            "x = r#\"a\"b\"#\n",
+            "/* a /* b */ c */\nx = 1\n",
+        ] {
             assert!(scan_with_diags(src).1.is_empty(), "{src:?}");
         }
     }

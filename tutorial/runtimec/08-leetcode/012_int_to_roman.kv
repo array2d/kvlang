@@ -3,7 +3,7 @@
 // 期望输出:
 //   LVIII
 //   MCMXCIV
-rwfunc int_to_roman(*int64 $n) -> () {
+rwfunc int_to_roman(*int64 #n) -> () {
 	result:[]char/utf32 = ""
 	val:int64 = *n
 	while (val >= 1000) { result + "M" -> result ; val = val - 1000 }

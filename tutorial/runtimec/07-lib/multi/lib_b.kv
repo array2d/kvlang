@@ -1,8 +1,8 @@
 // 期望阻塞: 多文件 loadandrun 用例，单文件 runner 不支持
 // 运行: kvlang loadandrun lib_a·kv lib_b·kv
 lib math {
-    rwfunc twice(*int64 $A) -> (*int64 $R) { *A × 2 -> *R }
-    rwfunc twice(*int64 $A) -> (*int64 $R) { *A × 2 -> R_m }
+    rwfunc twice(*int64 #A) -> (*int64 #R) { *A × 2 -> *R }
+    rwfunc twice(*int64 #A) -> (*int64 #R) { *A × 2 -> R_m }
 }
 rwfunc test() -> () {
     math·sum(3, 4) -> s

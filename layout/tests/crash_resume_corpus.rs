@@ -9,9 +9,9 @@ use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-const CAPABILITIES: &str = "rwir println(*[]char/utf32 $s...)\n\
-                            rwir print(*[]char/utf32 $s...)\n\
-                            rwir cerr(*[]char/utf32 $s...)\n";
+const CAPABILITIES: &str = "rwir println(*[]char/utf32 #s...)\n\
+                            rwir print(*[]char/utf32 #s...)\n\
+                            rwir cerr(*[]char/utf32 #s...)\n";
 
 const STORE_FILES: &[&str] = &[
     "store.shm",

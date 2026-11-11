@@ -3,8 +3,8 @@
 // 期望输出:
 //   kvlang in kvlang
 //   exit= 0
-rwfunc run_proc(*'[int64]'[]char/utf32 $args,
-		*'[int64]'[]char/utf32 $envs) -> (*uint8 $code) {
+rwfunc run_proc(*'[int64]'[]char/utf32 #args,
+		*'[int64]'[]char/utf32 #envs) -> (*uint8 #code) {
 	networld/proc·exec(*args, *envs) -> *code
 }
 

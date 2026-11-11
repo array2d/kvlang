@@ -8,7 +8,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc has_cycle(*Node $head) -> (*int64 $result) {
+rwfunc has_cycle(*Node #head) -> (*int64 #result) {
 	0 -> *result
 	slow:*/lib/Node = head
 	fast:*/lib/Node = head

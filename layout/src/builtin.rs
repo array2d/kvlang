@@ -169,7 +169,10 @@ pub fn try_parse_number(s: &str) -> Result<Option<(Vec<u8>, &'static str)>, Stri
     }
     if c0 != b'-' && !s.contains('.') && !s.contains('e') && !s.contains('E') {
         if let Ok(u) = s.parse::<u64>() {
-            return Ok(Some((ffi::xvalue_to_wire("uint64", &u.to_le_bytes(), 1)?, "uint64")));
+            return Ok(Some((
+                ffi::xvalue_to_wire("uint64", &u.to_le_bytes(), 1)?,
+                "uint64",
+            )));
         }
     }
     if let Ok(f) = s.parse::<f64>() {

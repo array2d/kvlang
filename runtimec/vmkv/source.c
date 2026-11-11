@@ -255,25 +255,26 @@ static bool vmkv_source_has_inplace_suffix(const char *type_name,
                   inplace_suffix, inplace_suffix_size) == 0;
 }
 
-/* Param key body: `name NUL langtype[ inplace]`; the suffix only on write params. */
+/* Param key body: `langtype[ inplace]`; the suffix only on write params.
+ *
+ * **body 里没有名字**（2026-11-11 裁决）：`#name` 是源码注释，layout 不写它。
+ * 于是这里不再按 NUL 切「名字/类型」——body 整串就是类型，没有 NUL 可切。
+ * `parameter_name` 因此恒为空视图：它只服务于源码级诊断，而名字不在库里。 */
 static bool vmkv_source_parse_parameter_definition(
     const uint8_t *body, size_t body_size, bool read_side,
     vmkv_param_definition_t *output) {
     const size_t inplace_suffix_size = sizeof(" inplace") - 1U;
     *output = (vmkv_param_definition_t){0};
-    size_t name_size = 0U;
-    while (name_size < body_size && body[name_size] != 0U) {
-        name_size += 1U;
-    }
-    if (name_size == 0U || name_size == body_size) {
+    if (body_size == 0U) {
         return false;
     }
-    size_t type_size = body_size - name_size - 1U;
-    if (type_size == 0U) {
+    /* 旧形态 `名字 NUL 类型` 已废除：带 NUL 的 body 就是**坏数据**，不猜。
+     * 静默把它当类型串会让 `x int64` 变成一个永不匹配的 langtype——比拒绝更糟。 */
+    if (memchr(body, 0, body_size) != NULL) {
         return false;
     }
-    const char *type_name =
-        (const char *)(const void *)(body + name_size + 1U);
+    const char *type_name = (const char *)(const void *)body;
+    size_t type_size = body_size;
     bool inplace = false;
     if (vmkv_source_has_inplace_suffix(type_name, type_size)) {
         if (read_side) {
@@ -289,8 +290,6 @@ static bool vmkv_source_parse_parameter_definition(
     if (type_size == 0U) {
         return false;
     }
-    output->name = (const char *)(const void *)body;
-    output->name_size = name_size;
     output->type_name = type_name;
     output->type_name_size = type_size;
     output->inplace = inplace;

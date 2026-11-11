@@ -9,16 +9,16 @@ struct Box {
 	a:int64=0
 	b:int64=0
 }
-rwfunc put_i(*int64 $k, *int64 $v) -> (*'int64'int64 $m) {
+rwfunc put_i(*int64 #k, *int64 #v) -> (*'int64'int64 #m) {
 	*v -> (*m)·*k
 }
-rwfunc put_s(*[]char/utf8 $k, *int64 $v) -> (*'[]char/utf8'int64 $m) {
+rwfunc put_s(*[]char/utf8 #k, *int64 #v) -> (*'[]char/utf8'int64 #m) {
 	(*m)·*k = *v
 }
-rwfunc set_field(*[]char/utf8 $k, *int64 $v) -> (*Box $p) {
+rwfunc set_field(*[]char/utf8 #k, *int64 #v) -> (*Box #p) {
 	*v -> (*p)·*k
 }
-rwfunc local_map(*int64 $k) -> (*int64 $r) {
+rwfunc local_map(*int64 #k) -> (*int64 #r) {
 	lm:'int64'int64 = {}
 	3 -> lm·*k
 	lm·*k -> *r

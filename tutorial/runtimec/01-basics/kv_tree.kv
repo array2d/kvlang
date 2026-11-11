@@ -7,12 +7,12 @@
 //   shape0= 3
 
 // path 下是否存在字段 key
-rwfunc has_field(*[]char/utf32 $path, *[]char/utf32 $key) -> (*bool $ok) {
+rwfunc has_field(*[]char/utf32 #path, *[]char/utf32 #key) -> (*bool #ok) {
 	(*path)·*key != None -> *ok
 }
 
 // 列出 prefix 下的子键并计数（成员数查 memindex，非 ndarray 形状）
-rwfunc count_children(*[]char/utf32 $prefix) -> (*int64 $n) {
+rwfunc count_children(*[]char/utf32 #prefix) -> (*int64 #n) {
 	kvspace·listlen(*prefix) -> *n
 }
 

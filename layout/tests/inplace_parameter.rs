@@ -38,7 +38,7 @@ fn diagnostic(src: &str) -> String {
 fn inplace_positive_same_instruction_read_write() {
     // 正例：`*acc + d -> *acc` 同一条指令既读又写。
     let src = "\
-rwfunc add_to(*int64 $n, int64 $d) -> (*int64 $acc inplace) {
+rwfunc add_to(*int64 #n, int64 #d) -> (inplace *int64 #acc) {
 \t*acc + d -> *acc
 }
 ";
@@ -53,7 +53,7 @@ rwfunc add_to(*int64 $n, int64 $d) -> (*int64 $acc inplace) {
 fn inplace_negative_never_read() {
     // 反例 1：只写不读 ⇒ 缺第 1 条。
     let src = "\
-rwfunc only_write(*int64 $a) -> (*int64 $acc inplace) {
+rwfunc only_write(*int64 #a) -> (inplace *int64 #acc) {
 \t5 -> *acc
 }
 ";
@@ -69,7 +69,7 @@ rwfunc only_write(*int64 $a) -> (*int64 $acc inplace) {
 fn inplace_negative_never_write() {
     // 反例 2：只读不写 ⇒ 缺第 2 条。
     let src = "\
-rwfunc only_read(*int64 $a) -> (*int64 $acc inplace) {
+rwfunc only_read(*int64 #a) -> (inplace *int64 #acc) {
 \t*acc -> x:int64
 \tprint(x)
 }
@@ -87,7 +87,7 @@ fn inplace_negative_read_then_overwrite() {
     /* 反例 3（架构师点名的那条）：先读后覆盖。
      * 满足 1、2，但没有**同一条指令**同时读写 ⇒ 必须拒，且诊断指第 3 条。 */
     let src = "\
-rwfunc read_then_overwrite(*int64 $a) -> (*int64 $acc inplace) {
+rwfunc read_then_overwrite(*int64 #a) -> (inplace *int64 #acc) {
 \t*acc -> x:int64
 \t5 -> *acc
 \tprint(x)
@@ -108,7 +108,7 @@ rwfunc read_then_overwrite(*int64 $a) -> (*int64 $acc inplace) {
 fn inplace_rejected_on_read_parameter() {
     // `inplace` 只能修饰写参；读参上出现它是错误。
     let src = "\
-rwfunc bad(*int64 $a inplace) -> (*int64 $acc) {
+rwfunc bad(inplace *int64 #a) -> (*int64 #acc) {
 \t*a + 1 -> *acc
 }
 ";
@@ -122,14 +122,17 @@ rwfunc bad(*int64 $a inplace) -> (*int64 $acc) {
 fn inplace_multiple_parameters_each_validated() {
     // 多个 inplace 写参逐个校验：第二个缺「同指令读写」，必须报。
     let src = "\
-rwfunc two(*int64 $d) -> (*int64 $a inplace, *int64 $b inplace) {
+rwfunc two(*int64 #d) -> (inplace *int64 #a, inplace *int64 #b) {
 \t*a + d -> *a
 \tb -> x:int64
 \t5 -> *b
 }
 ";
     let message = diagnostic(src);
-    assert!(!message.is_empty(), "第二个 inplace 参数不满足第 3 条，必须报");
+    assert!(
+        !message.is_empty(),
+        "第二个 inplace 参数不满足第 3 条，必须报"
+    );
     assert!(
         message.contains("`b`"),
         "诊断应指向不满足的那个参数 `b`，实际={message:?}"
@@ -147,7 +150,7 @@ fn without_inplace_modifier_the_same_bodies_are_accepted() {
         "*acc -> x:int64\n\tprint(x)\n",
         "*acc -> x:int64\n\t5 -> *acc\n\tprint(x)\n",
     ] {
-        let src = format!("rwfunc f(*int64 $a) -> (*int64 $acc) {{\n\t{body}}}\n");
+        let src = format!("rwfunc f(*int64 #a) -> (*int64 #acc) {{\n\t{body}}}\n");
         assert!(
             passes(&src),
             "没有 inplace 修饰符时该函数体应当通过；诊断={:?}",
@@ -158,7 +161,7 @@ fn without_inplace_modifier_the_same_bodies_are_accepted() {
 
 #[test]
 fn rwir_decl_supports_inplace_on_write_parameter_and_rejects_on_read() {
-    let valid = "rwir accumulate(*int64 $delta) -> (*int64 $acc inplace)\n";
+    let valid = "rwir accumulate(*int64 #delta) -> (inplace *int64 #acc)\n";
     assert!(
         passes(valid),
         "inplace on an rwir write param must pass; diag={:?}",
@@ -166,12 +169,15 @@ fn rwir_decl_supports_inplace_on_write_parameter_and_rejects_on_read() {
     );
     let formatted = format(valid).unwrap();
     assert!(
-        formatted.contains("$acc inplace"),
+        formatted.contains("inplace *int64 #acc"),
         "format must keep inplace on rwir write params, got={formatted:?}"
     );
 
-    let invalid = "rwir bad_op(*int64 $delta inplace) -> (*int64 $acc)\n";
-    assert!(!passes(invalid), "inplace on an rwir read param must be rejected");
+    let invalid = "rwir bad_op(inplace *int64 #delta) -> (*int64 #acc)\n";
+    assert!(
+        !passes(invalid),
+        "inplace on an rwir read param must be rejected"
+    );
     assert!(
         diagnostic(invalid).contains("rwfunc 或 rwir 的写参"),
         "diagnostic must name rwfunc or rwir write params, got={:?}",
@@ -183,27 +189,24 @@ fn rwir_decl_supports_inplace_on_write_parameter_and_rejects_on_read() {
 fn compile_persists_inplace_in_kvspace_and_printlib_reconstructs_it() {
     let (_store, mut kv) = fresh_kv();
     let src = concat!(
-        "rwir native_acc(*int64 $d) -> (*int64 $acc inplace)\n",
-        "rwfunc add_to(*int64 $d) -> (*int64 $acc inplace) {\n",
+        "rwir native_acc(*int64 #d) -> (inplace *int64 #acc)\n",
+        "rwfunc add_to(*int64 #d) -> (inplace *int64 #acc) {\n",
         "    *acc + *d -> *acc\n",
         "}\n",
     );
     compile(&mut kv, src).unwrap();
 
-    // 1. /lib/add_to.[0,1] stores the mark; def_param_parts returns the bare type
+    // 1. /lib/add_to.[0,1] stores the mark; the body is the bare langtype.
+    // 参数名是源码注释（`#name`），不落库——body 里既没有名字，也没有 `\0` 分隔符。
     let write_param_wire = kv.get_one("/lib/add_to.[0,1]");
     assert_eq!(
         kvkind::def_param_full(&write_param_wire),
-        Some(("acc".to_string(), "int64".to_string(), true))
-    );
-    assert_eq!(
-        kvkind::def_param_parts(&write_param_wire),
-        Some(("acc".to_string(), "int64".to_string()))
+        Some(("int64".to_string(), true))
     );
     let read_param_wire = kv.get_one("/lib/add_to.[0,-1]");
     assert_eq!(
         kvkind::def_param_full(&read_param_wire),
-        Some(("d".to_string(), "int64".to_string(), false))
+        Some(("int64".to_string(), false))
     );
 
     // 2. def rwir slot /lib/native_acc/[0,1] stores the mark
@@ -221,12 +224,12 @@ fn compile_persists_inplace_in_kvspace_and_printlib_reconstructs_it() {
     // 3. .src and printlib keep the mark; printlib(/lib) does not print a def rwir as an empty rwfunc
     let src_copy = kvkind::value_string(&kv.get_one("/lib/add_to.src"));
     assert!(
-        src_copy.contains("$acc inplace"),
-        ".src must keep inplace, got={src_copy:?}"
+        src_copy.contains("inplace *int64 #acc"),
+        ".src must keep inplace before the type, got={src_copy:?}"
     );
     let dumped = printlib(&mut kv, "/lib/add_to");
     assert!(
-        dumped.contains("$acc inplace)"),
+        dumped.contains("inplace int64)"),
         "printlib must restore inplace from .[0,1], got={dumped:?}"
     );
     let full_dump = printlib(&mut kv, "/lib");
@@ -250,7 +253,7 @@ fn inplace_supports_member_writes_and_delegation_and_crash_resume_propagation() 
 struct Counter {
     x:int64=0
 }
-rwfunc bump(*int64 $d) -> (*/lib/Counter $p inplace) {
+rwfunc bump(*int64 #d) -> (inplace */lib/Counter #p) {
     (*p)·x + *d -> (*p)·x
 }
 ";
@@ -263,8 +266,8 @@ rwfunc bump(*int64 $d) -> (*/lib/Counter $p inplace) {
     // 2. Delegating to inplace rwir/rwfunc, and the callers' crash_resume records
     let (_store, mut kv) = fresh_kv();
     let delegate_src = concat!(
-        "rwir native_acc(*int64 $d) -> (*int64 $acc inplace)\n",
-        "rwfunc wrap_acc(*int64 $d) -> (*int64 $acc inplace) {\n",
+        "rwir native_acc(*int64 #d) -> (inplace *int64 #acc)\n",
+        "rwfunc wrap_acc(*int64 #d) -> (inplace *int64 #acc) {\n",
         "    native_acc(*d) -> *acc\n",
         "}\n",
         "rwfunc local_caller() -> () {\n",
@@ -303,10 +306,13 @@ fn record(kv: &mut Kv, func_dir: &str) -> String {
 fn verdicts(src: &str, names: &[&str]) -> Vec<String> {
     let (_store, mut kv) = fresh_kv();
     compile(&mut kv, src).unwrap();
-    names.iter().map(|n| record(&mut kv, &format!("/lib/{n}"))).collect()
+    names
+        .iter()
+        .map(|n| record(&mut kv, &format!("/lib/{n}")))
+        .collect()
 }
 
-const NATIVE_ACC: &str = "rwir native_acc(*int64 $d) -> (*int64 $acc inplace)\n";
+const NATIVE_ACC: &str = "rwir native_acc(*int64 #d) -> (inplace *int64 #acc)\n";
 
 #[test]
 fn crash_resume_self_increment_anchors_at_initial_write() {
@@ -324,7 +330,7 @@ fn crash_resume_loop_increment_needs_entry() {
 #[test]
 fn crash_resume_window_replays_each_step_alone() {
     let src = concat!(
-        "rwfunc window(*int64 $b0) -> (*int64 $c inplace, *int64 $x inplace) {\n",
+        "rwfunc window(*int64 #b0) -> (inplace *int64 #c, inplace *int64 #x) {\n",
         "\t*b0 + 0 -> b:int64\n\t*c + 1 -> *c\n\t*x + b -> *x\n}\n",
     );
     assert_eq!(verdicts(src, &["window"]), ["ALWAYS_RESUMABLE"]);
@@ -335,10 +341,10 @@ fn crash_resume_window_replays_each_step_alone() {
 fn crash_resume_parameter_rmw_defers_to_caller() {
     let src = format!(
         "{NATIVE_ACC}{}{}{}{}",
-        "rwfunc add_to(*int64 $d) -> (*int64 $acc inplace) {\n\t*acc + *d -> *acc\n}\n",
-        "rwfunc set0() -> (*[]int64 $acc inplace) {\n\t(*acc)[0] = 9\n}\n",
-        "rwfunc outer() -> (*[]int64 $x) {\n\tset0() -> *x\n}\n",
-        "rwfunc wrap_acc(*int64 $d) -> (*int64 $acc inplace) {\n\tnative_acc(*d) -> *acc\n}\n",
+        "rwfunc add_to(*int64 #d) -> (inplace *int64 #acc) {\n\t*acc + *d -> *acc\n}\n",
+        "rwfunc set0() -> (inplace *[]int64 #acc) {\n\t(*acc)[0] = 9\n}\n",
+        "rwfunc outer() -> (*[]int64 #x) {\n\tset0() -> *x\n}\n",
+        "rwfunc wrap_acc(*int64 #d) -> (inplace *int64 #acc) {\n\tnative_acc(*d) -> *acc\n}\n",
     );
     assert_eq!(
         verdicts(&src, &["add_to", "set0", "outer", "wrap_acc"]),
@@ -355,7 +361,7 @@ fn crash_resume_parameter_rmw_defers_to_caller() {
 #[test]
 fn crash_resume_callers_of_a_reading_callee() {
     let src = concat!(
-        "rwfunc add_to(*int64 $d) -> (*int64 $acc inplace) {\n\t*acc + *d -> *acc\n}\n",
+        "rwfunc add_to(*int64 #d) -> (inplace *int64 #acc) {\n\t*acc + *d -> *acc\n}\n",
         "rwfunc local_caller() -> () {\n\t10 -> v:int64\n\tadd_to(5) -> v\n}\n",
         "rwfunc global_caller() -> () {\n\t10 -> /tmp/g\n\tadd_to(5) -> /tmp/g\n}\n",
     );
@@ -368,9 +374,9 @@ fn crash_resume_callers_of_a_reading_callee() {
 #[test]
 fn crash_resume_plain_unresolved_and_unmarked_read() {
     let src = concat!(
-        "rwfunc plain(int64 $a) -> (*int64 $r) {\n\tb:int64 = a + 1\n\tb -> *r\n}\n",
+        "rwfunc plain(int64 #a) -> (*int64 #r) {\n\tb:int64 = a + 1\n\tb -> *r\n}\n",
         "rwfunc unres() -> () {\n\t0 -> v:int64\n\text·f(1) -> v\n}\n",
-        "rwfunc bump() -> (*int64 $acc) {\n\t*acc + 1 -> *acc\n}\n",
+        "rwfunc bump() -> (*int64 #acc) {\n\t*acc + 1 -> *acc\n}\n",
         "rwfunc user() -> () {\n\tv:int64 = 3\n\tbump() -> v\n\tv -> /tmp/o\n}\n",
     );
     assert_eq!(
@@ -387,14 +393,17 @@ fn crash_resume_plain_unresolved_and_unmarked_read() {
 #[test]
 fn crash_resume_read_then_overwrite_and_join() {
     let src = concat!(
-        "rwfunc rto(int64 $c) -> () {\n\ta:int64 = 1\n\tif (c > 0) {\n",
+        "rwfunc rto(int64 #c) -> () {\n\ta:int64 = 1\n\tif (c > 0) {\n",
         "\t\ta -> t:int64\n\t\tt + 1 -> a\n\t\ta + t -> a\n\t\ta -> /tmp/rto\n\t}\n}\n",
-        "rwfunc join(int64 $c) -> () {\n\tx:int64 = 0\n\tif (c > 0) {\n\t\tx = 5\n",
+        "rwfunc join(int64 #c) -> () {\n\tx:int64 = 0\n\tif (c > 0) {\n\t\tx = 5\n",
         "\t} else {\n\t\tx = 7\n\t}\n\tx = x + 1\n\tx -> /tmp/join\n}\n",
     );
     assert_eq!(
         verdicts(src, &["rto", "join"]),
-        ["CONDITIONALLY_RESUMABLE:6<-5", "CONDITIONALLY_RESUMABLE:8<-entry"]
+        [
+            "CONDITIONALLY_RESUMABLE:6<-5",
+            "CONDITIONALLY_RESUMABLE:8<-entry"
+        ]
     );
 }
 
@@ -423,13 +432,17 @@ fn crash_resume_anchor_regressions() {
 #[test]
 fn store_resident_callees_are_resolved() {
     let (_store, mut kv) = fresh_kv();
-    compile(&mut kv, "lib mp {\n\trwir native_acc(*int64 $d) -> (*int64 $acc inplace)\n}\n").unwrap();
     compile(
         &mut kv,
-        "lib mp {\n\trwfunc add_to(*int64 $d) -> (*int64 $acc inplace) {\n\t\t*acc + *d -> *acc\n\t}\n}\n",
+        "lib mp {\n\trwir native_acc(*int64 #d) -> (inplace *int64 #acc)\n}\n",
     )
     .unwrap();
-    let h = "lib other {\n\trwfunc h(*int64 $d) -> (*int64 $acc inplace) {\n\t\tmp·native_acc(*d) -> *acc\n\t}\n}\n";
+    compile(
+        &mut kv,
+        "lib mp {\n\trwfunc add_to(*int64 #d) -> (inplace *int64 #acc) {\n\t\t*acc + *d -> *acc\n\t}\n}\n",
+    )
+    .unwrap();
+    let h = "lib other {\n\trwfunc h(*int64 #d) -> (inplace *int64 #acc) {\n\t\tmp·native_acc(*d) -> *acc\n\t}\n}\n";
     assert!(!passes(h), "without the store the callee mark is unknown");
     vet_with_store(&mut kv, h).unwrap();
     compile(
@@ -437,8 +450,8 @@ fn store_resident_callees_are_resolved() {
         concat!(
             "lib other {\n",
             "\trwfunc g() -> () {\n\t\t1 -> v:int64\n\t\tmp·native_acc(5) -> v\n\t}\n",
-            "\trwfunc h(*int64 $d) -> (*int64 $acc inplace) {\n\t\tmp·native_acc(*d) -> *acc\n\t}\n",
-            "\trwfunc k(*int64 $d) -> (*int64 $x inplace) {\n\t\tmp·add_to(*d) -> *x\n\t}\n",
+            "\trwfunc h(*int64 #d) -> (inplace *int64 #acc) {\n\t\tmp·native_acc(*d) -> *acc\n\t}\n",
+            "\trwfunc k(*int64 #d) -> (inplace *int64 #x) {\n\t\tmp·add_to(*d) -> *x\n\t}\n",
             "}\n",
         ),
     )
@@ -453,7 +466,10 @@ fn store_resident_callees_are_resolved() {
         "NOT_RESUMABLE:1:unverified:mp·native_acc"
     );
     /* A store rwfunc body is invisible: never replayed. */
-    assert_eq!(record(&mut kv, "/lib/other·k"), "NOT_RESUMABLE:1:callee:mp·add_to");
+    assert_eq!(
+        record(&mut kv, "/lib/other·k"),
+        "NOT_RESUMABLE:1:callee:mp·add_to"
+    );
 }
 
 /// A callee's mark counts only after it verifies, so recursion cannot justify itself.
@@ -463,52 +479,78 @@ fn inplace_recursion_does_not_justify_itself() {
         "\tif (n > 0) {\n\t\tf(n - 1) -> *acc\n\t} else {\n\t\t5 -> *acc\n\t}\n",
         "\t5 -> *acc\n\tf(0) -> *acc\n",
     ] {
-        let src = format!("rwfunc f(int64 $n) -> (*int64 $acc inplace) {{\n{body}}}\n");
-        assert!(diagnostic(&src).contains("从未被读"), "recursion must not credit itself: {src}");
+        let src = format!("rwfunc f(int64 #n) -> (inplace *int64 #acc) {{\n{body}}}\n");
+        assert!(
+            diagnostic(&src).contains("从未被读"),
+            "recursion must not credit itself: {src}"
+        );
     }
     let mutual = concat!(
-        "rwfunc a(int64 $n) -> (*int64 $acc inplace) {\n\tb(n) -> *acc\n}\n",
-        "rwfunc b(int64 $n) -> (*int64 $acc inplace) {\n\ta(n) -> *acc\n}\n",
+        "rwfunc a(int64 #n) -> (inplace *int64 #acc) {\n\tb(n) -> *acc\n}\n",
+        "rwfunc b(int64 #n) -> (inplace *int64 #acc) {\n\ta(n) -> *acc\n}\n",
     );
     assert!(!passes(mutual), "mutual recursion must not credit itself");
     let verified = concat!(
-        "rwfunc add_to(*int64 $d) -> (*int64 $acc inplace) {\n\t*acc + *d -> *acc\n}\n",
-        "rwfunc wrap(*int64 $d) -> (*int64 $acc inplace) {\n\tadd_to(*d) -> *acc\n}\n",
+        "rwfunc add_to(*int64 #d) -> (inplace *int64 #acc) {\n\t*acc + *d -> *acc\n}\n",
+        "rwfunc wrap(*int64 #d) -> (inplace *int64 #acc) {\n\tadd_to(*d) -> *acc\n}\n",
     );
-    assert!(passes(verified), "a verified callee mark counts: {}", diagnostic(verified));
+    assert!(
+        passes(verified),
+        "a verified callee mark counts: {}",
+        diagnostic(verified)
+    );
 }
 
 /// Quoted literals, static member keys and shadowing loop variables are not reads of the param.
 #[test]
 fn inplace_reads_ignore_literals_member_keys_and_shadowing() {
     for src in [
-        "rwfunc f() -> (*char/utf8 $acc inplace) {\n\t\"acc\" -> *acc\n}\n",
-        "rwfunc f(int64 $d) -> (*int64 $acc inplace) {\n\tprintln(\"acc\") -> *acc\n}\n",
-        "struct S {\n\tacc:int64=0\n}\nrwfunc f(*/lib/S $q) -> (*int64 $acc inplace) {\n\t(*q)·acc -> *acc\n}\n",
+        "rwfunc f() -> (inplace *char/utf8 #acc) {\n\t\"acc\" -> *acc\n}\n",
+        "rwfunc f(int64 #d) -> (inplace *int64 #acc) {\n\tprintln(\"acc\") -> *acc\n}\n",
+        "struct S {\n\tacc:int64=0\n}\nrwfunc f(*/lib/S #q) -> (inplace *int64 #acc) {\n\t(*q)·acc -> *acc\n}\n",
     ] {
         assert!(diagnostic(src).contains("从未被读"), "must be rejected as never read: {src}");
     }
-    let shadow = "rwfunc f(*[]int64 $d) -> (*int64 $acc inplace) {\n\t0 -> *acc\n\tfor (acc in *d) {\n\t\tacc + 1 -> *acc\n\t}\n}\n";
-    assert!(diagnostic(shadow).contains("shadows a parameter"), "{}", diagnostic(shadow));
+    let shadow = "rwfunc f(*[]int64 #d) -> (inplace *int64 #acc) {\n\t0 -> *acc\n\tfor (acc in *d) {\n\t\tacc + 1 -> *acc\n\t}\n}\n";
+    assert!(
+        diagnostic(shadow).contains("shadows a parameter"),
+        "{}",
+        diagnostic(shadow)
+    );
     /* The loop variable would be emitted as the parameter slot; read params were already refused. */
-    let write_shadow = "rwfunc f(*[]int64 $d) -> (*int64 $r) {\n\tfor (r in *d) {\n\t\tprint(r)\n\t}\n}\n";
-    assert!(diagnostic(write_shadow).contains("shadows a parameter"), "{}", diagnostic(write_shadow));
-    assert!(!passes("rwfunc f(*[]int64 $d) -> () {\n\tfor (d in *d) {\n\t\tprint(d)\n\t}\n}\n"));
+    let write_shadow =
+        "rwfunc f(*[]int64 #d) -> (*int64 #r) {\n\tfor (r in *d) {\n\t\tprint(r)\n\t}\n}\n";
+    assert!(
+        diagnostic(write_shadow).contains("shadows a parameter"),
+        "{}",
+        diagnostic(write_shadow)
+    );
+    assert!(!passes(
+        "rwfunc f(*[]int64 #d) -> () {\n\tfor (d in *d) {\n\t\tprint(d)\n\t}\n}\n"
+    ));
 }
 
 /// `(*m)·*k` desugars to a `kvlang·resolvekey` position slot; the write still counts for `m`.
 #[test]
 fn inplace_dynamic_member_write_counts() {
-    let src = "rwfunc put(*int64 $k, *int64 $v) -> (*'[int64]'int64 $m inplace) {\n\t(*m)·*k + *v -> (*m)·*k\n}\n";
-    assert!(passes(src), "dynamic member RMW must pass: {}", diagnostic(src));
+    let src = "rwfunc put(*int64 #k, *int64 #v) -> (inplace *'[int64]'int64 #m) {\n\t(*m)·*k + *v -> (*m)·*k\n}\n";
+    assert!(
+        passes(src),
+        "dynamic member RMW must pass: {}",
+        diagnostic(src)
+    );
 }
 
 /// `vet` with a store accepts a call to an rwir declared in the same file, as `compile` does.
 #[test]
 fn vet_with_store_sees_same_unit_rwir_decls() {
-    let src = "rwir native_acc(*int64 $d) -> (*int64 $acc)\nrwfunc w(*int64 $d) -> (*int64 $acc) {\n\tnative_acc(*d) -> *acc\n}\n";
+    let src = "rwir native_acc(*int64 #d) -> (*int64 #acc)\nrwfunc w(*int64 #d) -> (*int64 #acc) {\n\tnative_acc(*d) -> *acc\n}\n";
     let (_store, mut kv) = fresh_kv();
-    assert!(vet_with_store(&mut kv, src).is_ok(), "{:?}", vet_with_store(&mut kv, src));
+    assert!(
+        vet_with_store(&mut kv, src).is_ok(),
+        "{:?}",
+        vet_with_store(&mut kv, src)
+    );
     let (_store2, mut kv2) = fresh_kv();
     assert!(compile(&mut kv2, src).is_ok());
 }
@@ -516,31 +558,43 @@ fn vet_with_store_sees_same_unit_rwir_decls() {
 /// `format` output of a dynamic member RMW still verifies.
 #[test]
 fn inplace_dynamic_member_write_survives_format() {
-    let src = "rwfunc put(*int64 $k, *int64 $v) -> (*'[int64]'int64 $m inplace) {\n\t(*m)·*k + *v -> (*m)·*k\n}\n";
+    let src = "rwfunc put(*int64 #k, *int64 #v) -> (inplace *'[int64]'int64 #m) {\n\t(*m)·*k + *v -> (*m)·*k\n}\n";
     let formatted = format(src).unwrap();
-    assert!(passes(&formatted), "{formatted}\n{}", diagnostic(&formatted));
+    assert!(
+        passes(&formatted),
+        "{formatted}\n{}",
+        diagnostic(&formatted)
+    );
 }
 
 /// Duplicate definitions: the last one is what the store keeps, so it decides the credit.
 #[test]
 fn inplace_credit_uses_last_duplicate_definition() {
     let rwfunc = concat!(
-        "rwfunc g(*int64 $d) -> (*int64 $acc inplace) {\n\t*acc + *d -> *acc\n}\n",
-        "rwfunc g(*int64 $d) -> (*int64 $acc) {\n\t*d -> *acc\n}\n",
-        "rwfunc f(*int64 $d) -> (*int64 $r inplace) {\n\tg(*d) -> *r\n}\n",
+        "rwfunc g(*int64 #d) -> (inplace *int64 #acc) {\n\t*acc + *d -> *acc\n}\n",
+        "rwfunc g(*int64 #d) -> (*int64 #acc) {\n\t*d -> *acc\n}\n",
+        "rwfunc f(*int64 #d) -> (inplace *int64 #r) {\n\tg(*d) -> *r\n}\n",
     );
-    assert!(diagnostic(rwfunc).contains("从未被读"), "{}", diagnostic(rwfunc));
+    assert!(
+        diagnostic(rwfunc).contains("从未被读"),
+        "{}",
+        diagnostic(rwfunc)
+    );
     let rwir = concat!(
-        "rwir n(*int64 $d) -> (*int64 $acc inplace)\n",
-        "rwir n(*int64 $d) -> (*int64 $acc)\n",
-        "rwfunc f(*int64 $d) -> (*int64 $r inplace) {\n\tn(*d) -> *r\n}\n",
+        "rwir n(*int64 #d) -> (inplace *int64 #acc)\n",
+        "rwir n(*int64 #d) -> (*int64 #acc)\n",
+        "rwfunc f(*int64 #d) -> (inplace *int64 #r) {\n\tn(*d) -> *r\n}\n",
     );
-    assert!(diagnostic(rwir).contains("从未被读"), "{}", diagnostic(rwir));
+    assert!(
+        diagnostic(rwir).contains("从未被读"),
+        "{}",
+        diagnostic(rwir)
+    );
 }
 
 /// An rwir decl reusing an operator word gets no credit: the call is emitted as the builtin.
 #[test]
 fn inplace_operator_word_rwir_decl_gets_no_credit() {
-    let src = "rwir add(*int64 $a, *int64 $b) -> (*int64 $acc inplace)\nrwfunc f(int64 $x) -> (*int64 $r inplace) {\n\tadd(x, 1) -> *r\n}\n";
+    let src = "rwir add(*int64 #a, *int64 #b) -> (inplace *int64 #acc)\nrwfunc f(int64 #x) -> (inplace *int64 #r) {\n\tadd(x, 1) -> *r\n}\n";
     assert!(diagnostic(src).contains("从未被读"), "{}", diagnostic(src));
 }

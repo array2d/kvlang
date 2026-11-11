@@ -9,7 +9,7 @@
 //   sum = 100
 // 散 key 数组作实参时 for-in 在 layout 脱糖成 compact 取值（compactarray·at），
 // 函数内改用 kvspace·listlen/kvspace·listat/kvspace·get 显式遍历。
-rwfunc print_sum(*'[int64]'int64 $nums) -> (*int64 $total) {
+rwfunc print_sum(*'[int64]'int64 #nums) -> (*int64 #total) {
 	*total = 0
 	kvspace·listlen(*nums) -> n:int64
 	0 -> i:int64

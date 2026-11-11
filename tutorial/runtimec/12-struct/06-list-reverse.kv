@@ -12,7 +12,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc reverse_list() -> (**Node $head, **Node $new_head) {
+rwfunc reverse_list() -> (**Node #head, **Node #new_head) {
 	prev:*/lib/Node = None
 	cur:*/lib/Node = *head
 	while (cur != None) {

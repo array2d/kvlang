@@ -3,7 +3,7 @@
 // 期望输出:
 //   true
 //   false
-rwfunc has_dup(*[]int64 $a) -> () {
+rwfunc has_dup(*[]int64 #a) -> () {
 	compactarray·numel(*a) -> n:int64
 	seen:'[]char/utf8'int64 = {}
 	found:bool = false

@@ -11,7 +11,6 @@ use kvlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
-
 /// 测试用的临时目录，**离开作用域即删**（含 panic 展开时）。
 /// 普通清理语句在断言失败时会被跳过——测试红了反而留下最多垃圾。
 struct TempDir(PathBuf);
@@ -27,8 +26,6 @@ impl TempDir {
         self.0.join(p)
     }
 }
-
-
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
@@ -85,7 +82,7 @@ fn compile(tag: &str, src: &str) -> (TempDir, Kv) {
 fn mixed_precision_params_keep_their_own_types() {
     let (_dir, mut kv) = compile(
         "mixed",
-        "lib p {\n\trwfunc f(*int64 $a, *float64 $b) -> (*float64 $r) {\n\t\t*a + *b -> *r\n\t}\n}\n",
+        "lib p {\n\trwfunc f(*int64 #a, *float64 #b) -> (*float64 #r) {\n\t\t*a + *b -> *r\n\t}\n}\n",
     );
     assert_eq!(read_slot_type(&mut kv, "/lib/p·f/[1,-1]"), "int64");
     assert_eq!(read_slot_type(&mut kv, "/lib/p·f/[2,-1]"), "float64");
@@ -96,13 +93,13 @@ fn mixed_precision_params_keep_their_own_types() {
 fn union_declaration_with_single_assignment_kind_is_narrowed() {
     let (_dir, mut kv) = compile(
         "narrow",
-        "lib p {\n\trwfunc h() -> (*int64 $r) {\n\t\ty:int64|float64 = 1\n\t\ty + 1 -> *r\n\t}\n}\n",
+        "lib p {\n\trwfunc h() -> (*int64 #r) {\n\t\ty:int64|float64 = 1\n\t\ty + 1 -> *r\n\t}\n}\n",
     );
     assert_eq!(read_slot_type(&mut kv, "/lib/p·h/[2,-1]"), "int64");
     // 循环累加：boot 从字面量 0 点火，再由算术来源接上。
     let (_dir2, mut kv2) = compile(
         "loop",
-        "lib p {\n\trwfunc s(*int64 $n) -> () {\n\t\ttotal:int64|float64 = 0\n\t\ti = 0\n\t\twhile (i < *n) {\n\t\t\ttotal = total + i\n\t\t\ti = i + 1\n\t\t}\n\t}\n}\n",
+        "lib p {\n\trwfunc s(*int64 #n) -> () {\n\t\ttotal:int64|float64 = 0\n\t\ti = 0\n\t\twhile (i < *n) {\n\t\t\ttotal = total + i\n\t\t\ti = i + 1\n\t\t}\n\t}\n}\n",
     );
     // `while (i < *n)` 里的 `*n` 展开成一条拷贝指令，循环体因此右移到第 7 行。
     assert_eq!(read_slot_type(&mut kv2, "/lib/p·s/[7,-1]"), "int64");
@@ -118,7 +115,7 @@ fn unresolvable_union_is_preserved() {
     // 两条路径写不同 kind：真动态，保留并集。
     let (_dir2, mut kv2) = compile(
         "branch",
-        "lib p {\n\trwfunc m(*bool $c) -> (*float64 $r) {\n\t\tx:int64|float64 = 1\n\t\tif (*c) {\n\t\t\tx = 2.5\n\t\t}\n\t\tx + 1.0 -> *r\n\t}\n}\n",
+        "lib p {\n\trwfunc m(*bool #c) -> (*float64 #r) {\n\t\tx:int64|float64 = 1\n\t\tif (*c) {\n\t\t\tx = 2.5\n\t\t}\n\t\tx + 1.0 -> *r\n\t}\n}\n",
     );
     // `if (*c)` 里的 `*c` 展开成一条拷贝指令，`x + 1.0` 因此右移到第 8 行。
     assert_eq!(read_slot_type(&mut kv2, "/lib/p·m/[8,-1]"), "int64|float64");
@@ -129,7 +126,7 @@ fn unresolvable_union_is_preserved() {
 fn narrowing_never_invents_a_kind_outside_the_union() {
     let (_dir, mut kv) = compile(
         "outside",
-        "lib p {\n\trwfunc f() -> (*int8 $r) {\n\t\ty:int8|int16 = 1\n\t\ty + int8(1) -> *r\n\t}\n}\n",
+        "lib p {\n\trwfunc f() -> (*int8 #r) {\n\t\ty:int8|int16 = 1\n\t\ty + int8(1) -> *r\n\t}\n}\n",
     );
     // `y` 的唯一赋值是字面量 1（int64），不在 int8|int16 并集内 → 不得采纳。
     let ty = read_slot_type(&mut kv, "/lib/p·f/[3,-1]");
