@@ -14,8 +14,8 @@ env:
   # workflow_dispatch 在分支上跑，GITHUB_REF_NAME 含 /；用 tag 输入或固定名
   ABI_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.tag || 'dryrun' }}
 jobs:
-  # 产物布局（repo 即 prefix）：bin/ 可执行、lib/ 库、lib/kvspace/ 后端、
-  # include/ 头。tarball 保持同一布局，rpath 相对 $ORIGIN / @loader_path。
+  # 产物布局（repo 即 prefix）：bin/ 可执行、lib/ 库、include/ 头。
+  # tarball 保持同一布局，rpath 相对 $ORIGIN / @loader_path。
   linux:
     runs-on: ubuntu-latest
     env:
@@ -65,7 +65,7 @@ jobs:
           set -euo pipefail
           v="${ABI_VERSION}"
           d="kvlang-abi-$v-linux-x86_64"
-          mkdir -p "$d/include/kvlang" "$d/lib/kvspace" "$d/bin"
+          mkdir -p "$d/include/kvlang" "$d/bin"
           # kvlang 头有两个来源，`runtime/include/` 已随 c2 归档消失（e927a923）：
           #   include/kvlang/        —— 语言层（xvalue.h 构造器、const.h）
           #   runtimec/include/kvlang/ —— 运行时 ABI（runtimec.h）
@@ -81,14 +81,7 @@ jobs:
               [ -e "$f" ] && cp -P "$f" "$d/lib/"
             done
           done
-          # 后端目录**只收 durable，按库名收**：`find` 全收会把 CMake 顺带装进
-          # `lib/kvspace/` 的前端副本一起带进包（macOS 的 `cmake --install` 就装两份），
-          # 发布包里出现两份 libkvspace 就是二义来源。
-          for f in "$DEP_PREFIX/lib/kvspace"/libkvspace_durable.so*; do
-            [ -e "$f" ] && cp -P "$f" "$d/lib/kvspace/"
-          done
-          test "$(ls "$d/lib/kvspace" | sed 's/\.so.*//' | sort -u)" = "libkvspace_durable" || {
-            echo "发布包 lib/kvspace 出现非预期库："; ls "$d/lib/kvspace"; exit 1; }
+          # 不发 durable（先不管）：发布包只有前端三库，`lib/kvspace/` 不存在。
           # 断言：恰好 3 个库名（允许 soname 链接），多一个就是残留。
           names=$(find "$d/lib" -maxdepth 1 -type f -name '*.so*' | sed 's/.*\///;s/\.so.*//' | sort -u)
           test "$names" = "$(printf 'libkvlang_runtime\nlibkvlanglayout\nlibkvspace')" || {
@@ -176,10 +169,7 @@ jobs:
             cmake --build "$RUNNER_TEMP/$repo/build" -j
             sudo cmake --install "$RUNNER_TEMP/$repo/build"
           done
-          git clone --depth 1 https://github.com/array2d/kvspace-durable.git "$RUNNER_TEMP/kvspace-durable"
-          cargo build --release --manifest-path "$RUNNER_TEMP/kvspace-durable/Cargo.toml"
-          sudo mkdir -p "$DEP_PREFIX/lib/kvspace"
-          sudo cp "$RUNNER_TEMP/kvspace-durable/target/release/libkvspace_durable.dylib" "$DEP_PREFIX/lib/kvspace/"
+          # durable 不建不发（先不管）。
       # byteseek 暂不发：缺 kvlangDefRwir / kvlangRuntime* / kvlangRwirext* 十二个 ABI
       # （TASK-035），修复后恢复。它的 Makefile target 保留，不要删。
       - name: 构建 layout + runtimec 运行库 + kvspace CLI
@@ -215,18 +205,15 @@ jobs:
           EOF
           # 头与库都从平台最终位置取：Linux /usr、macOS /usr/local。repo 内没有
           # 依赖副本，所以这里不需要任何「副本 vs 系统」的取舍。
-          # 两个 `-L`：kvspace 的 CMake 把库装到 `lib/kvspace/`（安装规则），而
-          # release tarball 的布局是 `lib/` 顶层；给两处，两种布局都命中。
           cc "$RUNNER_TEMP/conn.c" -o "$RUNNER_TEMP/conn" \
-            -I"$DEP_PREFIX/include" \
-            -L"$DEP_PREFIX/lib" -L"$DEP_PREFIX/lib/kvspace" -lkvspace
-          DYLD_FALLBACK_LIBRARY_PATH="$DEP_PREFIX/lib:$DEP_PREFIX/lib/kvspace" "$RUNNER_TEMP/conn"
+            -I"$DEP_PREFIX/include" -L"$DEP_PREFIX/lib" -lkvspace
+          DYLD_FALLBACK_LIBRARY_PATH="$DEP_PREFIX/lib" "$RUNNER_TEMP/conn"
       - name: 打包 ABI 产物
         run: |
           set -euo pipefail
           v="${ABI_VERSION}"
           d="kvlang-abi-$v-darwin-arm64"
-          mkdir -p "$d/include/kvlang" "$d/lib/kvspace" "$d/bin"
+          mkdir -p "$d/include/kvlang" "$d/bin"
           # 同 Linux job：`runtime/include/` 已随 c2 归档消失（e927a923）。
           cp -R include/kvlang/. "$d/include/kvlang/"
           cp -R runtimec/include/kvlang/. "$d/include/kvlang/"
@@ -245,13 +232,7 @@ jobs:
               [ -e "$f" ] && cp -P "$f" "$d/lib/"
             done
           done
-          # 后端目录**只收 durable，按库名收**（同 Linux job）：`cmake --install`
-          # 把前端也装进 `lib/kvspace/`，全收会让发布包里出现两份 libkvspace。
-          for f in "$DEP_PREFIX/lib/kvspace"/libkvspace_durable*.dylib; do
-            [ -e "$f" ] && cp -P "$f" "$d/lib/kvspace/"
-          done
-          test "$(ls "$d/lib/kvspace" | sed 's/\.dylib$//; s/\.[0-9][0-9.]*$//' | sort -u)" = "libkvspace_durable" || {
-            echo "发布包 lib/kvspace 出现非预期库："; ls "$d/lib/kvspace"; exit 1; }
+          # 不发 durable（先不管）：发布包只有前端三库，`lib/kvspace/` 不存在。
           # `-type f` 只看得见真文件 `libkvspace.1.0.0.dylib`，所以剥掉 `.dylib` 后
           # 还剩版本段 `.1.0.0`——必须再剥一次数字段才能与期望的库名相等。
           # `libkvlanglayout.dylib` 无版本段，两次 sed 后仍是 `libkvlanglayout`。
