@@ -65,7 +65,7 @@ jobs:
           set -euo pipefail
           v="${ABI_VERSION}"
           d="kvlang-abi-$v-linux-x86_64"
-          mkdir -p "$d/include/kvlang" "$d/bin"
+          mkdir -p "$d/include/kvlang" "$d/lib" "$d/bin"
           # kvlang 头有两个来源，`runtime/include/` 已随 c2 归档消失（e927a923）：
           #   include/kvlang/        —— 语言层（xvalue.h 构造器、const.h）
           #   runtimec/include/kvlang/ —— 运行时 ABI（runtimec.h）
@@ -213,7 +213,7 @@ jobs:
           set -euo pipefail
           v="${ABI_VERSION}"
           d="kvlang-abi-$v-darwin-arm64"
-          mkdir -p "$d/include/kvlang" "$d/bin"
+          mkdir -p "$d/include/kvlang" "$d/lib" "$d/bin"
           # 同 Linux job：`runtime/include/` 已随 c2 归档消失（e927a923）。
           cp -R include/kvlang/. "$d/include/kvlang/"
           cp -R runtimec/include/kvlang/. "$d/include/kvlang/"
