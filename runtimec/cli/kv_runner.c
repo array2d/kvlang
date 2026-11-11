@@ -682,6 +682,9 @@ static runtimec_status_t case_store_close(runner_environment_t *environment) {
  */
 static const char *g_runner_operators_argument = NULL;
 
+/* `--list-outcomes`：逐条打印用例的最终归属。默认关。 */
+static bool g_list_outcomes = false;
+
 static size_t runner_operator_names(const char *output[], size_t capacity) {
     const char *list = g_runner_operators_argument;
     if (list == NULL || list[0] == '\0') {
@@ -1343,14 +1346,23 @@ static compare_result_t compare_output(const expectation_t *expectation,
 /* ── 主流程（骨架：尚未接执行） ───────────────────────────────────── */
 
 int main(int argument_count, char **arguments) {
-    /* `--operators=a,b` 可选：要声明哪些输出算子名（见
-     * `runner_operator_names` 的说明）。位置参数仍是三个。 */
+    /* 可选开关先摘掉，位置参数仍是三个：
+     *   `--operators=a,b`    要声明哪些输出算子名（见 `runner_operator_names`）
+     *   `--list-outcomes`    逐条打印用例归属（见汇总处的归属核对）
+     *
+     * **开关一律走命令行，不走环境变量**：kvlang 只有一个环境变量 `KVSPACE`
+     * （用户裁决 G12）。环境变量的毛病是它不在命令行里——读代码的人看不到本次
+     * 调用的全部输入，而「为什么这次输出多了一大段」会变成一次考古。 */
     const char *positional[3];
     size_t positional_count = 0U;
     for (int at = 1; at < argument_count; ++at) {
         const char *argument = arguments[at];
         if (strncmp(argument, "--operators=", 12) == 0) {
             g_runner_operators_argument = argument + 12;
+            continue;
+        }
+        if (strcmp(argument, "--list-outcomes") == 0) {
+            g_list_outcomes = true;
             continue;
         }
         if (positional_count < 3U) {
@@ -1360,8 +1372,8 @@ int main(int argument_count, char **arguments) {
     }
     if (positional_count != 3U) {
         fprintf(stderr,
-                "usage: kv_runner [--operators=a,b] <corpus-dir> <layout-lib> "
-                "<kvspace-lib>\n");
+                "usage: kv_runner [--operators=a,b] [--list-outcomes] "
+                "<corpus-dir> <layout-lib> <kvspace-lib>\n");
         return 2;
     }
     const char *corpus = positional[0];
@@ -1984,10 +1996,8 @@ int main(int argument_count, char **arguments) {
      * 再把「各桶之和 == cases.count」做成断言：不等就红，不让它下次静默。
      */
     {
-        /* 逐条明细默认不打（会淹没汇总），`KVRUN_LIST_OUTCOMES=1` 时打。
-         * 用环境开关而不是第四个位置参数：位置参数的数量是既有契约。 */
-        const char *list = getenv("KVRUN_LIST_OUTCOMES");
-        const bool list_each = list != NULL && list[0] != '\0' && list[0] != '0';
+        /* 逐条明细默认不打（会淹没汇总），`--list-outcomes` 时打。 */
+        const bool list_each = g_list_outcomes;
         bool matches = true;
         for (size_t index = 0U; index < cases.count; ++index) {
             const case_outcome_t outcome = g_outcomes[index].outcome;

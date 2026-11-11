@@ -151,33 +151,29 @@ fn string_plus_emits_concat_and_mixed_is_rejected() {
 
 #[test]
 fn no_switch_can_bring_typed_names_back() {
-    // 开关已删：把历史开关值设成任意值都不影响产物。
-    for value in ["1", "0", ""] {
-        let file = temp_file("switch", "rwfunc f(*int64 $a) -> () {\n\t*a + *a -> w\n}\n");
-        let db = dsn("switch");
-        let out = Command::new(bin())
-            .arg(&file)
-            .arg(&db)
-            .env("KVLANG_LAYOUT_SEMANTIC_OP", value)
-            .env("KVLANG_LAYOUT_STRING_CONCAT", value)
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        let mut kv = Kv::conn(&db);
-        init_dirs(&mut kv).unwrap();
-        for c in kv.list("/lib/f/", false, false) {
-            let t = c.trim_end_matches('/');
-            if !t.starts_with('[') || !t.ends_with(",0]") {
-                continue;
-            }
-            let text = slot_text(&mut kv, &format!("/lib/f/{c}"));
-            assert!(
-                !text.contains('·'),
-                "环境变量 {value:?} 让 typed opcode 复活：{text:?}"
-            );
+    // 开关（`KVLANG_LAYOUT_SEMANTIC_OP` / `KVLANG_LAYOUT_STRING_CONCAT`）已随改动
+    // 一并删除，layout 源码不再读它们。原先这里跑 `["1","0",""]` 三轮，是为了证明
+    // 「任何开关值都不影响产物」——开关没了，三轮就是同一件事跑三遍。
+    // 按 p11：被测对象已删，测试直接收敛成一轮、不设任何 env。
+    let file = temp_file("switch", "rwfunc f(*int64 $a) -> () {\n\t*a + *a -> w\n}\n");
+    let db = dsn("switch");
+    let out = Command::new(bin())
+        .arg(&file)
+        .arg(&db)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let mut kv = Kv::conn(&db);
+    init_dirs(&mut kv).unwrap();
+    for c in kv.list("/lib/f/", false, false) {
+        let t = c.trim_end_matches('/');
+        if !t.starts_with('[') || !t.ends_with(",0]") {
+            continue;
         }
-        drop(kv);
-        let _ = std::fs::remove_file(&file);
-        kvlanglayout::ffi::remove_test_store(&db);
+        let text = slot_text(&mut kv, &format!("/lib/f/{c}"));
+        assert!(!text.contains('·'), "typed opcode 复活：{text:?}");
     }
+    drop(kv);
+    let _ = std::fs::remove_file(&file);
+    kvlanglayout::ffi::remove_test_store(&db);
 }

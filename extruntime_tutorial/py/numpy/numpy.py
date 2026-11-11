@@ -43,8 +43,24 @@ BIN = KVLANG / "bin"
 LIB = KVLANG / "lib"
 
 
-def _find_lib(name, env, *rels):
-    cands = ([os.environ[env]] if os.environ.get(env) else []) + [str(KVLANG / r) for r in rels]
+def _argv_option(name):
+    """取 `name=value` 形式的命令行参数，**不走环境变量**（G12：除 KVSPACE 外不新增）。
+
+    为什么不用 `--runtime-lib=`：脚本在模块顶层就要 CDLL 三个库，参数必须在 import
+    时就到位；用 `name=value` 位置形式与 layout 测试里的约定一致。
+    """
+    prefix = f"{name}="
+    for a in sys.argv[1:]:
+        if a.startswith(prefix):
+            return a[len(prefix):]
+    return None
+
+
+_RUNTIME_LIB_OVERRIDE = _argv_option("runtime-lib")
+
+
+def _find_lib(name, path, *rels):
+    cands = ([path] if path else []) + [str(KVLANG / r) for r in rels]
     for c in cands:
         if os.path.exists(c):
             return ctypes.CDLL(c)
@@ -54,10 +70,10 @@ def _find_lib(name, env, *rels):
 if os.path.isdir(LIB / "kvspace") and "KVSPACE_BACKEND_PATH" not in os.environ:
     os.environ["KVSPACE_BACKEND_PATH"] = str(LIB / "kvspace")
 
-_ks = _find_lib("libkvspace.so.1", "KVSPACE_LIB", "lib/libkvspace.so.1", "lib/libkvspace.so")
-_rt = _find_lib("libkvlang_runtime.so", "KVLANG_RUNTIME_LIB",
+_ks = _find_lib("libkvspace.so.1", None, "lib/libkvspace.so.1", "lib/libkvspace.so")
+_rt = _find_lib("libkvlang_runtime.so", _RUNTIME_LIB_OVERRIDE,
                 "lib/libkvlang_runtime.so", "lib/libkvlang_runtimec2.so")
-_lay = _find_lib("libkvlanglayout.so", "KVLANG_LAYOUT_LIB",
+_lay = _find_lib("libkvlanglayout.so", None,
                  "lib/libkvlanglayout.so", "layout/target/release/libkvlanglayout.so")
 
 
@@ -455,7 +471,7 @@ def _setup_c_runtime_prefix(tmp_dir: Path) -> Path:
     shutil.copy2(LIB / "libkvlanglayout.so", pfx / "lib" / "libkvlanglayout.so")
     if (LIB / "kvspace").is_dir():
         shutil.copytree(LIB / "kvspace", pfx / "lib" / "kvspace", symlinks=True)
-    rt_so = Path(os.environ.get("KVLANG_RUNTIME_LIB", str(LIB / "libkvlang_runtime.so"))).resolve()
+    rt_so = Path(_RUNTIME_LIB_OVERRIDE or (LIB / "libkvlang_runtime.so")).resolve()
     os.symlink(rt_so, pfx / "lib" / "libkvlang_runtimec2.so")
     return pfx / "bin" / "byteseek"
 
