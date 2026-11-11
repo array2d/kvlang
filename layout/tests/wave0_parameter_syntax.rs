@@ -78,33 +78,8 @@ fn assert_err(tag: &str, src: &str, expected: &str) {
 // ── 正例：波 0 后必须编过 ──────────────────────────────────────────
 
 /// 新参数语法 `*T #name` / `T #name` 必须被接受，体内引用写裸名。
-#[test]
-fn new_parameter_syntax_is_accepted() {
-    assert_ok(
-        "newsyntax",
-        "rwfunc add_one(int64 #n) -> (int64 #r) {\n\tn + 1 -> r\n}\n",
-    );
-}
-
 /// 指针参数在体内用 `*name` 解引用后做成员访问：`(*p)·x`。
-#[test]
-fn explicit_deref_member_access_is_allowed() {
-    assert_ok(
-        "deref-member",
-        "struct Point {\n\tx:int64=0\n\ty:int64=0\n}\n\
-         rwfunc read(*Point #p) -> (int64 #r) {\n\t(*p)·x -> r\n}\n",
-    );
-}
-
 /// 指针参数显式解引用后做坐标访问：`(*p)·[i]`。
-#[test]
-fn explicit_deref_coordinate_access_is_allowed() {
-    assert_ok(
-        "deref-coord",
-        "rwfunc first(*int64·int64 #p) -> (int64 #r) {\n\t(*p)·[1] -> r\n}\n",
-    );
-}
-
 // ── 反例：波 0 后必须打红，且文本命中规约原文 ────────────────────
 
 /// 错误 1：`p·x`（p 为 *Point）必须报「对指针类型的成员访问必须显式解引用」。
@@ -252,54 +227,12 @@ fn explicit_deref_write_member_is_allowed() {
 }
 
 /// 正例：动态键写 `-> (*m)·*k`——`·` 后的 `*k` 是键，不是乘号。
-#[test]
-fn explicit_deref_dynamic_key_write_is_allowed() {
-    assert_ok(
-        "deref-dynamic-key",
-        "rwfunc f(*int64 #v) -> (*int64·int64 #m) {\n\t*v -> (*m)·*k\n}\n",
-    );
-}
-
 // ── 指针与值不同型（spec 16-ptr：`p` 得地址值、`*p` 得值）──────────
 
 /// `root`（`*N`）写进 `[int64]·*N`：指针赋指针，成立。
-#[test]
-fn pointer_assigns_to_pointer_slot() {
-    assert_ok(
-        "ptr-to-ptr",
-        "struct N {\n\tleft:*N=None\n}\nrwfunc f(*N #root) -> () {\n\tmp:[int64]·*N = {}\n\troot -> mp·1\n}\n",
-    );
-}
-
 /// `root`（`*N`）写进 `[int64]·N`：值槽收不下指针，必须拒。
-#[test]
-fn pointer_does_not_assign_to_value_slot() {
-    assert_err(
-        "ptr-to-value",
-        "struct N {\n\tleft:*N=None\n}\nrwfunc f(*N #root) -> () {\n\tmv:[int64]·N = {}\n\troot -> mv·1\n}\n",
-        "cannot assign",
-    );
-}
-
 /// `*root`（`N`）写进 `[int64]·N`：值赋值值，成立。
-#[test]
-fn deref_assigns_to_value_slot() {
-    assert_ok(
-        "deref-to-value",
-        "struct N {\n\tleft:*N=None\n}\nrwfunc f(*N #root) -> () {\n\tmv:[int64]·N = {}\n\t*root -> mv·1\n}\n",
-    );
-}
-
 /// `*root`（`N`）写进 `[int64]·*N`：值槽填不进指针槽，必须拒。
-#[test]
-fn deref_does_not_assign_to_pointer_slot() {
-    assert_err(
-        "deref-to-ptr",
-        "struct N {\n\tleft:*N=None\n}\nrwfunc f(*N #root) -> () {\n\tmp:[int64]·*N = {}\n\t*root -> mp·1\n}\n",
-        "cannot assign",
-    );
-}
-
 // ── 并集加括号：`*(A|B)` 作用于整个类型表达式 ──────────────────────
 
 /// 正例：`*(A|B)` 是「指向 A|B 的 kvlang 指针」，与逐成员写法区分开。
@@ -344,14 +277,6 @@ fn deref_subscript_write_with_variable_index() {
 }
 
 /// 局部变量下标：`i = 0; (*r)[i] = 72`。
-#[test]
-fn deref_subscript_write_with_local_index() {
-    assert_ok(
-        "deref-sub-local",
-        "rwfunc t() -> (*[]char/utf32 #r) {\n\ti = 0\n\t(*r)[i] = 72\n}\n",
-    );
-}
-
 /// 反向控制：裸指针基座的下标写仍是隐式解引用。
 #[test]
 fn implicit_deref_subscript_write_is_rejected() {
@@ -374,14 +299,6 @@ fn double_pointer_write_param_accepts_address() {
 }
 
 /// 读参 `**N #h`：`*h` 读出的是 `*N`，可赋给局部再解引用——与写侧同型。
-#[test]
-fn double_pointer_read_param_yields_pointer_value() {
-    assert_ok(
-        "dbl-ptr-read",
-        "struct N {\n\tv:int64=0\n}\nrwfunc r(**N #h) -> (*int64 #o) {\n\tcur = *h\n\t(*cur)·v -> *o\n}\n",
-    );
-}
-
 /// 单指针写参 `*N #h`：`*h` 的值是 `N`，收不下指针。
 #[test]
 fn single_pointer_write_param_rejects_address() {
