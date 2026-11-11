@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: 安装 ABI 依赖到 /usr（系统最终位置）
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
-        run: sudo -E ./ci/deps.sh /usr
+        run: sudo env "GH_TOKEN=$GH_TOKEN" ./ci/deps.sh /usr
       # `ci/deps.sh` 只解发布包、不留源码，而 `make kvspace-cli` 需要 kvspace 仓的
       # `cli/`（独立 Cargo 项目）。所以这里按 deps.json 的 pin 克隆一份到
       # $RUNNER_TEMP——**不用 /tmp**，那目录在 runner 上不保证活到后续 step。
