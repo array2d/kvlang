@@ -327,25 +327,17 @@ kvspace-libs: kvspace-frontend kvlang-xvalue kvspace-durable-lib
 # 只做存储子命令、零引用 kvlang 符号。原先那条「CLI 造值要用语言层构造器」是迁移前
 # 的遗留，它顺带造成了一个循环依赖（kvspace-frontend 要 .a → .a 要 libkvspace），
 # 从干净树构建必死在起手第一环。既不必要又致故障，删掉。
-# kvspace 的两个 header-only 依赖（blockmalloc / slotsboxmalloc）从哪来：
-#   - **repo 内 `include/`** 有就用它（`ci/deps.sh` 装在这儿）；
-#   - 没有就让 kvspace 走它自己的系统候选（`/usr/local/include`、`/usr/include`）。
+# kvspace 的两个 header-only 依赖（blockmalloc / slotsboxmalloc）由 `ci/deps.sh`
+# 装到平台最终位置（Linux `/usr/include`、macOS `/usr/local/include`），kvspace 的
+# `find_path` 候选就覆盖这两处——所以这里不再传任何 `-D`。
 #
-# 为什么必须条件化：release CI 先跑 kvlang 的 `ci/deps.sh`，头落在 repo `include/`，
-# 而 kvspace 的 CMake 用 `NO_DEFAULT_PATH` 只查系统目录——两边对不上，干净 runner 上
-# 必然 `找不到 <blockmalloc/blockmalloc.h>`。反过来无条件传 repo 路径，本地（头装在
-# `/usr/include`、repo 里没有）就全红。两种形态都得成立，所以按存在性二选一。
-#
-# 为什么必须 echo 选了哪条：kvspace 的 CMake 注释明确反对「看不见的默认兜底」——
-# 构建日志要能看出这次用的是 repo 头还是系统头，否则下次红的时候又要从头猜。
-KVSPACE_DEP_INCLUDE_FLAGS := \
-  $(if $(wildcard $(CURDIR)/include/blockmalloc/blockmalloc.h),-DKVSPACE_blockmalloc_INCLUDE_DIRECTORY=$(CURDIR)/include) \
-  $(if $(wildcard $(CURDIR)/include/slotsboxmalloc/slotsboxobj.h),-DKVSPACE_slotsboxmalloc_INCLUDE_DIRECTORY=$(CURDIR)/include)
-
+# 曾经这里有个条件变量：repo `include/` 有头就传 repo 路径、否则让 kvspace 走系统候选。
+# 那是在给「repo 内的依赖副本」打补丁——副本本身是二义来源（runtimec 的 stale-copy
+# 闸要求 `include/kvspace/` 不存在，别的消费者又要求它存在），补丁只能让两边轮流出红。
+# 依赖统一装系统最终位置之后，副本消失，条件分支也就不需要了。
 kvspace-frontend: stale-gate
 	@$(call kvspace_require,KVSPACE_SRC,kvspace-frontend,kvspace)
-	@echo "kvspace-frontend: dep includes = $(if $(strip $(KVSPACE_DEP_INCLUDE_FLAGS)),$(KVSPACE_DEP_INCLUDE_FLAGS),<system: /usr/local/include,/usr/include>)"
-	cmake -S "$(KVSPACE_SRC)" -B build/kvspace -DCMAKE_BUILD_TYPE=Release $(KVSPACE_DEP_INCLUDE_FLAGS)
+	cmake -S "$(KVSPACE_SRC)" -B build/kvspace -DCMAKE_BUILD_TYPE=Release
 	cmake --build build/kvspace -j
 	mkdir -p $(LIB)
 	# 通配而不是 `.so*`：macOS 的产物是 `libkvspace.dylib`，写死 `.so` 在 darwin 上

@@ -1,15 +1,29 @@
 #!/usr/bin/env bash
-# 下载 ABI 依赖（deps.json: repo → tag），安装到 repo 内（不装 /usr）：
-#   头   → <root>/include/
-#   前端 → <root>/lib/
-#   后端 → <root>/lib/kvspace/（kvspace-durable）
-#   可执行 → <root>/bin/
-# 本地与 CI 共用。
+# 下载 ABI 依赖（deps.json: repo → tag），安装到**系统最终位置**（不写 repo）：
+#   头   → <prefix>/include/
+#   前端 → <prefix>/lib/
+#   后端 → <prefix>/lib/kvspace/（kvspace-durable）
+#   可执行 → <prefix>/bin/
+#
+# 为什么装系统位置而不是 repo：repo 内的依赖副本是**二义来源**——同一个
+# `include/kvspace/` 被两个消费者以相反要求使用（runtimec 的 stale-copy 闸要求它
+# 不存在，冒烟探针又要求它存在）。副本一存在就要有人删、有人绕，改到最后没人说得清
+# 哪份是权威。装到平台最终位置之后只有一份。
+#
+# 脚本自身不 sudo：CI 用 `sudo -E ./ci/deps.sh <prefix>` 调用，本地有权就直接跑。
+#
+# **prefix 是必填位置参数**：Linux 用 `/usr`，macOS 用 `/usr/local`（SIP 限制）。
+# 没有默认值——默认一旦存在就会有人依赖它，装到哪就变成猜的了。
 #
 # 没有 kvspace-c：该仓已冻结，shm 引擎并入 kvspace 仓，随 libkvspace 一起发布。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-mkdir -p "$ROOT/include" "$ROOT/lib/kvspace" "$ROOT/bin"
+PREFIX="${1:-}"
+if [ -z "$PREFIX" ]; then
+  echo "用法: $0 <prefix>（Linux: /usr；macOS: /usr/local）" >&2
+  exit 2
+fi
+mkdir -p "$PREFIX/include" "$PREFIX/lib/kvspace" "$PREFIX/bin"
 
 # 依赖清单用 python3 读，不用 jq：jq 不是必装项，缺了会让整段静默空转（见下）。
 #
@@ -33,26 +47,23 @@ PY
   gh release download "$ver" -R "array2d/$repo" -p "${repo}-abi-*-linux-x86_64.tar.gz" -D "$tmp"
   tar xzf "$tmp"/*.tar.gz -C "$tmp" --strip-components=1
   if [ "$repo" = "kvspace-durable" ]; then
-    # Backend tarballs may bundle build-time kvspace headers; use headers from kvspace only.
-    cp -P "$tmp/lib/"*.so* "$ROOT/lib/kvspace/"
-  elif [ "$repo" = "kvspace" ]; then
-    # **不拷 include/**：kvspace 的头只有一个定义点，即 `KVSPACE_SRC/include`
-    # （Makefile 的 `KVSPACE_INCLUDE_DIRECTORY` 由 `KVSPACE_SRC` 派生）。
-    # tarball 里的 `include/kvspace/` 一旦落进 repo，`runtimec/CMakeLists.txt` 的
-    # stale-copy 闸（`:42-47`）会让 `make runtimec-lib` 必红——它专门拦这一份副本。
-    cp -P "$tmp/lib/"*.so* "$ROOT/lib/"
+    # 后端单独放 <prefix>/lib/kvspace。
+    cp -P "$tmp/lib/"*.so* "$PREFIX/lib/kvspace/"
   else
-    if [ -d "$tmp/include" ]; then cp -r "$tmp/include/"* "$ROOT/include/"; fi
+    # 其余（kvspace / blockmalloc / slotsboxmalloc）：头与库都直接落系统位置。
+    # kvspace 的头落 <prefix>/include/kvspace/ 是**对的**——那是系统最终位置，
+    # 不是 repo 副本；runtimec 的 stale-copy 闸查的是 `kvlang/include/kvspace`。
+    if [ -d "$tmp/include" ]; then cp -r "$tmp/include/"* "$PREFIX/include/"; fi
     if [ -d "$tmp/lib" ]; then
       # blockmalloc / slotsboxmalloc are header-only (no shared libs).
-      cp -P "$tmp/lib/"*.so* "$ROOT/lib/"
+      cp -P "$tmp/lib/"*.so* "$PREFIX/lib/"
     fi
   fi
   # 可选可执行（kvspace 的 CLI）→ bin/
   if [ -d "$tmp/bin" ]; then
-    cp "$tmp/bin/"* "$ROOT/bin/"
-    chmod 755 "$ROOT/bin/"*
+    cp "$tmp/bin/"* "$PREFIX/bin/"
+    chmod 755 "$PREFIX/bin/"*
   fi
   rm -rf "$tmp"
 done
-echo "✅ ABI deps → $ROOT/{include,lib,lib/kvspace,bin}"
+echo "✅ ABI deps → $PREFIX/{include,lib,lib/kvspace,bin}"
