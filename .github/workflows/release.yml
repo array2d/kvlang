@@ -232,13 +232,21 @@ jobs:
           done
           # 只收**当前构建会产出**的库名，不 `find` 全收（同 Linux job 的理由：
           # `find` 的开放性是残留混进发布包的通道）。
+          # `"$lib"*.dylib` 而不是 `"$lib".dylib`：kvspace 的 CMake 设了
+          # VERSION 1.0.0 / SOVERSION 1，macOS 产物是三个名字——`libkvspace.1.0.0.dylib`
+          # （真文件）+ `.1.dylib` / `.dylib`（指向它的符号链接）。只拷无版本名会把
+          # 一个**悬空链接**放进包里（目标没拷），冒烟里 `test -e libkvspace.1.dylib`
+          # 随即失败。
           for lib in libkvlang_runtime libkvlanglayout libkvspace; do
-            for f in "lib/$lib".dylib; do
+            for f in "lib/$lib"*.dylib; do
               [ -e "$f" ] && cp -P "$f" "$d/lib/"
             done
           done
           find lib/kvspace -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/kvspace/" \;
-          names=$(find "$d/lib" -maxdepth 1 -type f -name '*.dylib' | sed 's/.*\///;s/\.dylib$//' | sort -u)
+          # `-type f` 只看得见真文件 `libkvspace.1.0.0.dylib`，所以剥掉 `.dylib` 后
+          # 还剩版本段 `.1.0.0`——必须再剥一次数字段才能与期望的库名相等。
+          # `libkvlanglayout.dylib` 无版本段，两次 sed 后仍是 `libkvlanglayout`。
+          names=$(find "$d/lib" -maxdepth 1 -type f -name '*.dylib' | sed 's/.*\///; s/\.dylib$//; s/\.[0-9][0-9.]*$//' | sort -u)
           test "$names" = "$(printf 'libkvlang_runtime\nlibkvlanglayout\nlibkvspace')" || {
             echo "发布包 lib/ 出现非预期库："; ls "$d/lib"; exit 1; }
           # byteseek 暂不发（TASK-035），bin/ 只有这两个。
@@ -252,14 +260,23 @@ jobs:
             has_rpath "$1" "$2" && return 0
             install_name_tool -add_rpath "$2" "$1"
           }
-          for lib in "$d"/lib/*.dylib; do
+          # **只对真文件跑 `install_name_tool`，不对符号链接跑。**
+          #
+          # `$d/lib` 里 `libkvspace.1.0.0.dylib` 是实体，`.1.dylib` 与 `.dylib` 是指向
+          # 它的链接。用 `*.dylib` glob 会得到三个名字，`install_name_tool` 会**穿过
+          # 链接改同一个实体**三次：最终 id 取决于 glob 顺序（不是确定值），而且
+          # 第二次就会报 `file that has already been changed`，部分 macOS 版本直接失败。
+          #
+          # 所以按 `-type f` 取实体，一个库只改一次。
+          while IFS= read -r lib; do
             name=$(basename "$lib")
             cur_id=$(otool -D "$lib" | tail -n +2)
             [ "$cur_id" = "@rpath/$name" ] || install_name_tool -id "@rpath/$name" "$lib"
-          done
+          done < <(find "$d/lib" -maxdepth 1 -type f -name '*.dylib')
           # bin/ 里每个可执行：把对 lib/ 下各库的绝对路径依赖改写成 @rpath。
-          for exe in "$d"/bin/*; do
-            for lib in "$d"/lib/*.dylib; do
+          # 同样只遍历实体（`bin/` 下本来就全是实体，但保持与上面同一条判据）。
+          while IFS= read -r exe; do
+            while IFS= read -r lib; do
               name=$(basename "$lib")
               dep=$(otool -L "$exe" | awk -v n="$name" 'index($1,n){print $1; exit}')
               [ -n "$dep" ] || continue
@@ -267,11 +284,12 @@ jobs:
                 @rpath/*) ;;
                 *) install_name_tool -change "$dep" "@rpath/$name" "$exe" ;;
               esac
-            done
-          done
-          for f in "$d"/bin/* "$d"/lib/*.dylib; do
+            done < <(find "$d/lib" -maxdepth 1 -type f -name '*.dylib')
+          done < <(find "$d/bin" -maxdepth 1 -type f)
+          # add_rpath 也只对实体：对链接重复 -add_rpath 会让 LC_RPATH 出现重复项。
+          while IFS= read -r f; do
             add_rpath "$f" @loader_path/../lib
-          done
+          done < <(find "$d/bin" "$d/lib" -maxdepth 1 -type f)
           otool -L "$d/bin/kvlanglayout"
           printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
           tar czf "$d.tar.gz" "$d"
@@ -299,6 +317,33 @@ jobs:
           echo "$head_out" | grep -q 'attrslen=0'   || { echo "期望 attrslen=0"; exit 1; }
           echo "$head_out" | grep -q 'total=16'     || { echo "期望 total=16"; exit 1; }
           echo "$head_out" | grep -q 'padding=zero' || { echo "期望 padding=zero"; exit 1; }
+          # 依赖封闭性（与 Linux job 的 ldd 检查对称）：两个可执行只许解析到**包内**
+          # 的 lib/，不许出现包外的 kvlang/kvspace 库。
+          #
+          # 三个判据细节，每个都是「写错就恒假或误报」的坑：
+          #   1. `otool -L` 第一行是命令行自身的路径（`.../bin/kvlanglayout:`），
+          #      它不是依赖条目——先 `tail -n +2` 去掉。
+          #   2. **白名单判据**：凡含 kvlang/kvspace 的依赖，必须以 `@rpath/` 或
+          #      `@loader_path/` 开头。打包步骤已把依赖改写成这两类，所以冒烟时
+          #      看到的是 `@rpath/libkvspace.1.dylib`，**不是** `$run/lib/...`。
+          #      出现绝对路径（`/usr/local/...`、`/Users/...`、甚至 `$run/...`）
+          #      都算泄漏——tarball 要可搬移，包内绝对路径同样不合格。
+          #
+          #      曾经的错判据是 `grep -vE "^$run/"`：它按「改写前的绝对路径」写，
+          #      真实输出全是 `@rpath/...`，于是干净包必假红。
+          #   3. 用 `otool -L` 而不是 `otool -l`：后者会连 LC_RPATH 里的
+          #      `@loader_path/../lib` 一起列出，那是**正确**的配置，不是泄漏。
+          for exe in "$run/bin/kvlanglayout" "$run/bin/kvspace"; do
+            deps=$(otool -L "$exe" | tail -n +2 | awk '{print $1}')
+            leaked=$(echo "$deps" | grep -E 'kvlang|kvspace' \
+              | grep -vE '^@(rpath|loader_path)/' || true)
+            test -z "$leaked" || {
+              echo "$exe 依赖了包外的 kvlang/kvspace 库："
+              echo "$leaked"
+              exit 1
+            }
+          done
+          echo "smoke deps: 两个可执行都只解析包内库"
       - name: 上传 dry-run 产物（供合并前核对/重传）
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
