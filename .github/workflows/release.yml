@@ -177,6 +177,17 @@ jobs:
             cmake --build "$RUNNER_TEMP/$repo/build" -j
             cmake --install "$RUNNER_TEMP/$repo/build"
           done
+          # kvspace 的头只从 `KVSPACE_SRC/include` 取（Makefile 的
+          # `KVSPACE_INCLUDE_DIRECTORY` 由 `KVSPACE_SRC` 派生）。上面 `cmake --install`
+          # 会把它们装到 repo 的 `include/kvspace/`，而 `runtimec/CMakeLists.txt:42-47`
+          # 有 stale-copy 闸专门拦这份副本——它是对的（kvspace 头只有一个定义点），
+          # 所以这里删掉装进来的那一份。
+          #
+          # 与 linux 的 `ci/deps.sh` 对称：那边是「不拷」，这边是「装完删」——两条
+          # 路径不同（那边解 tarball，这边是 cmake --install），约束是同一条。
+          #
+          # 只删 kvspace/：blockmalloc 与 slotsboxmalloc 的头要留，kvspace 构建依赖它们。
+          rm -rf "$PWD/include/kvspace"
           # kvspace 前端按安装规则落在 lib/kvspace/，顶层 lib/ 也放一份
           # （runtime/layout/byteseek 以 -lkvspace 链接，dlopen 也按 SONAME 找）。
           cp -P lib/kvspace/libkvspace*.dylib lib/ 2>/dev/null || true
