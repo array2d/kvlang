@@ -154,6 +154,16 @@ jobs:
           for repo in blockmalloc slotsboxmalloc kvspace; do
             # 用 $RUNNER_TEMP 而不是 /tmp：后者在 runner 上不保证活到后续 step。
             git clone --depth 1 "https://github.com/array2d/$repo.git" "$RUNNER_TEMP/$repo"
+            # kvspace 的两个 header-only 依赖要**显式**给路径：它的 CMake 用
+            # `find_path(... PATHS /usr/local/include /usr/include NO_DEFAULT_PATH)`，
+            # **不认** CMAKE_INCLUDE_PATH / CMAKE_C_FLAGS——干净 runner 上系统目录
+            # 没有这两个头，于是 `找不到 <blockmalloc/blockmalloc.h>`。
+            # 只对 kvspace 传：另外两个 repo 不认识这两个变量，传了会报
+            # 「Manually-specified variables were not used」的警告（不致命，但噪音）。
+            extra=""
+            if [ "$repo" = "kvspace" ]; then
+              extra="-DKVSPACE_blockmalloc_INCLUDE_DIRECTORY=$PWD/include -DKVSPACE_slotsboxmalloc_INCLUDE_DIRECTORY=$PWD/include"
+            fi
             cmake -S "$RUNNER_TEMP/$repo" -B "$RUNNER_TEMP/$repo/build" \
               -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD" \
               -DCMAKE_PREFIX_PATH="$PWD" \
@@ -162,7 +172,8 @@ jobs:
               -DCMAKE_C_FLAGS="-I$PWD/include" \
               -DCMAKE_CXX_FLAGS="-I$PWD/include" \
               -DCMAKE_EXE_LINKER_FLAGS="-L$PWD/lib -L$PWD/lib/kvspace" \
-              -DCMAKE_SHARED_LINKER_FLAGS="-L$PWD/lib -L$PWD/lib/kvspace"
+              -DCMAKE_SHARED_LINKER_FLAGS="-L$PWD/lib -L$PWD/lib/kvspace" \
+              $extra
             cmake --build "$RUNNER_TEMP/$repo/build" -j
             cmake --install "$RUNNER_TEMP/$repo/build"
           done
