@@ -87,12 +87,13 @@ fn compile_simple_func() {
     assert_eq!(sig(&kv.get_one("/lib/sum/[2,-1]")), "*[0,-2]\0int64");
     assert_eq!(sig(&kv.get_one("/lib/sum/[4,0]")), "return");
 
-    // 源码副本
+    // 源码副本。langtype 是 `[]char/utf8` 不是裸 `char/utf8`：后者表示**单个** UTF-8
+    // 字符，而 `.src` 存的是整段源码。与 runtimec 的系统槽常量同值。
     let src_key = "/lib/sum.src";
     let src_val = kv.get_one(src_key);
     assert_eq!(
         kvkind::kind(&src_val, &kv.langtype_of(src_key)),
-        "char/utf8"
+        "[]char/utf8"
     );
 }
 
