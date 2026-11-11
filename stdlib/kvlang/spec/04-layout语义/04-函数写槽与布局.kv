@@ -46,7 +46,7 @@ rwfunc add_to(*int64 #n, int64 #d) -> (inplace *int64 #acc) {
     *acc + d -> *acc          // 同一条指令里既读 *acc 又写 *acc
 }
 
-rwir accumulate(*int64 #delta) -> (inplace *int64 #acc)
+rwir accumulate(int64 #delta) -> (inplace int64 #acc)
 ```
 
 写在名字之后（`*int64 #acc inplace`）是语法错误；读参带 `inplace` 也是错误。

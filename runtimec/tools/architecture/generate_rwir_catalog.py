@@ -1010,9 +1010,9 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
     else:
         expected_shapes = [
             (row.operator,
-             [f"*{langtype} #{SIGNATURE_PARAMETER_NAME}{index}"
+             [f"{langtype} #{SIGNATURE_PARAMETER_NAME}{index}"
               for index, langtype in enumerate(row.read_langtypes)],
-             [f"*{langtype} #{SIGNATURE_RESULT_NAME}{index}"
+             [f"{langtype} #{SIGNATURE_RESULT_NAME}{index}"
               for index, langtype in enumerate(row.write_langtypes)])
             for row in declared]
         recovered = read_back_signature_table(render_signature_table(rows))
@@ -1041,7 +1041,8 @@ def render_signature_table(rows: list[Row]) -> str:
 
     每个参数/返回值**必须声明类型**：裸 `#name`（空 kindexpr）不表示「不声明类型」，
     而是一条坏形状——layout 的 `rwir_decls` 解析器会拒绝它（`参数必须声明类型`）。
-    旧写法 `name: T` 与已废除的 `$name` 同样被拒：**只接受 `*T #name` 与 `T #name` 两种**。
+    旧写法 `name: T` 与已废除的 `$name` 同样被拒：rwir 声明只写 `T #name`，不写 `*T`
+    （rwir 没有 rwfunc 的帧间接层，操作数槽直接对应调用者的 key）。
 
     只收录声明了名字型类型的行。其余行的类型由 TypeSet 位或 `/lib/<op>` 的安装签名给出，
     在 layout 侧是另一套判据，不该在这份声明里出现第二份。
@@ -1062,13 +1063,13 @@ def render_signature_table(rows: list[Row]) -> str:
         "",
     ]
     for row in declared:
-        # 与 rwfunc 同形：类型在前、`#name` 在后（注释名）。返回值是写参，必须有可写的 key，
-        # 所以恒为指针形态 `*T`；`T #name`（值复制）只描述读参里被拷贝的标量。
+        # 类型在前、`#name` 在后（注释名）。rwir 没有 rwfunc 的帧间接层：
+        # 操作数的槽直接对应调用者的 key，所以参数类型就是 `T`，不写 `*T`。
         parameters = ", ".join(
-            f"*{langtype} #{SIGNATURE_PARAMETER_NAME}{index}"
+            f"{langtype} #{SIGNATURE_PARAMETER_NAME}{index}"
             for index, langtype in enumerate(row.read_langtypes))
         returns = ", ".join(
-            f"*{langtype} #{SIGNATURE_RESULT_NAME}{index}"
+            f"{langtype} #{SIGNATURE_RESULT_NAME}{index}"
             for index, langtype in enumerate(row.write_langtypes))
         lines.append(f"rwir {row.operator}({parameters}) -> ({returns})")
     lines.append("")
