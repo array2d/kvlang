@@ -20,11 +20,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      DEP_PREFIX: /usr
     steps:
       - uses: actions/checkout@v4
-      - name: 下载 ABI 依赖到 repo（include/lib/lib/kvspace/bin）
+      - name: 安装 ABI 依赖到 /usr（系统最终位置）
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
-        run: ./ci/deps.sh
+        run: sudo -E ./ci/deps.sh /usr
       # `ci/deps.sh` 只解发布包、不留源码，而 `make kvspace-cli` 需要 kvspace 仓的
       # `cli/`（独立 Cargo 项目）。所以这里按 deps.json 的 pin 克隆一份到
       # $RUNNER_TEMP——**不用 /tmp**，那目录在 runner 上不保证活到后续 step。
@@ -46,7 +47,8 @@ jobs:
           # 三个 target 都（直接或经 kvlang-xvalue 间接触发）需要 kvspace 的源码路径：
           # 兄弟仓不是默认值（G11），不传就 $(error)。
           make layout KVSPACE_SRC="$RUNNER_TEMP/kvspace"       # → bin/kvlanglayout + lib/libkvlanglayout.so
-          make runtimec-lib KVSPACE_SRC="$RUNNER_TEMP/kvspace" # → lib/libkvlang_runtime.so（自带陈旧 .so 闸）
+          make runtimec-lib KVSPACE_SRC="$RUNNER_TEMP/kvspace" \
+            KVSPACE_INCLUDE_DIRECTORY="$DEP_PREFIX/include"    # → lib/libkvlang_runtime.so（自带陈旧 .so 闸）
           # kvspace CLI 走 Makefile 的 target，不自己写 cargo 命令——那个 target 里
           # 带着正确的 rpath 与链接参数，另写一份就是第二个真相。
           make kvspace-cli KVSPACE_SRC="$RUNNER_TEMP/kvspace"
@@ -70,7 +72,7 @@ jobs:
           cp -R include/kvlang/. "$d/include/kvlang/"
           cp -R runtimec/include/kvlang/. "$d/include/kvlang/"
           for h in kvspace blockmalloc slotsboxmalloc; do
-            [ -d "include/$h" ] && cp -R "include/$h" "$d/include/"
+            [ -d "$DEP_PREFIX/include/$h" ] && cp -R "$DEP_PREFIX/include/$h" "$d/include/"
           done
           # 只收**当前构建会产出**的库名，不 `find` 全收——`find` 的开放性是残留
           # 混进发布包的通道（见上一步的 scaffold .so）。
@@ -79,7 +81,7 @@ jobs:
               [ -e "$f" ] && cp -P "$f" "$d/lib/"
             done
           done
-          find lib/kvspace -maxdepth 1 -name '*.so*' -exec cp -P {} "$d/lib/kvspace/" \;
+          find "$DEP_PREFIX/lib/kvspace" -maxdepth 1 -name '*.so*' -exec cp -P {} "$d/lib/kvspace/" \;
           # 断言：恰好 3 个库名（允许 soname 链接），多一个就是残留。
           names=$(find "$d/lib" -maxdepth 1 -type f -name '*.so*' | sed 's/.*\///;s/\.so.*//' | sort -u)
           test "$names" = "$(printf 'libkvlang_runtime\nlibkvlanglayout\nlibkvspace')" || {
@@ -137,63 +139,40 @@ jobs:
             kvlang-abi-*-linux-*.tar.gz SHA256SUMS-linux \
             --generate-notes
 
-  # macOS：依赖全部源码构建进 repo（include/、lib/、lib/kvspace/、bin/），
-  # 与 Linux 同一 tarball 布局；不使用 /usr/local。
+  # macOS：依赖源码构建后装到 /usr/local（系统最终位置），与 Linux 的 /usr 同构；
+  # tarball 布局与 Linux 相同。
   macos:
     needs: linux
     runs-on: macos-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      DEP_PREFIX: /usr/local
     steps:
       - uses: actions/checkout@v4
       # kvspace-c 已冻结并入 kvspace（shm 引擎在本仓），不再作为依赖构建。
-      - name: 构建依赖链到 repo（blockmalloc / slotsboxmalloc / kvspace）
+      - name: 安装依赖到 /usr/local（系统最终位置）
         run: |
           set -euo pipefail
-          mkdir -p include lib/kvspace bin
+          # 依赖直接装到平台最终位置：Linux /usr，macOS /usr/local（SIP 限制）。
+          # repo 内不再保留任何依赖副本——副本是二义来源：同一个 include/kvspace/
+          # 被 runtimec 的 stale-copy 闸（要求不存在）与冒烟探针（要求存在）以相反
+          # 要求使用。装到最终位置之后，kvspace 的 find_path 第一候选直接命中，
+          # 不需要任何 -D，也没有副本要删。
           for repo in blockmalloc slotsboxmalloc kvspace; do
             # 用 $RUNNER_TEMP 而不是 /tmp：后者在 runner 上不保证活到后续 step。
             git clone --depth 1 "https://github.com/array2d/$repo.git" "$RUNNER_TEMP/$repo"
-            # kvspace 的两个 header-only 依赖要**显式**给路径：它的 CMake 用
-            # `find_path(... PATHS /usr/local/include /usr/include NO_DEFAULT_PATH)`，
-            # **不认** CMAKE_INCLUDE_PATH / CMAKE_C_FLAGS——干净 runner 上系统目录
-            # 没有这两个头，于是 `找不到 <blockmalloc/blockmalloc.h>`。
-            # 只对 kvspace 传：另外两个 repo 不认识这两个变量，传了会报
-            # 「Manually-specified variables were not used」的警告（不致命，但噪音）。
-            extra=""
-            if [ "$repo" = "kvspace" ]; then
-              extra="-DKVSPACE_blockmalloc_INCLUDE_DIRECTORY=$PWD/include -DKVSPACE_slotsboxmalloc_INCLUDE_DIRECTORY=$PWD/include"
-            fi
             cmake -S "$RUNNER_TEMP/$repo" -B "$RUNNER_TEMP/$repo/build" \
-              -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD" \
-              -DCMAKE_PREFIX_PATH="$PWD" \
-              -DCMAKE_INCLUDE_PATH="$PWD/include" \
-              -DCMAKE_LIBRARY_PATH="$PWD/lib;$PWD/lib/kvspace" \
-              -DCMAKE_C_FLAGS="-I$PWD/include" \
-              -DCMAKE_CXX_FLAGS="-I$PWD/include" \
-              -DCMAKE_EXE_LINKER_FLAGS="-L$PWD/lib -L$PWD/lib/kvspace" \
-              -DCMAKE_SHARED_LINKER_FLAGS="-L$PWD/lib -L$PWD/lib/kvspace" \
-              $extra
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="$DEP_PREFIX" \
+              -DCMAKE_PREFIX_PATH="$DEP_PREFIX" \
+              -DCMAKE_LIBRARY_PATH="$DEP_PREFIX/lib"
             cmake --build "$RUNNER_TEMP/$repo/build" -j
-            cmake --install "$RUNNER_TEMP/$repo/build"
+            sudo cmake --install "$RUNNER_TEMP/$repo/build"
           done
-          # kvspace 的头只从 `KVSPACE_SRC/include` 取（Makefile 的
-          # `KVSPACE_INCLUDE_DIRECTORY` 由 `KVSPACE_SRC` 派生）。上面 `cmake --install`
-          # 会把它们装到 repo 的 `include/kvspace/`，而 `runtimec/CMakeLists.txt:42-47`
-          # 有 stale-copy 闸专门拦这份副本——它是对的（kvspace 头只有一个定义点），
-          # 所以这里删掉装进来的那一份。
-          #
-          # 与 linux 的 `ci/deps.sh` 对称：那边是「不拷」，这边是「装完删」——两条
-          # 路径不同（那边解 tarball，这边是 cmake --install），约束是同一条。
-          #
-          # 只删 kvspace/：blockmalloc 与 slotsboxmalloc 的头要留，kvspace 构建依赖它们。
-          rm -rf "$PWD/include/kvspace"
-          # kvspace 前端按安装规则落在 lib/kvspace/，顶层 lib/ 也放一份
-          # （runtime/layout/byteseek 以 -lkvspace 链接，dlopen 也按 SONAME 找）。
-          cp -P lib/kvspace/libkvspace*.dylib lib/ 2>/dev/null || true
           git clone --depth 1 https://github.com/array2d/kvspace-durable.git "$RUNNER_TEMP/kvspace-durable"
           cargo build --release --manifest-path "$RUNNER_TEMP/kvspace-durable/Cargo.toml"
-          cp "$RUNNER_TEMP/kvspace-durable/target/release/libkvspace_durable.dylib" lib/kvspace/
+          sudo mkdir -p "$DEP_PREFIX/lib/kvspace"
+          sudo cp "$RUNNER_TEMP/kvspace-durable/target/release/libkvspace_durable.dylib" "$DEP_PREFIX/lib/kvspace/"
       # byteseek 暂不发：缺 kvlangDefRwir / kvlangRuntime* / kvlangRwirext* 十二个 ABI
       # （TASK-035），修复后恢复。它的 Makefile target 保留，不要删。
       - name: 构建 layout + runtimec 运行库 + kvspace CLI
@@ -201,7 +180,8 @@ jobs:
           set -euo pipefail
           # 同 Linux job：三个 target 都需要 kvspace 源码路径（G11 兄弟仓不是默认值）。
           make layout KVSPACE_SRC="$RUNNER_TEMP/kvspace"
-          make runtimec-lib KVSPACE_SRC="$RUNNER_TEMP/kvspace"
+          make runtimec-lib KVSPACE_SRC="$RUNNER_TEMP/kvspace" \
+            KVSPACE_INCLUDE_DIRECTORY="$DEP_PREFIX/include"
           # 走 Makefile 的 target，不自己写 cargo 命令——target 里带着正确的链接参数
           # 与 rpath，另写一份就是第二个真相。
           make kvspace-cli KVSPACE_SRC="$RUNNER_TEMP/kvspace"
@@ -226,14 +206,11 @@ jobs:
               return shm ? 0 : 1;
           }
           EOF
-          # 头从**源码树**取，不从 repo 的 `$PWD/include`：那个副本已被上一步
-          # `rm -rf "$PWD/include/kvspace"` 删掉（runtimec 的 stale-copy 闸要求它
-          # 不存在）。同一个副本被两个消费者以相反要求使用，副本本身就是二义来源；
-          # 所以让这里指向权威来源，而不是为了这一步把副本恢复回来。
-          # `-L` 不动：库仍在 `$PWD/lib/kvspace/`（删的只是 include）。
+          # 头与库都从平台最终位置取：Linux /usr、macOS /usr/local。repo 内没有
+          # 依赖副本，所以这里不需要任何「副本 vs 系统」的取舍。
           cc "$RUNNER_TEMP/conn.c" -o "$RUNNER_TEMP/conn" \
-            -I"$RUNNER_TEMP/kvspace/include" -L"$PWD/lib/kvspace" -lkvspace
-          DYLD_FALLBACK_LIBRARY_PATH="$PWD/lib:$PWD/lib/kvspace" "$RUNNER_TEMP/conn"
+            -I"$DEP_PREFIX/include" -L"$DEP_PREFIX/lib" -lkvspace
+          DYLD_FALLBACK_LIBRARY_PATH="$DEP_PREFIX/lib:$DEP_PREFIX/lib/kvspace" "$RUNNER_TEMP/conn"
       - name: 打包 ABI 产物
         run: |
           set -euo pipefail
@@ -244,7 +221,7 @@ jobs:
           cp -R include/kvlang/. "$d/include/kvlang/"
           cp -R runtimec/include/kvlang/. "$d/include/kvlang/"
           for h in kvspace blockmalloc slotsboxmalloc; do
-            [ -d "include/$h" ] && cp -R "include/$h" "$d/include/"
+            [ -d "$DEP_PREFIX/include/$h" ] && cp -R "$DEP_PREFIX/include/$h" "$d/include/"
           done
           # 只收**当前构建会产出**的库名，不 `find` 全收（同 Linux job 的理由：
           # `find` 的开放性是残留混进发布包的通道）。
@@ -258,7 +235,7 @@ jobs:
               [ -e "$f" ] && cp -P "$f" "$d/lib/"
             done
           done
-          find lib/kvspace -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/kvspace/" \;
+          find "$DEP_PREFIX/lib/kvspace" -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/kvspace/" \;
           # `-type f` 只看得见真文件 `libkvspace.1.0.0.dylib`，所以剥掉 `.dylib` 后
           # 还剩版本段 `.1.0.0`——必须再剥一次数字段才能与期望的库名相等。
           # `libkvlanglayout.dylib` 无版本段，两次 sed 后仍是 `libkvlanglayout`。
