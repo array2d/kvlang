@@ -226,8 +226,13 @@ jobs:
               return shm ? 0 : 1;
           }
           EOF
+          # 头从**源码树**取，不从 repo 的 `$PWD/include`：那个副本已被上一步
+          # `rm -rf "$PWD/include/kvspace"` 删掉（runtimec 的 stale-copy 闸要求它
+          # 不存在）。同一个副本被两个消费者以相反要求使用，副本本身就是二义来源；
+          # 所以让这里指向权威来源，而不是为了这一步把副本恢复回来。
+          # `-L` 不动：库仍在 `$PWD/lib/kvspace/`（删的只是 include）。
           cc "$RUNNER_TEMP/conn.c" -o "$RUNNER_TEMP/conn" \
-            -I"$PWD/include" -L"$PWD/lib/kvspace" -lkvspace
+            -I"$RUNNER_TEMP/kvspace/include" -L"$PWD/lib/kvspace" -lkvspace
           DYLD_FALLBACK_LIBRARY_PATH="$PWD/lib:$PWD/lib/kvspace" "$RUNNER_TEMP/conn"
       - name: 打包 ABI 产物
         run: |
