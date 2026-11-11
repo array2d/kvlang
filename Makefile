@@ -173,7 +173,10 @@ runtimec-lib: stale-gate kvlang-xvalue
 	  -DKVLANG_XVALUE_LIBRARY_PATH="$(CURDIR)/$(LIB)/libkvlang_xvalue.a"
 	cmake --build build/runtimec --target kvlang_runtimec_scaffold -j
 	mkdir -p $(LIB)
-	cp build/runtimec/libkvlang_runtime.so $(LIB)/
+	# 通配而不是 `.so`：macOS 的产物是 `libkvlang_runtime.dylib`，写死 `.so` 在
+	# darwin 上必然 `No such file or directory`。`libkvlang_runtime.*` 两平台各自
+	# 只匹配该库自己的产物，比再维护一个 Darwin 分支少一条路。
+	cp build/runtimec/libkvlang_runtime.* $(LIB)/
 
 runtimec2:
 	cmake -S oldhero/oldgo/runtimec2 -B build/runtimec2 -DCMAKE_BUILD_TYPE=Release
@@ -345,7 +348,10 @@ kvspace-frontend: stale-gate
 	cmake -S "$(KVSPACE_SRC)" -B build/kvspace -DCMAKE_BUILD_TYPE=Release $(KVSPACE_DEP_INCLUDE_FLAGS)
 	cmake --build build/kvspace -j
 	mkdir -p $(LIB)
-	cp -P build/kvspace/libkvspace.so* $(LIB)/
+	# 通配而不是 `.so*`：macOS 的产物是 `libkvspace.dylib`，写死 `.so` 在 darwin 上
+	# 必然 `No such file or directory`。`libkvspace.*` 两平台各自只匹配该库自己的
+	# 产物（Linux 的 `.so` / `.so.1` / `.so.1.0.0`，macOS 的 `.dylib`）。
+	cp -P build/kvspace/libkvspace.* $(LIB)/
 
 # 语言层静态库（kvlangXvalueHeadNew* / kvlangXvalueNew* / kvlangCoordCmp /
 # kvlangConstLanguage）：TASK-082 从 kvspace 搬来，layout / runtimec 都链它。
