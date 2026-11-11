@@ -2,7 +2,7 @@
 //   abs(-5) = 5
 //   false
 lib my {
-    rwfunc abs(*int64 $x) -> (*int64 $r) {
+    rwfunc abs(*int64 #x) -> (*int64 #r) {
         if (*x < 0) {
             -*x -> *r
         } else {

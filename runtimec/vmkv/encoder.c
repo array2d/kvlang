@@ -923,7 +923,11 @@ static runtimec_status_t vmkv_encoder_map_argument(
     }
     uint16_t parameter_ordinal = 0U;
     bool writes_parameter = false;
-    if (source_argument->parameter_name.size != 0U &&
+    /*
+     * **判别位是 key 的形态，不是名字**：`#name` 是源码注释，落库时名字不存在，
+     * `parameter_name` 恒为空。帧参数引用的唯一形态是 `*[0,±k]`，就看这个。
+     */
+    if (source_argument->key_addressability == VMKV_KEY_ADDRESSABILITY_DYNAMIC &&
         vmkv_encoder_parse_parameter_reference(
             source_argument->key, &parameter_ordinal, &writes_parameter) &&
         (writes_parameter

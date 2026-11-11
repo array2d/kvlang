@@ -4,12 +4,12 @@
 // 期望输出:
 //   total = 30
 //   max = 20
-rwfunc total(*'[]char/utf8'int64 $m) -> (*int64 $s) {
+rwfunc total(*'[]char/utf8'int64 #m) -> (*int64 #s) {
 	(*m)·*"a" -> a:int64
 	(*m)·*"b" -> b:int64
 	(a + b) -> *s
 }
-rwfunc max2(*'[]char/utf8'int64 $m) -> (*int64 $mx) {
+rwfunc max2(*'[]char/utf8'int64 #m) -> (*int64 #mx) {
 	(*m)·*"a" -> a:int64
 	(*m)·*"b" -> b:int64
 	max(a, b) -> *mx

@@ -130,7 +130,7 @@ Record: `ALWAYS_RESUMABLE` (every step case 1 with a == c),
   `(*acc)[0] = 9` (verified `compactarray·set` on a write param) => `0<-caller`.
 - `t = a[0]; compactarray·set(a, 0, 9) -> b; x = x + t` => no range across the set (it writes `a`).
 - `10 -> /tmp/g; add_to(5) -> /tmp/g` => `NOT_RESUMABLE:1:/tmp/g`.
-- `rwfunc f(int64 $a) -> (*int64 $r)` reading `a` after writing `*r` => `caller`: `f(v) -> v`
+- `rwfunc f(int64 #a) -> (*int64 #r)` reading `a` after writing `*r` => `caller`: `f(v) -> v`
   binds both to `v`.
 - `m2 = m1; m1·b -> t; t + 1 -> m2·b` => no range across the member write (`m2` aliases `m1`).
 - `k = random·intn(2)` inside any longer range => `NOT_RESUMABLE:<c>:volatile:random·intn`.

@@ -330,13 +330,19 @@ pub extern "C" fn kvlangLayoutDefineRwir(
     ) {
         (Some(r), Some(w)) => (r, w),
         (None, _) => {
-            write_out(err_out, err_cap,
-                      "define rwir: read_count > 0 but read_langtypes is NULL");
+            write_out(
+                err_out,
+                err_cap,
+                "define rwir: read_count > 0 but read_langtypes is NULL",
+            );
             return -1;
         }
         (_, None) => {
-            write_out(err_out, err_cap,
-                      "define rwir: write_count > 0 but write_langtypes is NULL");
+            write_out(
+                err_out,
+                err_cap,
+                "define rwir: write_count > 0 but write_langtypes is NULL",
+            );
             return -1;
         }
     };
@@ -348,9 +354,7 @@ pub extern "C" fn kvlangLayoutDefineRwir(
             .collect()
     };
 
-    let r = catch_unwind(|| {
-        define_rwir_core(&dsn, &opcode, reads, writes, inplace, variadic != 0)
-    });
+    let r = catch_unwind(|| define_rwir_core(&dsn, &opcode, reads, writes, inplace, variadic != 0));
     match r {
         Ok(Ok(())) => 0,
         Ok(Err(e)) => {
@@ -418,10 +422,7 @@ fn define_rwir_core(
             "define rwir {opcode}: variadic requires at least one read parameter"
         ));
     }
-    let mut params: Vec<crate::ast::Param> = reads
-        .into_iter()
-        .map(|ty| param(ty, false))
-        .collect();
+    let mut params: Vec<crate::ast::Param> = reads.into_iter().map(|ty| param(ty, false)).collect();
     if variadic {
         let last = params.len() - 1;
         params[last].ty.push_str("...");
@@ -480,11 +481,20 @@ mod tests {
     #[test]
     fn kindexpr_parse_contract() {
         let k = parse("[2,3]int64").unwrap();
-        assert_eq!((k.ref_, k.ndim, &k.dims[..2], k.array_len, kind(&k)), (0, 2, &[2, 3][..], 6, "int64"));
+        assert_eq!(
+            (k.ref_, k.ndim, &k.dims[..2], k.array_len, kind(&k)),
+            (0, 2, &[2, 3][..], 6, "int64")
+        );
         let k = parse("*[4]float32").unwrap();
-        assert_eq!((k.ref_, k.ndim, k.array_len, kind(&k)), (1, 1, 4, "float32"));
+        assert_eq!(
+            (k.ref_, k.ndim, k.array_len, kind(&k)),
+            (1, 1, 4, "float32")
+        );
         let k = parse("@char/utf8").unwrap();
-        assert_eq!((k.ref_, k.ndim, k.array_len, kind(&k)), (2, 0, 1, "char/utf8"));
+        assert_eq!(
+            (k.ref_, k.ndim, k.array_len, kind(&k)),
+            (2, 0, 1, "char/utf8")
+        );
         // Reject ndim > 8, i32 overflow, negative dims, overlong kind, and empty input.
         assert!(parse("[1,1,1,1,1,1,1,1,1]int64").is_none());
         assert!(parse("[65536,65536]int64").is_none());

@@ -18,7 +18,7 @@
 //   [0,0] rwfunc
 //   ‥labels/
 //   _do_9
-rwfunc walk(*[]char/utf32 $path, *[]char/utf32 $indent, *int64 $down) -> () {
+rwfunc walk(*[]char/utf32 #path, *[]char/utf32 #indent, *int64 #down) -> () {
 	ms:'[int64]'[]char/utf32 = {}
 	kvspace·members(*path) -> (ms, n:int64)
 	0 -> i:int64

@@ -3,32 +3,32 @@
 // since/until/equal/elapsed_ns/elapsed_ms/elapsed_s/max/min 是 rwfunc 封装（kv 源码，可寻址/可自改）。
 
 lib time {
-	rwfunc since(*time $t) -> (*time/duration $dur) {
+	rwfunc since(*time #t) -> (*time/duration #dur) {
 		time·now() -> now:time
 		time·sub(now, *t) -> *dur
 	}
-	rwfunc until(*time $t) -> (*time/duration $dur) {
+	rwfunc until(*time #t) -> (*time/duration #dur) {
 		time·now() -> now:time
 		time·sub(*t, now) -> *dur
 	}
-	rwfunc equal(*time $a, *time $b) -> (*bool $r) {
+	rwfunc equal(*time #a, *time #b) -> (*bool #r) {
 		time·before(*a, *b) -> ba:bool
 		time·after(*a, *b) -> aa:bool
 		!ba && !aa -> *r
 	}
-	rwfunc elapsed_ns(*time $t) -> (*int64 $ns) {
+	rwfunc elapsed_ns(*time #t) -> (*int64 #ns) {
 		time·since(*t) -> dur:time/duration
 		time/duration·as_nanos(dur) -> *ns
 	}
-	rwfunc elapsed_ms(*time $t) -> (*int64 $ms) {
+	rwfunc elapsed_ms(*time #t) -> (*int64 #ms) {
 		time·since(*t) -> dur:time/duration
 		time/duration·as_millis(dur) -> *ms
 	}
-	rwfunc elapsed_s(*time $t) -> (*int64 $s) {
+	rwfunc elapsed_s(*time #t) -> (*int64 #s) {
 		time·since(*t) -> dur:time/duration
 		time/duration·as_seconds(dur) -> *s
 	}
-	rwfunc max(*time $a, *time $b) -> (*time $r) {
+	rwfunc max(*time #a, *time #b) -> (*time #r) {
 		time·after(*a, *b) -> gt:bool
 		if (gt) {
 			*a -> *r
@@ -36,7 +36,7 @@ lib time {
 			*b -> *r
 		}
 	}
-	rwfunc min(*time $a, *time $b) -> (*time $r) {
+	rwfunc min(*time #a, *time #b) -> (*time #r) {
 		time·before(*a, *b) -> lt:bool
 		if (lt) {
 			*a -> *r

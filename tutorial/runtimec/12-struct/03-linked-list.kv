@@ -11,7 +11,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc show_list(*Node $head) -> () {
+rwfunc show_list(*Node #head) -> () {
 	head -> cur                  // cur 是 *Node（指针赋值不加 *）
 	while (cur != None) {
 		(*cur)·val -> v:int64    // 解引用只走显式 *

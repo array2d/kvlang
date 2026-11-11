@@ -3,7 +3,7 @@
 // 期望输出:
 //   2
 //   2
-rwfunc str_str(*[]char/utf32 $hay, *[]char/utf32 $needle) -> () {
+rwfunc str_str(*[]char/utf32 #hay, *[]char/utf32 #needle) -> () {
 	string·len(*hay) -> nh:int64
 	nn:int64 = string·len(*needle)
 	i:int64 = 0

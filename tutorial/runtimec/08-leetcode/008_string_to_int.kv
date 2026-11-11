@@ -5,7 +5,7 @@
 //   42
 //   -42
 //   4193
-rwfunc my_atoi(*[]char/utf32 $s) -> (*int64 $result) {
+rwfunc my_atoi(*[]char/utf32 #s) -> (*int64 #result) {
 	*result = 0
 	n:int64 = string·len(*s)
 	i:int64 = 0

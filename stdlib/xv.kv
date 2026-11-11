@@ -11,7 +11,7 @@
 // 值语义铁律：compactarray·set 仅同槽 patch；异槽变换必须先 compactarray·copy。
 
 lib xv {
-	rwfunc swap(*[]int64 $arr, *int64 $i, *int64 $j) -> (*[]int64 $result) {
+	rwfunc swap(*[]int64 #arr, *int64 #i, *int64 #j) -> (*[]int64 #result) {
 		vi:int64 = compactarray·at(*arr, *i)
 		vj:int64 = compactarray·at(*arr, *j)
 		tmp:[]int64 = compactarray·copy(*arr)
@@ -20,14 +20,14 @@ lib xv {
 		*result = tmp
 	}
 
-	rwfunc first(*[]int64 $arr) -> (*int64 $result) {
+	rwfunc first(*[]int64 #arr) -> (*int64 #result) {
 		*result = compactarray·at(*arr, 0)
 	}
-	rwfunc last(*[]int64 $arr) -> (*int64 $result) {
+	rwfunc last(*[]int64 #arr) -> (*int64 #result) {
 		n:int64 = compactarray·numel(*arr)
 		*result = compactarray·at(*arr, n - 1)
 	}
-	rwfunc reverse(*[]int64 $arr) -> (*[]int64 $result) {
+	rwfunc reverse(*[]int64 #arr) -> (*[]int64 #result) {
 		*result = *arr
 		n:int64 = compactarray·numel(*arr)
 		i:int64 = 0
@@ -38,7 +38,7 @@ lib xv {
 			j = j - 1
 		}
 	}
-	rwfunc find(*[]int64 $arr, *int64 $val) -> (*int64 $idx) {
+	rwfunc find(*[]int64 #arr, *int64 #val) -> (*int64 #idx) {
 		*idx = -1
 		n:int64 = compactarray·numel(*arr)
 		i:int64 = 0
@@ -51,11 +51,11 @@ lib xv {
 			i = i + 1
 		}
 	}
-	rwfunc contains(*[]int64 $arr, *int64 $val) -> (*bool $ok) {
+	rwfunc contains(*[]int64 #arr, *int64 #val) -> (*bool #ok) {
 		xv·find(*arr, *val) -> idx:int64
 		idx != -1 -> *ok
 	}
-	rwfunc count(*[]int64 $arr, *int64 $val) -> (*int64 $cnt) {
+	rwfunc count(*[]int64 #arr, *int64 #val) -> (*int64 #cnt) {
 		*cnt = 0
 		n:int64 = compactarray·numel(*arr)
 		i:int64 = 0
@@ -67,7 +67,7 @@ lib xv {
 			i = i + 1
 		}
 	}
-	rwfunc sum(*[]int64 $arr) -> (*int64 $total) {
+	rwfunc sum(*[]int64 #arr) -> (*int64 #total) {
 		*total = 0
 		n:int64 = compactarray·numel(*arr)
 		i:int64 = 0
@@ -77,7 +77,7 @@ lib xv {
 			i = i + 1
 		}
 	}
-	rwfunc min(*[]int64 $arr) -> (*int64 $m) {
+	rwfunc min(*[]int64 #arr) -> (*int64 #m) {
 		compactarray·at(*arr, 0) -> *m
 		n:int64 = compactarray·numel(*arr)
 		i:int64 = 1
@@ -89,7 +89,7 @@ lib xv {
 			i = i + 1
 		}
 	}
-	rwfunc max(*[]int64 $arr) -> (*int64 $m) {
+	rwfunc max(*[]int64 #arr) -> (*int64 #m) {
 		compactarray·at(*arr, 0) -> *m
 		n:int64 = compactarray·numel(*arr)
 		i:int64 = 1
@@ -101,13 +101,13 @@ lib xv {
 			i = i + 1
 		}
 	}
-	rwfunc flatten(*[]int64 $arr) -> (*[]int64 $result) {
+	rwfunc flatten(*[]int64 #arr) -> (*[]int64 #result) {
 		n:int64 = compactarray·numel(*arr)
 		compactarray·newreshape(*arr, n) -> *result
 	}
 	// ── 以下为 #514 增补吸收（原 xv·at/set、ndarray·numel 改写为
 	//    compactarray 系；mutating 函数先 compactarray·copy 再 set）──
-	rwfunc argmin(*[]int64 $arr) -> (*int64 $idx) {
+	rwfunc argmin(*[]int64 #arr) -> (*int64 #idx) {
 		n:int64 = compactarray·numel(*arr)
 		if (n == 0) {
 			*idx = -1
@@ -125,7 +125,7 @@ lib xv {
 			}
 		}
 	}
-	rwfunc argmax(*[]int64 $arr) -> (*int64 $idx) {
+	rwfunc argmax(*[]int64 #arr) -> (*int64 #idx) {
 		n:int64 = compactarray·numel(*arr)
 		if (n == 0) {
 			*idx = -1
@@ -143,7 +143,7 @@ lib xv {
 			}
 		}
 	}
-	rwfunc rfind(*[]int64 $arr, *int64 $target) -> (*int64 $idx) {
+	rwfunc rfind(*[]int64 #arr, *int64 #target) -> (*int64 #idx) {
 		*idx = -1
 		i:int64 = compactarray·numel(*arr) - 1
 		while (i >= 0) {
@@ -154,7 +154,7 @@ lib xv {
 			i = i - 1
 		}
 	}
-	rwfunc eq(*[]int64 $a, *[]int64 $b) -> (*bool $r) {
+	rwfunc eq(*[]int64 #a, *[]int64 #b) -> (*bool #r) {
 		na:int64 = compactarray·numel(*a)
 		if (na != compactarray·numel(*b)) {
 			*r = false
@@ -170,7 +170,7 @@ lib xv {
 			}
 		}
 	}
-	rwfunc is_sorted(*[]int64 $arr) -> (*bool $r) {
+	rwfunc is_sorted(*[]int64 #arr) -> (*bool #r) {
 		n:int64 = compactarray·numel(*arr)
 		*r = true
 		i:int64 = 1
@@ -182,7 +182,7 @@ lib xv {
 			i = i + 1
 		}
 	}
-	rwfunc sort(*[]int64 $arr) -> (*[]int64 $result) {
+	rwfunc sort(*[]int64 #arr) -> (*[]int64 #result) {
 		*result = compactarray·copy(*arr)
 		n:int64 = compactarray·numel(*result)
 		i:int64 = 1
@@ -201,7 +201,7 @@ lib xv {
 			i = i + 1
 		}
 	}
-	rwfunc binary_search(*[]int64 $arr, *int64 $target) -> (*int64 $idx) {
+	rwfunc binary_search(*[]int64 #arr, *int64 #target) -> (*int64 #idx) {
 		lo:int64 = 0
 		hi:int64 = compactarray·numel(*arr) - 1
 		*idx = -1
@@ -218,7 +218,7 @@ lib xv {
 			}
 		}
 	}
-	rwfunc fill(*[]int64 $arr, *int64 $val) -> (*[]int64 $result) {
+	rwfunc fill(*[]int64 #arr, *int64 #val) -> (*[]int64 #result) {
 		*result = compactarray·copy(*arr)
 		n:int64 = compactarray·numel(*result)
 		i:int64 = 0

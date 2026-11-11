@@ -20,7 +20,7 @@ lib kvlang {
 7. 写参初值是 `None` 不是 0：累加前先 `0 -> acc:int64`，否则 `None + x` 报错。
 8. 数组要带 `[]` 前缀：`a:[]int64 = [1,2,3]`；写成 `a:int64 = [..]` 会报错。空容器必须标类型（`d:'[]char/utf32'int64 = {}`）。
 9. `+` 只允许同类：字符+字符=拼接，数值+数值=相加；`"标签" + 数字` 会 TypeError。带标签打印用 `println("answer =", n)` 多参数（自动空格）。
-10. 函数没有返回值，结果通过写参传出：`rwfunc f(*int64 $x) -> (*int64 $r) { *x + 1 -> *r }`；调用 `f(3) -> y:int64`。
+10. 函数没有返回值，结果通过写参传出：`rwfunc f(*int64 #x) -> (*int64 #r) { *x + 1 -> *r }`；调用 `f(3) -> y:int64`。
 11. **局部变量首次写必须声明类型**：`x:int64 = 5`、`0 -> i:int64`、`foo() -> r:int64`。未声明类型直接拒载；`_`（显式丢弃）与 `for (x in a)` 的循环变量除外。
 
 ## 1. 骨架与常见任务
@@ -169,7 +169,7 @@ map 遍历用 `while + kvspace·listlen + kvspace·listat`（for-in 对 map 不�
 
 ```kv
 lib mylib {
-    rwfunc add(*int64 $a, *int64 $b) -> (*int64 $c) { *a + *b -> *c }
+    rwfunc add(*int64 #a, *int64 #b) -> (*int64 #c) { *a + *b -> *c }
 }
 rwfunc main() -> () {
     mylib·add(3,4) -> s:int64
@@ -221,7 +221,7 @@ networld/fs·write("/tmp/x.txt", compactarray·newreinterpret("hi", "[]uint8")) 
 - 路径字符串读/写用 `=` / 成员读写 / `{t}·new`；`kvspace·del(path)`、`kvspace·deltree(path)`。
 - `kvspace·listlen("/dir/")`、`kvspace·listat("/dir/",i)`（列目录 path 要带尾 `/`）。
 - `kvlang·abs(x)`（= `&x`，取址）、`kvspace·cp(src,dst)`、`kvspace·cpdir(src,dst)`、`kvspace·cplist(src,dst)`。
-- rwfunc 便利：`kvspace·members($path) -> ($names,$n)`、`kvspace·count(*path)->*n`。
+- rwfunc 便利：`kvspace·members(#path) -> (#names,#n)`、`kvspace·count(*path)->*n`。
 
 ### 字符串（string·*）
 - `len / char / ord / cmp / find / slice / concat / set / formatint / formatuint / parseint / parseuint / parsefloat`。

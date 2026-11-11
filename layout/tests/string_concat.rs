@@ -5,8 +5,6 @@ use kvlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
-
-
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
 }
@@ -73,13 +71,18 @@ fn op_texts(db: &str) -> Vec<(String, String)> {
     out
 }
 
-const SRC: &str = "rwfunc t() -> (*char/utf32 $r) {\n    a = \"hello\"\n    b = a + \"!\"\n    b -> *r\n}\n";
+const SRC: &str =
+    "rwfunc t() -> (*char/utf32 #r) {\n    a = \"hello\"\n    b = a + \"!\"\n    b -> *r\n}\n";
 
 #[test]
 fn string_plus_becomes_concat() {
     let fx = layout("on", SRC, &[]);
     let (db, out) = (&fx.db, &fx.out);
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let ops = op_texts(&db);
     assert!(
         ops.iter().any(|(k, t)| k == "rwir" && t == "string·concat"),
@@ -89,7 +92,7 @@ fn string_plus_becomes_concat() {
 
 #[test]
 fn mixed_string_and_number_is_layout_error() {
-    let src = "rwfunc t() -> (*char/utf32 $r) {\n    a = \"x\"\n    b = a + 1\n    b -> *r\n}\n";
+    let src = "rwfunc t() -> (*char/utf32 #r) {\n    a = \"x\"\n    b = a + 1\n    b -> *r\n}\n";
     let fx = layout("mix", src, &[]);
     let out = &fx.out;
     assert!(!out.status.success());

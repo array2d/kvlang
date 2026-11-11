@@ -294,8 +294,6 @@ fn compile_fn(src: &str) -> (TempStore, Kv) {
     (store, kv)
 }
 
-
-
 #[test]
 fn lib_plane_has_no_scope_flat_keys() {
     let (_store, mut kv) = fresh_kv();
@@ -386,7 +384,7 @@ fn br_true_false_are_int64() {
     let (_store, mut kv) = fresh_kv();
     compile(
         &mut kv,
-        "rwfunc f(*int64 $X) -> (*int64 $Y) {\n    if (*X > 0) { *X -> *Y } else { 0 -> *Y }\n}\n",
+        "rwfunc f(*int64 #X) -> (*int64 #Y) {\n    if (*X > 0) { *X -> *Y } else { 0 -> *Y }\n}\n",
     )
     .unwrap();
     let children = children_of(&mut kv, "/lib/f/");
@@ -420,7 +418,7 @@ fn br_true_false_are_int64() {
 #[test]
 fn abs_if_is_numbered_jumps() {
     let (_store, mut kv) = compile_fn(
-        "rwfunc abs(*int64 $x) -> (*int64 $r) {\n    if (*x < 0) {\n        0 - *x -> *r\n    } else {\n        *x -> *r\n    }\n}\n",
+        "rwfunc abs(*int64 #x) -> (*int64 #r) {\n    if (*x < 0) {\n        0 - *x -> *r\n    } else {\n        *x -> *r\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "abs");
     let p = plane(&mut kv, "abs");
@@ -465,7 +463,7 @@ fn abs_if_is_numbered_jumps() {
 #[test]
 fn while_back_edge_is_goto_int64() {
     let (_store, mut kv) = compile_fn(
-        "rwfunc sum_to(*int64 $n) -> (*int64 $acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n",
+        "rwfunc sum_to(*int64 #n) -> (*int64 #acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "sum_to");
     let p = plane(&mut kv, "sum_to");
@@ -501,7 +499,7 @@ fn while_back_edge_is_goto_int64() {
 #[test]
 fn break_is_goto_exit() {
     let (_store, mut kv) = compile_fn(
-        "rwfunc f() -> (*int64 $i) {\n    0 -> *i\n    while (*i < 10) {\n        if (*i == 5) {\n            break\n        }\n        *i = *i + 1\n    }\n}\n",
+        "rwfunc f() -> (*int64 #i) {\n    0 -> *i\n    while (*i < 10) {\n        if (*i == 5) {\n            break\n        }\n        *i = *i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");
@@ -535,7 +533,7 @@ fn break_is_goto_exit() {
 #[test]
 fn continue_is_goto_cond() {
     let (_store, mut kv) = compile_fn(
-        "rwfunc f() -> (*int64 $acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= 5) {\n        if (i == 3) {\n            i = i + 1\n            continue\n        }\n        *acc = *acc + i\n        i = i + 1\n    }\n}\n",
+        "rwfunc f() -> (*int64 #acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= 5) {\n        if (i == 3) {\n            i = i + 1\n            continue\n        }\n        *acc = *acc + i\n        i = i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");
@@ -594,7 +592,7 @@ fn for_is_br_goto_single_plane() {
 #[test]
 fn nested_if_while_single_plane() {
     let (_store, mut kv) = compile_fn(
-        "rwfunc f() -> (*int64 $acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= 3) {\n        if (i == 2) {\n            *acc = *acc + i\n        } else {\n            *acc = *acc + 1\n        }\n        i = i + 1\n    }\n}\n",
+        "rwfunc f() -> (*int64 #acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= 3) {\n        if (i == 2) {\n            *acc = *acc + i\n        } else {\n            *acc = *acc + 1\n        }\n        i = i + 1\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
     let p = plane(&mut kv, "f");
@@ -616,8 +614,14 @@ fn tutorial_control_files_single_plane() {
             "../tutorial/runtimec/03-control/while.kv",
             &["sum_to", "first_div7", "sum_odds"][..],
         ),
-        ("../tutorial/runtimec/03-control/guess.kv", &["guess_number"][..]),
-        ("../tutorial/runtimec/03-control/classify.kv", &["classify"][..]),
+        (
+            "../tutorial/runtimec/03-control/guess.kv",
+            &["guess_number"][..],
+        ),
+        (
+            "../tutorial/runtimec/03-control/classify.kv",
+            &["classify"][..],
+        ),
         ("../tutorial/runtimec/03-control/for.kv", &["test"][..]),
     ] {
         let (_store, mut kv) = fresh_kv();

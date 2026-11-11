@@ -57,7 +57,9 @@ fn ops_of(kv: &mut Kv, func: &str) -> Vec<(i32, String)> {
         let Some(inner) = name.strip_prefix('[').and_then(|x| x.strip_suffix(",0]")) else {
             continue;
         };
-        let Ok(irseq) = inner.parse::<i32>() else { continue };
+        let Ok(irseq) = inner.parse::<i32>() else {
+            continue;
+        };
         if irseq < 1 {
             continue;
         }
@@ -74,9 +76,9 @@ fn output_ops_become_decimal_opid() {
     let (_store, mut kv) = fresh_kv();
     // 三个输出算子各占一条指令；rwir 声明由测试自己给（layout 不产 builtin 声明）。
     let src = "\
-rwir println(*[]char/utf32 $s...)
-rwir print(*[]char/utf32 $s...)
-rwir cerr(*[]char/utf32 $s...)
+rwir println(*[]char/utf32 #s...)
+rwir print(*[]char/utf32 #s...)
+rwir cerr(*[]char/utf32 #s...)
 rwfunc main() -> () {
     println(\"a\")
     print(\"b\")
@@ -106,13 +108,16 @@ fn ordinary_ops_keep_their_names() {
     // 非输出算子必须原样保留名字——扩展 rwir 走声明 ABI，不经 opid 这条路。
     /* 用形参而不是常量：`a:int64 = 1 + 2` 会被常量折叠成一条赋值，
      * 那样测不到 `add` 这条算子的名字有没有被改写。 */
-    let src = "rwfunc main(*int64 $a, *int64 $b) -> (*int64 $c) {\n    *a + *b -> *c\n}\n";
+    let src = "rwfunc main(*int64 #a, *int64 #b) -> (*int64 #c) {\n    *a + *b -> *c\n}\n";
     compile(&mut kv, src).unwrap();
     let ops: Vec<String> = ops_of(&mut kv, "main")
         .into_iter()
         .map(|(_, o)| o.rsplit(' ').next().unwrap_or("").to_string())
         .collect();
-    assert!(ops.contains(&"add".to_string()), "普通算子应保留名字，实际 {ops:?}");
+    assert!(
+        ops.contains(&"add".to_string()),
+        "普通算子应保留名字，实际 {ops:?}"
+    );
 }
 
 #[test]
@@ -121,7 +126,7 @@ fn package_prefixed_output_name_is_not_rewritten() {
     // `x·println` 是用户声明的另一条 rwir，不是内建输出。若被误编成 opid，
     // 等于悄悄改写了用户代码的语义——这是本测试要钉住的边界。
     let src = "\
-rwir x·println(*[]char/utf32 $s...)
+rwir x·println(*[]char/utf32 #s...)
 rwfunc main() -> () {
     x·println(\"a\")
 }
@@ -131,8 +136,10 @@ rwfunc main() -> () {
         .into_iter()
         .map(|(_, o)| o.rsplit(' ').next().unwrap_or("").to_string())
         .collect();
-    assert!(ops.contains(&"x·println".to_string()),
-            "带包前缀的名字不该被改写，实际 {ops:?}");
+    assert!(
+        ops.contains(&"x·println".to_string()),
+        "带包前缀的名字不该被改写，实际 {ops:?}"
+    );
 }
 
 #[test]

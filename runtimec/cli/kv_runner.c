@@ -708,8 +708,8 @@ static size_t runner_operator_names(const char *output[], size_t capacity) {
 }
 
 static bool declare_external_capabilities(runner_environment_t *environment) {
-    /* 新参数文法：`name: T` 已废，声明也是 `*T $name`。
-     * 变参标记 `...` 跟在**类型**后（`*[]char/utf32 $s...`），落签名行锚点 `[0,0]`
+    /* 新参数文法：`name: T` 与 `$name` 都已废，声明写 `*T #name`（`#name` 是注释名）。
+     * 变参标记 `...` 跟在**类型**后（`*[]char/utf32 #s...`），落签名行锚点 `[0,0]`
      * 的 dynamic 字节；这样多实参调用才过得了 layout 的类型检查。
      *
      * **声明要出现名字，而 runtimec 源码不许出现名字**——两者不矛盾：
@@ -727,7 +727,7 @@ static bool declare_external_capabilities(runner_environment_t *environment) {
     for (size_t at = 0U; at < operator_count; ++at) {
         const size_t used = strlen(declarations);
         if (snprintf(declarations + used, sizeof(declarations) - used,
-                     "rwir %.*s(*[]char/utf32 $s...)\n",
+                     "rwir %.*s(*[]char/utf32 #s...)\n",
                      (int)strcspn(operator_names[at], ","),
                      operator_names[at]) <= 0) {
             return false;

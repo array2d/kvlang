@@ -14,8 +14,6 @@ const OPS: [&str; 22] = [
     "gt", "ge", "bitand", "bitor", "bitxor", "shl", "shr", "pow",
 ];
 
-
-
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
 }
@@ -83,8 +81,11 @@ fn assert_semantic(tag: &str, src: &str) {
             "{tag}: 出现 typed opcode {op:?}"
         );
         assert!(
-            !op.contains('·') || op.starts_with("string·") || op.starts_with("compactarray·")
-                || op.starts_with("scatterarray·") || op.starts_with("kvspace·"),
+            !op.contains('·')
+                || op.starts_with("string·")
+                || op.starts_with("compactarray·")
+                || op.starts_with("scatterarray·")
+                || op.starts_with("kvspace·"),
             "{tag}: 出现非白名单的带 `·` opcode {op:?}"
         );
     }
@@ -94,15 +95,15 @@ fn assert_semantic(tag: &str, src: &str) {
 fn integer_families_emit_semantic_names() {
     assert_semantic(
         "i64",
-        "rwfunc f(*int64 $a, *int64 $b) -> () {\n\t*a + *b -> w\n\t*a - *b -> w\n\t*a × *b -> w\n\t*a ÷ *b -> w\n\t*a % *b -> w\n\t*a == *b -> _cmp1 -> _w1\n\t*a < *b -> _cmp2 -> _w2\n\tabs(*a) -> _w3\n\tsign(*a) -> _w4\n\t*a & *b -> w\n\t*a | *b -> w\n\t*a ^ *b -> w\n\t*a << *b -> w\n\t*a >> *b -> w\n\tmax(*a, *b) -> w\n\tmin(*a, *b) -> w\n}\n",
+        "rwfunc f(*int64 #a, *int64 #b) -> () {\n\t*a + *b -> w\n\t*a - *b -> w\n\t*a × *b -> w\n\t*a ÷ *b -> w\n\t*a % *b -> w\n\t*a == *b -> _cmp1 -> _w1\n\t*a < *b -> _cmp2 -> _w2\n\tabs(*a) -> _w3\n\tsign(*a) -> _w4\n\t*a & *b -> w\n\t*a | *b -> w\n\t*a ^ *b -> w\n\t*a << *b -> w\n\t*a >> *b -> w\n\tmax(*a, *b) -> w\n\tmin(*a, *b) -> w\n}\n",
     );
     assert_semantic(
         "u64",
-        "rwfunc f(*uint64 $a, *uint64 $b) -> () {\n\t*a + *b -> w\n\t*a < *b -> _cmp3 -> _w2\n\tmax(*a, *b) -> w\n}\n",
+        "rwfunc f(*uint64 #a, *uint64 #b) -> () {\n\t*a + *b -> w\n\t*a < *b -> _cmp3 -> _w2\n\tmax(*a, *b) -> w\n}\n",
     );
     assert_semantic(
         "small",
-        "rwfunc f(*int8 $a, *uint8 $b) -> () {\n\t*a + *a -> w\n\t*b + *b -> w\n\t*a < *a -> _cmp\n}\n",
+        "rwfunc f(*int8 #a, *uint8 #b) -> () {\n\t*a + *a -> w\n\t*b + *b -> w\n\t*a < *a -> _cmp\n}\n",
     );
 }
 
@@ -110,17 +111,17 @@ fn integer_families_emit_semantic_names() {
 fn float_families_emit_semantic_names() {
     assert_semantic(
         "f64",
-        "rwfunc f(*float64 $a, *float64 $b) -> () {\n\t*a + *b -> w\n\t*a - *b -> w\n\t*a × *b -> w\n\t*a ÷ *b -> w\n\t*a < *b -> _cmp4 -> _w2\n\tsqrt(*a) -> w\n\tpow(*a, *b) -> w\n\tabs(*a) -> _w3\n\tneg(*a) -> w\n\tmax(*a, *b) -> w\n}\n",
+        "rwfunc f(*float64 #a, *float64 #b) -> () {\n\t*a + *b -> w\n\t*a - *b -> w\n\t*a × *b -> w\n\t*a ÷ *b -> w\n\t*a < *b -> _cmp4 -> _w2\n\tsqrt(*a) -> w\n\tpow(*a, *b) -> w\n\tabs(*a) -> _w3\n\tneg(*a) -> w\n\tmax(*a, *b) -> w\n}\n",
     );
     assert_semantic(
         "f32",
-        "rwfunc f(*float32 $a, *float32 $b) -> () {\n\t*a + *b -> w\n\t*a < *b -> _cmp5 -> _w2\n\tmax(*a, *b) -> w\n}\n",
+        "rwfunc f(*float32 #a, *float32 #b) -> () {\n\t*a + *b -> w\n\t*a < *b -> _cmp5 -> _w2\n\tmax(*a, *b) -> w\n}\n",
     );
 }
 
 #[test]
 fn unary_minus_emits_neg() {
-    let ops = opcodes("unary", "f", "rwfunc f(*int64 $a) -> () {\n\t-*a -> w\n}\n");
+    let ops = opcodes("unary", "f", "rwfunc f(*int64 #a) -> () {\n\t-*a -> w\n}\n");
     assert!(ops.iter().any(|o| o == "neg"), "一元负号应发 neg：{ops:?}");
     assert!(!ops.iter().any(|o| o.contains('·')), "{ops:?}");
 }
@@ -144,7 +145,10 @@ fn string_plus_emits_concat_and_mixed_is_rejected() {
     let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();
     assert!(!out.status.success(), "混合字符串与数值必须 layout 失败");
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("cannot mix string and numeric"), "stderr: {err}");
+    assert!(
+        err.contains("cannot mix string and numeric"),
+        "stderr: {err}"
+    );
     let _ = std::fs::remove_file(&file);
     kvlanglayout::ffi::remove_test_store(&db);
 }
@@ -155,14 +159,14 @@ fn no_switch_can_bring_typed_names_back() {
     // 一并删除，layout 源码不再读它们。原先这里跑 `["1","0",""]` 三轮，是为了证明
     // 「任何开关值都不影响产物」——开关没了，三轮就是同一件事跑三遍。
     // 按 p11：被测对象已删，测试直接收敛成一轮、不设任何 env。
-    let file = temp_file("switch", "rwfunc f(*int64 $a) -> () {\n\t*a + *a -> w\n}\n");
+    let file = temp_file("switch", "rwfunc f(*int64 #a) -> () {\n\t*a + *a -> w\n}\n");
     let db = dsn("switch");
-    let out = Command::new(bin())
-        .arg(&file)
-        .arg(&db)
-        .output()
-        .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let mut kv = Kv::conn(&db);
     init_dirs(&mut kv).unwrap();
     for c in kv.list("/lib/f/", false, false) {

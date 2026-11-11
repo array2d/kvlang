@@ -286,7 +286,7 @@ pub fn new_defrwir(nr: i32, nw: i32, dynamic: bool) -> Result<Vec<u8>, String> {
     ffi::xvalue_to_wire(KIND_DEF_RWIR, &counts_body(nr, nw, dynamic)?, 1)
 }
 
-/// `inplace` mark appended to a write param's langtype, mirroring `*T $name inplace`.
+/// `inplace` mark appended to a write param's langtype, mirroring `inplace *T #name`.
 pub const INPLACE_SUFFIX: &str = " inplace";
 
 /// 签名行 [0,x] 槽：一个参数的类型定义，body=该参数完整 langtype 串。
@@ -323,46 +323,20 @@ pub fn def_langtype_full(data: &[u8]) -> Option<(String, bool)> {
     }
 }
 
-/// rwfunc 参数定义键（点后缀 .[0,-k]）：body=名字\x00类型串，langtype=def langtype。
-pub fn new_def_param(name: &str, langtype: &str) -> Result<Vec<u8>, String> {
-    new_def_param_with_inplace(name, langtype, false)
+/// rwfunc/rwir 参数定义键（点后缀 `.[0,±k]`）：body 只存 langtype（可带 ` inplace`
+/// 尾缀），**不存名字**——名字是源码注释（`#name`），到 kvspace 没有意义。
+pub fn new_def_param(langtype: &str) -> Result<Vec<u8>, String> {
+    new_def_param_with_inplace(langtype, false)
 }
 
-/// rwfunc write param key `.[0,+k]`: body `name\x00langtype[ inplace]`.
-pub fn new_def_param_with_inplace(
-    name: &str,
-    langtype: &str,
-    inplace: bool,
-) -> Result<Vec<u8>, String> {
-    let clean = langtype.strip_suffix(INPLACE_SUFFIX).unwrap_or(langtype);
-    let suffix = if inplace { INPLACE_SUFFIX.as_bytes() } else { &[][..] };
-    let mut body = Vec::with_capacity(name.len() + 1 + clean.len() + suffix.len());
-    body.extend_from_slice(name.as_bytes());
-    body.push(0);
-    body.extend_from_slice(clean.as_bytes());
-    body.extend_from_slice(suffix);
-    ffi::xvalue_to_wire(KIND_DEF_LANGTYPE, &body, 1)
+/// 写参定义键 body：`langtype[ inplace]`。
+pub fn new_def_param_with_inplace(langtype: &str, inplace: bool) -> Result<Vec<u8>, String> {
+    new_def_langtype_with_inplace(langtype, inplace)
 }
 
-/// Param key body `name\x00langtype[ inplace]` -> (name, langtype, inplace).
-pub fn def_param_full(data: &[u8]) -> Option<(String, String, bool)> {
-    if data.is_empty() || ffi::xh_is_none(data) {
-        return None;
-    }
-    let b = body(data);
-    let nul = b.iter().position(|&x| x == 0)?;
-    let name = String::from_utf8_lossy(&b[..nul]).into_owned();
-    let raw_ty = String::from_utf8_lossy(&b[nul + 1..]);
-    let (ty, inplace) = match raw_ty.strip_suffix(INPLACE_SUFFIX) {
-        Some(stripped) => (stripped.to_string(), true),
-        None => (raw_ty.into_owned(), false),
-    };
-    Some((name, ty, inplace))
-}
-
-/// 解析参数定义键 body（名字\x00类型串）→ (名字, 类型)。
-pub fn def_param_parts(data: &[u8]) -> Option<(String, String)> {
-    def_param_full(data).map(|(name, ty, _)| (name, ty))
+/// 参数定义键 body `langtype[ inplace]` -> (langtype, inplace)。
+pub fn def_param_full(data: &[u8]) -> Option<(String, bool)> {
+    def_langtype_full(data)
 }
 
 pub fn new_struct() -> Result<Vec<u8>, String> {
@@ -492,11 +466,11 @@ mod map_langtype_tests {
          * 这里钉住的是「判据不自作主张」：它答「是不是 map 形态」，不答「合不合法」。
          */
         for text in [
-            "''int64",           // #9 空 formatter
-            "''int64'int64",     // #10 嵌套（本轮不支持）
-            "'int64'",           // #11 缺 value
-            "'int64",            // #12 未闭合
-            "'foo'int64",        // #14 未知 formatter
+            "''int64",       // #9 空 formatter
+            "''int64'int64", // #10 嵌套（本轮不支持）
+            "'int64'",       // #11 缺 value
+            "'int64",        // #12 未闭合
+            "'foo'int64",    // #14 未知 formatter
         ] {
             assert!(
                 is_map_langtype(text),

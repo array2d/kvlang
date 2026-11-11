@@ -3,7 +3,7 @@
 // 期望输出:
 //   1
 //   0
-rwfunc is_pal(*int64 $x) -> (*int64 $r) {
+rwfunc is_pal(*int64 #x) -> (*int64 #r) {
 	neg:bool = *x < 0
 
 	if (neg) {

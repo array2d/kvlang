@@ -4,7 +4,7 @@
 //   true
 //   true
 //   false
-rwfunc is_valid(*[]char/utf32 $s) -> (*int64 $ok) {
+rwfunc is_valid(*[]char/utf32 #s) -> (*int64 #ok) {
 	*ok = 1
 	si:int64 = -1
 	n:int64 = string·len(*s)

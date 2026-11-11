@@ -6,23 +6,23 @@
 //   L3: hello world
 //   L2 int: 42
 //   L2 path-like: /lib
-rwfunc show(*[]char/utf32 $x, *[]char/utf32 $tag) -> () {
+rwfunc show(*[]char/utf32 #x, *[]char/utf32 #tag) -> () {
 	println(*tag, *x)
 }
 
-rwfunc show2(*[]char/utf32 $x, *[]char/utf32 $tag) -> () {
+rwfunc show2(*[]char/utf32 #x, *[]char/utf32 #tag) -> () {
 	show(*x, *tag)
 }
 
-rwfunc show3(*[]char/utf32 $x, *[]char/utf32 $tag) -> () {
+rwfunc show3(*[]char/utf32 #x, *[]char/utf32 #tag) -> () {
 	show2(*x, *tag)
 }
 
-rwfunc showi(*int64 $n) -> () {
+rwfunc showi(*int64 #n) -> () {
 	println("L2 int:", *n)
 }
 
-rwfunc showi2(*int64 $n) -> () {
+rwfunc showi2(*int64 #n) -> () {
 	showi(*n)
 }
 

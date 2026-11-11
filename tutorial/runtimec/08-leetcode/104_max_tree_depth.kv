@@ -8,7 +8,7 @@ struct TNode {
 	right:*TNode=None
 }
 
-rwfunc max_depth(*TNode $root) -> (*int64 $depth) {
+rwfunc max_depth(*TNode #root) -> (*int64 #depth) {
 	if (root == None) { 0 -> *depth }
 	else {
 		ld:int64 = max_depth((*root)·left)

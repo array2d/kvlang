@@ -11,7 +11,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc dedup() -> (**Node $head) {
+rwfunc dedup() -> (**Node #head) {
 	cur:*/lib/Node = *head
 	while (cur != None) {
 		(*cur)·next -> nxt:*/lib/Node
@@ -33,7 +33,7 @@ rwfunc dedup() -> (**Node $head) {
 	}
 }
 
-rwfunc show(**Node $head) -> () {
+rwfunc show(**Node #head) -> () {
 	p:*/lib/Node = *head
 	while (p != None) {
 		(*p)·val -> v:int64

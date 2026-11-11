@@ -8,7 +8,7 @@ struct Node {
 	next:*Node=None
 }
 
-rwfunc get_intersection(*Node $ha, *Node $hb) -> () {
+rwfunc get_intersection(*Node #ha, *Node #hb) -> () {
 	pa:*/lib/Node = ha
 	pb:*/lib/Node = hb
 	switch_a:int64 = 0

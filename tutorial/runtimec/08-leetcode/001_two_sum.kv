@@ -3,7 +3,7 @@
 // 期望输出:
 //   [ 0 , 1 ]
 //   [-1, -1]
-rwfunc two_sum(*[]int64 $nums, *int64 $target) -> () {
+rwfunc two_sum(*[]int64 #nums, *int64 #target) -> () {
 	n:int64 = compactarray·numel(*nums)
 	found:int64 = 0
 	0 -> i:int64

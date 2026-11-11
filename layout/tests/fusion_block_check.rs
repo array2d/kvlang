@@ -23,10 +23,7 @@ fn instr<'a>(reads: &'a [&'a str], writes: &'a [&'a str], inplace: bool) -> Fusi
 fn per_instruction_check_passes_the_counterexample() {
     // 反例：[b = a; a = 1]。两条指令各自都非 inplace。
     let block = [instr(&[A], &[B], false), instr(&[], &[A], false)];
-    assert!(
-        per_instruction_ok(&block),
-        "逐指令检查应当放过 [b=a; a=1]"
-    );
+    assert!(per_instruction_ok(&block), "逐指令检查应当放过 [b=a; a=1]");
 }
 
 #[test]
@@ -36,10 +33,7 @@ fn block_check_rejects_the_counterexample() {
         !later_write_recovered(&block),
         "C1* 必须拒绝 [b=a; a=1]：i₁ 读 a，更晚 i₂ 写 a，且没有更早的写恢复 a"
     );
-    assert!(
-        !no_future_read(&block),
-        "C1' 也必须拒绝 [b=a; a=1]"
-    );
+    assert!(!no_future_read(&block), "C1' 也必须拒绝 [b=a; a=1]");
     assert!(!block_admissible(&block), "块级判据必须拒绝 [b=a; a=1]");
 }
 
@@ -55,10 +49,7 @@ fn block_check_accepts_a_positive_control() {
         later_write_recovered(&block),
         "C1* 应接受 [a=1; b=a; a=2]：更早的 i₀ 会恢复 a"
     );
-    assert!(
-        !no_future_read(&block),
-        "C1' 是保守近似，应拒绝同一个正例"
-    );
+    assert!(!no_future_read(&block), "C1' 是保守近似，应拒绝同一个正例");
     assert!(block_admissible(&block), "块级判据应接受正例");
 }
 

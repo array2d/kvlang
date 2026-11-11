@@ -4,7 +4,7 @@
 //   primes up to 100
 //   ...
 //   total primes up to 100 = 25
-rwfunc prime_sieve(*int64 $limit) -> () {
+rwfunc prime_sieve(*int64 #limit) -> () {
 	println("primes up to", *limit)
 	count:int64 = 0
 	2 -> n:int64

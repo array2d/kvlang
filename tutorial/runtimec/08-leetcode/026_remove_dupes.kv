@@ -3,7 +3,7 @@
 // 期望输出:
 //   k = 5
 //   k = 5
-rwfunc remove_dupes() -> (*int64 $k) {
+rwfunc remove_dupes() -> (*int64 #k) {
     a:[]int64 = [0, 0, 1, 1, 1, 2, 2, 3, 3, 4]
     compactarray·numel(a) -> n:int64
     *k = 1

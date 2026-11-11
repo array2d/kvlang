@@ -16,7 +16,7 @@
 //   108
 
 // 替换第 i 个字符，返回新串（值语义：实参不被修改）
-rwfunc replace_at(*[]char/utf32 $s, *int64 $i,*[]char/utf32 $ch) -> (*[]char/utf32 $r) {
+rwfunc replace_at(*[]char/utf32 #s, *int64 #i,*[]char/utf32 #ch) -> (*[]char/utf32 #r) {
 	*s -> *r
 	(*r)[*i] = (*ch)[0]
 }

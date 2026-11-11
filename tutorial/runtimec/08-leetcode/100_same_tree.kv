@@ -9,7 +9,7 @@ struct TNode {
 	right:*TNode=None
 }
 
-rwfunc same(*TNode $a, *TNode $b) -> (*int64 $ok) {
+rwfunc same(*TNode #a, *TNode #b) -> (*int64 #ok) {
 	if (a == None || b == None) {
 		if (*a == *b) { 1 -> *ok } else { 0 -> *ok }
 	} else {

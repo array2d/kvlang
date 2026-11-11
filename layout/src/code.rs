@@ -2,7 +2,7 @@
 //!
 //! 存储约定：
 //!   /lib/<pkg>·<name>/[0,0]         布局后签名锚点（kind=rwfunc，body=计数头 [nr,nw,dyn]）
-//!   /lib/<pkg>·<name>.[0,±k]        参数定义键（langtype=def langtype, body=名字\x00类型）
+//!   /lib/<pkg>·<name>.[0,±k]        参数定义键（langtype=def langtype, body=类型[ inplace]）
 //!   /lib/<pkg>·<name>/[i,j]         编译后指令（kind=rwir），i 从 1 开始
 //!   /lib/<pkg>·<name>/‥labels/<l>   label → irseq
 //!   /lib/<pkg>·<name>.src           源码副本（仅 write_func 保留写入，printlib 不再依赖）
@@ -110,7 +110,10 @@ fn refuse_with_diagnostics(diags: &[crate::scanner::Diagnostic], stage: &str) ->
         .unwrap_or_else(|| stage.to_string());
     let errors = diags.iter().filter(|d| !d.warn).count();
     if errors > 1 {
-        format!("{stage}: error-level diagnostics — refusing to load ({first}; and {} more)", errors - 1)
+        format!(
+            "{stage}: error-level diagnostics — refusing to load ({first}; and {} more)",
+            errors - 1
+        )
     } else {
         format!("{stage}: error-level diagnostics — refusing to load ({first})")
     }
@@ -156,7 +159,9 @@ fn store_callee(kv: &mut Kv, op: &str) -> Option<StoreCallee> {
     if kvkind::kind(&kv.get_one(&dir), &kv.langtype_of(&dir)) == kvkind::KIND_RWFUNC {
         let (nr, nw, dynamic) = kvkind::counts(&kv.get_one(&format!("{dir}[0,0]")));
         let sig = reconstruct_sig(kv, &dir, name, nr, nw, dynamic);
-        return Some(StoreCallee::Rwfunc(sig.returns.iter().map(|p| p.inplace).collect()));
+        return Some(StoreCallee::Rwfunc(
+            sig.returns.iter().map(|p| p.inplace).collect(),
+        ));
     }
     let decl = keytree::rwir(name);
     let value = kv.get_one(&decl);
@@ -191,7 +196,11 @@ impl UnitNames {
         /* Last definition wins, as in the store (writes happen in file order). */
         let mut funcs = HashMap::new();
         for (i, f) in file.funcs.iter().enumerate() {
-            let pkg = if f.pkg.is_empty() { &file.package } else { &f.pkg };
+            let pkg = if f.pkg.is_empty() {
+                &file.package
+            } else {
+                &f.pkg
+            };
             funcs.insert(qualify(pkg, &f.sig.name), i);
             funcs.insert(qualify(&f.pkg, &f.sig.name), i);
         }
@@ -317,8 +326,7 @@ fn crash_resume_input(
     let param = |p: &Param| crash_resume::ParamInfo {
         name: p.name.clone(),
         inplace: p.inplace,
-        value: !p.by_ref.contains('@')
-            && (p.by_ref.len() >= 2 || crash_resume::value_type(&p.ty)),
+        value: !p.by_ref.contains('@') && (p.by_ref.len() >= 2 || crash_resume::value_type(&p.ty)),
     };
     crash_resume::FunctionInput {
         name: sig.name.clone(),
@@ -340,7 +348,11 @@ fn crash_resume_input(
                 }
             })
             .collect(),
-        label_starts: a.labels.values().map(|&start| (start.max(1) - 1) as usize).collect(),
+        label_starts: a
+            .labels
+            .values()
+            .map(|&start| (start.max(1) - 1) as usize)
+            .collect(),
         local_types: local_slot_types(a),
     }
 }
@@ -395,7 +407,10 @@ fn analyze_file(
         }
     }
     let mut inplace_diags = lower::check_inplace_unit(&facts, &|name| {
-        credit.get(name).cloned().unwrap_or(lower::InplaceCallee::Unknown)
+        credit
+            .get(name)
+            .cloned()
+            .unwrap_or(lower::InplaceCallee::Unknown)
     })
     .into_iter();
     let mut funcs: Vec<AnalyzedFunc> = Vec::new();
@@ -424,7 +439,13 @@ fn analyze_file(
             body,
             pkg: String::new(),
         };
-        top_init = Some(analyze_func(&init_fn, String::new(), &structs, &sigs, Vec::new())?);
+        top_init = Some(analyze_func(
+            &init_fn,
+            String::new(),
+            &structs,
+            &sigs,
+            Vec::new(),
+        )?);
     }
     let inputs: Vec<crash_resume::FunctionInput> = funcs
         .iter()
@@ -485,7 +506,9 @@ fn analyze_func(
      */
     lower::annotate_position_slot_types(&mut fn_, &type_map);
     let mut diags = std::mem::take(&mut shape_diags);
-    diags.extend(lower::validate_writes(&fn_, &type_map, structs, sigs, &annotated));
+    diags.extend(lower::validate_writes(
+        &fn_, &type_map, structs, sigs, &annotated,
+    ));
     /* 推断必须在 specialize 之前算一次，且只算一次：specialize 只改 e.op 的字形
      * （`+` → `add`）与 `operator`/`operand_kind`，不改赋值来源与类型，所以两处
      * 结果相同；在它之后重算既多余，又逼着 `exact_kind` 同时认两种 op 形态。
@@ -528,7 +551,13 @@ fn analyze_func(
         slot_coord.insert(parameter.name.clone(), format!("*[0,{}]", index + 1));
     }
     annotate_slot_types(
-        &mut seq, &declared, &type_sets, &mut stable, sigs, structs, &slot_coord,
+        &mut seq,
+        &declared,
+        &type_sets,
+        &mut stable,
+        sigs,
+        structs,
+        &slot_coord,
     );
     /* 隐式数值转换必须在 `annotate_slot_types` **之后**：目标 kind 取自
      * `write_slot_type`，而它读的正是那一趟补出来的写槽类型与并入的 `stable`。
@@ -538,7 +567,9 @@ fn analyze_func(
         let mut declared_source = source_langtypes.merged_under(&declared);
         for (name, kind) in &stable {
             if !kind.is_empty() && !kind.contains('|') {
-                declared_source.entry(name.clone()).or_insert_with(|| kind.clone());
+                declared_source
+                    .entry(name.clone())
+                    .or_insert_with(|| kind.clone());
             }
         }
         let param_types: Vec<String> = fn_.sig.langtype_list();
@@ -706,7 +737,11 @@ fn unit_func_names(file: &ast::File) -> HashSet<String> {
     file.funcs
         .iter()
         .map(|f| {
-            let pkg = if f.pkg.is_empty() { &file.package } else { &f.pkg };
+            let pkg = if f.pkg.is_empty() {
+                &file.package
+            } else {
+                &f.pkg
+            };
             qualify_name(pkg, &f.sig.name)
         })
         .collect()
@@ -855,7 +890,10 @@ fn collect_funcs(
         } else if !kv.list(&mem_sub, false, true).is_empty() {
             collect_funcs(kv, &mem_sub, &sub_pkg, funcs, decls);
         } else {
-            decls.push(format!("{key} {}", sanitize(&kvkind::display(&v, &kv.langtype_of(&key)))));
+            decls.push(format!(
+                "{key} {}",
+                sanitize(&kvkind::display(&v, &kv.langtype_of(&key)))
+            ));
         }
     }
 }
@@ -891,7 +929,10 @@ fn collect_slots(kv: &mut Kv, prefix: &str, out: &mut Vec<String>) {
             collect_slots(kv, &full, out);
         } else {
             let v = kv.get_one(&full);
-            out.push(format!("{c} {}", sanitize(&kvkind::display(&v, &kv.langtype_of(&full)))));
+            out.push(format!(
+                "{c} {}",
+                sanitize(&kvkind::display(&v, &kv.langtype_of(&full)))
+            ));
         }
     }
 }
@@ -961,7 +1002,11 @@ fn reconstruct(kv: &mut Kv, dir: &str, name: &str) -> String {
     .full_text()
 }
 
-/// 从参数定义键 base.[0,±k]（点后缀）重建签名：body=名字\x00类型串。
+/// 从参数定义键 base.[0,±k]（点后缀）重建签名：body 只有 langtype。
+///
+/// **名字不从存储读回**：`#name` 是源码注释，落库时不写（见 `kvkind::new_def_param`）。
+/// 重建出的签名因此没有名字，`printlib` 输出的是省略 `#name` 的形态——那是合法形态，
+/// 只是体里的裸名不再能按名解析，这正是「名字到 kvspace 没有意义」的代价。
 fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic: bool) -> FuncSig {
     let blank = || Param {
         name: String::new(),
@@ -974,11 +1019,9 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
     let mut returns: Vec<Param> = (0..nw).map(|_| blank()).collect();
     let base = dir.trim_end_matches('/');
     for k in 1..=nr {
-        if let Some((pname, pty)) =
-            kvkind::def_param_parts(&kv.get_one(&format!("{base}.[0,-{k}]")))
-        {
+        if let Some((pty, _)) = kvkind::def_param_full(&kv.get_one(&format!("{base}.[0,-{k}]"))) {
             params[(k - 1) as usize] = Param {
-                name: pname,
+                name: String::new(),
                 ty: pty,
                 by_ref: String::new(),
                 has_ty: true,
@@ -987,11 +1030,11 @@ fn reconstruct_sig(kv: &mut Kv, dir: &str, name: &str, nr: i32, nw: i32, dynamic
         }
     }
     for k in 1..=nw {
-        if let Some((rname, rty, r_inplace)) =
+        if let Some((rty, r_inplace)) =
             kvkind::def_param_full(&kv.get_one(&format!("{base}.[0,{k}]")))
         {
             returns[(k - 1) as usize] = Param {
-                name: rname,
+                name: String::new(),
                 ty: rty,
                 by_ref: String::new(),
                 has_ty: true,
@@ -1229,7 +1272,7 @@ fn build_inst(inst: &RawInst, by_irseq: &HashMap<i32, String>) -> Instruction {
         arrow_left: is_fill || inst.write_types.iter().any(|t| !t.is_empty()),
         operator: false,
         operand_kind: String::new(),
-            pos: Pos::default(),
+        pos: Pos::default(),
     }
 }
 
@@ -1309,7 +1352,9 @@ pub fn write_func(
     let mut declared_source = source_langtypes.merged_under(declared);
     for (name, kind) in stable {
         if !kind.is_empty() && !kind.contains('|') {
-            declared_source.entry(name.clone()).or_insert_with(|| kind.clone());
+            declared_source
+                .entry(name.clone())
+                .or_insert_with(|| kind.clone());
         }
     }
 
@@ -1347,24 +1392,21 @@ pub fn write_func(
         ffi::new_char_byte(fn_.full_text().as_bytes())?,
     ));
     // 参数定义键 funcDir.[0,±k]（点后缀，与坐标斜杠键 /[0,±k] 区分）：langtype=def langtype，
-    // body=名字\x00类型串。坐标斜杠键 [0,±k] 留给 runtime call 期写实参地址 Ptr；点后缀键
+    // body 只有类型串（写参可带 ` inplace`）——**名字不落库**：`#name` 是源码注释。
+    // 坐标斜杠键 [0,±k] 留给 runtime call 期写实参地址 Ptr；点后缀键
     // 不同名、不触发 extindex 写保护。函数体形参引用已替换为 *[0,±k] 显式解引用。
-    for (i, p) in fn_.sig.params.iter().enumerate() {
+    for (i, _) in fn_.sig.params.iter().enumerate() {
         pairs.push((
             format!("{func_dir}.[0,-{}]", i + 1),
             kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_param(&p.name, &param_types[i])?,
+            kvkind::new_def_param(&param_types[i])?,
         ));
     }
     for (i, r) in fn_.sig.returns.iter().enumerate() {
         pairs.push((
             format!("{func_dir}.[0,{}]", i + 1),
             kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_param_with_inplace(
-                &r.name,
-                &param_types[nr as usize + i],
-                r.inplace,
-            )?,
+            kvkind::new_def_param_with_inplace(&param_types[nr as usize + i], r.inplace)?,
         ));
     }
 
@@ -1411,7 +1453,10 @@ pub fn write_func(
         // 每条 op 观测到的操作数类型集合（union 成员表校准输入）。
         let mut per_op: std::collections::BTreeMap<
             String,
-            (std::collections::BTreeSet<String>, std::collections::BTreeSet<String>),
+            (
+                std::collections::BTreeSet<String>,
+                std::collections::BTreeSet<String>,
+            ),
         > = std::collections::BTreeMap::new();
         let mut record = |op: &str, ty: String, write: bool| {
             let members = lower::type_members(&ty);
@@ -1452,7 +1497,18 @@ pub fn write_func(
             for (j, w) in inst.writes.iter().enumerate() {
                 record(
                     &op,
-                    write_slot_type(inst, j, w, &param_langtype, &source_langtypes, declared, &declared_source, type_sets, structs, stable),
+                    write_slot_type(
+                        inst,
+                        j,
+                        w,
+                        &param_langtype,
+                        &source_langtypes,
+                        declared,
+                        &declared_source,
+                        type_sets,
+                        structs,
+                        stable,
+                    ),
                     true,
                 );
             }
@@ -1496,8 +1552,11 @@ pub fn write_func(
      */
     if let Some(resumability) = &a.crash_resume {
         let (text, langtype) = crash_resume_record(resumability);
-        let key = format!("{func_dir}/{}{}", keytree::RUNTIME_MEMBER_SEP,
-                          keytree::SEG_CRASH_RESUME);
+        let key = format!(
+            "{func_dir}/{}{}",
+            keytree::RUNTIME_MEMBER_SEP,
+            keytree::SEG_CRASH_RESUME
+        );
         kv.set(&[(key, langtype, ffi::new_char_byte(text.as_bytes())?)])
             .map_err(werr)?;
     }
@@ -1659,8 +1718,8 @@ fn collect_insts(
                 /* 只有**合成**块必须自己跳出去：它的入口是跳转进来的（if/while
                  * 分支、循环体），不跳就无法到达汇合点。用户具名块按线性展平，
                  * 后面的语句就是续接——停下即衔接，不需要也不该补跳转。 */
-                let terminated = (seq.len() as i32) >= start
-                    && seq.last().is_some_and(inst_is_terminator);
+                let terminated =
+                    (seq.len() as i32) >= start && seq.last().is_some_and(inst_is_terminator);
                 if s.synthetic && !terminated {
                     return Err(format!(
                         "synthetic block {:?} does not end with return/goto/br",
@@ -1950,7 +2009,7 @@ fn expr_slot_type(
      * 一段定宽数组，类型由调用方给出）。
      *
      * 判据挂在签名上：**先查 `sigs`**（`compactarray·fill` 若有安装签名就以它为准，
-     * 形状为 `fill(*[]char/utf8 $t) -> …`），签名不可得时才按「首参是 langtype
+     * 形状为 `fill(*[]char/utf8 #t) -> …`），签名不可得时才按「首参是 langtype
      * 文本」取——因为这一行的类型本来就来自调用方写下的那串 langtype，而它必然
      * 是个字符串字面量。
      *
@@ -2096,7 +2155,10 @@ fn value_type_of(
         .find(|(_, coordinate)| coordinate.as_str() == expr.val)
         .map(|(name, _)| name.clone())
     {
-        return declared.get(&name).cloned().or_else(|| derived.get(&name).cloned());
+        return declared
+            .get(&name)
+            .cloned()
+            .or_else(|| derived.get(&name).cloned());
     }
     declared
         .get(&expr.val)
@@ -2521,7 +2583,18 @@ fn write_linear_inst(
     for (j, w) in s.writes.iter().enumerate() {
         let orig = w.as_str();
         let wv = param_slot(params, orig);
-        let ty = write_slot_type(s, j, orig, param_langtype, source_langtypes, declared, declared_source, type_sets, structs, stable);
+        let ty = write_slot_type(
+            s,
+            j,
+            orig,
+            param_langtype,
+            source_langtypes,
+            declared,
+            declared_source,
+            type_sets,
+            structs,
+            stable,
+        );
         let (wire, lt) = typed_slot_value(wv, &ty, "")?;
         pairs.push((format!("{prefix}/[{n},{}]", j + 1), lt, wire));
     }
@@ -2586,8 +2659,7 @@ fn check_call_names(
             let qual = format!("{pkg}{}{op}", keytree::MEMBER_SEP);
             let qdir = format!("/lib/{qual}/");
             if local_funcs.contains(&qual)
-                || kvkind::kind(&kv.get_one(&qdir), &kv.langtype_of(&qdir))
-                    == kvkind::KIND_RWFUNC
+                || kvkind::kind(&kv.get_one(&qdir), &kv.langtype_of(&qdir)) == kvkind::KIND_RWFUNC
             {
                 return Err(undefined_call(&op));
             }
@@ -2615,10 +2687,20 @@ fn is_operator_word(op: &str) -> bool {
 fn is_cast_name(op: &str) -> bool {
     matches!(
         op,
-        "int8" | "int16" | "int32" | "int64"
-            | "uint8" | "uint16" | "uint32" | "uint64"
-            | "float32" | "float64" | "bool"
-            | "char/utf8" | "char/utf32" | "char/ascii"
+        "int8"
+            | "int16"
+            | "int32"
+            | "int64"
+            | "uint8"
+            | "uint16"
+            | "uint32"
+            | "uint64"
+            | "float32"
+            | "float64"
+            | "bool"
+            | "char/utf8"
+            | "char/utf32"
+            | "char/ascii"
     ) || op == "stringkeymap"
 }
 
@@ -2688,10 +2770,7 @@ fn integer_literal_text(s: &str) -> bool {
 }
 
 /// 无符号算子的字面量操作数：按 promotion 结果 kind 编码（范围复检，越界不改编码）。
-fn adapted_literal_slot(
-    text: &str,
-    kind: &str,
-) -> Result<Option<(Vec<u8>, String)>, String> {
+fn adapted_literal_slot(text: &str, kind: &str) -> Result<Option<(Vec<u8>, String)>, String> {
     if !builtin::is_unsigned_kind(kind) || !integer_literal_text(text) {
         return Ok(None);
     }
@@ -2755,10 +2834,7 @@ fn slot_value(val: &str, target_char: &str) -> Result<(Vec<u8>, String), String>
         return Ok((ffi::new_none()?, String::new()));
     }
     if !is_literal(val) {
-        return Ok((
-            kvkind::new_rwir(0, 0, val)?,
-            kvkind::KIND_RWIR.to_string(),
-        ));
+        return Ok((kvkind::new_rwir(0, 0, val)?, kvkind::KIND_RWIR.to_string()));
     }
     let b = val.as_bytes();
     if b[0] == b'"' {
@@ -3019,7 +3095,7 @@ mod tests {
 
     #[test]
     fn format_preserves_lib() {
-        roundtrip("lib http {\n\trwfunc get(*[]char/utf32 $url) -> (*[]char/utf32 $resp) {\n\t\thttp·call(\"GET\", \"\", *url, \"\") -> *resp\n\t}\n}\n");
+        roundtrip("lib http {\n\trwfunc get(*[]char/utf32 #url) -> (*[]char/utf32 #resp) {\n\t\thttp·call(\"GET\", \"\", *url, \"\") -> *resp\n\t}\n}\n");
         roundtrip("lib byteseek {\nlib session {\nlib s1 {\nrwfunc main() -> () {\ns:int64 = 3 + 4\nprintln(s)\n}\n}\n}\n}\nmain()\n");
     }
 
@@ -3047,7 +3123,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(dsn_nested.trim_start_matches("fs://"));
         // 后端不可用（本期 `libkvspace` 只服务 shm://）→ 显式 SKIP，不装红。
         if crate::ffi::try_connect(&dsn_nested).is_none() {
-            eprintln!("SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归", dsn_nested);
+            eprintln!(
+                "SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归",
+                dsn_nested
+            );
             return;
         }
         let mut kv = Kv::conn(&dsn_nested);
@@ -3055,7 +3134,7 @@ mod tests {
 
         compile(
             &mut kv,
-            "lib a {\nlib b {\nrwfunc f() -> (int64 $r) {\n*r = 1\n}\n}\n}\n",
+            "lib a {\nlib b {\nrwfunc f() -> (int64 #r) {\n*r = 1\n}\n}\n}\n",
         )
         .unwrap();
         let dir = kv.get_one("/lib/a/b·f/");
@@ -3063,7 +3142,10 @@ mod tests {
         /* head 只有 bodylen + attrslen + padding：目录 marker 的 bodylen 为 0。 */
         assert_eq!(ffi::xh_len(&dir), 0);
         assert_eq!(
-            kvkind::kind(&kv.get_one("/lib/a/b·f/[0,0]"), &kv.langtype_of("/lib/a/b·f/[0,0]")),
+            kvkind::kind(
+                &kv.get_one("/lib/a/b·f/[0,0]"),
+                &kv.langtype_of("/lib/a/b·f/[0,0]")
+            ),
             "rwfunc"
         );
         /* code 槽的判据是「body 非空」，不是 head 里的某个形态位——形态位
@@ -3074,7 +3156,7 @@ mod tests {
         // 同 lib a 下再 layout 另一嵌套 lib c，验证 b·f 未被整库删除（增量合并）
         compile(
             &mut kv,
-            "lib a {\nlib c {\nrwfunc g() -> (int64 $g) {\n*g = 2\n}\n}\n}\n",
+            "lib a {\nlib c {\nrwfunc g() -> (int64 #g) {\n*g = 2\n}\n}\n}\n",
         )
         .unwrap();
         assert_eq!(
@@ -3086,7 +3168,10 @@ mod tests {
             "b·f 应保留"
         );
         assert_eq!(
-            kvkind::kind(&kv.get_one("/lib/a/c·g/[0,0]"), &kv.langtype_of("/lib/a/c·g/[0,0]")),
+            kvkind::kind(
+                &kv.get_one("/lib/a/c·g/[0,0]"),
+                &kv.langtype_of("/lib/a/c·g/[0,0]")
+            ),
             "rwfunc"
         );
     }
@@ -3113,7 +3198,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(dsn_call_kind.trim_start_matches("fs://"));
         // 后端不可用（本期 `libkvspace` 只服务 shm://）→ 显式 SKIP，不装红。
         if crate::ffi::try_connect(&dsn_call_kind).is_none() {
-            eprintln!("SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归", dsn_call_kind);
+            eprintln!(
+                "SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归",
+                dsn_call_kind
+            );
             return;
         }
         let mut kv = Kv::conn(&dsn_call_kind);
@@ -3125,9 +3213,12 @@ mod tests {
             kvkind::new_defrwir(1, 0, false).unwrap(),
         )])
         .unwrap();
-        compile(&mut kv, "rwfunc caller() -> () {\ny:int64 = callee(1)\nprintln(y)\n}\nrwfunc callee(int64 $x) -> (int64 $r) {\nx -> *r\n}\n").unwrap();
+        compile(&mut kv, "rwfunc caller() -> () {\ny:int64 = callee(1)\nprintln(y)\n}\nrwfunc callee(int64 #x) -> (int64 #r) {\nx -> *r\n}\n").unwrap();
         assert_eq!(
-            kvkind::kind(&kv.get_one("/lib/caller/[1,0]"), &kv.langtype_of("/lib/caller/[1,0]")),
+            kvkind::kind(
+                &kv.get_one("/lib/caller/[1,0]"),
+                &kv.langtype_of("/lib/caller/[1,0]")
+            ),
             "rwfunc"
         );
         assert_eq!(
@@ -3135,7 +3226,10 @@ mod tests {
             (1, 1, false)
         );
         assert_eq!(
-            kvkind::kind(&kv.get_one("/lib/caller/[2,0]"), &kv.langtype_of("/lib/caller/[2,0]")),
+            kvkind::kind(
+                &kv.get_one("/lib/caller/[2,0]"),
+                &kv.langtype_of("/lib/caller/[2,0]")
+            ),
             "rwir"
         );
         assert_eq!(
@@ -3144,7 +3238,10 @@ mod tests {
         );
         compile(&mut kv, "rwfunc later() -> () {\ny:int64 = callee(1)\n}\n").unwrap();
         assert_eq!(
-            kvkind::kind(&kv.get_one("/lib/later/[1,0]"), &kv.langtype_of("/lib/later/[1,0]")),
+            kvkind::kind(
+                &kv.get_one("/lib/later/[1,0]"),
+                &kv.langtype_of("/lib/later/[1,0]")
+            ),
             "rwfunc"
         );
         compile(
@@ -3187,7 +3284,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(dsn_struct.trim_start_matches("fs://"));
         // 后端不可用（本期 `libkvspace` 只服务 shm://）→ 显式 SKIP，不装红。
         if crate::ffi::try_connect(&dsn_struct).is_none() {
-            eprintln!("SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归", dsn_struct);
+            eprintln!(
+                "SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归",
+                dsn_struct
+            );
             return;
         }
         let mut kv = Kv::conn(&dsn_struct);
@@ -3198,7 +3298,10 @@ mod tests {
         )
         .unwrap();
         let proto = kv.get_one("/lib/Point");
-        assert_eq!(kvkind::kind(&proto, &kv.langtype_of("/lib/Point")), "def struct");
+        assert_eq!(
+            kvkind::kind(&proto, &kv.langtype_of("/lib/Point")),
+            "def struct"
+        );
         assert!(kvkind::body(&proto).is_empty());
         assert_eq!(kvkind::value_string(&kv.get_one("/lib/Point/x")), "int64");
         assert_eq!(
@@ -3229,7 +3332,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(dsn_dot.trim_start_matches("fs://"));
         // 后端不可用（本期 `libkvspace` 只服务 shm://）→ 显式 SKIP，不装红。
         if crate::ffi::try_connect(&dsn_dot).is_none() {
-            eprintln!("SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归", dsn_dot);
+            eprintln!(
+                "SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归",
+                dsn_dot
+            );
             return;
         }
         let mut kv = Kv::conn(&dsn_dot);
@@ -3247,7 +3353,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            kvkind::kind(&kv.get_one("/lib/t·main/[0,0]"), &kv.langtype_of("/lib/t·main/[0,0]")),
+            kvkind::kind(
+                &kv.get_one("/lib/t·main/[0,0]"),
+                &kv.langtype_of("/lib/t·main/[0,0]")
+            ),
             "rwfunc"
         );
         assert!(
@@ -3313,7 +3422,10 @@ mod tests {
         let _ = std::fs::remove_dir_all(dsn.trim_start_matches("fs://"));
         // 后端不可用（本期 `libkvspace` 只服务 shm://）→ 显式 SKIP，不装红。
         if crate::ffi::try_connect(&dsn).is_none() {
-            eprintln!("SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归", dsn);
+            eprintln!(
+                "SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归",
+                dsn
+            );
             return;
         }
         let mut kv = Kv::conn(&dsn);

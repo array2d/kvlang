@@ -1,7 +1,7 @@
 // 期望输出:
 //   fib(10) = 34
 //   fact(10) = 3628800
-rwfunc fib(*int64 $n) -> (*int64 $a, *int64 $b) {
+rwfunc fib(*int64 #n) -> (*int64 #a, *int64 #b) {
 	if (*n <= 1) {
 		*a = 0
 		1 -> *b
@@ -14,7 +14,7 @@ rwfunc fib(*int64 $n) -> (*int64 $a, *int64 $b) {
 	}
 }
 
-rwfunc factorial(*int64 $n) -> (*int64 $r) {
+rwfunc factorial(*int64 #n) -> (*int64 #r) {
 	*r = 1
 	1 -> i:int64
 	while (i <= *n) {

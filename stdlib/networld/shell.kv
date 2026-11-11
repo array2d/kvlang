@@ -5,13 +5,13 @@
 // 实现在 networld/proc·exec 之上。
 
 lib networld/shell {
-	rwfunc run(*[]char/utf32 $cmd) -> (*[]char/utf32 $out) {
+	rwfunc run(*[]char/utf32 #cmd) -> (*[]char/utf32 #out) {
 		noenv:'[int64]'[]char/utf32 = {}
 		a:'[int64]'[]char/utf32 = {"bash", "-c", *cmd}
 		networld/proc·exec(a, noenv) -> code:uint8, o:[]char/utf32, e:[]char/utf32
 		o -> *out
 	}
-	rwfunc exec(*[]char/utf32 $cmd) -> (*uint8 $code, *[]char/utf32 $out, *[]char/utf32 $err) {
+	rwfunc exec(*[]char/utf32 #cmd) -> (*uint8 #code, *[]char/utf32 #out, *[]char/utf32 #err) {
 		noenv:'[int64]'[]char/utf32 = {}
 		a:'[int64]'[]char/utf32 = {"bash", "-c", *cmd}
 		networld/proc·exec(a, noenv) -> *code, o:[]char/utf32, e:[]char/utf32

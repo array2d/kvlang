@@ -8,7 +8,7 @@ use support::TempDirectory;
 
 static SEQ: AtomicUsize = AtomicUsize::new(0);
 
-const CAPABILITIES: &str = "rwir println(*[]char/utf32 $s...)\n";
+const CAPABILITIES: &str = "rwir println(*[]char/utf32 #s...)\n";
 
 /// Lay `src` out into a fresh store; return the record of each function in `names`.
 fn verdicts(src: &str, names: &[&str]) -> Vec<String> {
@@ -42,7 +42,7 @@ fn vthread_ops_are_never_replayed() {
 /// A replay range may not re-roll `random·intn` (was `5<-2`).
 #[test]
 fn volatile_result_blocks_the_range() {
-    let src = "rwfunc pick(uint64 $k) -> (*int64 $x, *int64 $y) {\n\tif (k == 0) {\n\t\t1 -> *x\n\t} else {\n\t\t1 -> *y\n\t}\n}\nrwfunc f() -> () {\n\ta:int64 = 0\n\tb:int64 = 0\n\ts:int64 = 0\n\tk:uint64 = random·intn(2)\n\tpick(k) -> a, b\n\ts = s + 1\n\ta -> /tmp/rev_a_a\n\tb -> /tmp/rev_a_b\n}\n";
+    let src = "rwfunc pick(uint64 #k) -> (*int64 #x, *int64 #y) {\n\tif (k == 0) {\n\t\t1 -> *x\n\t} else {\n\t\t1 -> *y\n\t}\n}\nrwfunc f() -> () {\n\ta:int64 = 0\n\tb:int64 = 0\n\ts:int64 = 0\n\tk:uint64 = random·intn(2)\n\tpick(k) -> a, b\n\ts = s + 1\n\ta -> /tmp/rev_a_a\n\tb -> /tmp/rev_a_b\n}\n";
     assert_eq!(
         verdicts(src, &["f"]),
         ["NOT_RESUMABLE:5:volatile:random·intn"]
@@ -69,7 +69,7 @@ fn map_new_keeps_old_members() {
 /// `_1 = *n; _1·v` reaches the parameter (was `3<-1`).
 #[test]
 fn member_of_lowering_temp_is_heap() {
-    let src = "struct Node {\n\tv:int64=0\n}\nrwfunc g() -> (*/lib/Node $n) {\n\t(*n)·v -> t:int64\n\tt + 1 -> (*n)·v\n\tt = t + 1\n\tt -> /tmp/rev_a_t\n}\n";
+    let src = "struct Node {\n\tv:int64=0\n}\nrwfunc g() -> (*/lib/Node #n) {\n\t(*n)·v -> t:int64\n\tt + 1 -> (*n)·v\n\tt = t + 1\n\tt -> /tmp/rev_a_t\n}\n";
     assert_eq!(verdicts(src, &["g"]), ["NOT_RESUMABLE:2:/tmp/rev_a_t"]);
 }
 
@@ -97,14 +97,14 @@ fn path_string_base_reaches_absolute_key() {
 /// `&a` of a by-value param writes caller storage (was `4<-1`).
 #[test]
 fn address_of_by_value_param() {
-    let src = "rwfunc f(int64 $a) -> () {\n\t&a -> p:*int64\n\tx:int64 = 0\n\ta -> t:int64\n\t5 -> *p\n\tx = x + t\n\tx -> /tmp/rev_a_x\n}\n";
+    let src = "rwfunc f(int64 #a) -> () {\n\t&a -> p:*int64\n\tx:int64 = 0\n\ta -> t:int64\n\t5 -> *p\n\tx = x + t\n\tx -> /tmp/rev_a_x\n}\n";
     assert_eq!(verdicts(src, &["f"]), ["CONDITIONALLY_RESUMABLE:4<-caller"]);
 }
 
 /// `leak(v)` may keep v's address; `*p` then writes v (was `6<-3`).
 #[test]
 fn escape_through_callee() {
-    let src = "rwfunc leak(*int64 $x) -> (**int64 $out) {\n\tx -> *out\n}\nrwfunc f() -> () {\n\tv:int64 = 1\n\tp:*int64 = None\n\tleak(v) -> p\n\ts:int64 = 0\n\tv -> t:int64\n\t5 -> *p\n\ts = s + t\n\ts -> /tmp/rev_a_s\n}\n";
+    let src = "rwfunc leak(*int64 #x) -> (**int64 #out) {\n\tx -> *out\n}\nrwfunc f() -> () {\n\tv:int64 = 1\n\tp:*int64 = None\n\tleak(v) -> p\n\ts:int64 = 0\n\tv -> t:int64\n\t5 -> *p\n\ts = s + t\n\ts -> /tmp/rev_a_s\n}\n";
     assert_eq!(
         verdicts(src, &["leak", "f"]),
         [
@@ -117,7 +117,7 @@ fn escape_through_callee() {
 /// `f(v) -> v` binds both params to v (was `4<-1`).
 #[test]
 fn by_value_param_aliases_write_param() {
-    let src = "rwfunc f(int64 $a) -> (*int64 $r) {\n\ta -> *r\n\tx:int64 = 0\n\ta -> t:int64\n\tt + 1 -> *r\n\tx = x + t\n\tx -> /tmp/rev_a_x\n}\nrwfunc h() -> () {\n\t5 -> v:int64\n\tf(v) -> v\n\tprintln(v)\n}\n";
+    let src = "rwfunc f(int64 #a) -> (*int64 #r) {\n\ta -> *r\n\tx:int64 = 0\n\ta -> t:int64\n\tt + 1 -> *r\n\tx = x + t\n\tx -> /tmp/rev_a_x\n}\nrwfunc h() -> () {\n\t5 -> v:int64\n\tf(v) -> v\n\tprintln(v)\n}\n";
     assert_eq!(
         verdicts(src, &["f", "h"]),
         [
@@ -130,7 +130,7 @@ fn by_value_param_aliases_write_param() {
 /// `f() -> /tmp/rev_a_g` while f reads that key: P2 checked inside the unit.
 #[test]
 fn same_unit_caller_binds_param_to_absolute_key() {
-    let src = "rwfunc f() -> (*int64 $r) {\n\tx:int64 = 0\n\t/tmp/rev_a_g -> t:int64\n\tt + 1 -> *r\n\tx = x + t\n\tx -> /tmp/rev_a_x\n}\nrwfunc h() -> () {\n\tf() -> /tmp/rev_a_g\n}\n";
+    let src = "rwfunc f() -> (*int64 #r) {\n\tx:int64 = 0\n\t/tmp/rev_a_g -> t:int64\n\tt + 1 -> *r\n\tx = x + t\n\tx -> /tmp/rev_a_x\n}\nrwfunc h() -> () {\n\tf() -> /tmp/rev_a_g\n}\n";
     assert_eq!(
         verdicts(src, &["f", "h"]),
         ["NOT_RESUMABLE:3:/tmp/rev_a_g", "NOT_RESUMABLE:0:callee:f"]
@@ -140,7 +140,7 @@ fn same_unit_caller_binds_param_to_absolute_key() {
 /// Replay from the kill of x re-establishes x before `*q` writes it.
 #[test]
 fn pointer_copy_keeps_kill_of_target() {
-    let src = "rwfunc f(int64 $n) -> (*int64 $r) {\n\ts:int64 = 0\n\ti:int64 = 0\n\twhile (i < n) {\n\t\ti = i + 1\n\t\tif (i == 2) {\n\t\t\tcontinue\n\t\t}\n\t\tif (i == 5) {\n\t\t\tbreak\n\t\t}\n\t\ts = s + i\n\t}\n\ts -> *r\n}\nrwfunc g() -> () {\n\tx:int64 = 1\n\t&x -> p:*int64\n\tq:*int64 = p\n\ty:int64 = 0\n\tx -> t:int64\n\t9 -> *q\n\ty = y + t\n\ty -> /tmp/rev_a_y\n}\n";
+    let src = "rwfunc f(int64 #n) -> (*int64 #r) {\n\ts:int64 = 0\n\ti:int64 = 0\n\twhile (i < n) {\n\t\ti = i + 1\n\t\tif (i == 2) {\n\t\t\tcontinue\n\t\t}\n\t\tif (i == 5) {\n\t\t\tbreak\n\t\t}\n\t\ts = s + i\n\t}\n\ts -> *r\n}\nrwfunc g() -> () {\n\tx:int64 = 1\n\t&x -> p:*int64\n\tq:*int64 = p\n\ty:int64 = 0\n\tx -> t:int64\n\t9 -> *q\n\ty = y + t\n\ty -> /tmp/rev_a_y\n}\n";
     assert_eq!(verdicts(src, &["g"]), ["CONDITIONALLY_RESUMABLE:6<-0"]);
 }
 
@@ -170,7 +170,7 @@ fn utf32_string_set_is_a_partial_write() {
 /// The callee patches its read param, so the caller's argument is written (was `5<-2`).
 #[test]
 fn callee_patches_pointer_read_param() {
-    let src = "rwfunc poke(*[]int64 $a) -> (*[]int64 $r) {\n\tcompactarray·set(*a, 0, 9) -> *r\n}\nrwfunc test() -> () {\n\ta:[]int64 = [1, 2, 3]\n\tb:[]int64 = [0, 0, 0]\n\tx:int64 = 0\n\tt:int64 = a[0]\n\tpoke(a) -> b\n\tx = x + t\n\tprintln(x)\n}\n";
+    let src = "rwfunc poke(*[]int64 #a) -> (*[]int64 #r) {\n\tcompactarray·set(*a, 0, 9) -> *r\n}\nrwfunc test() -> () {\n\ta:[]int64 = [1, 2, 3]\n\tb:[]int64 = [0, 0, 0]\n\tx:int64 = 0\n\tt:int64 = a[0]\n\tpoke(a) -> b\n\tx = x + t\n\tprintln(x)\n}\n";
     assert_eq!(
         verdicts(src, &["poke", "test"]),
         [
@@ -184,7 +184,7 @@ fn callee_patches_pointer_read_param() {
 /// range from step 0, and `*out` makes the fallback `caller`.
 #[test]
 fn listat_absent_entry_is_no_kill() {
-    let src = "rwfunc f() -> (*bool $out) {\n\tname:[]char/utf8 = \"init\"\n\tx:int64 = 0\n\tkvspace·listat(/tmp/rc_dir, 99) -> name\n\tu:[]char/utf8 = name\n\tname = \"zzzz\"\n\tx = x + 1\n\tu == \"init\" -> *out\n}\nrwfunc test() -> () {\n\n\tf() -> r:bool\n\tif (r) {\n\t\tprintln(\"u is init (correct)\")\n\t} else {\n\t\tprintln(\"u is NOT init (wrong)\")\n\t}\n}\n";
+    let src = "rwfunc f() -> (*bool #out) {\n\tname:[]char/utf8 = \"init\"\n\tx:int64 = 0\n\tkvspace·listat(/tmp/rc_dir, 99) -> name\n\tu:[]char/utf8 = name\n\tname = \"zzzz\"\n\tx = x + 1\n\tu == \"init\" -> *out\n}\nrwfunc test() -> () {\n\n\tf() -> r:bool\n\tif (r) {\n\t\tprintln(\"u is init (correct)\")\n\t} else {\n\t\tprintln(\"u is NOT init (wrong)\")\n\t}\n}\n";
     assert_eq!(
         verdicts(src, &["f"]),
         ["CONDITIONALLY_RESUMABLE:2<-0,5<-caller"]
@@ -194,7 +194,7 @@ fn listat_absent_entry_is_no_kill() {
 /// A by-value read param is bound by address too (caller was `5<-2`).
 #[test]
 fn callee_patches_by_value_read_param() {
-    let src = "rwfunc poke([]int64 $a) -> (*[]int64 $r) {\n\tcompactarray·set(a, 0, 9) -> *r\n}\nrwfunc test() -> () {\n\ta:[]int64 = [1, 2, 3]\n\tb:[]int64 = [0, 0, 0]\n\tx:int64 = 0\n\tt:int64 = a[0]\n\tpoke(a) -> b\n\tx = x + t\n\tu:int64 = a[0]\n\tif (x == 1) {\n\t\tprintln(\"x == 1 (correct)\")\n\t} else {\n\t\tprintln(\"x != 1 (wrong)\")\n\t}\n\tif (u == 9) {\n\t\tprintln(\"a[0] == 9: callee wrote its read param\")\n\t}\n}\n";
+    let src = "rwfunc poke([]int64 #a) -> (*[]int64 #r) {\n\tcompactarray·set(a, 0, 9) -> *r\n}\nrwfunc test() -> () {\n\ta:[]int64 = [1, 2, 3]\n\tb:[]int64 = [0, 0, 0]\n\tx:int64 = 0\n\tt:int64 = a[0]\n\tpoke(a) -> b\n\tx = x + t\n\tu:int64 = a[0]\n\tif (x == 1) {\n\t\tprintln(\"x == 1 (correct)\")\n\t} else {\n\t\tprintln(\"x != 1 (wrong)\")\n\t}\n\tif (u == 9) {\n\t\tprintln(\"a[0] == 9: callee wrote its read param\")\n\t}\n}\n";
     assert_eq!(
         verdicts(src, &["poke", "test"]),
         [
@@ -217,7 +217,7 @@ fn element_load_into_utf8_char_is_partial() {
 /// A member write through a write param reads the param's value (caller was `6<-3`).
 #[test]
 fn member_write_through_write_param_reads_it() {
-    let src = "rwfunc g() -> (*'[]char/utf8'int64 $r) {\n\t5 -> (*r)\u{b7}k\n}\nrwfunc f() -> () {\n\tm1:'[]char/utf8'int64 = {}\n\tv:'[]char/utf8'int64 = {}\n\tv = m1\n\tx:int64 = 1\n\tg() -> v\n\tv:'[]char/utf8'int64 = {}\n\tx = x + 1\n\tprintln(x)\n}\n";
+    let src = "rwfunc g() -> (*'[]char/utf8'int64 #r) {\n\t5 -> (*r)\u{b7}k\n}\nrwfunc f() -> () {\n\tm1:'[]char/utf8'int64 = {}\n\tv:'[]char/utf8'int64 = {}\n\tv = m1\n\tx:int64 = 1\n\tg() -> v\n\tv:'[]char/utf8'int64 = {}\n\tx = x + 1\n\tprintln(x)\n}\n";
     assert_eq!(
         verdicts(src, &["g", "f"]),
         ["CONDITIONALLY_RESUMABLE:0<-caller", "NOT_RESUMABLE:4:heap"]
@@ -227,7 +227,7 @@ fn member_write_through_write_param_reads_it() {
 /// An unverified rwir may touch any storage, even with literal-only operands (was ALWAYS).
 #[test]
 fn unverified_rwir_touches_storage() {
-    let src = "rwir bump() -> ()\nrwir bump2(int64 $n) -> ()\nrwfunc f() -> () {\n\tbump()\n\tbump2(5)\n\t5 -> /tmp/revd_x\n}\n";
+    let src = "rwir bump() -> ()\nrwir bump2(int64 #n) -> ()\nrwfunc f() -> () {\n\tbump()\n\tbump2(5)\n\t5 -> /tmp/revd_x\n}\n";
     assert_eq!(verdicts(src, &["f"]), ["NOT_RESUMABLE:0:unverified:bump"]);
 }
 
@@ -267,7 +267,7 @@ fn pointer_copy_then_address_of_resizes() {
 /// sound anchor: its slice rebinds v at the size g's store expects.
 #[test]
 fn callee_store_into_write_param_needs_its_size() {
-    let src = "rwfunc g() -> (*[]char/utf8 $r) {\n\tt:[]char/utf8 = \"abc\"\n\tt -> *r\n}\nrwfunc test() -> () {\n\ts:[]char/utf8 = \"abc\"\n\tv:[]char/utf8 = string·slice(s, 0, 12)\n\tx:int64 = 0\n\tg() -> v\n\tv = string·slice(s, 0, 2)\n\tx = x + 1\n\tx -> /tmp/reve_x\n\tv -> /tmp/reve_v\n}\n";
+    let src = "rwfunc g() -> (*[]char/utf8 #r) {\n\tt:[]char/utf8 = \"abc\"\n\tt -> *r\n}\nrwfunc test() -> () {\n\ts:[]char/utf8 = \"abc\"\n\tv:[]char/utf8 = string·slice(s, 0, 12)\n\tx:int64 = 0\n\tg() -> v\n\tv = string·slice(s, 0, 2)\n\tx = x + 1\n\tx -> /tmp/reve_x\n\tv -> /tmp/reve_v\n}\n";
     assert_eq!(
         verdicts(src, &["g", "test"]),
         ["ALWAYS_RESUMABLE", "CONDITIONALLY_RESUMABLE:5<-1"]
@@ -289,5 +289,8 @@ fn inplace_store_into_absolute_key_may_rebind() {
 #[test]
 fn char_slot_may_hold_text() {
     let src = "rwfunc test() -> () {\n\ts:[]char/utf32 = \"abcdef\"\n\tc:char/utf32 = 'a'\n\tx:int64 = 0\n\tc2:char/utf32 = 'b'\n\tc2 -> c\n\tstring·slice(s, 0, 2) -> c\n\tx = x + 1\n\tx -> /tmp/x\n\tc -> /tmp/c\n}\n";
-    assert_eq!(verdicts(src, &["test"]), ["CONDITIONALLY_RESUMABLE:6<-entry"]);
+    assert_eq!(
+        verdicts(src, &["test"]),
+        ["CONDITIONALLY_RESUMABLE:6<-entry"]
+    );
 }

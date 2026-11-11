@@ -16,7 +16,7 @@
 // Named `reflect` after Go/Rust reflection, leaving `lib kvlang` for core compiler/VM capabilities.
 
 lib kvlang/reflect {
-	rwfunc fnlist(*[]char/utf32 $name) -> (*[]char/utf32 $listing) {
+	rwfunc fnlist(*[]char/utf32 #name) -> (*[]char/utf32 #listing) {
 		"" -> *listing
 		"/lib/" + *name -> base:[]char/utf32
 		base + "·" -> mdir:[]char/utf32

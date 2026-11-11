@@ -39,24 +39,25 @@ def_rwir]]）。
 
 ## 写参修饰符 `inplace`
 
-`inplace` 写在**写参**的类型与名字之后：
+`inplace` 写在**写参**的类型**之前**：
 
 ```kv
-rwfunc add_to(*int64 $n, int64 $d) -> (*int64 $acc inplace) {
+rwfunc add_to(*int64 #n, int64 #d) -> (inplace *int64 #acc) {
     *acc + d -> *acc          // 同一条指令里既读 *acc 又写 *acc
 }
 
-rwir accumulate(*int64 $delta) -> (*int64 $acc inplace)
+rwir accumulate(int64 #delta) -> (inplace int64 #acc)
 ```
+
+写在名字之后（`*int64 #acc inplace`）是语法错误；读参带 `inplace` 也是错误。
 
 语义：该参数在**同一条指令内既被读又被写**。调用方看到的仍是普通传址参数，不需要额外语法。
 
 - Allowed on write params of `rwfunc` and `rwir` only; a read param marked `inplace` is an error.
 - 一个函数可以有多个 `inplace` 写参，逐个校验，不限数量。
 - Stored form: rwfunc write param key `funcDir.[0,+k]` (`def langtype`) has body
-  `<name>\0<langtype> inplace`; a def rwir write slot `/lib/<op>/[0,+k]` has body
-  `<langtype> inplace`. Unmarked params keep `<name>\0<langtype>` / `<langtype>`.
-  printlib restores the mark; vmkv strips it and rejects it on read params.
+  `<langtype> inplace`; a def rwir write slot `/lib/<op>/[0,+k]` has 后 同一形态。两者都**不存名字**（`#name` 是注释）。
+  Unmarked params keep `<langtype>`. printlib restores the mark; vmkv strips it and rejects it on read params.
 
 ### 三条深度校验（缺一即报错，具名指出缺哪条）
 

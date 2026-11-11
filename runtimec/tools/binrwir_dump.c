@@ -369,8 +369,8 @@ static bool declare_capabilities(dump_context_t *context,
     /* 那个已摘除的输出算子（TASK-044）不再声明；本工具只声明要跑的语料用到的
      * 那些外部能力。 */
     static const char declarations[] =
-        "rwir print(*[]char/utf32 $s...)\n"
-        "rwir printf(*[]char/utf32 $s...)\n"
+        "rwir print(*[]char/utf32 #s...)\n"
+        "rwir printf(*[]char/utf32 #s...)\n"
         "rwir debugger()\n";
     char path[PATH_CAPACITY];
     if (!format_path(path, sizeof(path), "%s/capabilities.kv",

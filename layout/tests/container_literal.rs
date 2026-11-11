@@ -17,7 +17,6 @@ use kvlanglayout::{init_dirs, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
-
 /// 测试用的临时目录，**离开作用域即删**（含 panic 展开时）。
 /// 普通清理语句在断言失败时会被跳过——测试红了反而留下最多垃圾。
 struct TempDir(PathBuf);
@@ -33,8 +32,6 @@ impl TempDir {
         self.0.join(p)
     }
 }
-
-
 
 fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_kvlanglayout")
@@ -197,7 +194,7 @@ fn no_literal_form_emits_obj() {
 fn signature_declaration_supplies_the_map_type() {
     let (dir, out) = layout(
         "sig",
-        "rwfunc build() -> (*'[]char/utf8'int64 $m) {\n\t{n=42; x=7} -> *m\n}\n",
+        "rwfunc build() -> (*'[]char/utf8'int64 #m) {\n\t{n=42; x=7} -> *m\n}\n",
     );
     let out = out.unwrap();
     assert!(

@@ -3,7 +3,7 @@
 // 期望输出:
 //   true
 //   false
-rwfunc near_dup(*[]int64 $nums, *int64 $k) -> () {
+rwfunc near_dup(*[]int64 #nums, *int64 #k) -> () {
 	n:int64 = compactarray·numel(*nums)
 	h:'[]char/utf8'int64 = {}
 	found:bool = false

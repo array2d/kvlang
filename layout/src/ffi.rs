@@ -111,9 +111,24 @@ extern "C" {
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvlangXvalueNewBool(v: u8, langtype: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
-    fn kvlangXvalueNewInt64(v: i64, langtype: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
-    fn kvlangXvalueNewFloat64(v: f64, langtype: *const c_char, out: *mut *mut u8, out_len: *mut u32) -> c_int;
+    fn kvlangXvalueNewBool(
+        v: u8,
+        langtype: *const c_char,
+        out: *mut *mut u8,
+        out_len: *mut u32,
+    ) -> c_int;
+    fn kvlangXvalueNewInt64(
+        v: i64,
+        langtype: *const c_char,
+        out: *mut *mut u8,
+        out_len: *mut u32,
+    ) -> c_int;
+    fn kvlangXvalueNewFloat64(
+        v: f64,
+        langtype: *const c_char,
+        out: *mut *mut u8,
+        out_len: *mut u32,
+    ) -> c_int;
 }
 
 // ── 原位 head 访问（16 字节固定头：长度全在 head 里，attr 区无前缀）──
@@ -198,7 +213,10 @@ fn err_ret(buf: &mut [c_char; 256], ret: c_int) -> Result<(), String> {
 
 /// codec 调用：产出 frontend malloc 缓冲，拷出后以 libc free 释放。
 /// Non-zero rc or empty output is an `Err` (passing an empty `Vec` to [`Kv::set`] would delete the key).
-fn call_codec(what: &str, f: impl FnOnce(*mut *mut u8, *mut u32) -> c_int) -> Result<Vec<u8>, String> {
+fn call_codec(
+    what: &str,
+    f: impl FnOnce(*mut *mut u8, *mut u32) -> c_int,
+) -> Result<Vec<u8>, String> {
     let mut out: *mut u8 = std::ptr::null_mut();
     let mut out_len: u32 = 0;
     let rc = f(&mut out, &mut out_len);
@@ -206,7 +224,9 @@ fn call_codec(what: &str, f: impl FnOnce(*mut *mut u8, *mut u32) -> c_int) -> Re
         if !out.is_null() {
             unsafe { free(out as *mut c_void) };
         }
-        return Err(format!("kvspace codec {what} failed (rc={rc}, len={out_len})"));
+        return Err(format!(
+            "kvspace codec {what} failed (rc={rc}, len={out_len})"
+        ));
     }
     let bytes = unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec();
     unsafe { free(out as *mut c_void) };
@@ -214,7 +234,10 @@ fn call_codec(what: &str, f: impl FnOnce(*mut *mut u8, *mut u32) -> c_int) -> Re
 }
 
 /// 固定头构造器调用（New* 的 out_len 为 u64）：成功且 total<=u32::MAX 才转 u32。
-fn call_codec64(what: &str, f: impl FnOnce(*mut *mut u8, *mut u64) -> c_int) -> Result<Vec<u8>, String> {
+fn call_codec64(
+    what: &str,
+    f: impl FnOnce(*mut *mut u8, *mut u64) -> c_int,
+) -> Result<Vec<u8>, String> {
     let mut out: *mut u8 = std::ptr::null_mut();
     let mut out_len: u64 = 0;
     let rc = f(&mut out, &mut out_len);
@@ -222,7 +245,9 @@ fn call_codec64(what: &str, f: impl FnOnce(*mut *mut u8, *mut u64) -> c_int) -> 
         if !out.is_null() {
             unsafe { free(out as *mut c_void) };
         }
-        return Err(format!("kvspace codec {what} failed (rc={rc}, len={out_len})"));
+        return Err(format!(
+            "kvspace codec {what} failed (rc={rc}, len={out_len})"
+        ));
     }
     let bytes = unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec();
     unsafe { free(out as *mut c_void) };
@@ -330,7 +355,8 @@ impl Kv {
 
         // wire 空字节 = None → 删该 key。
         if xvalue.is_empty() {
-            let ret = unsafe { kvspaceFree(self.h, ck.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
+            let ret =
+                unsafe { kvspaceFree(self.h, ck.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
             return err_ret(&mut err, ret);
         }
         if xvalue.len() < 16 {
@@ -352,8 +378,15 @@ impl Kv {
 
         let mut off: u64 = 0;
         let ret = unsafe {
-            kvspaceRealloc(self.h, ck.as_ptr(), body_len, attr_len, &mut off,
-                           err.as_mut_ptr(), err.len() as u32)
+            kvspaceRealloc(
+                self.h,
+                ck.as_ptr(),
+                body_len,
+                attr_len,
+                &mut off,
+                err.as_mut_ptr(),
+                err.len() as u32,
+            )
         };
         if ret != 0 {
             return err_ret(&mut err, ret);
@@ -388,7 +421,14 @@ impl Kv {
         let mut off: u64 = 0;
         let mut err: [c_char; 256] = [0; 256];
         let ret = unsafe {
-            kvspaceResolveOffset(self.h, c.as_ptr(), 0, &mut off, err.as_mut_ptr(), err.len() as u32)
+            kvspaceResolveOffset(
+                self.h,
+                c.as_ptr(),
+                0,
+                &mut off,
+                err.as_mut_ptr(),
+                err.len() as u32,
+            )
         };
         if ret != 0 {
             return Vec::new();
@@ -427,8 +467,14 @@ impl Kv {
         let mut max_name: u32 = 0;
         let mut err: [c_char; 256] = [0; 256];
         let ret = unsafe {
-            kvspaceListlen(self.h, c.as_ptr(), &mut count, &mut max_name,
-                           err.as_mut_ptr(), err.len() as u32)
+            kvspaceListlen(
+                self.h,
+                c.as_ptr(),
+                &mut count,
+                &mut max_name,
+                err.as_mut_ptr(),
+                err.len() as u32,
+            )
         };
         if ret != 0 || count <= 0 {
             return Vec::new();
@@ -443,9 +489,17 @@ impl Kv {
         let mut listed: u32 = 0;
         let mut generation: u64 = 0;
         let ret = unsafe {
-            kvspaceList(self.h, c.as_ptr(), buf.as_mut_ptr() as *mut c_char,
-                        cap as u32, &mut length, &mut listed, &mut generation,
-                        err.as_mut_ptr(), err.len() as u32)
+            kvspaceList(
+                self.h,
+                c.as_ptr(),
+                buf.as_mut_ptr() as *mut c_char,
+                cap as u32,
+                &mut length,
+                &mut listed,
+                &mut generation,
+                err.as_mut_ptr(),
+                err.len() as u32,
+            )
         };
         if ret != 0 {
             return Vec::new();
@@ -467,8 +521,7 @@ impl Kv {
     pub fn mkindex(&mut self, path: &str) -> Result<(), String> {
         let c = CString::new(path).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
-        let ret =
-            unsafe { kvspaceMkindex(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
+        let ret = unsafe { kvspaceMkindex(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
         err_ret(&mut err, ret)
     }
 }
@@ -554,30 +607,26 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>,
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     if kind == "char" || kind.starts_with("char/") {
         return call_codec64("HeadNewSlack", |out, out_len| unsafe {
-            kvlangXvalueHeadNewSlack(
-                raw.as_ptr(),
-                raw.len() as u64,
-                empty,
-                out,
-                out_len,
-            )
+            kvlangXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64, empty, out, out_len)
         });
     }
     if !dims.is_empty() && !kind.contains('·') && !kind.starts_with('/') {
         let d: Vec<u64> = dims.iter().map(|&x| x as u64).collect();
         return call_codec64("HeadNewTensor", |out, out_len| unsafe {
-            kvlangXvalueHeadNewTensor(d.as_ptr(), d.len() as u32, raw.as_ptr(), raw.len() as u64, empty, out, out_len)
-        });
-    }
-    if kind == "rwir" || kind == "def langtype" || (kind == "rwfunc" && !raw.is_empty()) {
-        return call_codec64("HeadNewCode", |out, out_len| unsafe {
-            kvlangXvalueHeadNewCode(
+            kvlangXvalueHeadNewTensor(
+                d.as_ptr(),
+                d.len() as u32,
                 raw.as_ptr(),
                 raw.len() as u64,
                 empty,
                 out,
                 out_len,
             )
+        });
+    }
+    if kind == "rwir" || kind == "def langtype" || (kind == "rwfunc" && !raw.is_empty()) {
+        return call_codec64("HeadNewCode", |out, out_len| unsafe {
+            kvlangXvalueHeadNewCode(raw.as_ptr(), raw.len() as u64, empty, out, out_len)
         });
     }
     call_codec64("HeadNewScalar", |out, out_len| unsafe {
@@ -639,13 +688,7 @@ pub fn new_char(kind: &str, s: &str) -> Result<Vec<u8>, String> {
     };
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     call_codec64("HeadNewSlack", |out, out_len| unsafe {
-        kvlangXvalueHeadNewSlack(
-            raw.as_ptr(),
-            raw.len() as u64,
-            empty,
-            out,
-            out_len,
-        )
+        kvlangXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64, empty, out, out_len)
     })
 }
 
@@ -669,17 +712,23 @@ pub fn new_none() -> Result<Vec<u8>, String> {
 
 pub fn new_bool(v: bool) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec("NewBool", |out, out_len| unsafe { kvlangXvalueNewBool(v as u8, empty, out, out_len) })
+    call_codec("NewBool", |out, out_len| unsafe {
+        kvlangXvalueNewBool(v as u8, empty, out, out_len)
+    })
 }
 
 pub fn new_int64(v: i64) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec("NewInt64", |out, out_len| unsafe { kvlangXvalueNewInt64(v, empty, out, out_len) })
+    call_codec("NewInt64", |out, out_len| unsafe {
+        kvlangXvalueNewInt64(v, empty, out, out_len)
+    })
 }
 
 pub fn new_float64(v: f64) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec("NewFloat64", |out, out_len| unsafe { kvlangXvalueNewFloat64(v, empty, out, out_len) })
+    call_codec("NewFloat64", |out, out_len| unsafe {
+        kvlangXvalueNewFloat64(v, empty, out, out_len)
+    })
 }
 
 #[cfg(test)]

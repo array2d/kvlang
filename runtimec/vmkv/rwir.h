@@ -43,13 +43,15 @@ typedef struct vmkv_rwir_literal_view_t {
 } vmkv_rwir_literal_view_t;
 
 /*
- * 单个明文参数。parameter_type_name 与 parameter_name 必须和 operation
- * manifest 完全匹配；key 是静态 key 或尚待求值的动态 key expression。
+ * 单个明文参数。parameter_type_name 必须和 operation manifest 完全匹配；
+ * key 是静态 key 或尚待求值的动态 key expression。
  * literal 只有参数是内联字面量时才有效（其余情形 bytes/langtype 均为空）。
+ *
+ * **没有名字字段**：`#name` 是源码注释，layout 不把它写进参数定义键。
+ * 判别「这是不是帧参数引用」只凭 key 形态 `*[0,±k]`（见 encoder）。
  */
 typedef struct vmkv_rwir_argument_view_t {
     runtimec_string_view_t parameter_type_name;
-    runtimec_string_view_t parameter_name;
     runtimec_key_view_t key;
     vmkv_key_addressability_t key_addressability;
     vmkv_rwir_literal_view_t literal;

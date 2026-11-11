@@ -33,8 +33,6 @@ fn fresh_kv() -> (TempStore, Kv) {
     (store, kv)
 }
 
-
-
 #[test]
 fn refuse_rwir_and_rwfunc() {
     let (_store, mut kv) = fresh_kv();
@@ -50,7 +48,7 @@ fn refuse_rwir_and_rwfunc() {
 #[test]
 fn compile_simple_func() {
     let (_store, mut kv) = fresh_kv();
-    let src = "rwfunc sum(*int64 $A, *int64 $B) -> (*int64 $C) {\n    *A + *B -> *C\n}\n";
+    let src = "rwfunc sum(*int64 #A, *int64 #B) -> (*int64 #C) {\n    *A + *B -> *C\n}\n";
     compile(&mut kv, src).unwrap();
 
     // 函数签名
@@ -61,13 +59,14 @@ fn compile_simple_func() {
     let b = body(&sig_val);
     assert_eq!(kvkind::rwfunc_num_reads(b), 2);
     assert_eq!(kvkind::rwfunc_num_writes(b), 1);
-    // langtype 列表：读参在前(nr=2)、写参在后(nw=1)，落参数定义键 .[0,±k]
+    // langtype 列表：读参在前(nr=2)、写参在后(nw=1)，落参数定义键 .[0,±k]。
+    // body 只有类型串——参数名（`#name`）是源码注释，不落库。
     let types: Vec<String> = ["[0,-1]", "[0,-2]", "[0,1]"]
         .iter()
         .map(|k| {
-            kvkind::def_param_parts(&kv.get_one(&format!("/lib/sum.{k}")))
+            kvkind::def_param_full(&kv.get_one(&format!("/lib/sum.{k}")))
                 .unwrap()
-                .1
+                .0
         })
         .collect();
     assert_eq!(types, vec!["int64", "int64", "int64"]);
@@ -91,7 +90,10 @@ fn compile_simple_func() {
     // 源码副本
     let src_key = "/lib/sum.src";
     let src_val = kv.get_one(src_key);
-    assert_eq!(kvkind::kind(&src_val, &kv.langtype_of(src_key)), "char/utf8");
+    assert_eq!(
+        kvkind::kind(&src_val, &kv.langtype_of(src_key)),
+        "char/utf8"
+    );
 }
 
 #[test]
@@ -137,7 +139,7 @@ fn compile_multiline_string_literal() {
 #[test]
 fn compile_control_flow_is_single_plane() {
     let (_store, mut kv) = fresh_kv();
-    let src = "rwfunc f(*int64 $X) -> (*int64 $Y) {\n    if (*X > 0) {\n        *X -> *Y\n    } else {\n        0 -> *Y\n    }\n}\n";
+    let src = "rwfunc f(*int64 #X) -> (*int64 #Y) {\n    if (*X > 0) {\n        *X -> *Y\n    } else {\n        0 -> *Y\n    }\n}\n";
     compile(&mut kv, src).unwrap();
 
     let sig_key = "/lib/f/[0,0]";
@@ -182,7 +184,7 @@ fn compile_control_flow_is_single_plane() {
 #[test]
 fn compile_while_goto_targets_are_int64() {
     let (_store, mut kv) = fresh_kv();
-    let src = "rwfunc sum_to(*int64 $n) -> (*int64 $acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n";
+    let src = "rwfunc sum_to(*int64 #n) -> (*int64 #acc) {\n    0 -> *acc\n    i:int64 = 1\n    while (i <= *n) {\n        *acc + i -> *acc\n        i + 1 -> i\n    }\n}\n";
     compile(&mut kv, src).unwrap();
     let children = kv.list("/lib/sum_to/", false, false);
     assert!(

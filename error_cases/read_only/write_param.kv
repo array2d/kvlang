@@ -1,6 +1,6 @@
 // expected:
 //   func f: read param "A" cannot be used as write slot
-rwfunc f(*int64 $A) -> () {
+rwfunc f(*int64 #A) -> () {
     *A = 5
 }
 

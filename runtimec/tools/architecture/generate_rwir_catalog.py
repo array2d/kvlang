@@ -141,7 +141,7 @@ FLOAT64 = type_set("float64")
 #
 # **它必须与 layout 的声明解析器接受面一致**——`char/utf8` 就是漂过的那一格：
 # 白名单原本只有前五项，而 layout 早已接受 `char/utf8`（实测
-# `rwir t·c(*char/utf8 $k) -> (*char/utf8 $v)` 经 `kvlanglayout vet` 返回 `ok`），
+# `rwir t·c(*char/utf8 #k) -> (*char/utf8 #v)` 经 `kvlanglayout vet` 返回 `ok`），
 # 于是 `vthread·create` 的返回类型无处可写。加这一项的依据就是那条实测。
 #
 # **按需给，不按「可能有用」给**：`char/utf32` / `char/ascii` / `[]char/...` 现在
@@ -1010,9 +1010,9 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
     else:
         expected_shapes = [
             (row.operator,
-             [f"*{langtype} ${SIGNATURE_PARAMETER_NAME}{index}"
+             [f"{langtype} #{SIGNATURE_PARAMETER_NAME}{index}"
               for index, langtype in enumerate(row.read_langtypes)],
-             [f"*{langtype} ${SIGNATURE_RESULT_NAME}{index}"
+             [f"{langtype} #{SIGNATURE_RESULT_NAME}{index}"
               for index, langtype in enumerate(row.write_langtypes)])
             for row in declared]
         recovered = read_back_signature_table(render_signature_table(rows))
@@ -1039,9 +1039,10 @@ def render_signature_table(rows: list[Row]) -> str:
     这样 layout 现成的 `rwir_decls` 解析器直接消费，不需要为这张表再写一个解析器；手写的
     `rwir xxx` 声明与 runtime 提供的 native rwir 从此是同一件事，只是兑现方不同。
 
-    每个参数/返回值**必须声明类型**：裸 `$name`（空 kindexpr）不表示「不声明类型」，
+    每个参数/返回值**必须声明类型**：裸 `#name`（空 kindexpr）不表示「不声明类型」，
     而是一条坏形状——layout 的 `rwir_decls` 解析器会拒绝它（`参数必须声明类型`）。
-    旧写法 `name: T` 同样被拒：**只接受 `*T $name` 与 `T $name` 两种**。
+    旧写法 `name: T` 与已废除的 `$name` 同样被拒：rwir 声明只写 `T #name`，不写 `*T`
+    （rwir 没有 rwfunc 的帧间接层，操作数槽直接对应调用者的 key）。
 
     只收录声明了名字型类型的行。其余行的类型由 TypeSet 位或 `/lib/<op>` 的安装签名给出，
     在 layout 侧是另一套判据，不该在这份声明里出现第二份。
@@ -1056,19 +1057,19 @@ def render_signature_table(rows: list[Row]) -> str:
         "//       tools/architecture/generate_rwir_catalog.py 生成并由同一脚本校验。",
         "// 约束：不让 layout 运行期访问 kvspace 读 /lib/<op>；也不在 layout 里手写第二份。",
         "// 语法：与 rwfunc 同形的 rwir 声明，只差函数体——兑现方是 runtime。",
-        "//       每个参数/返回值必须带类型；裸 `$name` 与旧写法 `name:` 都被拒绝。",
+        "//       每个参数/返回值必须带类型；裸 `#name`、`$name` 与旧写法 `name:` 都被拒绝。",
         f"// 统计：{len(declared)} 条声明"
         "（其余行的签名由 TypeSet 位或安装签名给出）。",
         "",
     ]
     for row in declared:
-        # 与 rwfunc 同形：类型在前、`$name` 在后。返回值是写参，必须有可写的 key，
-        # 所以恒为指针形态 `*T`；`T $name`（值复制）只描述读参里被拷贝的标量。
+        # 类型在前、`#name` 在后（注释名）。rwir 没有 rwfunc 的帧间接层：
+        # 操作数的槽直接对应调用者的 key，所以参数类型就是 `T`，不写 `*T`。
         parameters = ", ".join(
-            f"*{langtype} ${SIGNATURE_PARAMETER_NAME}{index}"
+            f"{langtype} #{SIGNATURE_PARAMETER_NAME}{index}"
             for index, langtype in enumerate(row.read_langtypes))
         returns = ", ".join(
-            f"*{langtype} ${SIGNATURE_RESULT_NAME}{index}"
+            f"{langtype} #{SIGNATURE_RESULT_NAME}{index}"
             for index, langtype in enumerate(row.write_langtypes))
         lines.append(f"rwir {row.operator}({parameters}) -> ({returns})")
     lines.append("")
@@ -1082,24 +1083,24 @@ SIGNATURE_RESULT_NAME = "result"
 
 SIGNATURE_LINE_PATTERN = re.compile(
     r"^rwir (\S+)\(([^)]*)\) -> \(([^)]*)\)$")
-# 形参 = `*T $name` 或 `T $name`，**类型部分必需**。
+# 形参 = `*T #name` 或 `T #name`，**类型部分必需**。
 #
 # 两处「不放行」都是同一条判据的两面：
 #   旧写法 `name: T` —— 不匹配本正则，被拒（否则「把整串当类型也照样通过」）；
-#   裸 `$name`       —— 类型组曾是 `(\S(?:.*?))?`（可空），放行了空 kindexpr。
+#   裸 `#name`       —— 类型组曾是 `(\S(?:.*?))?`（可空），放行了空 kindexpr。
 #                       而 layout 的解析器拒绝它（`参数必须声明类型`）。两个解析器
 #                       判据不一致时**以 layout 为准**：BinRWIR 要求具体类型。
 #
 # 一个放行坏形状的校验就是一条不会失败的校验——所以这里把它收紧成必需。
 SIGNATURE_PARAMETER_PATTERN = re.compile(
-    r"^(\*{0,2})(\S.*?)\s*\$([A-Za-z0-9_]+)$")
+    r"^(\*{0,2})(\S.*?)\s*#([A-Za-z0-9_]+)$")
 
 
 def parse_signature_parameter(text: str) -> tuple[str, str]:
     """Return (type_text, name_text) for one formal parameter.
 
-    `*T $name` -> ("*T", "$name"); `T $name` -> ("T", "$name").
-    A bare `$name` (empty kindexpr) is **not** accepted: layout's `rwir_decls` parser
+    `*T #name` -> ("*T", "#name"); `T #name` -> ("T", "#name").
+    A bare `#name` (empty kindexpr) is **not** accepted: layout's `rwir_decls` parser
     rejects it (`参数必须声明类型`), and BinRWIR requires a concrete type. Two parsers
     disagreeing on the same file is the bug this function exists to prevent — layout
     is the authority because it is the reader.
@@ -1109,14 +1110,14 @@ def parse_signature_parameter(text: str) -> tuple[str, str]:
     match = SIGNATURE_PARAMETER_PATTERN.match(text.strip())
     if match is None:
         raise SystemExit(
-            f"formal parameter {text!r} does not match `*T $name` or `T $name`; "
-            f"every parameter must declare a type (a bare `$name` is not enough)")
+            f"formal parameter {text!r} does not match `*T #name` or `T #name`; "
+            f"every parameter must declare a type (a bare `#name` is not enough)")
     stars, type_text, name_text = match.groups()
     if len(stars) > 1:
         raise SystemExit(
             f"formal parameter {text!r} has more than one '*' prefix")
     type_text = (type_text or "").strip()
-    return (stars + type_text, "$" + name_text)
+    return (stars + type_text, "#" + name_text)
 
 
 def read_back_signature_table(text: str) -> list[tuple[str, list[str], list[str]]]:
@@ -1124,7 +1125,7 @@ def read_back_signature_table(text: str) -> list[tuple[str, list[str], list[str]
 
     独立于渲染器：渲染器把行拼成字符串，这里把它读回来。两边同时写错才会互相抵消，
     而那种情形由 layout 自己的 `vet` 兜底——本函数保证生成物**结构**与**语法形态**
-    都对（括号、箭头、`*T $name` 形态），并把读回结果交给调用方逐字比对。
+    都对（括号、箭头、`*T #name` 形态），并把读回结果交给调用方逐字比对。
     """
     recovered: list[tuple[str, list[str], list[str]]] = []
     for line in text.splitlines():
@@ -1142,9 +1143,9 @@ def read_back_signature_table(text: str) -> list[tuple[str, list[str], list[str]
             if name_text[1:] and not name_text[1:].replace("_", "").isalnum():
                 raise SystemExit(
                     f"{surface}: formal name {name_text!r} is not an identifier")
-            if type_text.endswith("$") or "$" in type_text:
+            if type_text.endswith("#") or "$" in type_text or "#" in type_text:
                 raise SystemExit(
-                    f"{surface}: '\u0024' must precede the name, not sit in the type")
+                    f"{surface}: the name marker must precede the name, not sit in the type")
         recovered.append((surface,
                           [f"{t} {n}".strip() for t, n in parameters],
                           [f"{t} {n}".strip() for t, n in returns]))

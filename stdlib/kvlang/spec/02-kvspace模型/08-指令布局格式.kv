@@ -29,7 +29,7 @@ a = 5、b ≥ 5**，langtype =
 
 rwfunc 的各参数类型**不**落 `/[0,x]` 静态槽，而随**参数定义键**承载：`/lib/{pkg}·{name}.[0,-j]`
 （读参）/ `.[0,+j]`（写参）——点后缀、与坐标斜杠键 `/[0,±j]` 不同名——langtype `def langtype`，
-body = 参数名 + NUL + 该参数的 **def langtype**（匹配类型）串——一个参数定义可匹配多种值的 langtype。参
+body = 该参数的 **def langtype**（匹配类型）串（写参可带 ` inplace` 尾缀）——一个参数定义可匹配多种值的 langtype。参数名是源码注释（`#name`），**不落库**。参
 数顺序由键中的 `±j` 显式记录（命名键不保序），故 func 目录
 根**不**落 `/[0,x]` 子槽。
 
@@ -51,8 +51,8 @@ native 与扩展同形。
 ```
 /lib/id_val/  class=0  langtype=rwfunc  body=empty  ← 函数目录
 [0,0]         class=1  langtype=rwfunc  body=[nr,nw,dyn]  ← 签名行锚点（s0=0）
-.[0,-1]       def langtype:"x\0int64"          ← 参数定义键（点后缀）：参数名 + NUL + def langtype 串
-.[0,1]        def langtype:"R\0int64"          ← 参数定义键（写参）
+.[0,-1]       def langtype:"int64"              ← 参数定义键（点后缀）：只有 def langtype 串
+.[0,1]        def langtype:"int64 inplace"      ← 参数定义键（写参，可带 inplace）
 [1,0]         class=1  langtype=rwir  body=counts+"add"  ← 指令0 opcode
 [1,-1]        class=1  langtype=rwir    body=counts+"*[0,-1]\0int64"  ← 指令0 读槽1
 [1,-2]        class=0  langtype=int64   body=raw(8B)           ← 指令0 读槽2（内联字面量，非 rwir、无 counts）

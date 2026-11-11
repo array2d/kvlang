@@ -4,10 +4,10 @@
 // 期望输出:
 //   3
 //   hi
-rwfunc count(*'[int64]'[]char/utf32 $a) -> (*int64 $n) {
+rwfunc count(*'[int64]'[]char/utf32 #a) -> (*int64 #n) {
 	kvspace·listlen(*a) -> *n
 }
-rwfunc first(*'[int64]'[]char/utf32 $a) -> (*[]char/utf32 $v) {
+rwfunc first(*'[int64]'[]char/utf32 #a) -> (*[]char/utf32 #v) {
 	(*a)·*"[0]" -> *v
 }
 rwfunc test() -> () {

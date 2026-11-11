@@ -206,7 +206,7 @@ static bool layout_capabilities_and_file(const char *dsn,
             const size_t used = strlen(declarations);
             if (size != 0U && used < sizeof(declarations) &&
                 snprintf(declarations + used, sizeof(declarations) - used,
-                         "rwir %.*s(*[]char/utf32 $s...)\n", (int)size,
+                         "rwir %.*s(*[]char/utf32 #s...)\n", (int)size,
                          cursor) <= 0) {
                 fprintf(stderr, "kvlangrun: cannot format capability declarations\n");
                 return false;

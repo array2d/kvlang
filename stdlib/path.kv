@@ -1,9 +1,9 @@
 lib path {
-	rwfunc isabs(*[]char/utf32 $p) -> (*bool $r) {
+	rwfunc isabs(*[]char/utf32 #p) -> (*bool #r) {
 		string·startswith(*p, "/") -> *r
 	}
 
-	rwfunc join(*[]char/utf32 $a, *[]char/utf32 $b) -> (*[]char/utf32 $r) {
+	rwfunc join(*[]char/utf32 #a, *[]char/utf32 #b) -> (*[]char/utf32 #r) {
 		if (string·len(*b) == 0) {
 			*a -> *r
 		} else if (path·isabs(*b) || string·len(*a) == 0) {
@@ -15,7 +15,7 @@ lib path {
 		}
 	}
 
-	rwfunc trim_slashes(*[]char/utf32 $p) -> (*[]char/utf32 $r) {
+	rwfunc trim_slashes(*[]char/utf32 #p) -> (*[]char/utf32 #r) {
 		hi:int64 = string·len(*p)
 		while (hi > 1) {
 			if (string·char(*p, hi - 1) != "/") {
@@ -26,7 +26,7 @@ lib path {
 		string·slice(*p, 0, hi) -> *r
 	}
 
-	rwfunc dirname(*[]char/utf32 $p) -> (*[]char/utf32 $d) {
+	rwfunc dirname(*[]char/utf32 #p) -> (*[]char/utf32 #d) {
 		if (string·len(*p) == 0) {
 			"." -> *d
 		} else {
@@ -41,7 +41,7 @@ lib path {
 		}
 	}
 
-	rwfunc basename(*[]char/utf32 $p) -> (*[]char/utf32 $b) {
+	rwfunc basename(*[]char/utf32 #p) -> (*[]char/utf32 #b) {
 		if (string·len(*p) == 0) {
 			"" -> *b
 		} else {
@@ -55,12 +55,12 @@ lib path {
 		}
 	}
 
-	rwfunc split(*[]char/utf32 $p) -> (*[]char/utf32 $dir, *[]char/utf32 $base) {
+	rwfunc split(*[]char/utf32 #p) -> (*[]char/utf32 #dir, *[]char/utf32 #base) {
 		path·dirname(*p) -> *dir
 		path·basename(*p) -> *base
 	}
 
-	rwfunc splitext(*[]char/utf32 $p) -> (*[]char/utf32 $root, *[]char/utf32 $e) {
+	rwfunc splitext(*[]char/utf32 #p) -> (*[]char/utf32 #root, *[]char/utf32 #e) {
 		plen:int64 = string·len(*p)
 		string·rfind(*p, "/") -> slash:int64
 		string·rfind(*p, ".") -> dot:int64
@@ -79,17 +79,17 @@ lib path {
 		}
 	}
 
-	rwfunc ext(*[]char/utf32 $p) -> (*[]char/utf32 $e) {
+	rwfunc ext(*[]char/utf32 #p) -> (*[]char/utf32 #e) {
 		path·basename(*p) -> b:[]char/utf32
 		path·splitext(b) -> (_, *e)
 	}
 
-	rwfunc stem(*[]char/utf32 $p) -> (*[]char/utf32 $s) {
+	rwfunc stem(*[]char/utf32 #p) -> (*[]char/utf32 #s) {
 		path·basename(*p) -> b:[]char/utf32
 		path·splitext(b) -> (*s, _)
 	}
 
-	rwfunc normpath(*[]char/utf32 $p) -> (*[]char/utf32 $r) {
+	rwfunc normpath(*[]char/utf32 #p) -> (*[]char/utf32 #r) {
 		n:int64 = string·len(*p)
 		if (n == 0) {
 			"." -> *r
