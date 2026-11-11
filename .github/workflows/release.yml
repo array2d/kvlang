@@ -81,7 +81,14 @@ jobs:
               [ -e "$f" ] && cp -P "$f" "$d/lib/"
             done
           done
-          find "$DEP_PREFIX/lib/kvspace" -maxdepth 1 -name '*.so*' -exec cp -P {} "$d/lib/kvspace/" \;
+          # 后端目录**只收 durable，按库名收**：`find` 全收会把 CMake 顺带装进
+          # `lib/kvspace/` 的前端副本一起带进包（macOS 的 `cmake --install` 就装两份），
+          # 发布包里出现两份 libkvspace 就是二义来源。
+          for f in "$DEP_PREFIX/lib/kvspace"/libkvspace_durable.so*; do
+            [ -e "$f" ] && cp -P "$f" "$d/lib/kvspace/"
+          done
+          test "$(ls "$d/lib/kvspace" | sed 's/\.so.*//' | sort -u)" = "libkvspace_durable" || {
+            echo "发布包 lib/kvspace 出现非预期库："; ls "$d/lib/kvspace"; exit 1; }
           # 断言：恰好 3 个库名（允许 soname 链接），多一个就是残留。
           names=$(find "$d/lib" -maxdepth 1 -type f -name '*.so*' | sed 's/.*\///;s/\.so.*//' | sort -u)
           test "$names" = "$(printf 'libkvlang_runtime\nlibkvlanglayout\nlibkvspace')" || {
@@ -238,7 +245,13 @@ jobs:
               [ -e "$f" ] && cp -P "$f" "$d/lib/"
             done
           done
-          find "$DEP_PREFIX/lib/kvspace" -maxdepth 1 -name '*.dylib' -exec cp -P {} "$d/lib/kvspace/" \;
+          # 后端目录**只收 durable，按库名收**（同 Linux job）：`cmake --install`
+          # 把前端也装进 `lib/kvspace/`，全收会让发布包里出现两份 libkvspace。
+          for f in "$DEP_PREFIX/lib/kvspace"/libkvspace_durable*.dylib; do
+            [ -e "$f" ] && cp -P "$f" "$d/lib/kvspace/"
+          done
+          test "$(ls "$d/lib/kvspace" | sed 's/\.dylib$//; s/\.[0-9][0-9.]*$//' | sort -u)" = "libkvspace_durable" || {
+            echo "发布包 lib/kvspace 出现非预期库："; ls "$d/lib/kvspace"; exit 1; }
           # `-type f` 只看得见真文件 `libkvspace.1.0.0.dylib`，所以剥掉 `.dylib` 后
           # 还剩版本段 `.1.0.0`——必须再剥一次数字段才能与期望的库名相等。
           # `libkvlanglayout.dylib` 无版本段，两次 sed 后仍是 `libkvlanglayout`。
