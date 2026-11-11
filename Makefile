@@ -285,25 +285,24 @@ BIN_OWNERS := \
 	kvspace=kvspace-cli \
 	kvlanglayout=layout
 
+# 三个判据各是一次集合运算，无循环、无 case、无标志位：
+#   1. actual − keys 非空 → 有文件不属于任何 target（残留）
+#   2. keys − actual 非空 → 有 target 未产出（缺失）
+#   3. 名字在但不是普通文件 → 目录 / 断链（`ls` 列得出、`-f` 为假的那类）
+#
+# 用临时文件而不是 `<(...)`：进程替换是 bash 扩展，make 默认走 `/bin/sh`。
+# 为一条闸给整个 Makefile 设 `SHELL := /bin/bash` 是拿全局换局部。
 bin-gate:
-	@bad=0; \
-	for f in $(wildcard $(BIN)/*); do \
-	  name=$$(basename "$$f"); \
-	  owner=""; \
-	  for entry in $(BIN_OWNERS); do \
-	    case "$$entry" in "$$name="*) owner=$${entry#*=};; esac; \
-	  done; \
-	  if [ -z "$$owner" ]; then \
-	    echo "闸：$(BIN)/$$name 没有 target 负责——这是上一次构建的残留，或该删的临时产物。"; \
-	    echo "  若它是**该有**的产物：把它加进 Makefile 的 BIN_OWNERS（名字=target）。"; \
-	    echo "  若不是：删掉它  rm -f $(BIN)/$$name"; \
-	    bad=1; \
-	  elif ! test -f "$$f"; then \
-	    echo "闸：$(BIN)/$$name 缺失——重建：make $$owner"; \
-	    bad=1; \
-	  fi; \
-	done; \
-	if [ $$bad -ne 0 ]; then exit 1; fi
+	@k=$$(mktemp); a=$$(mktemp); \
+	printf '%s\n' $(BIN_OWNERS) | cut -d= -f1 | sort > "$$k"; \
+	ls -1 $(BIN) 2>/dev/null | sort > "$$a"; \
+	trap 'rm -f "$$k" "$$a"' EXIT; \
+	unexpected=$$(comm -13 "$$k" "$$a"); \
+	missing=$$(comm -23 "$$k" "$$a"); \
+	notfile=$$(find $(BIN) -mindepth 1 -maxdepth 1 ! -type f 2>/dev/null | xargs -r -n1 basename | sort); \
+	[ -z "$$unexpected" ] || { echo "闸：$(BIN)/ 里有不属于任何 target 的文件："; printf '%s\n' "$$unexpected"; exit 1; }; \
+	[ -z "$$missing" ]    || { echo "闸：以下 target 未产出："; printf '%s\n' "$$missing"; exit 1; }; \
+	[ -z "$$notfile" ]    || { echo "闸：以下名字在但不是普通文件（目录 / 断链）："; printf '%s\n' "$$notfile"; exit 1; }
 	@echo "闸：$(BIN)/ 下全部可执行有归属"
 
 stale-gate: bin-gate
