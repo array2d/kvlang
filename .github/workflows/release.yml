@@ -208,8 +208,11 @@ jobs:
           EOF
           # 头与库都从平台最终位置取：Linux /usr、macOS /usr/local。repo 内没有
           # 依赖副本，所以这里不需要任何「副本 vs 系统」的取舍。
+          # 两个 `-L`：kvspace 的 CMake 把库装到 `lib/kvspace/`（安装规则），而
+          # release tarball 的布局是 `lib/` 顶层；给两处，两种布局都命中。
           cc "$RUNNER_TEMP/conn.c" -o "$RUNNER_TEMP/conn" \
-            -I"$DEP_PREFIX/include" -L"$DEP_PREFIX/lib" -lkvspace
+            -I"$DEP_PREFIX/include" \
+            -L"$DEP_PREFIX/lib" -L"$DEP_PREFIX/lib/kvspace" -lkvspace
           DYLD_FALLBACK_LIBRARY_PATH="$DEP_PREFIX/lib:$DEP_PREFIX/lib/kvspace" "$RUNNER_TEMP/conn"
       - name: 打包 ABI 产物
         run: |
