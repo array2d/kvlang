@@ -506,6 +506,15 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             while i < src.len() && !is_token_delim_at(src, i) {
                 i += 1;
             }
+            /* `#` 后立刻是空白/分隔符 ⇒ 注释体为空。那不是「空注释」这种无害形态：
+             * 注释止于分隔符，于是空格之后的文字被当成代码继续解析，裸名表达式
+             * 语句又被静默编成「读并丢弃」——编译成功、零诊断。 */
+            if i == start + 1 {
+                diags.push(lex_error(
+                    p,
+                    "空注释：`#` 后必须紧跟一个词（如 `#acc`）；`#` 与注释体之间不能有空白",
+                ));
+            }
             tokens.push(Token {
                 kind: Kind::Comment,
                 value: String::from_utf8_lossy(&src[start..i]).into_owned(),

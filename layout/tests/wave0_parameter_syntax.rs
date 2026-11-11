@@ -391,3 +391,28 @@ fn single_pointer_write_param_rejects_address() {
         "cannot assign",
     );
 }
+
+/// `#` 与注释体之间不能有空白：`# name` 是空注释 + 裸名表达式语句。
+///
+/// 根因在 scanner：注释止于空白/分隔符，故 `#` 后紧跟空格时注释体为空，
+/// 空格之后的文字被当代码继续解析。裸名表达式语句又被静默编成「读并丢弃」——
+/// **编译成功、零诊断**，是 p1 那种「以奇怪的方式成功运行」。
+#[test]
+fn empty_comment_after_hash_is_rejected() {
+    assert_err(
+        "empty-comment",
+        "rwfunc f(*int64 #x) -> (*int64 #R) {\n\t*x + 1 -> *R   # 这行是注释，不该变成指令\n}\n",
+        "空注释",
+    );
+}
+
+/// 对照组：`#name` 无空白是正常参数注解，必须编过且参数定义键只有 langtype。
+///
+/// 缺了这条，上一条的「拒绝」可以用「凡是 `#` 都拒绝」蒙过去。
+#[test]
+fn comment_without_space_still_compiles() {
+    assert_ok(
+        "nonempty-comment",
+        "rwfunc f(*int64 #x) -> (*int64 #R) {\n\t*x + 1 -> *R\n}\n",
+    );
+}
