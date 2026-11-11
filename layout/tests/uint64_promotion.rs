@@ -42,6 +42,18 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// 从测试 argv 取 `name=value` 形式的参数（**不带前导 `--`**）。
+///
+/// 为什么不用 `--term-bin=/x`：libtest 会把 `--` 之后以 `-` 开头的**拒绝**掉
+/// （实测 `error: Unrecognized option: 'term-bin'`）。位置参数才透传，而位置参数
+/// 不能以 `--` 开头——所以约定写成 `term-bin=/x`：
+///
+///     cargo test --release --test uint64_promotion -- term-bin=/x
+fn test_arg(name: &str) -> Option<String> {
+    let prefix = format!("{name}=");
+    std::env::args().find_map(|a| a.strip_prefix(&prefix).map(str::to_string))
+}
+
 fn temp_dir(tag: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!(
         "kvlanglayout_uint64_{}_{}",
@@ -175,9 +187,11 @@ fn literal_and_result_slots_use_promoted_kind() {
 #[test]
 fn uint64_comparison_and_max_yield_unsigned_values() {
     let root = repo_root();
-    let term = std::env::var("KVLANG_TERM_BIN")
+    // 被测二进制路径走测试 argv（`cargo test ... -- --term-bin=...`），不走环境变量：
+    // 环境变量是隐式输入，不进命令行也不进日志（G12）。缺省是本仓产物路径。
+    let term = test_arg("term-bin")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| root.join("bin/byteseek"));
+        .unwrap_or_else(|| root.join("bin/byteseek"));
     if !term.is_file() {
         eprintln!("skip: {} not built; run `make byteseek`", term.display());
         return;

@@ -31,6 +31,8 @@ KV = str(ROOT / "kvlang")
 # 不是外部配置。
 LAYOUT_BIN = str(ROOT / "bin" / "kvlanglayout")
 TERM_BIN = str(ROOT / "bin" / "byteseek")
+# 单用例运行超时（秒）。走 argv 的 `--case-timeout=`，不走环境变量（G12）。
+CASE_TIMEOUT = 120
 # DSN 无默认值：没给 `--kvspace=` 就报错退出。曾经这里缺省 redis，单库化后
 # `libkvspace` 只服务 shm://，那个默认值根本连不上，却要等用的时候才炸。
 _C_DSN = ""
@@ -294,7 +296,7 @@ def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
     entry = "test"  # 约定入口：每个 tutorial 顶层 rwfunc test()（pkg 空、裸名）
     try:
         crun = subprocess.run([TERM_BIN, entry], capture_output=True, text=True,
-                              timeout=int(os.environ.get("KV_CASE_TIMEOUT", "120")), cwd=str(ROOT), env={**env, "KVSPACE": dsn})
+                              timeout=CASE_TIMEOUT, cwd=str(ROOT), env={**env, "KVSPACE": dsn})
     except subprocess.TimeoutExpired:
         return False, "timeout"
     if crun.returncode != 0:
@@ -335,7 +337,8 @@ def _compare_lines(expects: list[str], actual_stdout: str) -> tuple[bool, str]:
 
 
 def main():
-    global _C_DSN, _BACKEND_TMP
+    # 三个名字用于 argv 的 default=，所以 global 必须在**任何使用之前**声明。
+    global _C_DSN, _BACKEND_TMP, LAYOUT_BIN, TERM_BIN, CASE_TIMEOUT
     ap = argparse.ArgumentParser(description="tutorial test")
     ap.add_argument("--filter", default="", help="按路径子串过滤（如 11-string/01 / 08-leetcode/01）")
     ap.add_argument("--no-build", action="store_true", help="skip make build")
@@ -345,9 +348,11 @@ def main():
                     help="DSN，必填且只接受 shm://（如 shm:///tmp/kv.shm）；无默认值")
     ap.add_argument("--layout-bin", default=LAYOUT_BIN, help="kvlanglayout 路径")
     ap.add_argument("--term-bin", default=TERM_BIN, help="byteseek 路径")
+    ap.add_argument("--case-timeout", type=int, default=CASE_TIMEOUT,
+                    help=f"单用例运行超时（秒），默认 {CASE_TIMEOUT}")
     args = ap.parse_args()
-    global LAYOUT_BIN, TERM_BIN
     LAYOUT_BIN, TERM_BIN = args.layout_bin, args.term_bin
+    CASE_TIMEOUT = args.case_timeout
     _C_DSN = args.kvspace
     if not _C_DSN:
         ap.error("缺少 --kvspace=：DSN 必填且只接受 shm://，例如 "

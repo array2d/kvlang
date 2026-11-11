@@ -52,7 +52,7 @@ FAIL 04-ndarray/xv_shape.kv: execute failed status=5（exit.kind=6 status=5 deta
 `16643 = 0x4103 = VMBIN_INTERPRETER_DIAG_INVALID_INSTRUCTION`——**正是 registry 未命中**。
 `01-basics/kv_tree.kv` 同样用了它，在编译期就失败。所以这一族是真的没接上，不是判据噪声。
 
-其余各族的用例归属可在 `KVRUN_LIST_OUTCOMES=1` 的逐条输出里按路径核对。
+其余各族的用例归属可在 `kv_runner --list-outcomes` 的逐条输出里按路径核对。
 
 ## 复现
 

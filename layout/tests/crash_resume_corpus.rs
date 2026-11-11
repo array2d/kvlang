@@ -1,8 +1,8 @@
 //! Tally of `‥crash_resume` states over `tutorial/` and `runtimec/tests/kv/` (ignored by default).
 //!
-//! KVLANG_CORPUS_DIR=<dir> cargo test --release --test crash_resume_corpus -- --ignored --nocapture
+//! cargo test --release --test crash_resume_corpus -- --ignored --nocapture [corpus-dir=<dir>] [verbose]
 //! Each file gets its own `shm://<dir>/<n>/store.shm` (default dir:
-//! `<repo>/workspace/tmp/crash-resume-corpus`). `KVLANG_CORPUS_VERBOSE=1` lists every function.
+//! `<repo>/workspace/tmp/crash-resume-corpus`). `verbose` lists every function.
 //! `println`/`print`/`cerr` are declared first, as `runtimec/tests/kv_runner.c` does.
 
 use kvlanglayout::{compile, init_dirs, kvkind, Kv};
@@ -63,10 +63,21 @@ fn crash_resume_corpus_tally() {
         .parent()
         .unwrap()
         .to_path_buf();
-    let work = std::env::var("KVLANG_CORPUS_DIR")
+    // 两个参数都走测试 argv，不走环境变量：环境变量是隐式输入，不进命令行也不进日志（G12）。
+    //
+    // **不带前导 `--`**：libtest 会拒绝 `--` 之后以 `-` 开头的参数（实测
+    // `error: Unrecognized option: 'corpus-dir'`），位置参数才透传。约定写成：
+    //
+    //     cargo test --release --test crash_resume_corpus -- \
+    //         --ignored --nocapture corpus-dir=/tmp/x verbose
+    let arg = |name: &str| {
+        let prefix = format!("{name}=");
+        std::env::args().find_map(|a| a.strip_prefix(&prefix).map(str::to_string))
+    };
+    let work = arg("corpus-dir")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| repo.join("workspace/tmp/crash-resume-corpus"));
-    let verbose = std::env::var("KVLANG_CORPUS_VERBOSE").is_ok_and(|v| v == "1");
+        .unwrap_or_else(|| repo.join("workspace/tmp/crash-resume-corpus"));
+    let verbose = std::env::args().any(|a| a == "verbose");
     let mut files = Vec::new();
     kv_files(&repo.join("tutorial"), &mut files);
     kv_files(&repo.join("runtimec/tests/kv"), &mut files);

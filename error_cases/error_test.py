@@ -9,8 +9,9 @@ import argparse, itertools, os, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LAYOUT_BIN = os.environ.get("KVLANG_LAYOUT_BIN", str(ROOT / "bin" / "kvlanglayout"))
-TERM_BIN = os.environ.get("KVLANG_TERM_BIN", str(ROOT / "bin" / "byteseek"))
+# 被测二进制路径走 argv（`--layout-bin=` / `--term-bin=`），不走环境变量（G12）。
+LAYOUT_BIN = str(ROOT / "bin" / "kvlanglayout")
+TERM_BIN = str(ROOT / "bin" / "byteseek")
 _C_DSN = os.environ.get("KVSPACE", "shm://")
 ERROR_CASES = Path(__file__).resolve().parent
 RED, GREEN, NC = "\033[0;31m", "\033[0;32m", "\033[0m"
@@ -102,11 +103,14 @@ def check(pat: str, errors: str) -> bool:
 
 
 def main() -> int:
-    global _BACKEND_TMP, _C_DSN, _LAST_BACKEND
+    global _BACKEND_TMP, _C_DSN, _LAST_BACKEND, LAYOUT_BIN, TERM_BIN
     ap = argparse.ArgumentParser(description="kvlang error_cases verification")
     ap.add_argument("--kvspace", default=None,
                     help="Backend DSN prefix (e.g. shm:// or fs://)")
+    ap.add_argument("--layout-bin", default=LAYOUT_BIN, help="kvlanglayout 路径")
+    ap.add_argument("--term-bin", default=TERM_BIN, help="byteseek 路径")
     args = ap.parse_args()
+    LAYOUT_BIN, TERM_BIN = args.layout_bin, args.term_bin
     if args.kvspace:
         _C_DSN = args.kvspace
     if _C_DSN.startswith(("shm://", "fs://")):
