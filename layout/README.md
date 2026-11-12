@@ -26,6 +26,27 @@
   空类型本身是合法的「缺席」——用它当哨兵就是「哨兵越出数据域」。
 - **不写注释解释烂代码**，而是把烂代码改成不需要解释。
 
+## 边界：layout 生成 rwir，永远不参与 binrwir
+
+**layout 生成的是 rwir**——kvlang 的通用明文指令，带 `langtype`（含并集 `T1|T2`、指针
+`*T`、容器 `[n]T` / `[]T` / `'K'T`）。它的产物就是 kvspace `/lib` 下的明文指令树，
+到此为止。
+
+**v9 负责把 rwir 生成 binrwir**：把明文编译成 `/lib/<pkg>·<func>.bin` 的 8 字节格序列。
+**binrwir 没有类型**：一格 8 字节全是 byte，操作数字是 `*byte`（64 位地址字节），
+类型在 v9 编译时已被消化干净。
+
+```
+layout →（明文 rwir）→ v9 →（binrwir .bin）→ runtime
+```
+
+**layout 永远不参与 binrwir。** 判据是结构性的：layout 的构建输入里不得出现
+`runtimec/binrwir/` 的任何路径——源码 include、`include_str!`、构建脚本读取都不行。
+layout 一旦看见 binrwir，只会二选一：把 langtype 带进字节层（「binrwir 没有类型」失效），
+或把字节格式带进 layout（layout 变成半个编译器）。两种都不允许。
+
+规范文本见 `stdlib/kvlang/spec/04-layout语义/13-与binrwir的边界.kv`。
+
 ## 为什么读的人不看 Rust 也不影响正确性
 
 因为**布局产物是可验证的**：

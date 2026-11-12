@@ -10,8 +10,8 @@
 extern "C" {
     #include <kvspace/kvspace.h>
     #include <kvspace/kvspace_xvalue.h>
-    #include <kvlang/xvalue.h>
-#include <kvlang/xvalue.h>
+    #include <kvlangxvalue.h>
+#include <kvlangxvalue.h>
 }
 
 #include <cstdio>
@@ -67,7 +67,7 @@ struct KV {
         const uint8_t *lt = nullptr;
         /* 返回字节数；0 表示没有 langtype。早先这里把返回值丢掉了，lt_len 一直
          * 是 0，于是 kind 永远为空——「取到了却不用」比取不到更难察觉。 */
-        const uint16_t lt_len = kvlangXvalueHeadLangtypeBounded(wire, total, &lt);
+        const uint16_t lt_len = kvlangXvalueAttrLangtypeBounded(wire, total, &lt);
         if (lt_len == 0 || lt == nullptr) return false;
         const char *k = reinterpret_cast<const char *>(lt);
         uint16_t k_len = lt_len;

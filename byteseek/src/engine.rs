@@ -225,14 +225,16 @@ impl Engine {
     }
 
     pub fn set_ext_handle(&self, key: &str, target_langtype: &str, locator: &str) -> KvResult {
-        // #571：@ext 句柄 = NewExt（body=定位串）；langtype 拼入值 attr 区。
+        // #571：@ext 句柄 = body 为定位串、langtype 带 `@` 前缀的 wire。
+        // 构造器 NewExt 已删除；@ 前缀由这里预拼进 langtype，字节与原来相同。
+        let want = format!("@{target_langtype}");
         let value = unsafe {
             let mut out = null_mut();
             let mut len = 0u64;
-            let rc = kvlangXvalueHeadNewExt(
+            let rc = kvlangXvalueNewScalar(
                 locator.as_ptr(),
                 locator.len() as u32,
-                cs(target_langtype).as_ptr(),
+                cs(&want).as_ptr(),
                 &mut out,
                 &mut len,
             );

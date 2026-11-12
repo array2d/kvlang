@@ -5,7 +5,7 @@ Gate (non-zero exit on any finding or on any inability to check):
 
     python3 runtimec/tools/architecture/check_handler_definitions.py --source-root <repo>
 
-Why this exists: `specification/rwir_catalog.def` claims runtimec can execute a capability.
+Why this exists: `rwir/rwir_catalog.yml` claims runtimec can execute a capability.
 The catalog generator proves each claimed capability descends from a registered surface
 name; this checker proves each registered name lands on a handler that runtimec itself
 defines. An operator whose implementation lives in another runtime (an extension such as
@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import argparse
 import re
+
+import yaml
 import subprocess
 import sys
 import tempfile
@@ -43,7 +45,7 @@ from pathlib import Path
 #
 #   1. `runtimec/specification/myrwircaps.c`  —— 只有 `{opcode, origin}`，**没有
 #      handler 列**。它答「哪些名字由本 runtime 兑现」，不答「怎么兑现」；
-#   2. `runtimec/specification/rwir_catalog.def` —— 每个名字对应一个**数字 opid**
+#   2. `runtimec/rwir/rwir_catalog.yml` —— 每个名字对应一个**数字 opid**
 #      （`RUNTIMEC_RWIR_OPERATION(SYMBOL, "名字", 0xNNNN, …)`），这是名字与 opid
 #      之间的唯一桥；
 #   3. `runtimec/vmbin/handlers/*.c` —— 各族的 `{opid, flags, handler}` 条目表，
@@ -52,18 +54,18 @@ from pathlib import Path
 # 于是判据也跟着变：**一个名字声明的 opid，必须在真正的 registry 里查得到**
 # （`binrwir_registry_find`）。这比原来的「某个同名函数存在」强——原来那版对
 # 「函数在但没注册」是瞎的，而那正是会让算子静默走 FOREIGN 的形态。
-REGISTRY_SOURCE = Path("runtimec/specification/myrwircaps.c")
-CATALOG_SOURCE = Path("runtimec/specification/rwir_catalog.def")
+REGISTRY_SOURCE = Path("runtimec/rwir/myrwircaps.yml")
+CATALOG_SOURCE = Path("runtimec/rwir/rwir_catalog.yml")
 ALIAS_TABLE_SOURCE = Path("runtimec/specification/rwir_alias_table.def")
 SPECIALIZATION_TABLE = Path("runtimec/binrwir/specialization_table.c")
 HANDLER_SOURCES = Path("runtimec/vmbin/handlers")
 REGISTRY_SOURCE_GLOBS = (
-    "runtimec/specification/myrwircaps.c",
-    "*/specification/myrwircaps.c",
-    "specification/myrwircaps.c",
+    "runtimec/rwir/myrwircaps.yml",
+    "*/rwir/myrwircaps.yml",
+    "rwir/myrwircaps.yml",
 )
 # 只做**降级**检查（条目存在），不反推任何东西——见文件头「这不是计数器」。
-# 名字集合本身可由 rwir_catalog.def 直接解析，不需要它；留着它是为了在文件被
+# 名字集合本身可由 rwir_catalog.yml 直接解析，不需要它；留着它是为了在文件被
 # 移走时报一句有方向的话，而不是笼统的「找不到」。
 PROBE_SOURCES = (Path("runtimec/binrwir/operation_identifiers.h"),)
 
@@ -174,20 +176,9 @@ def preprocess(root: Path, source: Path, kvspace_include: Path | None = None) ->
 def registered_surfaces(root: Path, registry: Path,
                         kvspace_include: Path | None) -> list[str]:
     """登记表里的 surface 名字，保持表内顺序（顺序决定 opid 分配）。"""
-    text = preprocess(root, registry, kvspace_include)
-    try:
-        start = text.index("runtimec_myrwircaps[] = {")
-        end = text.index("\n};", start)
-    except ValueError as error:
-        raise RuntimeError(
-            f"{registry}: 找不到 runtimec_myrwircaps[] 表——表名改了就同步改这里"
-        ) from error
-    names: list[str] = []
-    for literal in re.findall(
-            r'\{\s*((?:"(?:[^"\\]|\\.)*"\s*)+)\s*,', text[start:end]):
-        name = "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', literal))
-        names.append(name.replace("\\xC2\\xB7", "·"))
-    return names
+    del kvspace_include  # 名字表已是纯数据，不再需要预处理器
+    document = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    return [str(entry["name"]) for entry in document.get("names", [])]
 
 
 def surface_symbol(aliases: dict[str, str], surface: str) -> str | None:
@@ -284,19 +275,19 @@ def operation_identifier_constants(root: Path) -> dict[str, int]:
 
 
 def catalog_operation_codes(root: Path) -> dict[str, int]:
-    """`rwir_catalog.def` 里每个能力符号对应的数字 opid。
+    """`rwir_catalog.yml` 里每个能力符号对应的数字 opid。
 
     这是**名字 → opid** 的唯一桥。登记表只给名字，handler 表只给 opid，两边
     没有共同的键——若无此表，任何「它们对得上」的结论都是猜的。
     """
     path = root / CATALOG_SOURCE
-    text = path.read_text(encoding="utf-8")
+    document = yaml.safe_load(path.read_text(encoding="utf-8"))
     codes: dict[str, int] = {}
-    for match in re.finditer(
-            r"RUNTIMEC_RWIR_OPERATION\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,"
-            r"\s*(?:\"(?:[^\"\\]|\\.)*\"\s*,\s*)?0x([0-9A-Fa-f]+)", text):
-        symbol, code = match.group(1), int(match.group(2), 16)
-        codes[symbol] = code
+    for family in document.get("families", []):
+        for operation in family.get("operations", []):
+            code = operation["opid"]
+            codes[str(operation["identifier"])] = (
+                code if isinstance(code, int) else int(code, 0))
     return codes
 
 
@@ -468,8 +459,8 @@ def run_selftest() -> int:
         for name in ("runtimec/specification", "runtimec/binrwir", "runtimec/include",
                      "runtimec/vmbin/handlers"):
             (root / name).mkdir(parents=True)
-        registry = root / "runtimec/specification/myrwircaps.c"
-        catalog = root / "runtimec/specification/rwir_catalog.def"
+        registry = root / "runtimec/rwir/myrwircaps.yml"
+        catalog = root / "runtimec/rwir/rwir_catalog.yml"
         aliases = root / "runtimec/specification/rwir_alias_table.def"
         identifiers = root / "runtimec/binrwir/operation_identifiers.h"
         specialization = root / "runtimec/binrwir/specialization_table.c"

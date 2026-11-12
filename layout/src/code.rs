@@ -12,6 +12,7 @@
 //!       不读 .src、不依赖签名行 [0,x] 静态槽。printstack: /vthread/<vid> 活动栈渲染（只读）。
 
 use crate::scanner::Pos;
+use crate::symbol;
 use std::collections::{HashMap, HashSet};
 
 use super::ast::{
@@ -2418,6 +2419,35 @@ fn write_linear_inst(
     let opcode = match builtin::output_opid(&opcode) {
         Some(identifier) => identifier.to_string(),
         None => opcode,
+    };
+    /*
+     * 落盘的名字必须是**语义 rwir 名**，不是源码字形。
+     *
+     * 源码里 `a + b`、`a = b`、`br(...)` 的 `op` 存的是字形（parser 直接取
+     * `self.advance().value`），而 `runtimec_rwircap.kv` 是唯一能力清单、按语义名
+     * 登记（`add`、`copy`、`branch`）。v9 按名字查 opid，字形名直接查不到——
+     * 实测 layout 对 iops 的产物曾是 `[1,0] rwir: =`、`[6,0] rwir: br`。
+     *
+     * 语言表面语法**不变**（`+ - × ÷ % == ≤` 照旧写），只改落进 kvspace 的名字。
+     *
+     * 三层顺序不能颠倒：
+     *   1. `symbol::lookup` 覆盖中缀/一元字形（`+`→`add`、`==`→`eq`、`≤`→`le`…），
+     *      表里 `word` 恰好就是能力表中的名字，所以查表就是权威映射，无需第二份表；
+     *   2. 两个字形不在 symbol 表里但能力表要求语义名：`=`→`copy`（`flat()` 对叶/
+     *      成员读统一返回 `=`）、`br`→`branch`（layout 内部合成）；
+     *   3. 其余（`goto`、`compactarray·new`、扩展 rwir 名）本身已是语义名，原样保留。
+     */
+    let opcode = match opcode.as_str() {
+        "=" => "copy".to_string(),
+        "br" => "branch".to_string(),
+        glyph => {
+            let word = symbol::lookup(glyph).word;
+            if word.is_empty() {
+                glyph.to_string()
+            } else {
+                word.to_string()
+            }
+        }
     };
     // Already validated by `check_jumps`; still return `Result` to avoid panic paths.
     match opcode.as_str() {

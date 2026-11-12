@@ -147,7 +147,7 @@ capability_table（131 条能力行）   语义算子：union 参数掩码 + 约
 alias_table（316 条映射）          surface 名字（+ / add / int64·add …）→ 能力行
 ```
 
-- `specification/rwir_catalog.def`：**能力行**，一行一个语义算子。例如 `Add` 只占
+- `rwir/rwir_catalog.yml`：**能力行**，一行一个语义算子。例如 `Add` 只占
   一行，`int64·add`、`float32·add`、`+`、`add` 全部指向它。每行显式给出稳定
   identifier、`opid`、Read/Write 的 **TypeSet bitmask union**、操作数约束
   （`None`/`SameClass`/`NumericCompatible`/`NumericCompare`）、结果规则
@@ -175,11 +175,11 @@ manifest 回答「这个算子能接受什么」；BinRWIR 回答「这一次调
 复制第二张签名表」的直接结果，不是遗漏，也不是 wildcard。`obj`、`map·new`、
 `struct·new`、`kvspace/key·abs` 是例外，带类别位。
 
-**生成与门禁**：`rwir_catalog.def` 与 `rwir_alias_table.def` 都由
+**生成与门禁**：`rwir_catalog.yml` 与 `rwir_alias_table.def` 都由
 `tools/architecture/generate_rwir_catalog.py` 生成。手改会被判 out of date：
 
 ```bash
-python3 runtimec/tools/architecture/generate_rwir_catalog.py --check --require-complete
+python3 runtimec/binrwir/generate_rwir_catalog.py --check --require-complete
 ```
 
 稳定 identifier 是规范数据，不是容器位置：重排 manifest、插入新算子或改生成器都不得
@@ -487,7 +487,7 @@ runtimec 是 #622“runtime 回归 C”的新落点：它取代旧 `runtime/` �
 
 - 语义裁决先落 spec：`#622 4.1` 六项与 `#622 4.3` 两项已写入
   `specification/five-language-behavior-matrix.md`；没有矩阵决策，不得实现对应语义。
-- 单一事实源：`specification/rwir_catalog.def` 是能力行（语义算子）的唯一 manifest，
+- 单一事实源：`rwir/rwir_catalog.yml` 是能力行（语义算子）的唯一 manifest，
   `specification/rwir_alias_table.def` 是 surface 名字到能力行的唯一映射；两份都由
   `generate_rwir_catalog.py` 生成，CI 用 `--check --require-complete` 断言不存在可与
   它漂移的第二份表。能力行唯一、别名多对一。

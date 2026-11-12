@@ -194,7 +194,7 @@ pub fn try_parse_number(s: &str) -> Result<Option<(Vec<u8>, &'static str)>, Stri
 ///
 /// ## 编号从哪来
 ///
-/// `runtimec/binrwir/instruction.h` 的保留区占用记账：
+/// opid 保留区的占用记账（保留区基由 rwir 层定义）：
 ///
 /// ```text
 /// 保留区占用记账（0xFF00–0xFFFF）：

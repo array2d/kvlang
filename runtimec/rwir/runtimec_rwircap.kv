@@ -1,0 +1,142 @@
+// 组件：rwir/runtimec_rwircap
+// 作用：runtimec 兑现的 rwir 声明——rwir 层（明文、带 langtype）的唯一能力清单。
+// 联系：layout 生成 rwir；v9 把 rwir 编译成 binrwir（8 字节格、无类型）。本文件属于 rwir 层。
+// 语法：与 rwfunc 同形的 rwir 声明，只差函数体；类型可写并集 `T1|T2`。
+// 原则：一个语义算子一行，精度差异用并集表达，不为每种精度各开一条 rwir。
+//
+// 约束（layout 的类型文法）：值复制参数只能是数值/字符串/bool；容器必须按地址 `*`；
+// 没有类型变量、没有 `any`、没有 `[n]T`/`'K'T` 的通用写法——泛型容器与裸指针
+// 因此无法在此声明，见文件末尾的缺口清单。
+
+// ── 标量 ─────────────────────────────────────────────────────────
+rwir add(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #result)
+rwir sub(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #result)
+rwir mul(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #result)
+rwir div(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #result)
+rwir max(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #result)
+rwir min(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #result)
+rwir mod(int8|int16|int32|int64|uint8|uint16|uint32|uint64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64 #right) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64 #result)
+rwir bitand(int8|int16|int32|int64|uint8|uint16|uint32|uint64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64 #right) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64 #result)
+rwir bitor(int8|int16|int32|int64|uint8|uint16|uint32|uint64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64 #right) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64 #result)
+rwir bitxor(int8|int16|int32|int64|uint8|uint16|uint32|uint64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64 #right) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64 #result)
+rwir shl(int8|int16|int32|int64|uint8|uint16|uint32|uint64 #value, int8|int16|int32|int64|uint8|uint16|uint32|uint64 #count) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64 #result)
+rwir shr(int8|int16|int32|int64|uint8|uint16|uint32|uint64 #value, int8|int16|int32|int64|uint8|uint16|uint32|uint64 #count) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64 #result)
+rwir abs(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #value) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #result)
+rwir neg(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #value) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #result)
+rwir sign(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #value) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #result)
+rwir sqrt(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #value) -> (float64 #result)
+rwir exp(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #value) -> (float64 #result)
+rwir log(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #value) -> (float64 #result)
+rwir pow(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (float64 #result)
+rwir eq(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (bool #result)
+rwir neq(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (bool #result)
+rwir lt(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (bool #result)
+rwir le(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (bool #result)
+rwir gt(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (bool #result)
+rwir ge(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64 #right) -> (bool #result)
+rwir and(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool #right) -> (bool #result)
+rwir or(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool #left, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool #right) -> (bool #result)
+rwir not(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool #value) -> (bool #result)
+rwir bool·eq(bool #left, bool #right) -> (bool #result)
+rwir bool·neq(bool #left, bool #right) -> (bool #result)
+rwir concat([]char/utf8|[]char/utf32|[]char/ascii #left, []char/utf8|[]char/utf32|[]char/ascii #right) -> ([]char/utf8 #result)
+rwir cast(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool|[]char/utf8|[]char/utf32|[]char/ascii #value) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool|[]char/utf8|[]char/utf32|[]char/ascii #result)
+rwir copy(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool|[]char/utf8|[]char/utf32|[]char/ascii #source) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool|[]char/utf8|[]char/utf32|[]char/ascii #destination)
+
+// ── 控制 ─────────────────────────────────────────────────────────
+// goto 的目标是**指令轴 s0**——帧内指令序号，与 kvlang 的 `[s0,s1]` 坐标对齐；
+// 它不是字节偏移、不是 key、也不是帧号。跳转目标必须落在本函数指令轴内。
+rwir goto(int32 #s0) -> ()
+// branch 的两个目标同样是**指令轴 s0**（帧内指令序号），与 `[s0,s1]` 坐标对齐；
+// 条件为真走 taken_s0、否则走 not_taken_s0。二者都必须落在本函数指令轴内。
+// 不写成 `s0`/`s1`：那两个词是坐标分量（行 / 参数轴），不是两个跳转目标。
+rwir branch(bool #condition, int32 #taken_s0, int32 #not_taken_s0) -> ()
+// call：目标是**函数 key**；实参个数由被调函数的安装签名决定，声明里用 `...` 表示不定。
+// 实参按声明序跟在函数 key 之后，调用方负责按签名布帧。
+rwir call([]char/utf8 #function_key, []char/utf8 #arguments...) -> ()
+// return：控制交回调用方。本帧没有待提交的写，也没有操作数；返回值按安装签名取。
+// 文法里 `return` 是关键字，声明不写括号。
+rwir return -> ()
+
+// ── 字符串 ───────────────────────────────────────────────────────
+rwir string·set([]char/utf8|[]char/utf32|[]char/ascii #text, int64 #index, []char/utf8|[]char/utf32|[]char/ascii #value) -> ([]char/utf8|[]char/utf32|[]char/ascii #result)
+rwir string·char([]char/utf8|[]char/utf32|[]char/ascii #text, int64 #index) -> ([]char/utf8 #character)
+rwir string·ord([]char/utf8|[]char/utf32|[]char/ascii #text) -> (int64 #code)
+rwir string·cmp([]char/utf8|[]char/utf32|[]char/ascii #text, []char/utf8|[]char/utf32|[]char/ascii #other) -> (int64 #order)
+rwir string·find([]char/utf8|[]char/utf32|[]char/ascii #text, []char/utf8|[]char/utf32|[]char/ascii #pattern) -> (int64 #position)
+rwir string·len([]char/utf8|[]char/utf32|[]char/ascii #text) -> (int64 #length)
+rwir string·slice([]char/utf8|[]char/utf32|[]char/ascii #text, int64 #start, int64 #end) -> ([]char/utf8|[]char/utf32|[]char/ascii #result)
+rwir string·formatint(int64 #value, int64 #base) -> ([]char/utf8 #text)
+rwir string·formatuint(uint64 #value, int64 #base) -> ([]char/utf8 #text)
+rwir string·parseint([]char/utf8 #text) -> (int64 #value)
+rwir string·parseuint([]char/utf8 #text) -> (uint64 #value)
+rwir string·parsefloat([]char/utf8 #text) -> (float64 #value)
+
+// ── 存储 ─────────────────────────────────────────────────────────
+rwir kvspace·del([]char/utf8 #key) -> ()
+rwir kvspace·deltree([]char/utf8 #key) -> ()
+rwir kvspace·cp([]char/utf8 #key) -> ([]char/utf8 #target)
+rwir kvspace·cpdir([]char/utf8 #key) -> ([]char/utf8 #target)
+rwir kvspace·cplist([]char/utf8 #key, []char/utf8 #other) -> ()
+rwir kvspace·listlen([]char/utf8 #key) -> (int64 #count)
+rwir kvspace·listat([]char/utf8 #key, int64 #index) -> ([]char/utf8 #value)
+rwir kvspace·mkindex([]char/utf8 #key) -> ()
+rwir kvspace·delextindex([]char/utf8 #key) -> ()
+rwir kvspace·watch([]char/utf8 #key) -> ()
+
+// kvlang 键族：
+//   key·tostr   把一个值格式化成**成员键文本**（路径段）——不碰存储，也不解析路径。
+//   key·abs     把**相对 key** 补成**绝对 key**：只做路径规范化（帧根 + 相对路径），
+//               幂等，不查存储、不求值。binrwir 层不保留同名指令，编译成
+//               `kvspace·resolve`（帧锚点 + 相对 key → 64 位真实地址）。
+//   key·resolve 求值**动态 key 表达式**（含运行期键值/成员/坐标），定位到目标位置的绝对 key。
+//               这是唯一会在运行期才确定目标的键操作。
+//   三者都返回 keyptr：对目标 key 的**引用**，按文本承载；目标本身不必存在（位置不是值）。
+//
+// key·resolve（动态 key）的 bin 落法——**决策 B（2026-11-12）**，两条都要留痕：
+//  1) 一条 bin 指令 + handler 内部三段 memcpy，**不在 v9 里展开成多条指令**。
+//     理由：热路径一条；半截路径不会成为可观察状态；步边界完整（要么写完、要么没写）。
+//  2) 空间由 **Ptr 槽**付：一次 kvspace·realloc 到 len(pre)+len(mid)+len(end)，
+//     再按偏移做三段 C·memcpy（body+0 / +len(pre) / +len(pre)+len(mid)），
+//     **不产生中间串**；mid 由 key·tostr 产出，用 32 字节栈缓冲。
+// 后续若找到更优解（原地追加、路径缓存、按帧复用 pre 等），改这里并记录推翻原因。
+rwir key·tostr(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool|[]char/utf8|[]char/utf32|[]char/ascii #value) -> ([]char/utf8 #text)
+rwir key·resolve([]char/ascii #keyexpr) -> ([]char/utf8 #keyptr)
+rwir key·abs([]char/ascii #keyexpr) -> ([]char/utf8 #keyptr)
+
+// ── 定长数组：元素只允许固定宽度的基础类型（bool…float64） ──────
+rwir compactarray·new(int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool #elements...) -> ([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #array)
+rwir compactarray·copy([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #array) -> ([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #result)
+rwir compactarray·fill([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #array, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool #value) -> ([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #result)
+rwir compactarray·numel([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #array) -> (int64 #count)
+rwir compactarray·dim([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #array) -> (int64 #dimension)
+rwir compactarray·bodylen([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #array) -> (int64 #length)
+rwir compactarray·parselangtype([]char/utf8 #text) -> ([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #array)
+rwir compactarray·at([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #array, int64 #index) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool #value)
+rwir compactarray·set([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #array, int64 #index, int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool #value) -> (int8|int16|int32|int64|uint8|uint16|uint32|uint64|float32|float64|bool #result)
+rwir compactarray·newreshape([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #array, int64 #dimension) -> ([?]int8|[?]int16|[?]int32|[?]int64|[?]uint8|[?]uint16|[?]uint32|[?]uint64|[?]float32|[?]float64|[?]bool #result)
+// ── 结构体 / 映射 ────────────────────────────────────────────────
+// struct·new 的本质是 **cpdir**：把结构体定义（`/lib` 下那棵原型子树）整体复制到**新树位置**，
+// 返回新位置的 key `objname`。它不是逐字段构造，也不解析字段类型——子树原样搬过去。
+// 定义与对象都用 []char/utf8 承载，元素类型由定义在运行期决定，不进签名。
+rwir struct·new([]char/utf8 #structdefkey) -> ([]char/utf8 #objname)
+// map·new 的两个入参都是文本：键如何格式化成成员键，值是什么 langtype。
+// 键型与值型因此在运行期确定，不进签名；返回的新映射同样以名字承载。
+rwir map·new([]char/utf8 #keyformatter, []char/utf8 #valuelangtype) -> ([]char/utf8 #mapname)
+
+// ── time / vthread / random ──────────────────────────────────────
+// time 与 time/duration 到 binrwir 层退化为 **int64（纳秒）**：加减就是 `add`/`sub`，
+// 比较就是 `lt`/`le`/`gt`/`ge`，单位换算就是乘除常数——都不需要专门的 bin 算子。
+// 唯一不可退化的是**取时钟**本身：time·now。
+rwir time·now() -> (time #now)
+
+// ── 缺口：类型文法表达不了，暂不声明 ─────────────────────────────
+//
+// 已删除的算子族：sparse 数组（scatterarray·new/len/at/set/append/slice/newscatter/newcompact）
+// 整体移除——稀疏数组由 **map 系列**覆盖，不再有独立的 scatterarray 算子族。
+//
+// 泛型容器（元素类型未知，文法没有类型变量/any）：
+//   compactarray·shape / langtype / newreinterpret（前两个无 handler；langtype 结果类型文法不接受）
+//   ndarray·numel / dim / shape
+//   xv·at / set / bodylen / langtype / parselangtype / reshape / reinterpret
+// 裸指针结果：由 `key·resolve` 以 key 文本承载，不再需要 pointer 类型。

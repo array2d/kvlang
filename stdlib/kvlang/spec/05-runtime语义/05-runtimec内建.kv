@@ -38,7 +38,7 @@ rwir 不再分 Core/Ext class：native 与扩展都以
 `uint64`、`float32`、`float64`、`char/utf32`、`char/utf8`、`char/ascii`。
 
 **容器构造**（裸名）：`map·new`（stringkeymap 构造）、`compactarray·new`（compact 数组构造）、
-`scatterarray·new`（散列数组构造）、`struct·new`（structref 实例）。
+`struct·new`（把 struct 原型子树 `cpdir` 到新树位置，返回新位置 key）。
 
 **调试**：`debugger`（等价 `vthread·setstatus("paused")`）。
 

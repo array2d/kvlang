@@ -897,9 +897,8 @@ fn annotate_returns_inst(inst: &mut Instruction, sigs: &SigTable) {
 
 /// native rwir 的**名字型**签名（`time`、`duration` 这类不是 TypeSet 位的类型）。
 ///
-/// 唯一源是 `runtimec/specification/native_rwir_decls.kv`——一份**与 rwfunc 同形**的
-/// `rwir` 声明片段，由 `generate_rwir_catalog.py` 生成并在 `--check` 里逐份校验；
-/// `include_str!` 把它的**文本**编进二进制。
+/// 唯一源是 `runtimec/rwir/runtimec_rwircap.kv`——一份**与 rwfunc 同形**的
+/// `rwir` 声明片段；`include_str!` 把它的**文本**编进二进制。
 ///
 /// 用 `.kv` 而不是自定义 X-macro：签名格式**只有一套**（`rwir name(a:T) -> (r:U)`），
 /// 解析器也只有一套（`parser::parse_code`）。格式分叉会造出第二份「什么算合法签名」
@@ -910,7 +909,7 @@ fn annotate_returns_inst(inst: &mut Instruction, sigs: &SigTable) {
 ///
 /// 注意：这里**只取内存里的签名表**，绝不调用 `write_rwir_decl`——那会往 `/lib`
 /// 写 native rwir 的声明，让每次 layout 都产生一次副作用写。
-const NATIVE_RWIR_DECLS: &str = include_str!("../../runtimec/specification/native_rwir_decls.kv");
+const NATIVE_RWIR_DECLS: &str = include_str!("../../runtimec/rwir/runtimec_rwircap.kv");
 
 fn native_rwir_signatures() -> &'static HashMap<String, ast::FuncSig> {
     static TABLE: std::sync::OnceLock<HashMap<String, ast::FuncSig>> = std::sync::OnceLock::new();
@@ -919,7 +918,7 @@ fn native_rwir_signatures() -> &'static HashMap<String, ast::FuncSig> {
          * 不是运行期可恢复的状态。与「查表未命中」是两件事——后者保持现状，
          * 前者必须硬失败，否则会静默退化成「没有签名」。 */
         let (file, diags) = crate::parser::parse_code(NATIVE_RWIR_DECLS)
-            .unwrap_or_else(|e| panic!("native_rwir_decls.kv: parse failed: {e}"));
+            .unwrap_or_else(|e| panic!("runtimec_rwircap.kv: parse failed: {e}"));
         /* `warn`/`info` 之外的都是 error（Diagnostic 没有 level 字段，
          * 用两个布尔位表达三档）。 */
         let errors: Vec<String> = diags
@@ -929,13 +928,13 @@ fn native_rwir_signatures() -> &'static HashMap<String, ast::FuncSig> {
             .collect();
         assert!(
             errors.is_empty(),
-            "native_rwir_decls.kv: {} error diagnostic(s): {:?}",
+            "runtimec_rwircap.kv: {} error diagnostic(s): {:?}",
             errors.len(),
             errors
         );
         assert!(
             !file.rwir_decls.is_empty(),
-            "native_rwir_decls.kv: parsed 0 rwir declarations; the generator produced an empty table"
+            "runtimec_rwircap.kv: parsed 0 rwir declarations; the capability file is empty"
         );
         file.rwir_decls
             .iter()
@@ -960,19 +959,19 @@ pub fn native_rwir_sig(name: &str) -> Option<&'static ast::FuncSig> {
     native_rwir_signatures().get(name)
 }
 
-/// Operator names runtimec implements (`myrwircaps.c` is the single name-level source).
-const NATIVE_CATALOG: &str = include_str!("../../runtimec/specification/myrwircaps.c");
+/// rwir 层的算子名（`runtimec/rwir/runtimec_rwircap.kv` 是唯一能力清单）。
+const NATIVE_CATALOG: &str = include_str!("../../runtimec/rwir/runtimec_rwircap.kv");
 
 /// Whether `name` is a runtimec catalog operator.
 pub fn native_catalog_has(name: &str) -> bool {
     static NAMES: std::sync::OnceLock<HashSet<String>> = std::sync::OnceLock::new();
     NAMES
         .get_or_init(|| {
-            /* rows look like `{"name", RUNTIMEC_MYRWIRCAPS_ORIGIN_...},` */
+            /* 一行一条 `rwir <name>(...) -> (...)`。 */
             NATIVE_CATALOG
                 .lines()
-                .filter_map(|line| line.trim().strip_prefix("{\""))
-                .filter_map(|rest| rest.split_once("\", RUNTIMEC_MYRWIRCAPS_ORIGIN_"))
+                .filter_map(|line| line.trim().strip_prefix("rwir "))
+                .filter_map(|rest| rest.split_once('('))
                 .map(|(name, _)| name.to_string())
                 .collect()
         })
@@ -2995,8 +2994,8 @@ fn validate_num_op(
         let all_cmp_ok = !members.is_empty() && members.iter().all(|m| nullable(m));
         /* **布尔只允许相等比较**（`==` / `!=`），且不得与数值混用。
          *
-         * 依据：catalog 本就有 `bool·eq` / `bool·neq` 两条特化行
-         * （`rwir_alias_table.def:342-343`），说明布尔相等是已有语义；缺的只是
+         * 依据：能力清单本就有 `bool·eq` / `bool·neq` 两条 rwir
+         * （`runtimec_rwircap.kv`），说明布尔相等是已有语义；缺的只是
          * layout 这一侧的准入——它把 `eq` 当纯数值算子，`true == true` 直接报
          * `eq expects numeric operand, got "bool"`。
          *

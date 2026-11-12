@@ -162,15 +162,15 @@ runtimec_runner: stale-gate
 # 而报错指向 byteseek。手工产物没有 target 就没有闸，没有闸就会变成陈旧输入。
 #
 # 闸在入口（`stale-gate`），不在拷完之后：见闸定义处「挂在拷贝后的闸恒绿」。
-# 依赖 kvlang-xvalue：runtimec 的 contract 层链 libkvlang_xvalue.a。
+# 依赖 kvlang-xvalue：runtimec 动态链接 libkvlang_xvalue.so。
 runtimec-lib: stale-gate kvlang-xvalue
 	@$(call kvspace_require,KVSPACE_SRC,runtimec-lib,kvspace)
-	@test -f "$(LIB)/libkvlang_xvalue.a" || { \
-	  echo "缺少 $(LIB)/libkvlang_xvalue.a：先跑 make kvlang-xvalue"; exit 1; }
+	@test -f "$(LIB)/libkvlang_xvalue.so" || { \
+	  echo "缺少 $(LIB)/libkvlang_xvalue.so：先跑 make kvlang-xvalue"; exit 1; }
 	cmake -S runtimec -B build/runtimec -DCMAKE_BUILD_TYPE=Release \
 	  -DKVSPACE_INCLUDE_DIRECTORY="$(KVSPACE_INCLUDE_DIRECTORY)" \
 	  -DRUNTIMEC_KVSPACE_LIBRARY_DIRECTORY="$(CURDIR)/$(LIB)" \
-	  -DKVLANG_XVALUE_LIBRARY_PATH="$(CURDIR)/$(LIB)/libkvlang_xvalue.a"
+	  -DKVLANG_XVALUE_LIBRARY_PATH="$(CURDIR)/$(LIB)/libkvlang_xvalue.so"
 	cmake --build build/runtimec --target kvlang_runtimec_scaffold -j
 	mkdir -p $(LIB)
 	# 通配而不是 `.so`：macOS 的产物是 `libkvlang_runtime.dylib`，写死 `.so` 在
@@ -277,7 +277,7 @@ endef
 #
 #   - `byteseek`：`make single` 现在**能编译成功**（embed 模式把符号解析推迟到运行期），
 #     但一跑就 `missing symbol kvlangXvalueHeadNewNone`——`kvlangXvalueHeadNew*` 只在
-#     静态库 `libkvlang_xvalue.a` 里，而 embed payload 只有 `.so`，运行期 dlsym 找不到。
+#     共享库 `libkvlang_xvalue.so` 里，而 embed payload 没有它，运行期 dlsym 找不到。
 #     所以它不在白名单：**「构建成功」不等于「能用」**，白名单收的是后者。
 #   - `json-rwirext`：target 构建不出（042/035）。
 #
@@ -323,7 +323,7 @@ kvspace-libs: kvspace-frontend kvlang-xvalue kvspace-durable-lib
 	$(MAKE) kvspace-cli
 	$(MAKE) check-kvspace-head
 
-# kvspace 的构建**不需要** libkvlang_xvalue.a：085 把语言层命令迁走后，kvspace CLI
+# kvspace 的构建**不需要** libkvlang_xvalue.so：085 把语言层命令迁走后，kvspace CLI
 # 只做存储子命令、零引用 kvlang 符号。原先那条「CLI 造值要用语言层构造器」是迁移前
 # 的遗留，它顺带造成了一个循环依赖（kvspace-frontend 要 .a → .a 要 libkvspace），
 # 从干净树构建必死在起手第一环。既不必要又致故障，删掉。
@@ -353,13 +353,13 @@ kvspace-frontend: stale-gate
 # 「找不到 libkvspace」——那是构建顺序问题，不是配置错。
 kvlang-xvalue: kvspace-frontend
 	@$(call kvspace_require,KVSPACE_SRC,kvlang-xvalue,kvspace)
-	cmake -S xvalue -B build/kvlang-xvalue -DCMAKE_BUILD_TYPE=Release \
+	cmake -S kvlangxvalue -B build/kvlang-xvalue -DCMAKE_BUILD_TYPE=Release \
 	  -DBUILD_TESTING=OFF \
 	  -DKVLANG_KVSPACE_INCLUDE_DIRECTORY="$(KVSPACE_INCLUDE_DIRECTORY)" \
 	  -DKVLANG_KVSPACE_LIB_DIRECTORY="$(CURDIR)/$(LIB)"
 	cmake --build build/kvlang-xvalue -j
 	mkdir -p $(LIB)
-	cp build/kvlang-xvalue/libkvlang_xvalue.a $(LIB)/
+	cp build/kvlang-xvalue/libkvlang_xvalue.so $(LIB)/
 
 # kvspace-c 已冻结：shm 引擎并入 kvspace 仓，随 kvspace-frontend 一起产出 libkvspace。
 # 该仓现在只有一条 FATAL_ERROR 桩，保留 target 等于留一条必断的依赖边。
@@ -379,13 +379,13 @@ kvspace-cli: kvspace-frontend
 # 探针：从**已装**的两个库产一个 XValue，检查 head 是 16 字节、字段落在正确偏移。
 # 装错版本时在构建期就报错，而不是等到测试期看到一片 invalid XValue。
 #
-# 两个库缺一不可：构造器（kvlangXvalueHeadNewScalar）在 kvlang 的 libkvlang_xvalue.a
+# 两个库缺一不可：构造器（kvlangXvalueHeadNewScalar）在 kvlang 的 libkvlang_xvalue.so
 # （TASK-082 从 kvspace 搬出），head 布局与字节访问器在 libkvspace。只链其中一个，
 # 探到的就不是「两者对同一份格式的理解」——那正是要防的那种错误。
 check-kvspace-head:
 	@$(call kvspace_require,KVSPACE_SRC,check-kvspace-head,kvspace)
-	@test -f "$(LIB)/libkvlang_xvalue.a" || { \
-	  echo "缺少 $(LIB)/libkvlang_xvalue.a：先构建 kvlang/xvalue"; exit 1; }
+	@test -f "$(LIB)/libkvlang_xvalue.so" || { \
+	  echo "缺少 $(LIB)/libkvlang_xvalue.so：先构建 kvlang/kvlangxvalue"; exit 1; }
 	@tmp=$$(mktemp -d); \
 	printf '%s\n' \
 	  '#include <kvspace/kvspace_xvalue.h>' \
@@ -410,13 +410,13 @@ check-kvspace-head:
 	  '  return 0;' \
 	  '}' > $$tmp/probe.c; \
 	cc $$tmp/probe.c -o $$tmp/probe -I"$(KVSPACE_SRC)/include" -I"$(CURDIR)/include" \
-	  -L"$(LIB)" -lkvspace "$(LIB)/libkvlang_xvalue.a" \
+	  -L"$(LIB)" -lkvspace -lkvlang_xvalue \
 	  -Wl,-rpath,"$(CURDIR)/$(LIB)" || { rm -rf $$tmp; exit 1; }; \
 	$$tmp/probe; rc=$$?; rm -rf $$tmp; \
 	if [ $$rc -ne 0 ]; then echo "kvspace 库的 head 布局不是 16 字节——先跑 make kvspace-libs"; fi; \
 	exit $$rc
 
-# 依赖 kvlang-xvalue：layout 的 build.rs 链 libkvlang_xvalue.a。
+# 依赖 kvlang-xvalue：layout 的 build.rs 动态链接 libkvlang_xvalue.so。
 layout: stale-gate kvlang-xvalue
 	cargo build --release --manifest-path layout/Cargo.toml
 	mkdir -p $(BIN) $(LIB)

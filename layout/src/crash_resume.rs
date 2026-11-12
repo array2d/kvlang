@@ -126,9 +126,8 @@ const OPAQUE: OpSpec = OpSpec {
     ..spec(WriteMode::Partial, Store::Both)
 };
 
-/// Verified ops, keyed by catalog row name (`rwir_catalog.def`); surface names reach a row
-/// through `rwir_alias_table.def`. Handlers live in `runtimec/vmbin/handlers/`.
-/// Rows absent here, and any other rwir, fall to [`unverified`].
+/// Verified ops, keyed by the rwir name in `runtimec/rwir/runtimec_rwircap.kv`.
+/// Names absent here, and any other rwir, fall to [`unverified`].
 pub const OP_TABLE: &[(&str, OpSpec)] = &[
     /* interpreter.c execute_copy: write_body, or write_whole_value for a bound path. */
     ("copy", spec(WriteMode::Whole, Store::Both)),
@@ -355,49 +354,23 @@ pub const fn unverified() -> OpSpec {
     }
 }
 
-const CATALOG: &str = include_str!("../../runtimec/specification/rwir_catalog.def");
-const ALIASES: &str = include_str!("../../runtimec/specification/rwir_alias_table.def");
-
-/// First quoted string and the trailing `RUNTIMEC_RWIR_*` identifier of a `.def` row.
-fn def_row(line: &str, macro_name: &str) -> Option<(String, String)> {
-    let rest = line.trim().strip_prefix(macro_name)?.strip_prefix('(')?;
-    let open = rest.find('"')?;
-    let close = open + 1 + rest[open + 1..].find('"')?;
-    let quoted = rest[open + 1..close].to_string();
-    let ident = rest
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .filter(|w| w.starts_with("RUNTIMEC_RWIR_"))
-        .last()?
-        .to_string();
-    Some((quoted, ident))
-}
+const CATALOG: &str = include_str!("../../runtimec/rwir/runtimec_rwircap.kv");
 
 /// Surface name -> catalog row names (alias row plus specialization rows).
 fn surface_rows() -> &'static HashMap<String, Vec<String>> {
     static ROWS: std::sync::OnceLock<HashMap<String, Vec<String>>> = std::sync::OnceLock::new();
     ROWS.get_or_init(|| {
-        let mut row_name: HashMap<String, String> = HashMap::new();
-        for line in CATALOG.lines() {
-            let t = line.trim();
-            let Some(rest) = t.strip_prefix("RUNTIMEC_RWIR_OPERATION(") else {
-                continue;
-            };
-            let Some((ident, tail)) = rest.split_once(',') else {
-                continue;
-            };
-            if let Some(name) = tail.split('"').nth(1) {
-                row_name.insert(ident.trim().to_string(), name.to_string());
-            }
-        }
+        // 唯一能力清单是 `runtimec/rwir/runtimec_rwircap.kv`：一行一条 `rwir <name>(...)`。
+        // 别名到行的收敛此前依赖能力表的行标识符；那份表已并入本文件，故按名字直取。
         let mut rows: HashMap<String, Vec<String>> = HashMap::new();
-        for line in ALIASES.lines() {
-            let row = def_row(line, "RUNTIMEC_RWIR_ALIAS")
-                .or_else(|| def_row(line, "RUNTIMEC_RWIR_SPECIALIZATION"));
-            if let Some((surface, ident)) = row {
-                if let Some(name) = row_name.get(&ident) {
-                    rows.entry(surface).or_default().push(name.clone());
-                }
-            }
+        for line in CATALOG.lines() {
+            let Some(rest) = line.trim().strip_prefix("rwir ") else {
+                continue;
+            };
+            let Some((name, _)) = rest.split_once('(') else {
+                continue;
+            };
+            rows.insert(name.to_string(), vec![name.to_string()]);
         }
         rows
     })
@@ -2468,8 +2441,8 @@ mod tests {
     fn op_table_matches_catalog_and_corpus() {
         let rows: BTreeSet<String> = CATALOG
             .lines()
-            .filter_map(|l| l.trim().strip_prefix("RUNTIMEC_RWIR_OPERATION("))
-            .filter_map(|r| r.split('"').nth(1).map(str::to_string))
+            .filter_map(|l| l.trim().strip_prefix("rwir "))
+            .filter_map(|r| r.split_once('(').map(|(name, _)| name.to_string()))
             .collect();
         for (name, _) in OP_TABLE {
             assert!(rows.contains(*name), "{name} is not a catalog row");

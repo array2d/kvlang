@@ -38,24 +38,18 @@ ALLOWED_DEPENDENCIES = {
     "interface": {"public", "contract", "engine", "interface"},
 }
 EXPECTED_COMPONENT_ORDER = (
-    ("runtimec_contract", "contract"),
+    ("runtimec_kvlangxvalue", "kvlangxvalue"),
     ("runtimec_binrwir", "binrwir"),
-    ("runtimec_vmkv", "vmkv"),
-    ("runtimec_binrwir_compiler", "binrwir_compiler"),
-    ("runtimec_vmbin", "vmbin"),
-    ("runtimec_engine", "engine"),
+    ("runtimec_binrwirgrouprun", "binrwirgrouprun"),
+    ("runtimec_vthread", "vthread"),
+    ("runtimec_runtime", "runtime"),
 )
 EXPECTED_TARGET_DEPENDENCIES = {
-    "runtimec_contract": set(),
-    "runtimec_binrwir": {"runtimec_contract"},
-    "runtimec_vmkv": {"runtimec_contract", "runtimec_binrwir"},
-    "runtimec_binrwir_compiler": {"runtimec_contract", "runtimec_binrwir"},
-    "runtimec_vmbin": {"runtimec_contract", "runtimec_binrwir"},
-    "runtimec_engine": {
-        "runtimec_contract", "runtimec_binrwir",
-        "runtimec_vmkv", "runtimec_binrwir_compiler", "runtimec_vmbin",
-    },
-    "runtimec_interface": {"runtimec_contract", "runtimec_engine"},
+    "runtimec_kvlangxvalue": set(),
+    "runtimec_binrwir": set(),
+    "runtimec_binrwirgrouprun": {"runtimec_binrwir"},
+    "runtimec_vthread": {"runtimec_kvlangxvalue"},
+    "runtimec_runtime": {"runtimec_vthread", "runtimec_kvlangxvalue"},
 }
 INCLUDE_PATTERN = re.compile(r'^\s*#\s*include\s*([<"])([^>"]+)[>"]')
 FORBIDDEN_TREE_PATTERN = re.compile(r"(?:^|/)(?:runtime|runtimec2)(?:/|$)")
@@ -67,8 +61,7 @@ LINK_PATTERN = re.compile(
     re.DOTALL,
 )
 INTERNAL_PREFIXES = {
-    "contract", "host", "binrwir", "vmkv", "binrwir_compiler",
-    "vmbin", "engine", "interface",
+    "contract", "host", "kvlangxvalue", "vthread", "binrwir", "vmbin", "engine", "interface",
 }
 POLICY_LAYERS = {"binrwir_compiler", "vmbin"}
 EXECUTION_WINDOW_FILES = {"engine/execution_window.c", "engine/execution_window.h"}
@@ -123,7 +116,7 @@ JIT_EXCLUSIVE_STORAGE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 # 合同只有**一个定义点**：`contract/kvspace_access.h`。二进制接口版本宏随
-# `contract/host_services.h` 一起删除——那张函数指针表没了，就没有「表版本」这件
+# `kvlangxvalue/host_services.h` 一起删除——那张函数指针表没了，就没有「表版本」这件
 # 事可 pin。判据从「版本一致」换成「唯一锚点存在且被唯一实现在 .c」。
 CONTRACT_HEADER = ("contract", "kvspace_access.h")
 CONTRACT_IMPLEMENTATION = ("contract", "kvspace_access.c")
@@ -969,7 +962,7 @@ def selftest_base_tree() -> dict[str, str]:
         "CMakeLists.txt": SELFTEST_CMAKE,
         "interface/public_interface.c": "int runtimec_public_interface(void) { return 0; }\n",
         "contract/kvspace_access.h": SELFTEST_CONTRACT_HEADER,
-        "contract/kvspace_access.c": SELFTEST_CONTRACT_SOURCE,
+        "kvlangxvalue/kvspace_access.c": SELFTEST_CONTRACT_SOURCE,
         "binrwir/argument.h": SELFTEST_ARGUMENT_HEADER,
         "binrwir/argument.c": (
             "int binrwir_argument_validate(void) {\n"
@@ -1142,10 +1135,10 @@ SELFTEST_CASES = (
                              "runtimec_xvalue_address_t *output);\n", "")),)),
     SelftestCase("contract-derivation-missing",
                  ("contract-body-address-derivation",),
-                 write=(("contract/kvspace_access.c", "int contract_placeholder;\n"),)),
+                 write=(("kvlangxvalue/kvspace_access.c", "int contract_placeholder;\n"),)),
     SelftestCase("contract-derivation-zero-address-removed",
                  ("contract-body-address-derivation",),
-                 write=(("contract/kvspace_access.c",
+                 write=(("kvlangxvalue/kvspace_access.c",
                          SELFTEST_CONTRACT_SOURCE.replace(
                              "    if (xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE ||\n"
                              "        xvalue_address > UINT64_MAX - "
@@ -1155,7 +1148,7 @@ SELFTEST_CASES = (
     # 已知陷阱：注释与字面量里的诱饵既不能让定位器认错函数，也不能冒充计数。
     SelftestCase("contract-derivation-comment-decoy",
                  ("contract-body-address-derivation",),
-                 write=(("contract/kvspace_access.c",
+                 write=(("kvlangxvalue/kvspace_access.c",
                          "/* runtimec_xvalue_body_address( { { */\n"
                          "runtimec_value_body_address_t\n"
                          "runtimec_xvalue_body_address(runtimec_xvalue_address_t "
@@ -1170,7 +1163,7 @@ SELFTEST_CASES = (
     # 正例：注释里有诱饵，但真实实现完整 —— 不得报。
     SelftestCase("contract-derivation-decoy-clean",
                  forbid=("contract-body-address-derivation",),
-                 write=(("contract/kvspace_access.c",
+                 write=(("kvlangxvalue/kvspace_access.c",
                          "/* runtimec_xvalue_body_address( { { */\n" +
                          SELFTEST_CONTRACT_SOURCE),)),
     SelftestCase("body-offset-arithmetic-outside-contract",
@@ -1186,7 +1179,7 @@ SELFTEST_CASES = (
                          "    return xvalue_address + 8;\n"
                          "}\n"),)),
     SelftestCase("removed-resolver-name", ("removed-static-address-resolver",),
-                 write=(("contract/status.c",
+                 write=(("kvlangxvalue/status.c",
                          "int resolve_static_value_body_address(void);\n"),)),
     # kvspace 头只有一个定义点；仓库内的同名副本必须报。
     SelftestCase("stale-kvspace-header-copy", ("stale-kvspace-header-copy",),
@@ -1213,7 +1206,7 @@ SELFTEST_CASES = (
                          '#include "not_here/missing.h"\n' + SELFTEST_EXECUTION_WINDOW),)),
     SelftestCase("forbidden-layer-edge", ("forbidden-layer-edge",),
                  write=(("contract/status.h", "int status_layer;\n"),
-                        ("contract/status.c",
+                        ("kvlangxvalue/status.c",
                          '#include "binrwir/binfunc.h"\n' + "int status_layer;\n"))),
     SelftestCase("binrwir-owned-by-vmbin", ("binrwir-owned-by-vmbin",),
                  write=(("vmbin/value.c", "int binrwir_value_copy;\n"),)),

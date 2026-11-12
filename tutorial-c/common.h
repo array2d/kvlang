@@ -14,7 +14,7 @@
 
 #include <kvspace/kvspace.h>
 #include <kvspace/kvspace_xvalue.h>
-#include <kvlang/xvalue.h>
+#include <kvlangxvalue.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,7 +77,7 @@ static inline const char *kv_kind(const kv_value *v, char *kind, size_t cap) {
     if (total == 0 || cap == 0)
         return kind;
     const uint8_t *lt = NULL;
-    uint16_t n = kvlangXvalueHeadLangtypeBounded(v->head, total, &lt);
+    uint16_t n = kvlangXvalueAttrLangtypeBounded(v->head, total, &lt);
     const uint8_t *close = lt && n && lt[0] == '[' ? memchr(lt, ']', n) : NULL;
     if (close) {
         n -= (uint16_t)(close + 1 - lt);

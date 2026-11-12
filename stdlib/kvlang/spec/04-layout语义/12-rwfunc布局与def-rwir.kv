@@ -73,6 +73,10 @@ layout&run 进 kvspace**，其余宿主也可显式 layout 写入常量。
 ## struct 原型
 
 `struct` 声明布进 `/lib/<Name>`：原型定义节点是 class-0 空 body 的 `def struct`；字段类型在
-`/lib/<Name>/field`，默认值在 `/lib/<Name>·field`。runtime `struct·new` 以此原型创建实例。
+`/lib/<Name>/field`，默认值在 `/lib/<Name>·field`。
+
+**`struct·new` 的本质是 `cpdir`**：把 `/lib/<Name>` 这棵原型子树整体复制到新树位置，返回新
+位置的 key。它不是逐字段构造——字段类型不参与复制，子树原样搬过去；新位置落在调用方的
+对象树里，`struct·new` 只给出源（原型定义 key）和结果（新位置 key）。
 	"#### -> /lib/kvlang/spec/layout语义/rwfunc布局与def_rwir
 }

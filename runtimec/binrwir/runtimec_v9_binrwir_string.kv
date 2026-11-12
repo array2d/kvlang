@@ -1,0 +1,18 @@
+// 组件：binrwir/runtimec_v9_binrwir_string
+// 作用：v9 的 binrwir 指令——字符串，一行一条。
+// 生成：由 generate_v9_binrwir.py 从 ../rwir/runtimec_rwircap.kv 展开，勿手改。
+// 操作数：二进制指针，按所指值的宽度写 uint8（1 字节）/ [N]uint8（N=2、4、8）/
+//       []uint8（变长字节）；不写 *，binrwir 没有 langtype。
+// 命名：<算子>_<读参类型>_<写参类型>，同型也写全；opid 见 runtimec_v9_binrwir_opids.yml。
+//       opid 是 runtimec 私有编号，从 1 按产物顺序递增。
+// 规模：10 条。
+rwir string·set([]uint8 #text, [8]uint8 #index, []uint8 #value) -> ([]uint8 #result)
+rwir string·char([]uint8 #text, [8]uint8 #index) -> ([]uint8 #character)
+rwir string·ord([]uint8 #text) -> ([8]uint8 #code)
+rwir string·find([]uint8 #text, []uint8 #pattern) -> ([8]uint8 #position)
+rwir string·len([]uint8 #text) -> ([8]uint8 #length)
+rwir string·formatint([8]uint8 #value, [8]uint8 #base) -> ([]uint8 #text)
+rwir string·formatuint([8]uint8 #value, [8]uint8 #base) -> ([]uint8 #text)
+rwir string·parseint([]uint8 #text) -> ([8]uint8 #value)
+rwir string·parseuint([]uint8 #text) -> ([8]uint8 #value)
+rwir string·parsefloat([]uint8 #text) -> ([8]uint8 #value)
