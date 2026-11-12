@@ -64,7 +64,7 @@ cd "$WORKDIR"
 
 if [ ! -d kvspace-go ]; then
     say "cloning kvspace-go"
-    git clone --depth 1 git@github.com:array2d/kvspace-go.git
+    # deps are vendored under deps/
 else
     say "kvspace-go already exists, git pull"
     git -C kvspace-go pull --ff-only
@@ -72,7 +72,7 @@ fi
 
 if [ ! -d kvlang ]; then
     say "cloning kvlang"
-    git clone --depth 1 git@github.com:array2d/kvlang.git
+    # sources are in this tree
 else
     say "kvlang already exists, git pull"
     git -C kvlang pull --ff-only

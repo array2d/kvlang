@@ -21,7 +21,7 @@ print(json.load(open(sys.argv[1]))[sys.argv[2]])
 PY
   ) || { echo "deps.json 里缺少 $repo 的版本" >&2; exit 1; }
   tmp="$(mktemp -d)"
-  gh release download "$ver" -R "array2d/$repo" -p "${repo}-abi-*-linux-x86_64.tar.gz" -D "$tmp"
+  gh release download "$ver" -R "$repo" -p "${repo}-abi-*-linux-x86_64.tar.gz" -D "$tmp"
   tar xzf "$tmp"/*.tar.gz -C "$tmp" --strip-components=1
   if [ -d "$tmp/include" ]; then cp -r "$tmp/include/"* "$PREFIX/include/"; fi
   if [ -d "$tmp/lib" ]; then

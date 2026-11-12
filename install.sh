@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO=array2d/kvlang
+REPO=kvlang/kvlang
 KVSPACE_BACKEND_DIR=kvspace   # 后端与 dispatch 前端同放 <prefix>/lib/kvspace
 
 os=$(uname -s)

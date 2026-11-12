@@ -660,7 +660,7 @@ def backend_library(frontend_path: str, scheme: str) -> str | None:
 
 def main(arguments: list[str]) -> int:
     frontend_path = os.path.expanduser(
-        "~/github.com/array2d/kvlang/lib/libkvspace.so")
+        "<repo>/lib/libkvspace.so")
     if "--selftest" in arguments:
         return run_selftest()
     index = 1

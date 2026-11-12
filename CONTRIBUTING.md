@@ -5,7 +5,7 @@ Thanks for your interest! Here's how to get started.
 ## Setup
 
 ```bash
-git clone https://github.com/array2d/kvlang.git
+git clone <this-repository> kvlang
 cd kvlang
 make build
 ```

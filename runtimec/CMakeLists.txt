@@ -80,7 +80,7 @@ find_library(RUNTIMEC_KVSPACE_LIBRARY_PATH NAMES kvspace
     PATHS "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}" NO_DEFAULT_PATH)
 if(NOT RUNTIMEC_KVSPACE_LIBRARY_PATH)
     message(FATAL_ERROR "cannot find libkvspace (searched "
-        "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}). Fix: build array2d/kvspace there "
+        "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}). Fix: build the kvspace include dir there "
         "(kvlang and kvspace must be siblings), or configure with "
         "-DRUNTIMEC_KVSPACE_LIBRARY_DIRECTORY=<dir holding libkvspace>.")
 endif()

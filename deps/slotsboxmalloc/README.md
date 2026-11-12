@@ -1,6 +1,5 @@
 # slotsboxmalloc
 
-[![CI](https://github.com/array2d/slotsboxmalloc/actions/workflows/ci.yml/badge.svg)](https://github.com/array2d/slotsboxmalloc/actions/workflows/ci.yml)
 
 An N=64 left-box / right-object memory allocator (header-only).
 
