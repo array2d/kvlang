@@ -61,6 +61,13 @@ artifact: stale-gate
 	cmake --build build/artifact-kvspace -j
 	mkdir -p $(LIB)
 	cp -P build/artifact-kvspace/libkvspace.* $(LIB)/
+	@echo "== artifact: 构建 xvalue（语言层静态库） =="
+	cmake -S xvalue -B build/artifact-xvalue -DCMAKE_BUILD_TYPE=Release \
+	  -DBUILD_TESTING=OFF \
+	  -DKVLANG_KVSPACE_INCLUDE_DIRECTORY="$(ARTIFACT_KVSPACE_SRC)/include" \
+	  -DKVLANG_KVSPACE_LIB_DIRECTORY="$(CURDIR)/$(LIB)"
+	cmake --build build/artifact-xvalue -j
+	cp build/artifact-xvalue/libkvlang_xvalue.a $(LIB)/
 	@echo "== artifact: 构建 layout =="
 	cargo build --release --manifest-path layout/Cargo.toml
 	mkdir -p $(BIN)
@@ -379,14 +386,15 @@ kvspace-frontend: stale-gate
 # 语言层静态库（kvlangXvalueHeadNew* / kvlangXvalueNew* / kvlangCoordCmp /
 # kvlangConstLanguage）：TASK-082 从 kvspace 搬来，layout / runtimec 都链它。
 #
-# **构建入口已移除**：论文 artifact 不带 xvalue/ 的 CMakeLists，该 .a 以预编译形态
-# 随 lib/ 提供。源码仍在 src/（xvalue.c / codec.c / coord.c / const.c），需要重建时
-# 按 xvalue/CMakeLists.txt 的原始定义自行加回构建入口。
-kvlang-xvalue:
-	@echo "kvlang-xvalue: 构建入口已从 artifact 移除；lib/libkvlang_xvalue.a 为预编译提供。"
-	@echo "  源码：src/xvalue.c src/codec.c src/coord.c src/const.c"
-	@test -f "$(LIB)/libkvlang_xvalue.a" || { \
-	  echo "缺少 $(LIB)/libkvlang_xvalue.a，且本树不含构建入口。"; exit 1; }
+kvlang-xvalue: kvspace-frontend
+	@$(call kvspace_require,KVSPACE_SRC,kvlang-xvalue,kvspace)
+	cmake -S xvalue -B build/kvlang-xvalue -DCMAKE_BUILD_TYPE=Release \
+	  -DBUILD_TESTING=OFF \
+	  -DKVLANG_KVSPACE_INCLUDE_DIRECTORY="$(KVSPACE_INCLUDE_DIRECTORY)" \
+	  -DKVLANG_KVSPACE_LIB_DIRECTORY="$(CURDIR)/$(LIB)"
+	cmake --build build/kvlang-xvalue -j
+	mkdir -p $(LIB)
+	cp build/kvlang-xvalue/libkvlang_xvalue.a $(LIB)/
 
 # kvspace-c 已冻结：shm 引擎并入 kvspace 仓，随 kvspace-frontend 一起产出 libkvspace。
 # 该仓现在只有一条 FATAL_ERROR 桩，保留 target 等于留一条必断的依赖边。
