@@ -26,7 +26,7 @@ else
 LAYOUT_LIB := libkvlanglayout.so
 endif
 
-.PHONY: all byteseek layout json test clean \
+.PHONY: all artifact artifact-check byteseek layout json test clean \
         status clear clear-headers clear-all single \
         kvspace-libs check-kvspace-head stale-gate
 
@@ -42,6 +42,44 @@ endif
 #
 # 两者加回 all 的条件见对应位置。
 all: stale-gate layout
+
+# ── 论文 artifact 一键构建 ───────────────────────────────────────────
+# 从 deps/ 源码编出全部运行产物，再跑 benchmark 验证 10 个 case 全部 valid。
+# 零参数：所有路径由本文件从 $(CURDIR) 推出，不读环境变量、不要求兄弟仓。
+#
+# 产物：
+#   lib/libkvspace.so*        ← deps/kvspace
+#   lib/libkvlanglayout.so    ← layout/ (Rust)
+#   lib/libkvlang_runtime.so  ← runtimec/
+#   bin/kvlangrun, bin/kv_runner, bin/kvlanglayout
+#
+# lib/libkvlang_xvalue.a 树内已带（xvalue/ 构建入口已移除，源码在 src/）。
+artifact: stale-gate
+	@echo "== artifact: 构建依赖库（deps/） =="
+	cmake -S "$(ARTIFACT_KVSPACE_SRC)" -B build/artifact-kvspace \
+	  -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+	cmake --build build/artifact-kvspace -j
+	mkdir -p $(LIB)
+	cp -P build/artifact-kvspace/libkvspace.* $(LIB)/
+	@echo "== artifact: 构建 layout =="
+	cargo build --release --manifest-path layout/Cargo.toml
+	cp layout/target/release/kvlanglayout $(BIN)/
+	cp layout/target/release/$(LAYOUT_LIB) $(LIB)/
+	@echo "== artifact: 构建 runtimec =="
+	cmake -S runtimec -B build/artifact-runtimec -DCMAKE_BUILD_TYPE=Release \
+	  -DKVSPACE_INCLUDE_DIRECTORY="$(ARTIFACT_KVSPACE_SRC)/include" \
+	  -DRUNTIMEC_KVSPACE_LIBRARY_DIRECTORY="$(CURDIR)/$(LIB)" \
+	  -DKVLANG_XVALUE_LIBRARY_PATH="$(CURDIR)/$(LIB)/libkvlang_xvalue.a"
+	cmake --build build/artifact-runtimec -j
+	cp build/artifact-runtimec/kv_runner $(BIN)/
+	cp build/artifact-runtimec/kvlangrun $(BIN)/
+	cp -P build/artifact-runtimec/libkvlang_runtime.* $(LIB)/ 2>/dev/null || true
+	@echo "== artifact: 构建完成 =="
+	@ls -1 $(BIN) $(LIB)
+
+# 构建 + 跑 benchmark（shm），10 个 case × 各规模，全部 valid 才算通过。
+artifact-check: artifact
+	python3 benchmark/run.py --backends shm --repeat 3
 
 test: all
 	python3 tutorial/test.py --no-build
@@ -200,6 +238,14 @@ $(BYTESEEK_BINARY): $(BYTESEEK_STDLIB_SOURCES) byteseek/Cargo.toml
 # KVSPACE_INCLUDE_DIRECTORY 派生于**显式传入的** KVSPACE_SRC（同一个仓，不是猜的
 # 兄弟路径）；想指向别处的头（比如已安装的 /usr/include）就显式覆盖它。
 KVSPACE_INCLUDE_DIRECTORY ?= $(if $(strip $(KVSPACE_SRC)),$(KVSPACE_SRC)/include,)
+
+# ── 论文 artifact：零参数一键构建 ────────────────────────────────────
+# `make artifact` 不要求任何外部路径：依赖源码在 deps/（kvspace / slotsboxmalloc /
+# blockmalloc），全部从源码编到 lib/ 与 bin/，最后跑 benchmark 验证。
+#
+# KVSPACE_SRC 默认取 deps/kvspace——这是 artifact 树的自包含形态，不是「猜兄弟路径」：
+# deps/ 就在仓内，路径由本文件定义，与开发者本地布局无关。显式传 KVSPACE_SRC= 可覆盖。
+ARTIFACT_KVSPACE_SRC := $(CURDIR)/deps/kvspace
 
 # 变量在**引用时**检查：只用 kvlang-xvalue / check-kvspace-head 这类
 # 不碰兄弟仓的目标时不必提供。
