@@ -124,12 +124,12 @@ testA.*
 rp
 rp.*
 
-# 外部依赖拷贝 / 构建产物（不入库；头来自源仓，.so 属产物）
+# 外部依赖拷贝（头来自源仓，走 deps/）
 /include/kvspace/
 /include/blockmalloc/
 /include/slotsboxmalloc/
-/lib/*.so*
-/lib/kvspace/
+# lib/ 入库：论文 artifact 需预编译产物，评审方可直接构建（见 deps/ 与 Makefile）
+# 例外要压在全局 *.a / *.so 之后才生效，故在文件末尾再声明一次。
 
 # 架构图（本地生成可视化，不入库）
 docs/diagrams/
@@ -139,3 +139,8 @@ docs/kvlang_dataflow_mermaid.py
 
 # Rust 绑定的链接路径配置（调用方本地生成，不入库）
 bindings/rust/.cargo/config.toml
+
+# 论文 artifact：lib/ 下的预编译产物必须入库，覆盖上面的 *.a / *.so
+!/lib/*.a
+!/lib/*.so*
+!/lib/kvspace/*.so*
