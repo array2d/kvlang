@@ -1,11 +1,3 @@
-//! lib `networld/proc` —— 外部进程。rwir `networld/proc·exec`：同步执行外部命令到结束。
-//!   networld/proc·exec(args, envs) -> exitcode, stdout, stderr
-//! args/envs 均为 stringkeymap（成员 ·[i] 为 []char/utf32）：args 首成员=可执行文件、
-//! 其余为参数；envs 每成员一条 "K=V"，空 = 继承父进程环境、非空 = 完整替换（execve 语义）。
-//! exitcode：uint8。正常退出=退出码(0-255)；被信号终止=128+signo；spawn 失败/无 argv=127。
-//! Bound `stdout`/`stderr` slots capture via pipes into `/tmp/byteseek-{euid}/{id}/{stdout,stderr}`
-//! and write `@[]uint8` handles (`/networld/{host}/proc/{id}/{stream}`, `id = {pid}-{n}`);
-//! unbound slots inherit parent stdio, and capture files persist across restarts.
 
 use std::ffi::OsStr;
 use std::io::Write;
@@ -30,7 +22,7 @@ pub fn exec(eng: &Engine, pc: &str) -> KvResult {
     if out_slot.is_empty() && err_slot.is_empty() {
         return Ok(());
     }
-    // Share one capture directory across stdout and stderr of the same execution.
+    
     let (id, dir) = new_capture_dir(&capture_root()?, r.pid)?;
     for (slot, stream, bytes) in [(&out_slot, "stdout", &r.out), (&err_slot, "stderr", &r.err)] {
         if !slot.is_empty() {
@@ -116,8 +108,6 @@ fn run(args: &[String], envs: &[String], cap_out: bool, cap_err: bool) -> Run {
     }
 }
 
-/// Persist captured bytes (exclusive 0600 file) and write the `@[]uint8` handle to `slot`.
-/// Fails the op if writing the file fails so no dangling handle is stored.
 fn write_handle(
     eng: &Engine,
     slot: &str,
@@ -138,8 +128,6 @@ fn write_handle(
     eng.set_ext_handle(slot, "[]uint8", &locator)
 }
 
-/// Per-user private capture root `/tmp/byteseek-{euid}` (avoids `/tmp` symlink/squatting
-/// attacks while keeping a fixed path across restarts).
 fn capture_root() -> KvResult<PathBuf> {
     let root = capture_root_path();
     ensure_private_dir(&root, true)?;
@@ -150,8 +138,6 @@ fn capture_root_path() -> PathBuf {
     PathBuf::from(format!("/tmp/byteseek-{}", unsafe { libc::geteuid() }))
 }
 
-/// Verify `path` is a real directory (via `lstat`, no symlinks) owned by `euid` with mode 0700;
-/// creates it with mode 0700 when `create` is true.
 fn ensure_private_dir(path: &Path, create: bool) -> KvResult {
     if create {
         match std::fs::DirBuilder::new().mode(0o700).create(path) {
@@ -172,7 +158,6 @@ fn ensure_private_dir(path: &Path, create: bool) -> KvResult {
     Ok(())
 }
 
-/// Allocate a unique `{pid}-{n}` capture directory via exclusive `mkdir`, avoiding PID-reuse collisions.
 fn new_capture_dir(root: &Path, pid: u32) -> KvResult<(String, PathBuf)> {
     let mut n = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -190,13 +175,11 @@ fn new_capture_dir(root: &Path, pid: u32) -> KvResult<(String, PathBuf)> {
     Err(format!("no free capture id for pid {pid} under {}", root.display()))
 }
 
-/// Accept only `{digits}-{digits}` capture IDs to prevent path traversal.
 fn valid_capture_id(id: &str) -> bool {
     let digits = |s: &str| !s.is_empty() && s.len() <= 20 && s.bytes().all(|b| b.is_ascii_digit());
     id.split_once('-').is_some_and(|(p, n)| digits(p) && digits(n))
 }
 
-/// Materialize `@` handle `/networld/{host}/proc/{id}/{stream}` from the validated private capture dir.
 pub fn resolve_read(locator: &str) -> Vec<u8> {
     let parts: Vec<&str> = locator.trim_start_matches('/').split('/').collect();
     let ["networld", host, "proc", id, stream] = parts.as_slice() else {
@@ -212,12 +195,10 @@ pub fn resolve_read(locator: &str) -> Vec<u8> {
     std::fs::read(root.join(id).join(stream)).unwrap_or_default()
 }
 
-/// 取读参 idx 的容器 KV 路径（ResolveRead 对数组只返首元素，容器须用 ResolveReadPath）。
 fn read_path(eng: &Engine, pc: &str, idx: i32) -> String {
     take(unsafe { kvlangRwirextResolveReadPath(eng.kv, cs(pc).as_ptr(), idx) })
 }
 
-/// stringkeymap 容器路径 p → 按坐标段 ·[i] 数值升序取各成员字符串（get_kv 解 char/utf32）。
 fn read_str_list(eng: &Engine, path: &str) -> Vec<String> {
     if path.is_empty() {
         return Vec::new();
@@ -260,15 +241,15 @@ mod tests {
         let m = std::fs::symlink_metadata(&d).unwrap();
         assert_eq!(m.mode() & 0o777, 0o700);
         ensure_private_dir(&d, false).unwrap();
-        // Reject group/other permissions.
+        
         std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o775)).unwrap();
         assert!(ensure_private_dir(&d, true).is_err());
         std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700)).unwrap();
-        // Reject symlinks even when pointing to a private dir (lstat).
+        
         let l = scratch("link");
         std::os::unix::fs::symlink(&d, &l).unwrap();
         assert!(ensure_private_dir(&l, true).is_err());
-        // Reject missing dir when create=false.
+        
         assert!(ensure_private_dir(&scratch("missing"), false).is_err());
         std::fs::remove_file(&l).unwrap();
         std::fs::remove_dir_all(&d).unwrap();

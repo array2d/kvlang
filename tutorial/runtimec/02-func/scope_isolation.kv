@@ -1,10 +1,4 @@
-// scope_isolation: 帧隔离验证 SI-1~SI-3
-// 期望输出:
-//   PASS SI-1a: x=5 returns 5
-//   PASS SI-1b: x=10 returns 10
-//   PASS SI-2a: S= 8 D= 2
-//   PASS SI-2b: S= 15 D= 5
-//   PASS SI-3: chain = 10
+
 rwfunc id_val(*int64 #x) -> (*int64 #R) {
 	*x + 0 -> *R
 }

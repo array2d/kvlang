@@ -1,15 +1,3 @@
-/*
- * 组件：binrwir/operation_identifiers
- * 作用：能力行的 opid 常量，供 `binrwir` 与 `vmbin` 共同 include。
- * 联系：真源是 `specification/rwir_catalog.def`；本文件由
- *       tools/architecture/generate_rwir_catalog.py 生成并由同一脚本校验。
- * 约束：**只含常量**，不含类型、不含表。改 opid 要改真源，不改本文件。
- *
- * 为什么需要它：`vmbin` 与 `vmkv` 是同层兄弟，`vmbin` 不得链 `vmkv`，
- * 于是 handler 无法向 manifest 询问自己的 opid。在此之前的两个选择——
- * 在 handler 里写裸十六进制（与 catalog 漂开且无处对账）、让 vmbin 链 vmkv
- * （分层倒置）——都不可接受。
- */
 
 #ifndef BINRWIR_OPERATION_IDENTIFIERS_H
 #define BINRWIR_OPERATION_IDENTIFIERS_H
@@ -153,22 +141,9 @@ extern "C" {
 #define BINRWIR_OPERATION_IDENTIFIER_KEY_ADDRESS_OF UINT16_C(0x01A2)
 #define BINRWIR_OPERATION_IDENTIFIER_KEY_TOSTRING UINT16_C(0x01A3)
 #define BINRWIR_OPERATION_IDENTIFIER_KVLANG_RESOLVE_POINTER UINT16_C(0x01A6)
-/* 已退役：object — obj。编号永久保留，不复用。 */
+
 #define BINRWIR_OPERATION_IDENTIFIER_OBJECT_LITERAL UINT16_C(0x0028)
 
-/*
- * ── 特化 opid（0x8000–0xFEFF）───────────────────────────────────────────
- *
- * 一个算子按操作数的具体类型组合拆成多条，每条一个 opid。展开规则只有一条：
- *   读掩码全笛卡尔积 → constraint 过滤 → result_rule 定结果。
- *
- * 分配：0x8000 + 序号，序号来自按 (base opid, 元组串) 排序后的列表。
- * 顺序必须稳定——Program 是地址化的、要跨进程一致。
- *
- * 元组串 = 读参按声明序在前、写参在后，**同型也写全**。写全是唯一性前提：
- * 省略重复项会让 `add_int64` 与 `add_int64_int64_int64` 指同一条。
- * 统计：1836 条。
- */
 #define BINRWIR_SPECIALIZED_COUNT UINT16_C(1836)
 #define BINRWIR_SPECIALIZED_BASE UINT16_C(0x8000)
 #define BINRWIR_OPERATION_IDENTIFIER_ADD_FLOAT32_FLOAT32_FLOAT32 UINT16_C(0x8000)
@@ -2008,17 +1983,8 @@ extern "C" {
 #define BINRWIR_OPERATION_IDENTIFIER_CHARACTER_NOT_EQUAL_CHAR_UTF8_CHAR_UTF32_BOOL UINT16_C(0x872A)
 #define BINRWIR_OPERATION_IDENTIFIER_CHARACTER_NOT_EQUAL_CHAR_UTF8_CHAR_UTF8_BOOL UINT16_C(0x872B)
 
-/*
- * 查找表：特化轮次用 `(base opid, 元组串)` 查目标 opid。
- *
- * 表与上面那批常量**同源同批生成**，条数必须相等——`--check` 逐项比对。
- * 表放在头文件里而不是 .c：`binrwir` 与 `vmbin` 都要读它，而 `vmbin` 不得
- * 链 `vmkv`；生成物多一份就多一处对账。
- */
 typedef struct binrwir_specialization {
-    /* 用 uint16_t 而不是 binrwir_operation_identifier_t：后者定义在
-     * binrwir/instruction.h，本头若 include 它就成环（instruction.h 将来
-     * 可能反过来要这张表）。opid 是 16 位是 wire 事实，这里照写即可。 */
+    
     uint16_t base_operation_identifier;
     const char *operand_types;
     uint16_t specialized_operation_identifier;
@@ -2026,7 +1992,6 @@ typedef struct binrwir_specialization {
 
 #define BINRWIR_SPECIALIZATION_TABLE_COUNT UINT16_C(1836)
 
-/* 定义在 binrwir/specialization_table.c：头里只放声明与计数。 */
 extern const binrwir_specialization_t binrwir_specializations[BINRWIR_SPECIALIZATION_TABLE_COUNT];
 
 #if defined(__cplusplus)

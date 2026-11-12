@@ -1,4 +1,3 @@
-//! JSON conversion over physical KVSpace members.
 
 use serde_json::{Map, Value};
 
@@ -77,7 +76,7 @@ fn read_value(eng: &Engine, path: &str) -> Value {
         return read_dir(eng, path);
     }
     if kind.is_empty() {
-        return Value::Null; // None → JSON null
+        return Value::Null; 
     }
     xvalue_to_json(&kind, &raw, arr_len)
 }
@@ -163,14 +162,13 @@ fn parse_xvalue(eng: &Engine, path: &str, data: &[u8]) -> (String, Vec<u8>, usiz
     let kx = crate::ffi::langtype_of(eng.kv, path);
     let (dims, kind) = parse_langtype(&kx);
     let raw = value_body(data).to_vec();
-    // Use dims product only to detect arrays; actual element count is bounded by body length.
+    
     let arr_len = dims
         .iter()
         .fold(1usize, |n, &d| n.saturating_mul(d.max(1) as usize));
     (kind, raw, arr_len)
 }
 
-/// Slice elements from `raw` by `elem_size` (capped at `arr_len`) so mismatched `dims` never panic.
 fn xvalue_to_json(kind: &str, raw: &[u8], arr_len: usize) -> Value {
     let es = elem_size(kind);
     let elems = |f: fn(&[u8]) -> Value| -> Value {
@@ -384,7 +382,7 @@ mod tests {
     #[test]
     fn struct_and_local_container_to_json() {
         let eng = test_engine();
-        // Struct instance: root langtype is `/lib/Profile` (no `·`), fields live under `path·field`.
+        
         let prof_wire = xvalue_to_wire("/lib/Profile", &[], &[]);
         eng.set_xvalue("/vthread/1/[1]/profile", &prof_wire).unwrap();
         eng.set_xvalue("/vthread/1/[1]/profile·name", &new_char_byte(b"alice"))
@@ -399,7 +397,6 @@ mod tests {
         );
     }
 
-    /// Oversized or overflowing langtype dims must clamp to body length without panicking.
     #[test]
     fn short_body_vs_langtype_dims() {
         let eng = test_engine();
@@ -411,7 +408,7 @@ mod tests {
         let b = xvalue_to_wire("bool", &[1], &[64]);
         eng.set_xvalue("/flags", &b).unwrap();
         assert_eq!(read_value(&eng, "/flags").to_string(), "[true]");
-        // Empty body or trailing partial element.
+        
         assert_eq!(xvalue_to_json("float64", &[], 5).to_string(), "[]");
         assert_eq!(xvalue_to_json("int32", &[1, 0, 0, 0, 9], usize::MAX).to_string(), "[1]");
     }

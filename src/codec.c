@@ -1,6 +1,4 @@
-/* 强类型值构造器。与 xvalue.c 的 `kvlangXvalueHeadNew*` 是**两条路**：那条接受
- * 任意 langtype 串，这条接受强类型实参并自己拼 langtype。产出的 wire 必须逐字节
- * 相同——差异只在调用姿势。 */
+
 #include <kvlang/xvalue.h>
 
 #include <limits.h>
@@ -22,13 +20,13 @@ int kvlangXvalueNewPtr(const char *target_kindexpr, const char *target,
                        uint8_t **out, uint32_t *out_len) {
     if (!target_kindexpr || !target || !out || !out_len)
         return 1;
-    /* `any` 不是类型名（空 kindexpr = 不约束，见 spec [[文法与合法性]]）。 */
+    
     if (strcmp(target_kindexpr, "any") == 0)
         return 1;
-    /* 空 target 不是可用的指针目标（None 指针走 xvalue_head 构造器，不经本 codec）。 */
+    
     if (*target == '\0')
         return 1;
-    /* target_kindexpr 是被指向类型的基 kindexpr；`*` 前缀由 NewPtr 唯一补上。 */
+    
     uint8_t *value = NULL;
     uint64_t total = 0;
     if (kvlangXvalueHeadNewPtr((const uint8_t *)target,

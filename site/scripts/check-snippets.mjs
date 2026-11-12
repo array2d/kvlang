@@ -1,8 +1,5 @@
 #!/usr/bin/env node
-/**
- * 校验内容 JSON 里的每个代码块仍是其声明来源文件的子串。
- * 代码块由 { code, source } 成对描述；HTML 实体（&lt; 等）先还原再比较。
- */
+
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

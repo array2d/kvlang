@@ -1,0 +1,12 @@
+[package]
+name = "kvspace-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "kvspace 存储层 CLI（libkvspace C ABI；只有 shm://，无运行期 dispatch）"
+
+[[bin]]
+name = "kvspace"
+path = "kvspace.rs"
+
+[dependencies]

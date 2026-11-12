@@ -1,52 +1,11 @@
-/*
- * 组件：specification/myrwircaps
- * 作用：**本 runtime 原生兑现的算子名字表**——一个 surface 名字一行。
- *       它是「哪些算子的语义由 runtimec 自己实现」的唯一名字级事实源。
- * 联系：tools/architecture/generate_rwir_catalog.py 以本表为 REGISTRY_SOURCE，
- *       生成 rwir_catalog.def（能力行）、rwir_alias_table.def（名字 → 能力行）、
- *       native_rwir_decls.kv、operation_identifiers.h、specialization_table.c
- *       与 rwir_catalog_gaps.md 六份产物；vmkv 的 manifest 再展开这些产物。
- *       生成器只消费本文件，产物的完整性由它自己的 `--check` 逐个比对。
- * 约束：
- *   - **本表只答「这个名字由本 runtime 兑现」，不答「怎么兑现」**。handler 的归属
- *     由 vmbin 各模块的注册表回答，那才是执行期的事实。两者不互相推导：名字表
- *     里有一行而 registry 里没有 handler，是**真实的缺口**，由
- *     tests/catalog_coverage_test.c 在真 session 上报 MISSING——这是有意的，
- *     放开的只是「名字从哪来」，不是「声称了就必须能执行」。
- *   - **不是字典序、不是按族排序可以改的产物**：顺序决定 opid 的分配顺序（见
- *     生成器），改顺序即改产物字节。要加名字就追加，不要重排。
- *   - **不得出现本 runtime 不兑现的名字**。表里多一个名字，目录就多一条能力行，
- *     而那条行会声称「runtimec 能执行它」。
- *
- * ── 为什么本表从 runtime/src/myrwircaps.c 搬到这里 ──────────────────────
- *
- * 那一份是**上一代 C runtime** 的派发表，行里同时挂着 opcode 文本与
- * `kvlangBuiltin*` 函数指针。它已被 runtimec 取代并冻结；但生成器一直把它当作
- * 「注册面」的输入，于是出现「runtimec 想加一条自己兑现的能力，却要先去改一棵
- * 冻结的树」这种反向依赖——`kvspace·new`（#635）就卡在这里。
- *
- * 搬过来之后，依赖方向恢复正常：runtimec 的名字事实在 runtimec 里，
- * 生成器读它，不再读任何已删除或已冻结的树（CI 的守卫规则正是这么要求的）。
- *
- * **本文件只留名字，不留函数指针。** 函数指针属于被冻结的那份实现，把
- * `kvlangBuiltin*` 引进来会让 runtimec 依赖一棵它不链接的树（`-Werror` 直接
- * 拒绝），也会让「名字表」变成第二份执行派发表——那是同一个事实的第二个来源。
- * 名字列里 `call` / `return` / `goto` / `br` / `=` 五条是 control/copy 行，
- * 其余是算子行；这个区分由 origin 列承载，生成器只看名字。
- */
 
 #ifndef RUNTIMEC_SPECIFICATION_MYRWIRCAPS_C
 #define RUNTIMEC_SPECIFICATION_MYRWIRCAPS_C
 
-/*
- * 一行的来源。**只用于人读与后续分组，不参与任何判定**：生成器解析时只看名字
- * 列（正则要求每行恰好「一个字符串字面量 + 一个标识符」），opid 与能力行都由
- * 生成器自己分配，与这里的 origin 无关。
- */
 typedef enum runtimec_myrwircaps_origin {
-    /* control（call/return/goto/br）与 copy（=）：不进标量 union 通道。 */
+    
     RUNTIMEC_MYRWIRCAPS_ORIGIN_CONTROL = 0,
-    /* 算子：由本 runtime 的 handler 兑现。 */
+    
     RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR = 1
 } runtimec_myrwircaps_origin_t;
 
@@ -371,10 +330,9 @@ static const struct {
     {"vthread·call", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"vthread·sleep", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"vthread·setstatus", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
-    /* `vthread·pc()`：纯读、无读参、两个结果（spec `05-runtime语义/02-执行模型-续.kv:26-40`）。
-     * 它是**新算子**，旧 runtime 没有实现也不需要——旧表已冻结，本表才是生成器的真源。 */
+    
     {"vthread·pc", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
     {"debugger", RUNTIMEC_MYRWIRCAPS_ORIGIN_OPERATOR},
 };
 
-#endif /* RUNTIMEC_SPECIFICATION_MYRWIRCAPS_C */
+#endif 

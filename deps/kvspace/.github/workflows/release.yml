@@ -1,0 +1,58 @@
+name: release-abi
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载 ABI 依赖
+        run: ./ci/deps.sh
+      - name: 构建
+        run: |
+          set -euo pipefail
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build -j"$(nproc)"
+      - name: Verify CLI RUNPATH (built by cmake kvspace-cli target)
+        run: |
+          set -euo pipefail
+          readelf -d cli/target/release/kvspace | grep -F 'RUNPATH' | grep -F '$ORIGIN/../lib'
+      - name: 打包 ABI 产物
+        run: |
+          set -euo pipefail
+          v="${GITHUB_REF_NAME}"
+          d="kvspace-abi-$v-linux-x86_64"
+          mkdir -p "$d/include" "$d/lib" "$d/bin"
+          cp -R include/. "$d/include/"
+          for f in kvspace.h kvspace_xvalue.h const.h; do
+            test -f "$d/include/kvspace/$f"
+          done
+          unexpected=$(ls -1 "$d/include/kvspace" | grep -vE '^(kvspace\.h|kvspace_xvalue\.h|const\.h)$' || true)
+          if [ -n "$unexpected" ]; then
+            echo "include/kvspace 里有意外文件: $unexpected" >&2
+            exit 1
+          fi
+          for f in libkvspace.so libkvspace.so.1 libkvspace.so.1.0.0; do
+            [ -e "build/$f" ] && cp -P "build/$f" "$d/lib/"
+          done
+          n=$(ls -1 "$d/lib" | wc -l)
+          echo "lib 目录: $(ls -1 "$d/lib" | tr '\n' ' ')"
+          test "$n" -eq 3
+          for f in "$d"/lib/*; do
+            case "$(basename "$f")" in
+              libkvspace.so|libkvspace.so.1|libkvspace.so.1.0.0) ;;
+              *) echo "意外的库文件: $f" >&2; exit 1 ;;
+            esac
+          done
+          cp cli/target/release/kvspace "$d/bin/"
+          printf '{"abi":"%s"}\n' "$v" > "$d/abi-manifest.json"
+          tar czf "$d.tar.gz" "$d"
+          tar tzf "$d.tar.gz"
+          sha256sum "$d.tar.gz" > SHA256SUMS
+      - name: 发布 release
+        run: gh release create "${GITHUB_REF_NAME}" kvspace-abi-*.tar.gz SHA256SUMS --generate-notes

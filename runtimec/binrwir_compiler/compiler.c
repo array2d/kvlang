@@ -1,13 +1,3 @@
-/*
- * 组件：BinRWIR Compiler 的实现（VMBIN 档）
- * 作用：把已地址化的 canonical Program 编译成完整 compilation：Program 的
- *       不可变副本 + 派生的 execution plan + 已确定的执行目标。本阶段固定产出
- *       VMBIN 目标，不带机器码。
- * 联系：route 唯一调用者；plan 由 optimization 派生，JIT 不在本档。
- * 约束：不读 RWIR、不解析 key、不缓存 V.body、不执行 Program；执行目标在这里
- *       一次选定，执行期不得再选。真实编译错误绝不降级成 VMBIN plan——本档没有
- *       这种错误来源，因为 JIT 未启用；位置留在 compile 的目标判定处。
- */
 
 #include "binrwir_compiler/compiler.h"
 
@@ -18,14 +8,14 @@
 struct binrwir_compiler_t {
     runtimec_allocator_t allocator;
     uint32_t compiler_revision;
-    /* plan 身份里的代次：同一份 Program 每编译一次前进一格。 */
+    
     uint64_t plan_generation;
 };
 
 struct binrwir_compilation_t {
     runtimec_allocator_t allocator;
     binrwir_compilation_view_t view;
-    /* compilation 独占的两份派生对象：Program 副本与 execution plan。 */
+    
     binrwir_binfunc_t *canonical_program;
     binrwir_execution_plan_t *execution_plan;
 };
@@ -51,10 +41,6 @@ static void binrwir_compilation_reset_view(binrwir_compilation_view_t *view) {
     }
 }
 
-/*
- * enable_jit 为真时 JIT 字段必须齐全；为假时四个字段必须全零。这条判据只描述
- * 配置是否自洽，不描述能力是否存在——能力由 create 单独判。
- */
 static bool binrwir_compiler_jit_configuration_is_valid(
     const binrwir_compiler_configuration_t *configuration) {
     if (configuration->enable_jit) {
@@ -88,7 +74,7 @@ runtimec_status_t binrwir_compiler_create(
         return RUNTIMEC_STATUS_INVALID;
     }
     if (configuration->enable_jit) {
-        /* 本阶段只有 VMBIN 档：配置自洽也不代表能力存在。 */
+        
         return binrwir_compiler_fail(error, RUNTIMEC_STATUS_NOT_IMPLEMENTED, 1,
                                      "JIT compilation is not implemented yet");
     }
@@ -143,8 +129,7 @@ runtimec_status_t binrwir_compiler_compile(
     if (output_compilation != NULL) {
         *output_compilation = NULL;
     }
-    /* program 一进来就归编译器：任何出口都不还给调用方。
-     * 每个失败出口都必须填 error——只返回一个码，调用方只能看到一个数字。 */
+    
     if (program == NULL) {
         return binrwir_compiler_fail(error, RUNTIMEC_STATUS_INVALID, 1,
                                      "compiler received no program");
@@ -174,11 +159,7 @@ runtimec_status_t binrwir_compiler_compile(
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         runtimec_error_reset(&ignored);
         (void)binrwir_binfunc_destroy(program);
-        /*
-         * 兜底：下游若已填过 error 就保留它（那条消息更接近根因），
-         * 没填就补一条——绝不让失败只剩一个状态码。
-         * 状态本身在 `error->status` 里，消息说清是哪一步即可。
-         */
+        
         if (error != NULL && error->message.size == 0U) {
             return binrwir_compiler_fail(
                 error, status, 7,
@@ -186,10 +167,7 @@ runtimec_status_t binrwir_compiler_compile(
         }
         return status;
     }
-    /*
-     * 目标判定点：本档只有 VMBIN。将来 JIT 打开时，JIT 的不可编译判定在这里
-     * 形成 VMBIN plan，真实编译错误在这里直接返回、绝不降级。
-     */
+    
     compilation = (binrwir_compilation_t *)runtimec_allocator_allocate(
         &compiler->allocator, sizeof(*compilation),
         _Alignof(binrwir_compilation_t));

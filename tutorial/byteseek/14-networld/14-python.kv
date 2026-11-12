@@ -1,8 +1,4 @@
-// networld/python·run(code) -> out / exec(code) -> (ret, out, err)
-// 期望输出:
-//   out= 42
-//   str= abc
-//   exec= 5 pyout pyerr
+
 rwfunc test() -> () {
 	networld/python·run("print(6*7)") -> o:[]char/utf32
 	println("out=", o)

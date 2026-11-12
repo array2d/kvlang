@@ -1,4 +1,3 @@
-/* JIT safepoint materialization 的失败封闭骨架。 */
 
 #include "binrwir_compiler/jit/safepoint.h"
 

@@ -1,16 +1,6 @@
-// 欢迎加入kvspace世界
-// lib kvspace —— KV 空间便利库。native rwir：kvspace·del/deltree/cp/cpdir/cplist/listlen/listat；
-// rwfunc 补充：members（折叠孪生目录条目）、count（折叠后成员数）。
-// （has/get_or/set_default 已删：get/set 死刑，调用方直接用 `= /path`（无引号槽名）
-// 解引用读键值 + if 条件写表达。）
 
 lib kvspace {
-	// members(path) -> (names, n)：列目录成员，并**折叠同名孪生条目**。
-	// 值与同名目录可以共存（见 kvspace/tutorial-durable/10-dir-file-coexist.sh），此时
-	// 列举会同时给出裸名 X 与目录名 X/（或 X·）——它们是两个实体，**后端不去重**（fs 发两
-	// 条、redis 视场景而定，无统一规则）。需要「这层有哪些名字」的自省/遍历类调用方一律用
-	// 本函数：裸名后面紧跟同名 X/（或 X·）时只保留带目录标记的那条，名字取 `X/`。
-	// 调用方先声明空容器：`m:'[int64]'[]char/utf32 = {}` + `kvspace·members(p) -> (m, n)`。
+	
 	rwfunc members(*[]char/utf32 #path) -> (
 	               *'[int64]'[]char/utf32 #names, *int64 #n) {
 		kvspace·listlen(*path) -> total:int64
@@ -24,9 +14,7 @@ lib kvspace {
 			if (ml > 0) {
 				string·char(m, ml - 1) -> tail:char/utf32
 				if (tail != "/" && tail != "·") {
-					// 名字带 `.[…]`/`.src` 的兄弟把裸名与 `<名>/` 隔开
-					// （列举按 cmp_coord 排序），所以要向后扫完同前缀条目，
-					// 不能只看下一条。
+					
 					j:int64 = i + 1
 					while (j < total) {
 						kvspace·listat(*path, j) -> n8:char/utf8
@@ -60,7 +48,7 @@ lib kvspace {
 			i = i + 1
 		}
 	}
-	// count(path) -> n：统计目录 path 下折叠同名孪生条目后的直接成员数。
+	
 	rwfunc count(*[]char/utf32 #path) -> (*int64 #n) {
 		ms:'[int64]'[]char/utf32 = {}
 		kvspace·members(*path) -> (ms, *n)

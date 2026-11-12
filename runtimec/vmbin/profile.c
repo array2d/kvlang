@@ -1,7 +1,3 @@
-/*
- * 组件：vmbin/profile 的实现
- * 作用：初始化、清零和读取调用方拥有的统计存储。
- */
 
 #include "profile.h"
 

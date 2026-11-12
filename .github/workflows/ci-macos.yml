@@ -1,8 +1,6 @@
 name: ci-macos
 on: [push, pull_request]
 jobs:
-  # #622 阶段 0：runtimec（C11 新底座）macOS 构建与门禁。只取 kvspace 头，
-  # 不建依赖链、不碰 runtimec2，与下面的 build job 各自独立判读。
   runtimec:
     runs-on: macos-latest
     name: runtimec
@@ -11,23 +9,14 @@ jobs:
       - name: 取 kvspace 头（runtimec 只依赖 include/kvspace）
         run: |
           set -euo pipefail
-          # 版本与 deps.json 的 kvspace 钉死一致，不跟 master 漂移。
           ver=$(python3 -c 'import json;print(json.load(open("deps.json"))["kvspace"])')
           echo "kvspace $ver"
-          # 显式落到 $RUNNER_TEMP，**不**用「仓库的兄弟目录」——兄弟布局是开发者本地
-          # 的偶然状态，不是契约（见 Makefile / CMakeLists 里的同类注释）。
           git clone --depth 1 --branch "$ver" \
             https://github.com/array2d/kvspace "$RUNNER_TEMP/kvspace"
           test -f "$RUNNER_TEMP/kvspace/include/kvspace/kvspace_xvalue.h"
-          # 头**不**复制进仓库 include/：kvlang/include/kvspace/ 一律被视为过期副本，
-          # runtimec 的配置阶段会 FATAL_ERROR。用它的那一步把路径**直接写进命令**，
-          # 不经环境变量中转——环境变量是隐式输入，不进命令行也不进日志，
-          # 同一个 `run:` 里两个人跑同一条命令可能得出不同结果。
       - name: 守卫：runtimec 不得依赖 runtimec2 / runtime
         run: |
           set -euo pipefail
-          # grep 的 0=命中、1=无命中、2=执行错误；三者必须分开判，不能用 `! grep`
-          # （它会把执行错误也翻成成功）。
           guard() {
             local rc=0
             grep -rn "$@" > /tmp/runtimec-guard.txt || rc=$?
@@ -52,9 +41,6 @@ jobs:
       - name: 架构校验（三个结构脚本，各自非零退出即失败）
         run: |
           set -euo pipefail
-          # check_behavior_matrix.py 只扫 specification/ 规范树与 manifest，
-          # 不扫源码：它不会因源码改动变红，也不会拦下源码里新增的、
-          # 未进矩阵的行为决策。不要把它当成「已覆盖所有架构漂移」。
           python3 runtimec/tools/architecture/check_layers.py \
             --source-root "$PWD"
           python3 runtimec/tools/architecture/check_names.py \
@@ -70,11 +56,6 @@ jobs:
       - name: RWIR manifest 校验
         run: |
           set -euo pipefail
-          # 断言注册表 == manifest ∪ 缺口（双向）、identifier/opid/opcode 无重复、
-          # decision 在矩阵存在、无第二份签名表、两个产物与生成结果字节一致。
-          # 该脚本以 gcc -E 读 runtime/src/mywircaps.c 作为输入（旧 C runtime 的
-          # 注册表是唯一事实源），这只是只读消费，不是 runtimec 的构建依赖。
-          # macOS runner 的 gcc 是 clang 的同名入口，-E 语义一致。
           if [ ! -f runtimec/tools/architecture/generate_rwir_catalog.py ]; then
             echo "::error::generate_rwir_catalog.py 未提交到本 commit（coding1 归属）"
             exit 1
@@ -85,11 +66,8 @@ jobs:
 
   build:
     runs-on: macos-latest
-    # 产物布局与 release.yml 一致：repo 即 prefix（include/、lib/、lib/kvspace/、bin/），
-    # 不装 /usr/local——layout 现在按 layout/../lib 找 libkvspace.dylib。
     steps:
       - uses: actions/checkout@v4
-      # kvspace-c 已冻结并入 kvspace（shm 引擎在本仓），不再作为依赖构建。
       - name: 构建依赖链到 repo（blockmalloc / slotsboxmalloc / kvspace）
         run: |
           set -euo pipefail
@@ -108,8 +86,6 @@ jobs:
             cmake --build "/tmp/$repo/build" -j
             cmake --install "/tmp/$repo/build"
           done
-          # 前端按安装规则落在 lib/kvspace/，顶层 lib/ 也放一份
-          # （runtime/layout/byteseek 以 -lkvspace 链接，dlopen 也按 SONAME 找）。
           cp -P lib/kvspace/libkvspace*.dylib lib/ 2>/dev/null || true
       - name: 构建 layout（Rust）/ runtimec2 / byteseek
         run: |

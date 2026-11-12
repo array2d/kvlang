@@ -1,9 +1,0 @@
-// Non-finite floats (`NaN` from `sqrt(-1)`) are rejected as member write keys (`v -> m·*k`).
-rwfunc test() -> () {
-	m:float64·int64 = {}
-	neg = 0.0 - 1.0
-	float64·sqrt(neg) -> k
-	println("before")
-	1 -> m·*k
-	println("unreachable")
-}

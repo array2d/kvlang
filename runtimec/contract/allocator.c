@@ -1,9 +1,3 @@
-/*
- * 组件：contract/allocator 的实现
- * 作用：对显式分配器做参数校验后转发；不缓存、不统计、不分配自身状态。
- * 联系：host/vmbin/vmkv/BinRWIR Compiler/engine 的冷路径分配经这里；测试可注入
- *       计数或失败分配器，验证内存耗尽与失败封闭行为。
- */
 
 #include "contract/allocator.h"
 

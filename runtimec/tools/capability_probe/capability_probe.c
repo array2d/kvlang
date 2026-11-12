@@ -1,19 +1,3 @@
-/*
- * 组件：tools/capability_probe
- * 作用：给一条能力行跑一次执行，输出 TSV 三列事实：exit.kind / detail_code / 首行输出。
- *
- * **它是分类器，不是测试**：没有期望值、不判通过失败。判定口径在
- * `coding1/builtin-registry-contract.md`（DONE=已实现；HANDOFF+UNSUPPORTED=未实现；
- * ERROR+detail_code!=0=实现了但错了）。把分类写进本工具，等于把「当前状态」固化成
- * 断言——明天某行实现了，工具开始说谎。
- *
- * 输出一行 TSV：`<行标识>\t<exit.kind>\t<detail_code>\t<首行输出>`
- *
- * 用法：
- *   capability_probe <dsn> <行标识> [源码文件] \
- *       [--kvspace <lib>] [--layout <lib>]
- * 库路径也可由 RUNTIMEC_KVSPACE_LIBRARY / KVLANG_LAYOUT_LIBRARY 给出。
- */
 
 #include <dlfcn.h>
 #include <stdbool.h>
@@ -48,7 +32,6 @@ static void probe_deallocate(void *context, void *allocation, size_t size,
     free(allocation);
 }
 
-/* exit.kind 的数值 + 名字。名字只服务可读性，不参与判定。 */
 static const char *probe_exit_kind_name(uint16_t kind) {
     switch (kind) {
     case BINRWIR_EXECUTION_EXIT_NONE:
@@ -70,7 +53,6 @@ static const char *probe_exit_kind_name(uint16_t kind) {
     }
 }
 
-/* 读一段文件到静态缓冲；调用方给容量。失败返回 false。 */
 static bool probe_read_file(const char *path, char *buffer, size_t capacity) {
     FILE *file = fopen(path, "r");
     size_t size;
@@ -84,7 +66,6 @@ static bool probe_read_file(const char *path, char *buffer, size_t capacity) {
     return true;
 }
 
-/* 截到首个换行为止：TSV 一行不能含换行。 */
 static void probe_first_line(const char *text, char *output, size_t capacity) {
     size_t length = 0U;
 
@@ -100,8 +81,7 @@ int main(int argument_count, char **arguments) {
     const char *dsn = NULL;
     const char *capability = NULL;
     const char *source_path = NULL;
-    /* 库路径一律走命令行：kvlang 只允许 `KVSPACE` 一个环境变量（用户裁决），
-     * 探针的两个路径没有任何「非 env 不可」的场景——它们是每次调用的输入。 */
+    
     const char *kvspace_library = NULL;
     const char *layout_library = NULL;
     char template_buffer[CAPABILITY_PROBE_TEMPLATE_CAPACITY];
@@ -141,16 +121,6 @@ int main(int argument_count, char **arguments) {
         return 2;
     }
 
-    /*
-     * 源码：给了文件就用它。
-     *
-     * **内置模板只覆盖「能直接写进 kv 源码的算子」**——`copy` / `call` / `goto`
-     * 这类是执行器内部语义名，源码里不存在对应写法（`copy` 就是 `=`、`call` 是
-     * 函数调用、`goto` 是块跳转）。给它们拼 `copy -> *r` 必然 layout 或编码失败，
-     * 而那个失败**不是能力行状态**，把两者混在一起工具就说谎了。
-     *
-     * 所以：不给源码且算子在模板白名单外时，直接报「需要源码」，不猜。
-     */
     if (source_path != NULL) {
         if (!probe_read_file(source_path, source_buffer, sizeof(source_buffer))) {
             fprintf(stderr, "cannot read %s\n", source_path);
@@ -161,7 +131,7 @@ int main(int argument_count, char **arguments) {
             const char *capability;
             const char *body;
         } templates[] = {
-            /* 能直接在源码里写的：二元算术、字面量赋值、块内跳转。 */
+            
             {"add", "1 + 2 -> x"},
             {"sub", "5 - 2 -> x"},
             {"mul", "3 × 4 -> x"},
@@ -185,18 +155,13 @@ int main(int argument_count, char **arguments) {
             printf("%s\tNO_TEMPLATE\t0\tneed source file\n", capability);
             return 0;
         }
-        /*
-         * 模板**不带形参**：探针只回答「这条能力行能不能跑」，带形参就得同时
-         * 提供实参与帧槽，那是另一件事（也未实现），会把「能力未实现」和
-         * 「形参没绑上」混成一个失败。写槽用局部符号，由执行窗口物化。
-         */
+        
         snprintf(template_buffer, sizeof(template_buffer),
                  "rwfunc probe() -> () {\n\tx:int64 = 0\n\t%s\n}\n", body);
     }
     const char *source =
         source_path != NULL ? source_buffer : template_buffer;
 
-    /* ── 段 1：装载 layout（kvspace 已是链接期依赖）──────────────────── */
     (void)kvspace_library;
     void *layout_handle_library = dlopen(layout_library, RTLD_NOW | RTLD_LOCAL);
     layout_code_function_t layout_code_function = NULL;
@@ -216,21 +181,16 @@ int main(int argument_count, char **arguments) {
     runtimec_error_t error;
     runtimec_error_reset(&error);
 
-    /* ── 段 2：layout 源码进 store ─────────────────────────────────── */
     entry[0] = '\0';
     layout_error[0] = '\0';
     if (layout_code_function(source, dsn, entry, (uint32_t)sizeof(entry),
                              layout_error, (uint32_t)sizeof(layout_error)) !=
         0) {
-        /*
-         * layout 就失败也是事实：这条能力行连编都编不出来（未注册 / 签名不符）。
-         * 照实报，不退出——那是本工具要回答的问题之一。
-         */
+        
         printf("%s\tLAYOUT_FAILED\t0\t%s\n", capability, layout_error);
         return 0;
     }
 
-    /* ── 段 3：adapter + session ──────────────────────────────────── */
     void *kvspace_handle = kvspaceConnect(dsn);
     if (kvspace_handle == NULL) {
         fprintf(stderr, "cannot connect %s\n", dsn);
@@ -249,10 +209,7 @@ int main(int argument_count, char **arguments) {
         fprintf(stderr, "adapter failed\n");
         return 2;
     }
-    /*
-     * 诊断：直接问一次 source revision，把执行窗口内部那一步的事实摊开。
-     * 它失败会让窗口报 detail=3（SNAPSHOT_FAILED）而不带消息，只能在这里看。
-     */
+    
     {
         runtimec_snapshot_t probe_snapshot;
         runtimec_snapshot_reset(&probe_snapshot);
@@ -291,7 +248,6 @@ int main(int argument_count, char **arguments) {
         return 2;
     }
 
-    /* ── 段 4：执行一次，捕获 stdout 首行 ──────────────────────────── */
     snprintf(capture_path, sizeof(capture_path), "/tmp/capability-probe-%d.txt",
              (int)getpid());
     fflush(stdout);
@@ -306,12 +262,12 @@ int main(int argument_count, char **arguments) {
     runtimec_execution_window_request_t request;
     memset(&request, 0, sizeof(request));
     request.function_path = runtimec_string_view_from_c_string("/lib/probe");
-    /* vid 必须是纯数字：执行窗口按整数解析 vthread 身份。 */
+    
     request.vthread_identifier = runtimec_string_view_from_c_string("2");
     request.frame_path = runtimec_string_view_from_c_string("/vthread/2/[1]");
     request.stack_identifier = 1;
     request.source_logical_program_counter = 1U;
-    /* 紧邻窗口调用再问一次：两次结果不同就说明中间有状态变化。 */
+    
     {
         runtimec_kvspace_access_t *session_host = NULL;
         if (runtimec_session_get_kvspace_access(session, &session_host) ==
@@ -380,14 +336,7 @@ int main(int argument_count, char **arguments) {
 
     char first_line[CAPABILITY_PROBE_CAPTURE_CAPACITY];
     probe_first_line(captured, first_line, sizeof(first_line));
-    /*
-     * 准备期失败与能力状态必须分开：本次实测里所有行都因为「读不到 source
-     * revision」在编码前失败，那会统一显示成 ERROR —— 读者会以为每条能力都
-     * 「实现了但错了」，那是工具在说谎。
-     *
-     * 判据：ERROR 且 logical_program_counter 为 NONE。真正的执行期 ERROR 一定
-     * 带着出错那条指令的位置；准备期失败（快照 / 编码 / 编译）没有位置。
-     */
+    
     const bool preparation_failed =
         result.execution_exit.kind == BINRWIR_EXECUTION_EXIT_ERROR &&
         result.execution_exit.logical_program_counter ==

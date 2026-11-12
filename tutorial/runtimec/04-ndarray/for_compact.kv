@@ -1,10 +1,4 @@
-// for_compact: for 遍历器直接迭代连续数组 []int64（单 XValue 打包）
-// 语义: for (x in arr) 对 compact 数组按元素下标迭代，无需散 key
-// 期望输出:
-//   10
-//   20
-//   30
-//   sum = 60
+
 rwfunc print_sum(*[]int64 #a) -> (*int64 #total) {
 	*total = 0
 	for (x in *a) {

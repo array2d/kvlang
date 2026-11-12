@@ -1,21 +1,4 @@
 #!/usr/bin/env bash
-# #583 验收：shm A/B 基准（benchmark 10 case × repeat），输出 kv/C 比值表（C = 1）。
-#
-# A/B 两臂各自有一套隔离的 bin/ + lib/（复制后 $ORIGIN rpath 只指向本臂），
-# 避免 DT_RPATH=$ORIGIN 压过 LD_LIBRARY_PATH 导致两臂实际跑同一个库。
-# 默认 A = 当前 <repo>/bin/byteseek（JIT 开），B 不启用；给 --b-bin 或 --b-env 才启用 B。
-#
-# 用法：
-#   scripts/bench-shm-ab.sh                       # 单臂：A vs C 比值
-#   scripts/bench-shm-ab.sh --b-env 'RC2_NOJIT=1' # JIT vs 解释 A/B
-#   scripts/bench-shm-ab.sh --b-bin /path/byteseek --b-lib /path/lib
-#   scripts/bench-shm-ab.sh --scale all --repeat 3
-#   scripts/bench-shm-ab.sh -k iops --verbose
-#   scripts/bench-shm-ab.sh --csv out.csv
-#
-# 环境变量：KVLANG_BIN（A 臂默认 <repo>/bin/byteseek）、KV_CASE_TIMEOUT（默认 300）
-#
-# 退出码：0 全部成功且功能输出一致；1 有 case 失败或功能输出不一致；2 环境/用法错误。
 set -uo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,8 +17,6 @@ FILTER=""
 CSV=""
 VERBOSE=0
 CASE_TIMEOUT="${KV_CASE_TIMEOUT:-300}"
-# case 结构版本：历史 CSV 一律视为 1（不回填）；改 case 结构或计时代码路径必须 +1，
-# 只改注释/无关字段不升。跨 harness_rev 只能看趋势，不能做精确回归判定。
 HARNESS_REV=2
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; NC=$'\033[0m'
@@ -101,7 +82,6 @@ fi
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/kvlang-bench-ab.XXXXXX")" || die "mktemp 失败"
 trap 'rm -rf "$TMP"' EXIT
 
-# 每臂一套隔离 bin/ + lib/：复制后 $ORIGIN/../lib 只解析到本臂副本。
 stage_arm() { # $1=dir $2=bin $3=lib
 	mkdir -p "$1/bin" "$1/lib"
 	cp "$2" "$1/bin/byteseek"
@@ -146,7 +126,6 @@ scales_for() {
 	esac
 }
 
-# 一次运行：$1=arm 根 $2=env 串 $3=stdout 文件 $4=源文件
 run_once() {
 	local arm="$1" envs="$2" out="$3" src="$4"
 	local d="$TMP/run"
@@ -159,7 +138,6 @@ run_once() {
 	return $?
 }
 
-# 解析 __bench_ns 行。
 bench_ns() {
 	awk '/^__bench_ns:/ { print $2; exit }' "$1"
 }
@@ -183,7 +161,6 @@ ratio() { # $1=ns $2=base ns → "x.xx×"
 	awk -v a="$a" -v b="$b" 'BEGIN{ printf "%.2fx", a / b }'
 }
 
-# 跑一个臂 N 次取 min（写入全局 ARM_BEST），同时留下最后一次 stdout 供功能比对。
 ARM_BEST=""
 run_arm_best() { # $1=arm root $2=env $3=src $4=outfile
 	local arm="$1" envs="$2" src="$3" out="$4"
@@ -251,7 +228,6 @@ for cdir in ./benchmark/cases/*/; do
 		b_rc=0 b_ns=""
 		[ "$B_ON" -eq 1 ] && { run_arm_best "$B_ROOT" "$B_ENV" "$src" "$outB" || b_rc=$?; b_ns="$ARM_BEST"; }
 
-		# C 基线：同一源码规模，环境变量 BENCH_SCALE。
 		c_best=""
 		c_rc=0
 		for ((i = 1; i <= REPEAT; i++)); do

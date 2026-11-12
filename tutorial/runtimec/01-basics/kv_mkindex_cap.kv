@@ -1,24 +1,8 @@
-// 期望输出:
-//   n= 3
 
-// 列出 prefix 下的子键并计数
 rwfunc count_children(*[]char/utf32 #prefix) -> (*int64 #n) {
 	kvspace·listlen(*prefix) -> *n
 }
 
-// `kvspace·mkindex` 只有一个读参：capacity 是存储分配属性，不是语言签名的一部分。
-//
-// 本文件原先是「双参数 mkindex（带 capacity）」的正向用例。capacity 从签名删除后，
-// 双参数调用会被**执行期** arity 校验拒绝（`RUNTIMEC_HOST_DIAG_ARITY` 0x4A05）。
-// 本 runner 没有任何一态表达「预期执行期失败」：layout 期拒绝那一态只认 layout 失败，
-// blocked 只表示 runner/能力缺失。把 arity 负例硬塞进任一态都是让判据说谎，
-// 所以这里保留正向路径、改为单参数；「多传一个读参被拒」由 ABI 单测与 runtimec 的
-// arity 用例覆盖。
-//
-// capacity 归属见：02-kvspace模型/11-存储层ABI.kv（`makeindex` 只建 index 位置、
-// 不带 capacity）、05-runtime语义/05-runtimec内建.kv、
-// runtimec/specification/kvspace-family.md（「多传一个读参 ⇒ prepare_call 的
-// arity 校验直接拒绝，不是静默忽略」）。
 rwfunc test() -> () {
 	kvspace·mkindex("/tmp/kvtc/")
 	1 -> /tmp/kvtc/a

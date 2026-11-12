@@ -1,8 +1,3 @@
-/*
- * 05_integrity — 数据完整性压力测试（统一 kvspace* ABI，shm:// 后端）
- *
- * 写入大量随机数据，读回校验。多轮增删改混合操作。
- */
 
 #include "common.h"
 #include <stdio.h>

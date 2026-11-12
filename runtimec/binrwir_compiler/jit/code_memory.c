@@ -1,4 +1,3 @@
-/* binrwir_compiler/jit/code_memory 的失败封闭骨架。 */
 
 #include "binrwir_compiler/jit/code_memory.h"
 

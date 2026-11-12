@@ -1,11 +1,4 @@
-// string_passthrough: 字符串变量作实参穿过多层调用不丢值
-// 实参槽 [0,-k] 存的是键路径；resolve 只追显式 Ptr，勿把 char 值当路径再追（否则第二层即 None）
-// 期望输出:
-//   L1: hello world
-//   L2: hello world
-//   L3: hello world
-//   L2 int: 42
-//   L2 path-like: /lib
+
 rwfunc show(*[]char/utf32 #x, *[]char/utf32 #tag) -> () {
 	println(*tag, *x)
 }

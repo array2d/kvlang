@@ -1,17 +1,6 @@
-// 链接 stock 三方 .so（camelCase，符合 deepx-design/doc/abi-naming-standard.md）：
-//   kvlang_runtime  —— 模式2 主导执行 + rwirext 宿主 ABI（repo lib/）
-//   kvspace         —— dispatch 前端，按 DSN 运行时选后端（repo lib/，后端 lib/kvspace/）
-//   kvlanglayout    —— .kv 编译入库（kvlang·* rwir + 启动 layout stdlib 用，repo lib/）
-// 并把 stdlib/**/*.kv（顶层语言级标准库）全部 include_str! 进二进制（EMBEDDED_KV），启动时 layout 进 kvspace。
+
 use std::path::{Path, PathBuf};
 
-// ── runtime 库名（**唯一常量**）────────────────────────────────────
-//
-// embed 与非 embed 两条路径共用这一个名字，改名只改这里。
-// **TASK-059 的最终名已落地**：runtimec 的 `OUTPUT_NAME` 已改为
-// `kvlang_runtime`，产物就是 `libkvlang_runtime.so`。改名前用的是
-// `libkvlang_runtimec_scaffold`——那次改名验证了这个常量的价值：
-// 从上到下只改这一行，两处用法（embed 要完整文件名、link-lib 要裸名）同步生效。
 const RUNTIME_LIBRARY_NAME: &str = "libkvlang_runtime";
 
 fn collect_kv(dir: &Path, files: &mut Vec<PathBuf>) {
@@ -28,34 +17,22 @@ fn collect_kv(dir: &Path, files: &mut Vec<PathBuf>) {
     }
 }
 
-/// #493 embed：把发布版 .so/.dylib 的字节嵌进可执行文件（include_bytes!），不直接链接。
 fn emit_embed(manifest: &str) {
-    // payload 目录固定为 build/embed（由 `make embed-payload` 组装）；
-    // 不读任何构建环境变量。产物后缀：Linux=.so(+版本号) macOS=.dylib。
+    
     let dir = format!("{manifest}/../build/embed");
     let (ks_ext, rt_ext) = if cfg!(target_os = "macos") {
         (".dylib", ".dylib")
     } else {
         (".so.1", ".so")
     };
-    // **单库化之后的真实形态：只有三个。**
-    //
-    // 旧布局是六件套（前端 + runtimec2 + layout + c 后端 + durable 后端），其中
-    // `libkvspace-c` 与 `libkvspace_durable` 随单库化消失——`kvspaceConnect` 不再
-    // dlopen 任何后端，shm 引擎直接编在 `libkvspace` 里；runtimec2 更是早已归档
-    // （TASK-041）。留着那三个名字，症状是「说缺一个已经不存在的文件」。
+    
     let names = [
         ("EMBED_KVSPACE", &format!("libkvspace{ks_ext}")),
         ("EMBED_KVLANG_RUNTIME", &format!("{RUNTIME_LIBRARY_NAME}{rt_ext}")),
         ("EMBED_KVLANGLAYOUT", &format!("libkvlanglayout{rt_ext}")),
     ];
     for (var, file) in names {
-        // 只在 payload 根目录找，**不搜 `kvspace/` 子目录**：那个子目录装的是已经不
-        // 存在的 c/durable 后端，留在搜索路径里等于给一套废弃布局留后门——哪天有人
-        // 手工建出 `kvspace/` 目录，构建就会从一个没人维护的位置取字节。
-        //
-        // `is_file()` 会跟符号链接：payload 里若是断链（`cp -P` 的典型后果），这里
-        // 返回 false 并报「找不到」，而不是把一个 0 字节的东西 include_bytes! 进去。
+        
         let p = format!("{dir}/{file}");
         if !std::path::Path::new(&p).is_file() {
             panic!("embed: {file} not found under {dir} (run make embed-payload first)");
@@ -66,7 +43,6 @@ fn emit_embed(manifest: &str) {
     gen_shim(&format!("{manifest}/src/ffi.rs"));
 }
 
-/// 从 ffi.rs 的唯一 extern 块生成 shim：每符号一个函数指针 + 同签名转发 + bind()。
 fn gen_shim(ffi_rs: &str) {
     let src = std::fs::read_to_string(ffi_rs).expect("read ffi.rs");
     let open = "unsafe extern \"C\" {";
@@ -141,45 +117,37 @@ fn gen_shim(ffi_rs: &str) {
 
 fn main() {
     let manifest = env!("CARGO_MANIFEST_DIR");
-    // 两级布局（repo 即 prefix）：库在 lib/，后端在 lib/kvspace/，不装 /usr。
+    
     let lib = format!("{manifest}/../lib");
     let backend = format!("{lib}/kvspace");
 
     if std::env::var("CARGO_FEATURE_EMBED").is_ok() {
-        // #493：全部自有 .so 以字节嵌入，启动时 memfd + dlopen 从内存加载。
+        
         emit_embed(manifest);
     } else {
         println!("cargo:rustc-link-search=native={lib}");
         println!("cargo:rustc-link-search=native={backend}");
-        // runtimec2 已归档（TASK-041）并从 lib/ 移除。仍然链它会在链接期报
-        // 「cannot find -lkvlang_runtimec2」——这是**预期**的：byteseek 的 boot
-        // 依赖 c2 的 kvlangDefRwir 扩展注册，而 runtimec 还没有等价 ABI
-        // （TASK-035）。等 TASK-035 落地后把这行改成 kvlang_runtime。
-        // rustc-link-lib 自动加 `lib` 前缀与平台后缀，传**裸名**。
-        // 常量带 `lib` 前缀（embed 那条要完整文件名），这里剥掉，
-        // 否则会拼成 `-llibkvlang_runtimec_scaffold`。
+        
         let runtime_link_name = RUNTIME_LIBRARY_NAME
             .strip_prefix("lib")
             .unwrap_or(RUNTIME_LIBRARY_NAME);
         println!("cargo:rustc-link-lib=dylib={runtime_link_name}");
         println!("cargo:rustc-link-lib=dylib=kvspace");
-        // 语言层的 wire 构造器（kvlangXvalueHeadNew*）：TASK-082 从 libkvspace 搬到
-        // kvlang 自己的静态库，随 kvlang/xvalue 构建产出到 repo 的 lib/。
+        
         println!("cargo:rustc-link-lib=static=kvlang_xvalue");
         println!("cargo:rustc-link-lib=dylib=kvlanglayout");
 
         if cfg!(target_os = "macos") {
-            // macOS：ld64 无 --disable-new-dtags；$ORIGIN 对应 @loader_path
+            
             println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path/../lib");
             println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path/../lib/kvspace");
         } else {
-            println!("cargo:rustc-link-arg=-Wl,--disable-new-dtags"); // rpath 转 DT_RPATH，传递解析子依赖
+            println!("cargo:rustc-link-arg=-Wl,--disable-new-dtags"); 
             println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../lib");
             println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../lib/kvspace");
         }
     }
 
-    // 内嵌顶层 stdlib/**/*.kv → EMBEDDED_KV。
     let libdir = format!("{manifest}/../stdlib");
     let mut files: Vec<PathBuf> = Vec::new();
     collect_kv(Path::new(&libdir), &mut files);

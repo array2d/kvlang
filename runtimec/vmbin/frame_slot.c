@@ -1,8 +1,3 @@
-/*
- * 组件：vmbin/frame_slot 的实现
- * 作用：把参数项换算成绑定表的唯一槽号。
- * 约束：槽号超出 16 位或参数表本身不合法时一律 INVALID，不做截断。
- */
 
 #include "frame_slot.h"
 
@@ -41,7 +36,7 @@ runtimec_status_t vmbin_frame_slot_capacity(const binrwir_binfunc_t *program,
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
-    /* 局部符号排在两个参数区之后，容量必须把它们算进去，否则一绑就越界。 */
+    
     if (binrwir_binfunc_get_symbol_count(program, &symbol_count) !=
             RUNTIMEC_STATUS_SUCCESS ||
         read_count > UINT16_MAX ||
@@ -145,11 +140,11 @@ runtimec_status_t vmbin_frame_slot_of_argument(
                                              BINRWIR_PARAMETER_DIRECTION_WRITE,
                                              argument->slot, output_slot);
     case BINRWIR_REFERENCE_LOCAL:
-        /* 局部符号排在两个参数区之后，互不覆盖。 */
+        
         slot = read_count + write_count + (size_t)argument->slot;
         break;
     default:
-        /* LITERAL / STATIC / FUNCTION 不占绑定表。 */
+        
         return RUNTIMEC_STATUS_INVALID;
     }
     if (slot > UINT16_MAX) {

@@ -1,29 +1,7 @@
-/*
- * 01_basic — Set / Get / List / Del（统一 kvspace* ABI，shm:// 后端）
- *
- * # expected:
- * # === Set & Get ===
- * # /t01/a	int64:42
- * # === Set & List ===
- * # a	int64	42
- * # b	int64	7
- * # c	char/utf8
- * # === Get bulk ===
- * # /t01/a	int64:42
- * # /t01/b	int64:7
- * # /t01/c	char/utf8:hello
- * # === Get nil ===
- * # /t01/nonexist	(nil)
- * # === Del ===
- * # /t01/a	(nil)
- * # b
- * # c
- * # /end
- */
+
 #include "common.h"
 #include <stdio.h>
 
-/* 读一个 key：resolve 拿 offset，在 base+offset 处读 head/body/attr。 */
 static void get(void *kv, const char *key) {
     kv_value v;
     if (kv_read(kv, key, &v) != 0) { printf("%s\t(nil)\n", key); return; }

@@ -1,0 +1,20 @@
+name: ci-macos
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建依赖 blockmalloc（macOS 无预编译 ABI，从源码装）
+        run: |
+          git clone --depth 1 --branch v0.1.4 https://github.com/array2d/blockmalloc.git /tmp/blockmalloc
+          cmake -S /tmp/blockmalloc -B /tmp/blockmalloc/build \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build /tmp/blockmalloc/build -j
+          sudo cmake --install /tmp/blockmalloc/build
+      - name: 构建
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build build -j
+      - name: 测试
+        run: cd build && ctest --output-on-failure

@@ -1,6 +1,4 @@
-// expected
-//   TypeError: min cannot mix string and numeric operands
-// min/max are native per-kind ops; mixed string/numeric operands raise TypeError.
+
 rwfunc test() -> () {
 	min(int64(1), "a") -> x
 }

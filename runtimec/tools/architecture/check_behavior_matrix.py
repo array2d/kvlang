@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-"""Require five-language decisions before runtimec language semantics."""
 
 from __future__ import annotations
 
@@ -8,7 +6,6 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-
 
 EXPECTED_COLUMNS = (
     "Decision", "Behavior", "C", "Python", "Rust", "Go", "V8/TypeScript",
@@ -29,7 +26,6 @@ SCANNED_PRODUCT_DIRECTORIES = (
     "specification", "binrwir", "vmkv", "binrwir_compiler", "vmbin",
 )
 
-
 @dataclass(frozen=True, order=True)
 class Finding:
     path: str
@@ -39,7 +35,6 @@ class Finding:
 
     def render(self) -> str:
         return f"{self.path}:{self.line}: [{self.rule}] {self.detail}"
-
 
 def parse_arguments(command_arguments: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -51,12 +46,10 @@ def parse_arguments(command_arguments: list[str]) -> argparse.Namespace:
     parser.add_argument("--quiet", action="store_true", help="suppress success output")
     return parser.parse_args(command_arguments)
 
-
 def locate_runtimec(source_root: Path) -> tuple[Path, Path]:
     source_root = source_root.resolve()
     return ((source_root.parent, source_root) if source_root.name == "runtimec"
             else (source_root, source_root / "runtimec"))
-
 
 def display(path: Path, repository_root: Path) -> str:
     try:
@@ -64,10 +57,8 @@ def display(path: Path, repository_root: Path) -> str:
     except ValueError:
         return path.as_posix()
 
-
 def table_cells(line: str) -> tuple[str, ...]:
     return tuple(cell.strip() for cell in line.strip().strip("|").split("|"))
-
 
 def read_decisions(
     matrix_path: Path, repository_root: Path,
@@ -123,7 +114,6 @@ def read_decisions(
                                 "at least one decision is required"))
     return decisions, findings
 
-
 def iter_product_files(runtimec_root: Path):
     for directory_name in SCANNED_PRODUCT_DIRECTORIES:
         directory = runtimec_root / directory_name
@@ -131,7 +121,6 @@ def iter_product_files(runtimec_root: Path):
             for path in sorted(directory.rglob("*")):
                 if path.is_file() and path.suffix in {".c", ".h", ".def"}:
                     yield path
-
 
 def audit_markers(
     runtimec_root: Path, repository_root: Path, decisions: set[str],
@@ -157,7 +146,6 @@ def audit_markers(
                     ))
     return findings, scanned
 
-
 def main(command_arguments: list[str] | None = None) -> int:
     arguments = parse_arguments(command_arguments or sys.argv[1:])
     repository_root, runtimec_root = locate_runtimec(arguments.source_root)
@@ -174,7 +162,6 @@ def main(command_arguments: list[str] | None = None) -> int:
     if not arguments.quiet:
         print(f"check_behavior_matrix: OK ({len(decisions)} decisions, {scanned} files scanned)")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

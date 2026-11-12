@@ -1,18 +1,11 @@
 name: ci
 on: [push, pull_request, repository_dispatch]
 jobs:
-  # #622 阶段 0：runtimec（C11 新底座）独立构建与门禁。
-  # 与 test-* / typed-debug / single 完全解耦：只构建 kvspace + kvlang/xvalue,
-  # 不碰 runtimec2、不跑 tutorial，所以现有红灯不会污染本 job 的判读。
   runtimec:
     runs-on: ubuntu-latest
     name: runtimec
     steps:
       - uses: actions/checkout@v4
-      # **不假定兄弟仓存在**（G11）：kvspace 克隆到 $RUNNER_TEMP 下的显式目录，
-      # 位置通过变量传给各 CMake 工程，而不是靠 `../kvspace` 这种目录约定。
-      # 整仓克隆而不是拷一张头：runtimec 配置期有「kvlang/include/kvspace 不得存在」
-      # 的守卫，把 kvspace 头拷进本仓 include/ 会被自己拦下。
       - name: 取 kvspace（显式目录，整仓）
         run: |
           set -euo pipefail
@@ -21,9 +14,6 @@ jobs:
           git clone --depth 1 --branch "$ver" \
             https://github.com/array2d/kvspace "$RUNNER_TEMP/kvspace"
           test -f "$RUNNER_TEMP/kvspace/include/kvspace/kvspace_xvalue.h"
-      # kvspace 的 shm 引擎要两个 header-only 依赖（blockmalloc / slotsboxmalloc），
-      # 版本钉在 kvspace 仓自己的 ci/deps.sh 里。直接用它，不在这里再抄一份 pin
-      # ——两个版本号写两处就是第二个真相。
       - name: 构建 kvspace（runtimec 要链它）
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
@@ -34,9 +24,6 @@ jobs:
           cmake --build build -j"$(nproc)"
           mkdir -p "$GITHUB_WORKSPACE/lib"
           cp -P build/libkvspace.so* "$GITHUB_WORKSPACE/lib/"
-      # 语言层静态库：runtimec 的构造器（kvlangXvalueHeadNew*）从这里来，
-      # 配置期查 `kvlang/lib/libkvlang_xvalue.a`。显式传 kvspace 的 include 与 lib
-      # 目录——xvalue 的 CMake 没有兄弟目录默认值（G11）。
       - name: 构建 kvlang/xvalue
         run: |
           set -euo pipefail
@@ -49,8 +36,6 @@ jobs:
       - name: 守卫：runtimec 不得依赖 runtimec2 / runtime
         run: |
           set -euo pipefail
-          # grep 的 0=命中、1=无命中、2=执行错误；三者必须分开判，不能用 `! grep`
-          # （它会把执行错误也翻成成功）。
           guard() {
             local rc=0
             grep -rn "$@" > /tmp/runtimec-guard.txt || rc=$?
@@ -71,9 +56,6 @@ jobs:
             -DKVSPACE_INCLUDE_DIRECTORY="$RUNNER_TEMP/kvspace/include" \
             -DRUNTIMEC_KVSPACE_LIBRARY_DIRECTORY="$GITHUB_WORKSPACE/lib"
           cmake --build /tmp/kvlang-runtimec-build --parallel
-      # **先断言测试数非零，再跑**：`ctest` 在没有注册任何测试时输出
-      # `No tests were found!!!` 而**退出码是 0**——CI 因此恒绿，一个测试都没跑过。
-      # 这条断言把「假绿」变成「红」。判据是 `ctest -N` 的实际条目数，不是构建成功。
       - name: ctest（先断言测试数非零）
         run: |
           set -euo pipefail
@@ -84,9 +66,6 @@ jobs:
       - name: 架构校验（三个结构脚本，各自非零退出即失败）
         run: |
           set -euo pipefail
-          # check_behavior_matrix.py 只扫 specification/ 规范树与 manifest，
-          # 不扫源码：它不会因源码改动变红，也不会拦下源码里新增的、
-          # 未进矩阵的行为决策。不要把它当成「已覆盖所有架构漂移」。
           python3 runtimec/tools/architecture/check_layers.py \
             --source-root "$PWD"
           python3 runtimec/tools/architecture/check_names.py \
@@ -96,18 +75,12 @@ jobs:
       - name: 导出符号校验
         run: |
           set -euo pipefail
-          # 产物名是 `libkvlang_runtime.so`（target 早先叫 ..._scaffold，已改名）；
-          # 写成旧名字会让 nm 直接报「文件不存在」，这条检查就永远不会真的跑。
           python3 runtimec/tools/architecture/check_exports.py \
             --library /tmp/kvlang-runtimec-build/libkvlang_runtime.so \
             --manifest runtimec/interface/exports.txt
       - name: RWIR manifest 校验
         run: |
           set -euo pipefail
-          # 断言注册表 == manifest ∪ 缺口（双向）、identifier/opid/opcode 无重复、
-          # decision 在矩阵存在、无第二份签名表、两个产物与生成结果字节一致。
-          # 该脚本以 gcc -E 读 runtime/src/mywircaps.c 作为输入（旧 C runtime 的
-          # 注册表是唯一事实源），这只是只读消费，不是 runtimec 的构建依赖。
           if [ ! -f runtimec/tools/architecture/generate_rwir_catalog.py ]; then
             echo "::error::generate_rwir_catalog.py 未提交到本 commit（coding1 归属）"
             exit 1
@@ -132,7 +105,6 @@ jobs:
         run: ./ci/deps.sh
       - name: 构建
         run: |
-          # 产物全部落 repo：bin/ 可执行、lib/ 库（不装 /usr）。
           make runtimec2
           cmake --build build/runtimec2 -j
           make runtime      # C runtime（可选 A/B 臂；c2_symbol_parity 需要同目录兄弟库）
@@ -146,7 +118,6 @@ jobs:
       - name: 测试 (${{ matrix.backend.name }})
         env: { KVSPACE: "${{ matrix.backend.dsn }}", KV_CASE_TIMEOUT: "600" }
         run: |
-          # repo 即 prefix：tutorial 依赖 bin/ 里的 kvspace CLI 与 lib/ 里的库。
           export PATH="$PWD/bin:$PATH"
           export LD_LIBRARY_PATH="$PWD/lib:$PWD/lib/kvspace:$PWD/bin"
           python3 tutorial/test.py
@@ -184,7 +155,6 @@ jobs:
           KVLANG_TERM_BIN="$PWD/bin/byteseek" \
           python3 runtime/tests/isa_conformance.py
 
-  # #493 单一二进制：嵌入 .so + memfd dlsym。构建、无自有库/rpath 校验、冒烟。
   single:
     runs-on: ubuntu-latest
     name: single-binary
@@ -199,7 +169,6 @@ jobs:
           git clone --depth 1 https://github.com/array2d/kvspace /tmp/kvspace-src
           cmake -S /tmp/kvspace-src -B /tmp/kvspace-src/build -DCMAKE_BUILD_TYPE=Release
           cmake --build /tmp/kvspace-src/build -j
-          # 守卫：前端必须带 RTLD_NOLOAD 能力标记，否则单文件会静默回退到系统目录后端
           grep -aq "kvspace:embed-noload" /tmp/kvspace-src/build/libkvspace.so.1
       - name: 启动本地 redis（redis:// 冒烟）
         run: |
@@ -216,7 +185,6 @@ jobs:
       - name: 校验：运行时只有 KVSPACE 一个环境变量
         run: |
           set -euo pipefail
-          # 单二进制不得在运行期 setenv 任何 KVSPACE*（只认 KVSPACE 选后端）
           ! grep -rn 'setenv.*KVSPACE' byteseek/src/
       - name: 校验：无自有 .so、无 RPATH
         run: |
@@ -228,11 +196,9 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf /tmp/single-ci && mkdir -p /tmp/single-ci
-          # 证明单文件自包含：把 repo lib/ 整体移走（runtime/layout/前端/后端全在 payload）
           mv lib lib.hidden
           restore() { mv lib.hidden lib; }
           trap restore EXIT
-          # 三种 DSN，且环境里只有 KVSPACE（绝对路径调用）
           for dsn in "shm:///tmp/single-ci/s" "fs:///tmp/single-ci/fs" \
                      "redis://127.0.0.1:6379"; do
             out=$(env -i KVSPACE="$dsn" "$PWD/bin/byteseek" -c 'print("ok")')
@@ -241,7 +207,6 @@ jobs:
           done
           env -i KVSPACE=fs:///tmp/single-ci/fs2 \
             "$PWD/bin/byteseek" tutorial/01-basics/hello.kv >/dev/null
-          # tutorial 子集：TERM 用 single，layout 用 single 的 layout 子命令
           printf '#!/bin/sh\nexec env KVSPACE="$2" "$PWD/bin/byteseek" layout "$1"\n' \
             > /tmp/kl-wrap.sh
           chmod +x /tmp/kl-wrap.sh
@@ -250,27 +215,12 @@ jobs:
           KVLANG_LAYOUT_BIN=/tmp/kl-wrap.sh KVSPACE=shm:///tmp/single-ci/tut \
             python3 tutorial/test.py --no-build --filter 01
 
-  # ── kvlang 语言层组件：xvalue 库 + tutorial-c + 两套 bindings ──────────
-  #
-  # 这四个产物是 TASK-082/085 从 kvspace 搬进 kvlang 的，此前**没有任何 CI
-  # 触发**——全靠本地手动跑。注册了但没人跑的测试等于没注册。
-  #
-  # 为什么独立 job 而不并进 runtimec / test-*：那两个已有红灯，混在一起时
-  # 失败的是谁分不清。这里的红只可能来自这四套。
   kvlang-components:
     runs-on: ubuntu-latest
     name: kvlang-components
     steps:
       - uses: actions/checkout@v4
 
-      # kvspace 克隆到显式目录，**不用 `../kvspace` 这种兄弟约定**。
-      #
-      # G11：构建配置的默认值必须假定「本地兄弟仓不存在」。兄弟布局是开发者机器的
-      # 偶然状态，不是契约；默认值一旦存在，正确路径就变成「没被默认值遮住的那条」，
-      # 而没人会去验它——本轮已因此出过事故（默认命中兄弟仓，构建用的其实不是 pin
-      # 的版本）。所以这里把路径全部显式化，下面每一步都传完整路径，不依赖 cwd 关系。
-      #
-      # 版本读 deps.json，不硬编码——TASK-088 改完 pin 这里自然跟着走。
       - name: 克隆 kvspace（显式目录 $RUNNER_TEMP，按 deps.json 的 pin）
         run: |
           set -euo pipefail
@@ -280,17 +230,10 @@ jobs:
           rm -rf "$kvroot"
           git clone --depth 1 --branch "$ver" \
             https://github.com/array2d/kvspace.git "$kvroot"
-          # **不把路径写进 GITHUB_ENV**：除 `KVSPACE` 外不新增环境变量（G12）。
-          # 后续 step 直接用 `$RUNNER_TEMP/kvspace/...` 字面路径，或在自己的
-          # `run:` 块里赋 shell 变量——后者不跨进程，不算环境变量。
 
-      # 单库后 kvspace 自己就是标准实现，构建一次即有 libkvspace.so；
-      # shm 引擎要的两个 header-only 依赖由它自己的 ci/deps.sh 装。
       - name: 构建 kvspace
         run: |
           set -euo pipefail
-          # 不用相对路径：`./ci/deps.sh` 依赖 cwd 恰好在 kvspace 根，那又是一处
-          # 「靠布局猜」。显式拼完整路径。
           kvroot="$RUNNER_TEMP/kvspace"
           "$kvroot/ci/deps.sh"
           cmake -S "$kvroot" -B "$kvroot/build" \
@@ -301,8 +244,6 @@ jobs:
           mkdir -p lib
           cp -P "$kvroot/build/libkvspace.so"* lib/
 
-      # 语言层静态库：装到 kvlang/lib/libkvlang_xvalue.a —— tutorial-c 与两套
-      # bindings 的默认路径都是那里。
       - name: 构建 kvlang/xvalue
         run: |
           set -euo pipefail
@@ -316,12 +257,10 @@ jobs:
         run: |
           set -euo pipefail
           ctest --test-dir build/xvalue --output-on-failure
-          # ctest 找不到测试时退出码为 0，与「全过」不可区分。
           n=$(ctest --test-dir build/xvalue -N | grep -cE "^ *Test +#")
           echo "ctest 发现 $n 个测试"
           test "$n" -gt 0
 
-      # tutorial-c 与 bindings 都默认去 kvlang/lib 找 .a，故先装一份。
       - name: 安装 libkvlang_xvalue.a
         run: |
           set -euo pipefail
@@ -333,12 +272,10 @@ jobs:
       - name: tutorial-c（C/C++/Python/Rust 直调，11 条）
         run: |
           set -euo pipefail
-          # 路径走命令行参数（G12：不新增环境变量）。参数缺失时脚本自己报错退出。
           out=$(python3 tutorial-c/test.py \
                   --kvspace-include "$RUNNER_TEMP/kvspace/include" \
                   --kvspace-lib "$PWD/lib" 2>&1) || { echo "$out"; exit 1; }
           echo "$out" | tail -3
-          # 十一项逐条 PASS 才算过：脚本自身返回 0 也可能一条都没跑。
           n=$(echo "$out" | grep -c "^PASS ")
           echo "tutorial-c PASS 行数: $n"
           test "$n" -ge 11
@@ -347,9 +284,7 @@ jobs:
         run: |
           set -euo pipefail
           cd bindings/py
-          # 库路径走命令行参数（G12：不新增环境变量）。
           python3 -m pytest tests/ -q --kvspace-lib "$PWD/../../lib" 2>&1 | tail -3
-          # pytest 收集到 0 条也返回 0（「no tests ran」），故断言条数。
           n=$(python3 -m pytest tests/ --collect-only -q --kvspace-lib "$PWD/../../lib" 2>/dev/null | tail -1 \
               | grep -oE "^[0-9]+")
           echo "pytest 收集到 ${n:-0} 条"
@@ -359,7 +294,6 @@ jobs:
         run: |
           set -euo pipefail
           cd bindings/rust
-          # 链接路径写进 Cargo 配置文件（文件不是环境变量）；该文件被 gitignore。
           mkdir -p .cargo
           cat > .cargo/config.toml <<EOF2
           [target.'cfg(all())']
@@ -371,10 +305,6 @@ jobs:
           EOF2
           out=$(cargo test --release 2>&1) || { echo "$out"; exit 1; }
           echo "$out" | grep -E "^(test result|running)" | tail -6
-          # `cargo test` 在没有任何测试时输出 `running 0 tests` 且**整体成功**。
-          # 所以断言「总通过数 > 0」，而不是只看退出码。
-          # 用 awk 求和而不是 grep|paste|bc：`bc` 不在 ubuntu-latest 的默认镜像里，
-          # 且 grep 多行输出拼接时容易把 "running 0 tests" 与 result 行搞混。
           total=$(echo "$out" | awk '/^test result:/ {for (i=1;i<=NF;i++) if ($i=="passed;") s+=$(i-1)} END {print s+0}')
           echo "cargo 总通过数: $total"
           test "$total" -gt 0

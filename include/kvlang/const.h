@@ -1,14 +1,3 @@
-/* const.h — kvlang 语言层常量：kind 串。
- *
- * 存储常量（路径分隔符、错误串）在 kvspace 的 `<kvspace/const.h>`，不在这里。
- * 两个头都提供运行期查询入口，互不越界：
- *
- *   kvlangConstLanguage("KVLANG_KIND_MAP")  -> "stringkeymap"
- *   kvspaceConstStorage("KVSPACE_MEMBER_SEP") -> "·"
- *
- * `KVLANG_KV(X)` 是全部语言常量的唯一清单；C 侧展开成查找表，Rust 侧用 build.rs
- * 解析同一文件的 `#define KVLANG_* "…"` 行生成常量。
- */
 
 #ifndef KVLANG_CONST_H
 #define KVLANG_CONST_H
@@ -60,8 +49,6 @@
     X(KVLANG_KIND_TIME) \
     X(KVLANG_KIND_DURATION)
 
-/* 运行期查询：kvlangConstLanguage("KVLANG_KIND_MAP") -> "stringkeymap"。
- * 供 Go/Python/Rust 扩展经 C ABI 取常量，避免硬编码。 */
 const char *kvlangConstLanguage(const char *name);
 
 #endif

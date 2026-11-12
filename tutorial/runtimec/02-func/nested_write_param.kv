@@ -1,11 +1,4 @@
-// nested_write_param: forwarded write-params across nested pure-memory and kvspace frames
-// must propagate updated values to every intermediate and outer caller slot.
-// Expected output:
-//   outer1 a= 3
-//   f1= 3
-//   outer a= 3  b= 4
-//   f= 3  g= 4
-//   fib(10) = 34 55
+
 rwfunc inner(*int64 #n) -> (*int64 #a, *int64 #b) {
 	*a = *n
 	*b = 4

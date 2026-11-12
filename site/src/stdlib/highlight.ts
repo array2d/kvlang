@@ -1,5 +1,3 @@
-// kvlang 语法高亮：把一段 kvlang 源码转成带 <span class="tok-*"> 的 HTML。
-// 输出整体包进 <code language="kvlang">。
 
 const KEYWORDS = new Set([
   "lib",

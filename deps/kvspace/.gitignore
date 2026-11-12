@@ -1,0 +1,22 @@
+/build/
+target/
+*.so
+*.so.*
+__pycache__/
+*.pyc
+
+# durable 测试产物
+kvtest*
+.omc/
+
+# CodeGraph 索引（本地知识图，不入库）
+.codegraph/
+
+# CLI 冒烟测试 store 产物
+cli/smoke*
+
+# 工作文档（审计/规划/调查，不入库）
+workspace/
+
+# 构建目录（README 用 build / build-test；防止构建产物被提交）
+/build*/

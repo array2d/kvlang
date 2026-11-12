@@ -9,7 +9,6 @@ fn sig(data: &[u8]) -> String {
     String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 
-/// store 守卫：离开作用域时删目录。先于 `Kv` 声明，故后 drop。
 struct TempStore(String);
 
 impl Drop for TempStore {
@@ -19,7 +18,7 @@ impl Drop for TempStore {
 }
 
 fn fresh_kv() -> (TempStore, Kv) {
-    // Isolate each parallel test in its own `shm://` store to avoid concurrent backend races.
+    
     static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dsn = format!(
         "shm:///tmp/kvlanglayout_test_{}",
@@ -51,7 +50,6 @@ fn compile_simple_func() {
     let src = "rwfunc sum(*int64 #A, *int64 #B) -> (*int64 #C) {\n    *A + *B -> *C\n}\n";
     compile(&mut kv, src).unwrap();
 
-    // 函数签名
     let sig_key = "/lib/sum/[0,0]";
     let sig_val = kv.get_one(sig_key);
     assert_eq!(kvkind::kind(&sig_val, &kv.langtype_of(sig_key)), "rwfunc");
@@ -59,8 +57,7 @@ fn compile_simple_func() {
     let b = body(&sig_val);
     assert_eq!(kvkind::rwfunc_num_reads(b), 2);
     assert_eq!(kvkind::rwfunc_num_writes(b), 1);
-    // langtype 列表：读参在前(nr=2)、写参在后(nw=1)，落参数定义键 .[0,±k]。
-    // body 只有类型串——参数名（`#name`）是源码注释，不落库。
+    
     let types: Vec<String> = ["[0,-1]", "[0,-2]", "[0,1]"]
         .iter()
         .map(|k| {
@@ -71,23 +68,19 @@ fn compile_simple_func() {
         .collect();
     assert_eq!(types, vec!["int64", "int64", "int64"]);
 
-    // 指令（layout 只发语义算子名：opcode = add，精度在操作数槽 langtype 上）。
-    // 新参数模型下 `*A` / `*B` 各展开成一条拷贝指令（第 1、2 行），`add` 落在第 3 行。
     let op_key = "/lib/sum/[3,0]";
     let op = kv.get_one(op_key);
     assert_eq!(kvkind::kind(&op, &kv.langtype_of(op_key)), "rwir");
     assert_eq!(sig(&op), "add");
     assert_eq!(sig(&kv.get_one("/lib/sum/[3,-1]")), "_1\0int64");
     assert_eq!(sig(&kv.get_one("/lib/sum/[3,-2]")), "_2\0int64");
-    // 形参引用一律编成**帧坐标** `*[0,±k]`（spec 04-layout语义/03-函数）：参数名只是
-    // 签名元数据，不是寻址路径。runtime 的 vmkv 读入时按坐标回填参数名与声明类型。
+    
     assert_eq!(sig(&kv.get_one("/lib/sum/[3,1]")), "*[0,1]\0int64");
-    // 解引用各自的读槽：`*A` 落 `[1,-1]`、`*B` 落 `[2,-1]`。
+    
     assert_eq!(sig(&kv.get_one("/lib/sum/[1,-1]")), "*[0,-1]\0int64");
     assert_eq!(sig(&kv.get_one("/lib/sum/[2,-1]")), "*[0,-2]\0int64");
     assert_eq!(sig(&kv.get_one("/lib/sum/[4,0]")), "return");
 
-    // 源码副本
     let src_key = "/lib/sum.src";
     let src_val = kv.get_one(src_key);
     assert_eq!(
@@ -102,12 +95,10 @@ fn compile_string_literal_and_lib() {
     let src = "lib p { rwfunc hi() -> () {\n    \"hello\" -> _\n} }\n";
     compile(&mut kv, src).unwrap();
 
-    // 函数在 /lib/p·hi/ 下（lib 块 pkg 前缀）
     let sig_key = "/lib/p·hi/[0,0]";
     let sig_val = kv.get_one(sig_key);
     assert_eq!(kvkind::kind(&sig_val, &kv.langtype_of(sig_key)), "rwfunc");
 
-    // 字符串字面量读槽 → char/utf32（UTF-32 LE 码点）
     let r_key = "/lib/p·hi/[1,-1]";
     let r = kv.get_one(r_key);
     assert_eq!(kvkind::kind(&r, &kv.langtype_of(r_key)), "char/utf32");
@@ -151,7 +142,7 @@ fn compile_control_flow_is_single_plane() {
         b.contains("_if_") || b.contains("_then_") || b.contains("_else_") || b.contains("_merge_")
     });
     assert!(!old_scope, "scope keys still present: {children:?}");
-    // Parent listings omit `‥` system segments; list `‥labels/` directly below.
+    
     let labels = kv.list("/lib/f/\u{2025}labels/", false, false);
     assert!(!labels.is_empty(), "missing ‥labels: {children:?}");
     let if_name = labels
@@ -168,7 +159,6 @@ fn compile_control_flow_is_single_plane() {
         kvkind::display(&if_irseq, &kv.langtype_of(&if_key))
     );
 
-    // irseq 1 is preamble goto; target is int64
     let goto_op = kv.get_one("/lib/f/[1,0]");
     assert_eq!(sig(&goto_op), "goto");
     let tgt_key = "/lib/f/[1,-1]";

@@ -1,88 +1,57 @@
-//! crash/resume analysis over the lowered step sequence of every function in one compile unit.
-//!
-//! Step model: each instruction of `seq` is one step. A crash may land after any subset of a
-//! step's writes and before its pc commit; replaying from step a re-runs a..=c in order.
-//!
-//! The record is advisory: runtimec does not consume it. Acting on it needs what runtimec lacks
-//! today: a persisted resume pc per frame (there is one `‥pc` per vthread and frame paths use a
-//! process-local serial), a CALL commit that cannot skip the callee (the CALL exit commits the
-//! caller's pc past the call before the callee's first commit), rebinding of locals that are not
-//! fixed width on a fresh process, and clearing the frame directory for `entry`.
-//!
-//! Premises (layout cannot check them):
-//! - P1 frame locals, lowering temps included, are durable and bound again on replay.
-//! - P2 an absolute key the function names does not alias a parameter (checked for callers in
-//!   the same unit).
-//! - P4 a write-param pointer is never stored where it outlives the call.
-//! - P5 ops in [`OP_TABLE`] behave as recorded there and are deterministic given their operands
-//!   unless marked volatile; output ops (println, print, cerr) are at-least-once on replay.
-//!   Every other op or rwir gets [`unverified`].
-//! - P6 a callee resolved at layout time (store or same unit) is not redefined afterwards.
-//! - A1 `c<-caller`: the driver drops the callee frame, rewinds the caller's pc to its call
-//!   step and applies the caller's verdict for that step.
-//!
-//! Read params are bound by address, so they share `Params` with write params.
-//! Whatever the analysis cannot resolve is rejected, never guessed.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 
 const MEMBER: char = '\u{b7}';
 
-/// Storage class: two accesses may touch the same storage only if their classes match.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Class {
-    /// Bare value of a frame local.
+    
     Local(String),
     Abs(String),
-    /// Every parameter's storage: a caller may pass one storage to several of them.
+    
     Params,
-    /// Storage reached through a path (member, subscript, deref, kvspace op); aliases Params
-    /// and every absolute key.
+    
     Heap,
-    /// Bare value of an address-taken local, reached through a deref.
+    
     Bare,
-    /// Byte size of a slot in the inner class: an in-place store needs it unchanged, a
-    /// create rebinds it.
+    
     Size(Box<Class>),
 }
 
-/// How an op writes its write slots.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WriteMode {
-    /// Every write slot is replaced whole (or the op has none).
+    
     Whole,
-    /// Whole iff the write slot type equals the element type of read operand 0.
+    
     Element,
-    /// Patched or written only on some paths: no kill, the old value may survive.
+    
     Partial,
 }
 
-/// How a write slot is stored (`value_access.c`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Store {
-    /// `write_body` or a typed pointer: the bound slot keeps its size, which must match.
+    
     InPlace,
-    /// `write_new_value` / `kvspaceSetValue`: the slot is rebound at the value's size.
+    
     Create,
-    /// Either, chosen by the handler.
+    
     Both,
-    /// The write slot is not written.
+    
     Untouched,
 }
 
-/// Verified behavior of one runtimec op (handler checked by hand, see [`OP_TABLE`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OpSpec {
-    /// Bit i: read operand i is written in place.
+    
     pub patches: u32,
     pub write: WriteMode,
     pub store: Store,
     pub heap_read: bool,
     pub heap_write: bool,
-    /// Nondeterministic result: replayed only as the crashed step itself.
+    
     pub volatile: bool,
-    /// Effects outside kvspace slots (vthread control, blocking watch): never replayed.
+    
     pub opaque: bool,
 }
 
@@ -98,9 +67,8 @@ const fn spec(write: WriteMode, store: Store) -> OpSpec {
     }
 }
 
-/// In-place whole write.
 const WHOLE: OpSpec = spec(WriteMode::Whole, Store::InPlace);
-/// Whole write that rebinds the slot.
+
 const CREATE: OpSpec = spec(WriteMode::Whole, Store::Create);
 const NO_WRITE: OpSpec = spec(WriteMode::Partial, Store::Untouched);
 const HEAP_READ: OpSpec = OpSpec {
@@ -126,14 +94,10 @@ const OPAQUE: OpSpec = OpSpec {
     ..spec(WriteMode::Partial, Store::Both)
 };
 
-/// Verified ops, keyed by catalog row name (`rwir_catalog.def`); surface names reach a row
-/// through `rwir_alias_table.def`. Handlers live in `runtimec/vmbin/handlers/`.
-/// Rows absent here, and any other rwir, fall to [`unverified`].
 pub const OP_TABLE: &[(&str, OpSpec)] = &[
-    /* interpreter.c execute_copy: write_body, or write_whole_value for a bound path. */
+    
     ("copy", spec(WriteMode::Whole, Store::Both)),
-    /* scalar.c, scalar_generated.c (`_TYPED`), scalar_character.c: in place, equal size;
-     * concat (the CONCAT row) also stores in place. */
+    
     ("add", WHOLE),
     ("sub", WHOLE),
     ("mul", WHOLE),
@@ -172,11 +136,9 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
     ("bool·neq", WHOLE),
     ("nonnull", WHOLE),
     ("nonnull·not", WHOLE),
-    /* scalar.c debugger: writes ‥status and yields. */
+    
     ("debugger", OPAQUE),
-    /* container.c: creates go through write_new_value (map·new keeps old members, which
-     * container slots tolerate because they never kill); copy, langtype, numel, dim and
-     * bodylen store in place. */
+    
     ("compactarray·new", CREATE),
     ("compactarray·fill", CREATE),
     ("compactarray·newslice", CREATE),
@@ -187,9 +149,9 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
     ("compactarray·dim", WHOLE),
     ("compactarray·bodylen", WHOLE),
     ("compactarray·langtype", WHOLE),
-    /* `_ARRAY_INDEX` copies one element into the bound write slot. */
+    
     ("compactarray·at", spec(WriteMode::Element, Store::InPlace)),
-    /* `_ARRAY_INDEX_WRITE` patches read operand 0 and never writes the write slot. */
+    
     (
         "compactarray·set",
         OpSpec {
@@ -199,7 +161,7 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
         },
     ),
     ("map·new", CREATE),
-    /* struct·new replaces the target subtree. */
+    
     (
         "struct·new",
         OpSpec {
@@ -207,10 +169,10 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
             ..CREATE
         },
     ),
-    /* langtype.c: write_body. */
+    
     ("compactarray·parselangtype", WHOLE),
     ("xv·parselangtype", WHOLE),
-    /* scatter.c: members are separate keys under the base. */
+    
     ("scatterarray·new", CREATE),
     ("scatterarray·len", HEAP_READ),
     (
@@ -221,7 +183,7 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
             ..WHOLE
         },
     ),
-    /* set and append write a member under the write slot's base, not the slot itself. */
+    
     (
         "scatterarray·set",
         OpSpec {
@@ -240,8 +202,7 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
     ("scatterarray·newscatter", HEAP_RW_CREATE),
     ("scatterarray·newcompact", HEAP_RW_CREATE),
     ("scatterarray·slice", HEAP_RW_CREATE),
-    /* string.c, handler_call_text.h: text results are creates, scalar results in place;
-     * set patches utf32 in place and rebuilds utf8 (`SET_BY_ENCODING`). */
+    
     ("string·set", spec(WriteMode::Partial, Store::Both)),
     ("string·char", CREATE),
     ("string·ord", WHOLE),
@@ -255,7 +216,7 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
     ("string·parseint", WHOLE),
     ("string·parseuint", WHOLE),
     ("string·parsefloat", WHOLE),
-    /* time.c: `_TYPED`; now is a create. */
+    
     (
         "time·now",
         OpSpec {
@@ -281,8 +242,7 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
     ("time/duration·sub", WHOLE),
     ("time/duration·before", WHOLE),
     ("time/duration·after", WHOLE),
-    /* host.c: listlen, listat, random and pc store in place (listat only when the entry
-     * exists); key·* are creates. */
+    
     ("kvspace·del", HEAP_WRITE),
     ("kvspace·deltree", HEAP_WRITE),
     ("kvspace·mkindex", HEAP_WRITE),
@@ -330,21 +290,18 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
     ("random·uint64", VOLATILE),
     ("random·int63", VOLATILE),
     ("random·intn", VOLATILE),
-    /* vthread·pc reads the frame position; create/run/call are not implemented. */
+    
     ("vthread·pc", VOLATILE),
     ("vthread·create", OPAQUE),
     ("vthread·run", OPAQUE),
     ("vthread·call", OPAQUE),
     ("vthread·setstatus", OPAQUE),
-    /* nanosleep only. */
+    
     ("vthread·sleep", NO_WRITE),
 ];
 
-/// Output ops outside the catalog (vmbin/temp_println.c): read operands, write stdout only.
 const OUTPUT_OPS: &[&str] = &["println", "print", "cerr"];
 
-/// Worst case for anything unverified: it may read and write any storage, patch every read
-/// operand, write slots partially either way, and it blocks every longer range.
 pub const fn unverified() -> OpSpec {
     OpSpec {
         patches: u32::MAX,
@@ -358,7 +315,6 @@ pub const fn unverified() -> OpSpec {
 const CATALOG: &str = include_str!("../../runtimec/specification/rwir_catalog.def");
 const ALIASES: &str = include_str!("../../runtimec/specification/rwir_alias_table.def");
 
-/// First quoted string and the trailing `RUNTIMEC_RWIR_*` identifier of a `.def` row.
 fn def_row(line: &str, macro_name: &str) -> Option<(String, String)> {
     let rest = line.trim().strip_prefix(macro_name)?.strip_prefix('(')?;
     let open = rest.find('"')?;
@@ -372,7 +328,6 @@ fn def_row(line: &str, macro_name: &str) -> Option<(String, String)> {
     Some((quoted, ident))
 }
 
-/// Surface name -> catalog row names (alias row plus specialization rows).
 fn surface_rows() -> &'static HashMap<String, Vec<String>> {
     static ROWS: std::sync::OnceLock<HashMap<String, Vec<String>>> = std::sync::OnceLock::new();
     ROWS.get_or_init(|| {
@@ -403,7 +358,6 @@ fn surface_rows() -> &'static HashMap<String, Vec<String>> {
     })
 }
 
-/// Verified behavior of `name`, merged over every row it may resolve to; None = unverified.
 pub fn op_spec(name: &str) -> Option<OpSpec> {
     if OUTPUT_OPS.contains(&name) {
         return Some(NO_WRITE);
@@ -442,21 +396,16 @@ fn scalar_type(t: &str) -> bool {
         || t.starts_with("char/")
 }
 
-/// The runtime writes a whole body of equal size, so one write replaces every byte read later.
-/// `char/utf8` is excluded: it is 1 to 4 bytes and an element load copies only 1.
 pub fn killable_type(ty: &str) -> bool {
     let t = ty.trim();
     (scalar_type(t) && t != "char/utf8")
         || matches!(t, "[]char/utf8" | "[]char/utf32" | "[]char/ascii")
 }
 
-/// Fixed-size scalar: every write of it covers the whole slot.
-/// No `char/*`: layout lets a text result into a char slot, rebinding it wider.
 fn fixed_width_type(t: &str) -> bool {
     scalar_type(t) && !t.starts_with("char/")
 }
 
-/// No members: a bare read or write touches only the slot itself.
 pub fn value_type(ty: &str) -> bool {
     let t = ty.trim();
     if t.starts_with('*') {
@@ -472,18 +421,17 @@ pub fn value_type(ty: &str) -> bool {
             .is_some_and(|(_, element)| scalar_type(element))
 }
 
-/// What a step invokes.
 #[derive(Clone, Debug)]
 pub enum Callee {
-    /// goto, br, return or an empty step.
+    
     None,
-    /// Verified runtimec op ([`op_spec`]).
+    
     Op(OpSpec),
-    /// Catalog row, native or declared rwir without a verified entry: [`unverified`].
+    
     Unverified(String),
-    /// Index into the slice passed to [`analyze_unit`].
+    
     Unit(usize),
-    /// rwfunc already laid out in the store; its body is not visible.
+    
     Store(String),
     Unknown(String),
 }
@@ -492,7 +440,7 @@ pub struct StepInput {
     pub op: String,
     pub reads: Vec<String>,
     pub writes: Vec<String>,
-    /// Slot type per write position ("" = unknown).
+    
     pub write_types: Vec<String>,
     pub callee: Callee,
 }
@@ -500,7 +448,7 @@ pub struct StepInput {
 pub struct ParamInfo {
     pub name: String,
     pub inplace: bool,
-    /// The bound storage has no members ([`value_type`]).
+    
     pub value: bool,
 }
 
@@ -509,9 +457,9 @@ pub struct FunctionInput {
     pub reads: Vec<ParamInfo>,
     pub writes: Vec<ParamInfo>,
     pub steps: Vec<StepInput>,
-    /// 0-based step index where each label block starts.
+    
     pub label_starts: Vec<usize>,
-    /// Slot type of each local ("" or missing = unknown).
+    
     pub local_types: HashMap<String, String>,
 }
 
@@ -524,9 +472,9 @@ pub enum Replay {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Resumability {
-    /// Every step replays from itself.
+    
     AlwaysResumable,
-    /// Steps not listed replay from themselves.
+    
     ConditionallyResumable {
         points: Vec<(usize, Replay)>,
     },
@@ -546,13 +494,6 @@ impl Resumability {
     }
 }
 
-/// `‥crash_resume` text (`[]char/utf8`). Step indices are 0-based positions in `seq` (step i
-/// is `[i+1,·]`): `ALWAYS_RESUMABLE` | `CONDITIONALLY_RESUMABLE:<c><-<a>|entry|caller,...` |
-/// `NOT_RESUMABLE:<c>:<absolute key>|heap|unknown|volatile:<op>|unverified:<op>|callee:<name>`.
-/// NOT_RESUMABLE covers the whole function; `<c>` is only the first step that fails.
-/// `entry` re-runs the frame from step 0 with fresh locals; `caller` is premise A1.
-/// `caller` in a frame without a caller (vthread root, `vthread·call` target, init), or one
-/// that lands on a caller step whose function is NOT_RESUMABLE, means not resumable.
 impl fmt::Display for Resumability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -575,8 +516,6 @@ impl fmt::Display for Resumability {
     }
 }
 
-// ── operands ────────────────────────────────────────────────────────
-
 struct Ctx<'a> {
     reads: &'a [ParamInfo],
     writes: &'a [ParamInfo],
@@ -589,17 +528,17 @@ enum ParamRef {
 }
 
 struct Slot {
-    /// Classes the access touches.
+    
     classes: Vec<Class>,
-    /// Classes read to locate the slot: index vars, dynamic keys, path holders.
+    
     locate: Vec<Class>,
-    /// Bare local or absolute key: a killable write overwrites exactly this class.
+    
     bare: Option<Class>,
-    /// Write param named by the base.
+    
     wparam: Option<usize>,
-    /// Read param named by the base.
+    
     rparam: Option<usize>,
-    /// Bare local named by the operand.
+    
     local: Option<String>,
 }
 
@@ -637,7 +576,6 @@ fn matching_paren(s: &str) -> Option<usize> {
     None
 }
 
-/// `*(*p)·k[i]` -> (deref depth, base, tail).
 fn split_base(text: &str) -> Option<(usize, &str, &str)> {
     let mut depth = 0;
     let mut s = text.trim();
@@ -670,12 +608,11 @@ fn split_base(text: &str) -> Option<(usize, &str, &str)> {
     Some((depth, &s[..end], &s[end..]))
 }
 
-/// Member segments and subscripts after the base; collects the classes they read.
 fn parse_tail(tail: &str, ctx: &Ctx, locate: &mut Vec<Class>) -> Option<()> {
     let mut s = tail;
     while !s.is_empty() {
         if let Some(rest) = s.strip_prefix(MEMBER) {
-            /* `m·[1,2]`: coordinate key segment, same shape as a subscript. */
+            
             if rest.starts_with('[') {
                 s = rest;
                 continue;
@@ -708,7 +645,6 @@ fn parse_tail(tail: &str, ctx: &Ctx, locate: &mut Vec<Class>) -> Option<()> {
     Some(())
 }
 
-/// `None`: malformed coordinate. `Some(None)`: not a parameter.
 fn param_ref(base: &str, ctx: &Ctx) -> Option<Option<ParamRef>> {
     if let Some(inner) = base.strip_prefix('[') {
         let inner = inner.strip_suffix(']')?;
@@ -754,7 +690,7 @@ fn parse_operand(text: &str, ctx: &Ctx) -> Option<Operand> {
         return None;
     }
     if let Some(rest) = t.strip_prefix('"') {
-        /* `"…` is a string literal; `"/a"·tail` is a member access on a literal path. */
+        
         return match rest.find('"').map(|end| &rest[end + 1..]) {
             Some(tail) if tail.starts_with(MEMBER) => {
                 let mut locate = Vec::new();
@@ -769,7 +705,7 @@ fn parse_operand(text: &str, ctx: &Ctx) -> Option<Operand> {
         };
     }
     if let Some(rest) = t.strip_prefix('\'') {
-        /* `'/a'` is a bare path in operand position; other quoted text is a type literal. */
+        
         let inner = rest.strip_suffix('\'').unwrap_or(rest);
         return if inner.starts_with('/') {
             parse_operand(inner, ctx)
@@ -797,10 +733,10 @@ fn parse_operand(text: &str, ctx: &Ctx) -> Option<Operand> {
         }
         None => return None,
     };
-    /* A param slot holds the caller's address: one deref still names caller storage. */
+    
     let direct = usize::from(own == Class::Params);
     let slot = if !tail.is_empty() {
-        /* Members and subscripts follow any path-valued base, so they may reach anything. */
+        
         locate.push(own);
         heap_slot(vec![Class::Heap], locate, params)
     } else if depth > direct {
@@ -823,32 +759,30 @@ fn parse_operand(text: &str, ctx: &Ctx) -> Option<Operand> {
     Some(Operand::Slot(slot))
 }
 
-// ── steps ───────────────────────────────────────────────────────────
-
 #[derive(Default)]
 struct Step {
     op: String,
-    /// Verified or worst-case behavior; None for control steps and unit calls.
+    
     spec: Option<OpSpec>,
     reads: Vec<Class>,
-    /// (class, overwrites the whole class)
+    
     writes: Vec<(Class, bool)>,
-    /// Per read position: classes and the read param it names (None: literal).
+    
     read_args: Vec<Option<(Vec<Class>, Option<usize>)>>,
     wparam_reads: Vec<usize>,
-    /// Read params this step writes in place.
+    
     rparam_writes: Vec<usize>,
-    /// Per write position: classes a synthetic read adds, and the write param it names.
+    
     slot_reads: Vec<(Vec<Class>, Option<usize>)>,
-    /// Write slots may keep part of their old value.
+    
     partial: bool,
     unknown: bool,
     control: bool,
-    /// `volatile` or `unverified`: blocks every longer range.
+    
     volatile: Option<&'static str>,
-    /// Per write position: size classes (empty for fixed width), the bare one, write param.
+    
     slot_sizes: Vec<(Vec<Class>, Option<Class>, Option<usize>)>,
-    /// One verified op: its own size read cannot see its own size write.
+    
     single_store: bool,
 }
 
@@ -859,7 +793,6 @@ fn sized(classes: &[Class]) -> Vec<Class> {
         .collect()
 }
 
-/// `compactarray·at` writes one element: whole iff the slot has the element type.
 fn element_matches(input: &StepInput, ctx: &Ctx) -> bool {
     let element = input
         .reads
@@ -915,16 +848,13 @@ fn parse_step(input: &StepInput, ctx: &Ctx, addr_taken: &mut BTreeSet<String>) -
         }
         _ => &input.reads,
     };
-    /* A callee may keep an argument's address; a container copy binds the source's path. */
+    
     let escapes = matches!(
         input.callee,
         Callee::Unit(_) | Callee::Store(_) | Callee::Unverified(_) | Callee::Unknown(_)
     );
     let copy = matches!(input.op.as_str(), "=" | "copy");
-    /* 两个算子在这里并排，但它们**不再同族**——曾经都叫 `kvspace/key·*`，
-     * 后来 `resolveptr` 改名 `kvlang·resolvekey`（语义没变，仍是 base + 键值 → 位置）。
-     * 之所以还并在这里：判据是「产出一个地址而不是值」，与命名族无关。
-     * 看到两个不同前缀并排别当成手滑——是改名留下的痕迹。 */
+    
     let address_of = matches!(input.op.as_str(), "kvspace/key·abs" | "kvlang·resolvekey");
     let patches = spec.map_or(0, |s| s.patches);
     for (i, read) in reads.iter().enumerate() {
@@ -986,7 +916,7 @@ fn parse_step(input: &StepInput, ctx: &Ctx, addr_taken: &mut BTreeSet<String>) -
                 let mut synthetic = slot.classes.clone();
                 synthetic.extend(slot.locate);
                 step.slot_reads.push((synthetic, slot.wparam));
-                /* A copy only replaces the bare slot (a container copy binds a path). */
+                
                 let bare_copy = copy && slot.bare.is_some();
                 for class in slot.classes {
                     if bare_copy && class == Class::Heap {
@@ -1010,15 +940,13 @@ fn parse_step(input: &StepInput, ctx: &Ctx, addr_taken: &mut BTreeSet<String>) -
     step
 }
 
-/// Accesses after synthetic reads, callee effects and Heap/Bare expansion.
 #[derive(Default)]
 struct Access {
     reads: Vec<Class>,
     writes: Vec<(Class, bool)>,
-    /// Size classes whose read and write by this step never meet (one op, or a callee
-    /// without an internal size conflict on them).
+    
     exempt: Vec<Class>,
-    /// Size classes a callee conflicts on; removed from `exempt` after alias expansion.
+    
     withheld: Vec<Class>,
 }
 
@@ -1028,7 +956,6 @@ impl Access {
     }
 }
 
-/// Size(inner) read at one step and written at another, or by one step without exemption.
 fn size_conflict(accesses: &[Access], inner: &Class) -> bool {
     let size = Class::Size(Box::new(inner.clone()));
     accesses.iter().enumerate().any(|(i, a)| {
@@ -1042,16 +969,15 @@ fn size_conflict(accesses: &[Access], inner: &Class) -> bool {
 #[derive(Clone, Default, PartialEq, Eq)]
 struct Summary {
     reads_wparam: Vec<bool>,
-    /// Read params the function may write (in-place op or a callee's).
+    
     writes_rparam: Vec<bool>,
-    /// Write params the function may store in place (needs the caller's slot size).
+    
     sizes_wparam: Vec<bool>,
     abs_reads: BTreeSet<String>,
     abs_writes: BTreeSet<String>,
     heap_read: bool,
     heap_write: bool,
-    /// Persistent classes (Abs, Heap, Params) whose size the function reads / writes, and
-    /// those it reads and writes at different steps.
+    
     size_reads: BTreeSet<Class>,
     size_writes: BTreeSet<Class>,
     size_conflicts: BTreeSet<Class>,
@@ -1082,9 +1008,6 @@ fn synthetic_positions(
         .collect()
 }
 
-/// Aliases of `classes`: Bare reaches Heap and every address-taken local; Heap reaches Params
-/// and every absolute key; with `params_abs` (a unit caller passes a path) Params reaches
-/// every absolute key. Size classes follow their inner class.
 fn aliases(classes: &[Class], heap: &[Class], bare: &[Class], params_abs: bool) -> Vec<Class> {
     let mut out = Vec::new();
     for class in classes {
@@ -1149,7 +1072,7 @@ fn assemble(
         let (heap_read, heap_write) = match &input.callee {
             Callee::Unit(g) => {
                 let callee = &sums[*g];
-                /* The callee may write a read param in place: the argument is written. */
+                
                 for (j, arg) in step.read_args.iter().enumerate() {
                     let written = callee.writes_rparam.get(j).copied().unwrap_or(true);
                     if let (true, Some((classes, rparam))) = (written, arg) {
@@ -1174,7 +1097,7 @@ fn assemble(
                         .iter()
                         .map(|k| (Class::Abs(k.clone()), false)),
                 );
-                /* Heap stands for Bare too: a caller local may sit behind the callee's path. */
+                
                 let widen = |c: &Class| match c {
                     Class::Heap => path.to_vec(),
                     Class::Params => Vec::new(),
@@ -1210,8 +1133,7 @@ fn assemble(
                 .extend(path.iter().map(|c| (c.clone(), false)));
         }
         for (j, (classes, bare, wparam)) in step.slot_sizes.iter().enumerate() {
-            /* write_body creates an absolute key unresolved at encode time
-             * (create_static_target) and every member (create_member). */
+            
             let unbound_path = matches!(bare, Some(Class::Size(b)) if matches!(b.as_ref(), Class::Abs(_)))
                 || (bare.is_none()
                     && wparam.is_none()
@@ -1222,7 +1144,7 @@ fn assemble(
                 Callee::Unit(g) if sums[*g].sizes_wparam.get(j).copied().unwrap_or(true) => {
                     Store::Both
                 }
-                /* The callee may rebind its write param or leave it alone: never a kill. */
+                
                 Callee::Unit(_) => Store::Untouched,
                 Callee::None => Store::Untouched,
                 _ => Store::Both,
@@ -1340,8 +1262,6 @@ fn assemble(
     (accesses, summary)
 }
 
-/// Unit functions whose params may be bound to an absolute key or another path by a unit
-/// caller (P2 is checked inside the unit, assumed across units).
 fn params_alias_paths(units: &[FunctionInput], parsed: &[Parsed]) -> Vec<bool> {
     let mut alias = vec![false; units.len()];
     loop {
@@ -1372,7 +1292,6 @@ fn params_alias_paths(units: &[FunctionInput], parsed: &[Parsed]) -> Vec<bool> {
     }
 }
 
-/// Functions on a call cycle inside the unit.
 fn cyclic(units: &[FunctionInput]) -> Vec<bool> {
     let n = units.len();
     let edges: Vec<Vec<usize>> = units
@@ -1387,7 +1306,7 @@ fn cyclic(units: &[FunctionInput]) -> Vec<bool> {
                 .collect()
         })
         .collect();
-    /* f is cyclic iff f reaches itself. */
+    
     (0..n)
         .map(|f| {
             let mut seen = vec![false; n];
@@ -1460,7 +1379,6 @@ fn step_replayable(callee: &Callee, replayable: &[bool]) -> bool {
     }
 }
 
-/// Analyze every function of one compile unit; results follow `units` order.
 pub fn analyze_unit(units: &[FunctionInput]) -> Vec<Resumability> {
     let parsed: Vec<Parsed> = units
         .iter()
@@ -1480,7 +1398,7 @@ pub fn analyze_unit(units: &[FunctionInput]) -> Vec<Resumability> {
         })
         .collect();
     let params_abs = params_alias_paths(units, &parsed);
-    /* Callee summaries grow monotonically to a fixpoint. */
+    
     let mut sums: Vec<Summary> = units
         .iter()
         .map(|f| Summary {
@@ -1510,7 +1428,7 @@ pub fn analyze_unit(units: &[FunctionInput]) -> Vec<Resumability> {
         .map(|f| facts(&parsed[f], &accesses[f]))
         .collect();
     let cyclic = cyclic(units);
-    /* REPLAYABLE: re-running f from entry inside a caller's replay is correct. */
+    
     let mut replayable: Vec<Option<bool>> = vec![None; units.len()];
     fn resolve(
         f: usize,
@@ -1598,8 +1516,7 @@ fn region_safe(
         {
             return false;
         }
-        /* One op either stores in place or rebinds, so its own size read and write never
-         * meet; they still meet every other step's. */
+        
         let late = |r: &Class| accesses[i].exempt(r);
         for r in accesses[i].reads.iter().filter(|r| !late(r)) {
             if a < c && written_globals.contains(r) {
@@ -1642,7 +1559,7 @@ fn verdict(
         .flat_map(|a| a.writes.iter().map(|(c, _)| c.clone()))
         .filter(|c| matches!(c, Class::Abs(_) | Class::Heap))
         .collect();
-    /* Why the frame cannot be re-run from entry; `None` means it can. */
+    
     let entry_block = if facts.unknown.is_some() {
         Some("unknown".to_string())
     } else if let Some((_, step)) = f
@@ -1691,7 +1608,6 @@ fn verdict(
     }
 }
 
-/// Convenience for a single function with no unit callees.
 pub fn analyze(f: FunctionInput) -> Resumability {
     analyze_unit(std::slice::from_ref(&f)).remove(0)
 }
@@ -1721,7 +1637,6 @@ mod tests {
         }
     }
 
-    /// Scalar parameter (`*int64 #x` or `int64 #x`).
     fn p(name: &str, inplace: bool) -> ParamInfo {
         ParamInfo {
             name: name.to_string(),
@@ -1730,7 +1645,6 @@ mod tests {
         }
     }
 
-    /// Every bare local written gets `int64` unless `types` says otherwise.
     fn typed(mut f: FunctionInput, types: &[(&str, &str)]) -> FunctionInput {
         for (name, ty) in types {
             f.local_types.insert(name.to_string(), ty.to_string());
@@ -1761,7 +1675,6 @@ mod tests {
         }
     }
 
-    /// Alias expansion of `exempt` must not re-admit a size the callee conflicts on.
     #[test]
     fn exempt_alias_cannot_bypass_callee_conflict() {
         let mixed = |extra_heap: bool| {
@@ -1824,7 +1737,6 @@ mod tests {
         )
     }
 
-    /// Lowered `x = x + 1` reads and writes x in one step: anchor at the full write of x.
     #[test]
     fn self_increment_anchors_at_initial_write() {
         let f = func(
@@ -1844,7 +1756,6 @@ mod tests {
         assert_eq!(r.to_string(), "CONDITIONALLY_RESUMABLE:1<-0");
     }
 
-    /// The loop body is its own block: the increment replays the whole frame.
     #[test]
     fn loop_increment_needs_entry() {
         let f = func(
@@ -1865,7 +1776,6 @@ mod tests {
         assert_eq!(points(&analyze(f)), vec![(4, Replay::Entry)]);
     }
 
-    /// Lowering loads every param into a temp first, so no step re-reads what it wrote.
     #[test]
     fn window_has_no_replay_points() {
         let f = func(
@@ -1886,7 +1796,6 @@ mod tests {
         assert_eq!(analyze(f), Resumability::AlwaysResumable);
     }
 
-    /// A verified in-place op on a parameter defers to the caller; a user rwir blocks entry.
     #[test]
     fn param_rmw_needs_caller_and_user_rwir_is_unverified() {
         assert_eq!(analyze(add_to()), Resumability::AlwaysResumable);
@@ -1918,7 +1827,6 @@ mod tests {
         );
     }
 
-    /// A unit callee that reads its write param makes the call step read the caller slot.
     #[test]
     fn caller_anchors_on_callee_reading_write_param() {
         let local = func(
@@ -2049,7 +1957,6 @@ mod tests {
         assert_eq!(analyze(f).to_string(), "NOT_RESUMABLE:0:unknown");
     }
 
-    /// `t = a; a = t + 1; a = a + t`: the last step anchors at the overwrite, never before the read.
     #[test]
     fn read_then_overwrite_picks_latest_safe_anchor() {
         let f = func(
@@ -2070,7 +1977,6 @@ mod tests {
         assert_eq!(points(&analyze(f)), vec![(4, Replay::From(3))]);
     }
 
-    /// The textually latest writer sits in the other branch: no anchor across the join label.
     #[test]
     fn join_block_does_not_anchor_in_a_branch() {
         let f = func(
@@ -2094,7 +2000,6 @@ mod tests {
         assert_eq!(points(&analyze(f)), vec![(7, Replay::Entry)]);
     }
 
-    /// Neither `map·new` nor a member write is a kill; map members are Heap.
     #[test]
     fn partial_write_is_not_a_kill() {
         let f = func(
@@ -2115,8 +2020,6 @@ mod tests {
         assert_eq!(analyze(f).to_string(), "NOT_RESUMABLE:4:heap");
     }
 
-    /// g1 with a verified partial write: step 2 would be the anchor, but string·set may rebind
-    /// s, so replaying the copy at step 2 may fail on its size.
     #[test]
     fn partial_write_anchors_after_last_overwrite() {
         let f = func(
@@ -2136,7 +2039,6 @@ mod tests {
         assert_eq!(points(&analyze(f)), vec![(3, Replay::Entry)]);
     }
 
-    /// A user rwir never sits inside a longer range.
     #[test]
     fn user_rwir_blocks_longer_ranges() {
         let f = func(
@@ -2163,14 +2065,13 @@ mod tests {
             vec![s("native_acc", &["5"], &[]), s("return", &[], &[])],
             &[],
         );
-        /* Literal-only operands do not make it safe: it may touch any storage. */
+        
         assert_eq!(
             analyze(g).to_string(),
             "NOT_RESUMABLE:0:unverified:native_acc"
         );
     }
 
-    /// An op missing from the verified table gets the same worst case.
     #[test]
     fn unlisted_op_is_worst_case() {
         assert!(op_spec("compactarray·shape").is_none());
@@ -2193,7 +2094,6 @@ mod tests {
         );
     }
 
-    /// `kvspace·listat` leaves the slot alone when the entry is absent: no kill.
     #[test]
     fn listat_is_no_kill() {
         let f = func(
@@ -2212,15 +2112,13 @@ mod tests {
             &[],
         );
         let f = typed(f, &[("name", "[]char/utf8"), ("u", "[]char/utf8")]);
-        /* Step 1 is no anchor for x (replay would re-read the overwritten `name`), nor
-         * step 0: the copy at step 4 may have rebound `name`, so the copy at step 0 may fail. */
+        
         assert_eq!(
             points(&analyze(f)),
             vec![(2, Replay::From(0)), (5, Replay::Entry)]
         );
     }
 
-    /// `compactarray·set(a, 0, 9) -> b` patches a, not b.
     #[test]
     fn array_set_patches_its_read_operand() {
         let f = func(
@@ -2241,14 +2139,13 @@ mod tests {
         let f = typed(f, &[("a", "[]int64"), ("b", "[]int64")]);
         let mut f = f;
         f.steps[3].write_types = vec!["int64".into()];
-        /* Arrays never kill, so the read of a at step 3 stays exposed. */
+        
         assert_eq!(
             points(&analyze(f)),
             vec![(4, Replay::Entry), (5, Replay::Entry)]
         );
     }
 
-    /// A callee that patches its read param writes the caller's argument.
     #[test]
     fn callee_patch_of_read_param_reaches_the_caller() {
         let poke = func(
@@ -2286,7 +2183,6 @@ mod tests {
         );
     }
 
-    /// g2b: the only anchor that covers s re-reads a global the function overwrote.
     #[test]
     fn anchor_never_rereads_a_written_global() {
         let f = func(
@@ -2314,7 +2210,6 @@ mod tests {
         assert_eq!(analyze(f).to_string(), "NOT_RESUMABLE:4:/tmp/g");
     }
 
-    /// A write through a pointer may hit an address-taken local read earlier in the region.
     #[test]
     fn heap_write_aliases_address_taken_local() {
         let f = func(
@@ -2352,7 +2247,6 @@ mod tests {
         assert_eq!(analyze(f).to_string(), "NOT_RESUMABLE:1:callee:f");
     }
 
-    /// Callee global writes are part of the call step, so an earlier read of that key cannot anchor.
     #[test]
     fn callee_global_effects_reach_the_caller() {
         let set = func(
@@ -2379,7 +2273,6 @@ mod tests {
         assert_eq!(r[1].to_string(), "NOT_RESUMABLE:2:/tmp/g");
     }
 
-    /// A by-value read param is bound by address: it may alias the write param (`f(v) -> v`).
     #[test]
     fn by_value_param_shares_params_class() {
         let f = func(
@@ -2403,7 +2296,6 @@ mod tests {
         );
     }
 
-    /// A volatile step replays only as the crashed step itself.
     #[test]
     fn volatile_step_blocks_longer_ranges() {
         let f = func(
@@ -2432,7 +2324,6 @@ mod tests {
         assert_eq!(analyze(g), Resumability::AlwaysResumable);
     }
 
-    /// Passing a local to a callee lets the callee keep its address.
     #[test]
     fn callee_argument_is_address_taken() {
         let f = func(
@@ -2463,7 +2354,6 @@ mod tests {
         assert_eq!(points(&r[0]), vec![(6, Replay::Entry)]);
     }
 
-    /// Every table key is a catalog row; every catalog op seen in the corpus is verified.
     #[test]
     fn op_table_matches_catalog_and_corpus() {
         let rows: BTreeSet<String> = CATALOG
@@ -2595,8 +2485,6 @@ mod tests {
         assert_eq!(op_spec("compactarray·set").map(|s| s.patches), Some(1));
     }
 
-    /// An in-place copy needs the slot size a later create may change; one op never meets
-    /// its own size write.
     #[test]
     fn size_rule_blocks_ranges_across_a_rebind() {
         let f = func(
@@ -2616,8 +2504,6 @@ mod tests {
         assert_eq!(points(&analyze(f)), vec![(3, Replay::From(1))]);
     }
 
-    /// A callee that stores and rebinds its write param at different steps makes the call
-    /// step meet its own size write; a callee with one store does not.
     #[test]
     fn callee_size_conflict_reaches_the_call_step() {
         let mixed = func(
@@ -2653,7 +2539,7 @@ mod tests {
             typed(f, &[("v", "[]char/utf8")])
         };
         let r = analyze_unit(&[mixed, single, user(0), user(1)]);
-        /* Each step of `mixed` replays alone; only a re-run of the whole callee fails. */
+        
         assert_eq!(r[0], Resumability::AlwaysResumable);
         assert_eq!(r[1], Resumability::AlwaysResumable);
         assert_eq!(r[2].to_string(), "CONDITIONALLY_RESUMABLE:1<-entry");

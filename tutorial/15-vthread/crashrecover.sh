@@ -1,9 +1,4 @@
 #!/usr/bin/env bash
-# kvlang「runtime 崩溃可随时恢复」端到端验证。
-# 核心承诺：vthread 全部执行态（pc/帧/栈）活在 kvspace，runtime 进程无内存态；
-# 进程随时被 SIGKILL，另起一个进程即可从持久化 pc 续跑，不重启、不重演已完成步骤。
-# KVSPACE 必填、无默认值：状态须活过被杀进程，所以必须是能持久保存的 DSN
-# （如 shm:// 上的一份文件）。不给就报错退出，不静默连某个默认后端。
 set -u
 if [ -z "${KVSPACE:-}" ]; then
   echo "缺少 KVSPACE：DSN 必填、无默认值。" >&2
@@ -29,7 +24,6 @@ echo "== Phase1：启动 worker，跑到 step3 时外部 SIGKILL =="
 ERR=$(mktemp); OUT1=$(mktemp)
 LOG_LEVEL=info "$KVLANG" "$PROG" >"$OUT1" 2>"$ERR" &  # info 级才吐 "vthread <vid>"，供 resume 捕获
 PID=$!
-# 等 vthread id 出现在 stderr
 vid=""
 for _ in $(seq 1 50); do
 	vid=$(grep -m1 -oE 'vthread [0-9]+' "$ERR" | awk '{print $2}')
@@ -38,7 +32,6 @@ for _ in $(seq 1 50); do
 done
 [ -n "$vid" ] || fail "未捕获 vthread id（stderr: $(cat "$ERR")）"
 echo "  vthread=$vid  pid=$PID"
-# 轮询到 step==3，再稍等落进 sleep 窗口，然后杀
 got=0
 for _ in $(seq 1 100); do
 	s=$(val /crashtest/step)
@@ -74,7 +67,6 @@ echo "  --- Phase2 stdout ---"; sed 's/^/    /' "$OUT2"
 [ "$step2" = "5" ] || fail "续跑后 step 应为 5，实为 $step2"
 [ "$done2" = "1" ] || fail "续跑后应 done=1，实为 $done2"
 [ "$st2" = "ok" ] || fail "续跑后 status 应为 ok（done 态），实为 $st2"
-# 铁证：Phase2 只补打 step 4/5，绝不重演已完成的 1..3
 grep -q '^step 4$' "$OUT2" || fail "resume 未补跑 step 4"
 grep -q '^step 5$' "$OUT2" || fail "resume 未补跑 step 5"
 grep -qE '^step [123]$' "$OUT2" && fail "resume 重演了已完成步骤（应续跑而非重启）"

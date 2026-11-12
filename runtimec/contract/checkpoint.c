@@ -1,9 +1,3 @@
-/*
- * 组件：contract/checkpoint 的实现
- * 作用：checkpoint 的空值构造与形状校验；不执行提交、不接触 kvspace。
- * 联系：engine/route 组装后交给 host 的 checkpoint 能力；host 只执行
- *       已组织好的提交，不自行决定 durable 状态。
- */
 
 #include "contract/checkpoint.h"
 

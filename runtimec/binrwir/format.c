@@ -1,9 +1,3 @@
-/*
- * 组件：binrwir/format 的实现
- * 作用：把 Program 的签名、指令序列与两个池打印成分区文本。
- * 约束：只用 sprintf 级别的整数格式化，不打印地址与 generation，因此同一 Program
- *       在任意进程里都打印出相同字节。每个输出片段都走 sink 回调，不做隐式缓冲。
- */
 
 #include "binrwir/format.h"
 
@@ -11,8 +5,6 @@
 #include <stdio.h>
 #include <string.h>
 
-/* 一行的临时缓冲；一行最长的是 [pc] op(所有实参) -> (所有结果)，远超也就增长
- * 不了——超了就走 sink 失败路径，不静默截断。 */
 #define BINRWIR_FORMAT_CHUNK_CAPACITY 4096U
 
 typedef struct binrwir_format_writer {
@@ -32,7 +24,6 @@ static void binrwir_format_writer_initialize(
     writer->status = RUNTIMEC_STATUS_SUCCESS;
 }
 
-/* 交付已缓冲的片段。返回 0 表示 sink 接不下，后续写入全部作废。 */
 static int binrwir_format_writer_flush(binrwir_format_writer_t *writer) {
     runtimec_string_view_t chunk;
     runtimec_string_view_t accepted;
@@ -51,7 +42,6 @@ static int binrwir_format_writer_flush(binrwir_format_writer_t *writer) {
     return 1;
 }
 
-/* 追加一段原样文本。 */
 static void binrwir_format_write(binrwir_format_writer_t *writer,
                                  const char *text) {
     size_t size = strlen(text);
@@ -62,7 +52,7 @@ static void binrwir_format_write(binrwir_format_writer_t *writer,
         }
     }
     if (size > sizeof(writer->chunk)) {
-        /* 单段超过一行缓冲：直接交付，不复制。 */
+        
         runtimec_string_view_t chunk = runtimec_string_view_make(text, size);
 
         if (writer->sink(writer->context, chunk).size != size) {
@@ -110,7 +100,6 @@ static void binrwir_format_write_hex(binrwir_format_writer_t *writer,
     binrwir_format_write(writer, text);
 }
 
-/* 两个十六进制字符一组，空格分隔：`01 00 00 00`。 */
 static void binrwir_format_write_bytes(binrwir_format_writer_t *writer,
                                        runtimec_bytes_view_t bytes) {
     static const char digits[] = "0123456789abcdef";
@@ -126,7 +115,6 @@ static void binrwir_format_write_bytes(binrwir_format_writer_t *writer,
     }
 }
 
-/* 一个操作数：`<argidx>:<reference>`。argidx 必须打印——它决定实参位置。 */
 static void binrwir_format_write_argument(
     binrwir_format_writer_t *writer, const binrwir_argument_t *argument) {
     binrwir_format_write_unsigned(writer, argument->argument_index);
@@ -146,7 +134,7 @@ static void binrwir_format_write_argument(
         binrwir_format_write(writer, "]");
         return;
     case BINRWIR_REFERENCE_STATIC:
-        /* 只打印符号下标：payload 是进程内 body 地址，打印它就不确定了。 */
+        
         binrwir_format_write(writer, "static[");
         binrwir_format_write_unsigned(writer, argument->slot);
         binrwir_format_write(writer, "]");
@@ -162,7 +150,7 @@ static void binrwir_format_write_argument(
         binrwir_format_write(writer, "]");
         return;
     default:
-        /* 非法 kind 不出现在合法 Program 里；打印数值，不猜含义。 */
+        
         binrwir_format_write(writer, "invalid_kind=");
         binrwir_format_write_unsigned(writer, argument->reference_kind);
         return;
@@ -183,7 +171,6 @@ static void binrwir_format_write_arguments(binrwir_format_writer_t *writer,
     binrwir_format_write(writer, ")");
 }
 
-/* 算子名：回调给不出就打印数值，绝不猜。 */
 static void binrwir_format_write_operation(
     binrwir_format_writer_t *writer,
     binrwir_operation_identifier_t operation_identifier,
@@ -207,7 +194,6 @@ static void binrwir_format_write_operation(
     binrwir_format_write_hex(writer, operation_identifier);
 }
 
-/* 定义区：函数自己的签名。被调用算子的签名不在这里重复。 */
 static void binrwir_format_write_definition(
     binrwir_format_writer_t *writer, runtimec_string_view_t function_name,
     const binrwir_signature_view_t *signature) {

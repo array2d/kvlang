@@ -1,9 +1,3 @@
-/*
- * 组件：binrwir_compiler/jit/backend/backend
- * 作用：按目标选择 backend；当前显式返回 UNSUPPORTED。未知 processor
- *       不得默认 x86_64。
- * 联系：binrwir_compiler/jit/compiler 调用；x86_64/aarch64 是并列 peer。
- */
 
 #include "binrwir_compiler/jit/backend.h"
 

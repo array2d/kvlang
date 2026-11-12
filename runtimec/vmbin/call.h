@@ -1,15 +1,6 @@
 #ifndef VMBIN_CALL_H
 #define VMBIN_CALL_H
 
-/*
- * 组件：vmbin/call
- * 作用：按 canonical BinRWIR Program 的签名建立控制流调用关系。
- * 联系：engine route 驱动调用；指令中的 argaddr 是参数 V.body 的唯一位置。
- * 约束：调用对象只能保存控制转移元数据，不得保存 V.body 内容、Cell、value
- *       slot 或第二份地址缓存；调用不得重复已经提交的副作用。
- *       进入把被调帧的游标复位到第一条指令：一次调用永远从头开始，帧因此可复用。
- */
-
 #include <stdint.h>
 
 #include "binrwir/execution_exit.h"
@@ -40,7 +31,7 @@ runtimec_status_t vmbin_call_enter(
     binrwir_binvthread_frame_t *callee,
     const vmbin_call_control_t *control,
     binrwir_execution_exit_t *output_exit);
-/* 返回：释放绑定表并把被调帧还原成「没进过调用」的状态，帧可再次进入。 */
+
 runtimec_status_t vmbin_call_return(
     binrwir_binvthread_frame_t *caller, binrwir_binvthread_frame_t *callee,
     const vmbin_call_control_t *control,

@@ -11,20 +11,14 @@ say()  { echo -e "${GREEN}==>${NC} $*"; }
 warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 die()  { echo -e "${RED}[X]${NC} $*" >&2; exit 1; }
 
-# ── detect os ──
 if ! grep -qi ubuntu /etc/os-release 2>/dev/null; then
     die "this script targets ubuntu; $(cat /etc/os-release 2>/dev/null | head -1) detected"
 fi
 say "ubuntu detected"
 
-# ── sudo check ──
 sudo -v
 
-# ═══════════════════════════════════════════════
-# step 1: install dependencies
-# ═══════════════════════════════════════════════
 
-# ── go 1.24+ ──
 need_go=0
 if ! command -v go &>/dev/null; then
     need_go=1
@@ -50,7 +44,6 @@ if [ "$need_go" -eq 1 ]; then
 fi
 say "go $(go version | grep -oP 'go[0-9.]+')"
 
-# ── redis-server ──
 if ! command -v redis-server &>/dev/null; then
     say "installing redis-server"
     sudo apt-get update -qq
@@ -58,7 +51,6 @@ if ! command -v redis-server &>/dev/null; then
 fi
 say "redis-server $(redis-server --version | grep -oP 'v=[0-9.]+')"
 
-# ── python3 ──
 if ! command -v python3 &>/dev/null; then
     say "installing python3"
     sudo apt-get update -qq
@@ -66,14 +58,10 @@ if ! command -v python3 &>/dev/null; then
 fi
 say "python3 $(python3 --version)"
 
-# ═══════════════════════════════════════════════
-# step 2: clone repos
-# ═══════════════════════════════════════════════
 
 mkdir -p "$WORKDIR"
 cd "$WORKDIR"
 
-# clone kvspace-go first (kvlang depends on it via go.mod replace)
 if [ ! -d kvspace-go ]; then
     say "cloning kvspace-go"
     git clone --depth 1 git@github.com:array2d/kvspace-go.git
@@ -90,9 +78,6 @@ else
     git -C kvlang pull --ff-only
 fi
 
-# ═══════════════════════════════════════════════
-# step 3: build (kvspace-go first, then kvlang)
-# ═══════════════════════════════════════════════
 
 say "building kvspace-go"
 cd "$WORKDIR/kvspace-go"
@@ -104,9 +89,6 @@ cd "$WORKDIR/kvlang"
 GOPROXY="$GOPROXY" PREFIX="$INSTALL_PREFIX" make build
 export PATH="$INSTALL_PREFIX/bin:$PATH"
 
-# ═══════════════════════════════════════════════
-# step 4: start redis
-# ═══════════════════════════════════════════════
 
 if ! redis-cli ping &>/dev/null; then
     say "starting redis-server"
@@ -116,9 +98,6 @@ fi
 redis-cli ping &>/dev/null || die "redis-server failed to start"
 say "redis is up"
 
-# ═══════════════════════════════════════════════
-# step 5: run tutorial tests
-# ═══════════════════════════════════════════════
 
 say "running tutorial/test.py"
 cd "$WORKDIR/kvlang"

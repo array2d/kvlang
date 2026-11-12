@@ -10,7 +10,6 @@ import (
 	"unsafe"
 )
 
-// rt 往返一次并返回输出 JSON 与 write 错误。
 func rt(c unsafe.Pointer, root, in string) (string, error) {
 	v, err := fromJSON([]byte(in))
 	if err != nil {
@@ -44,8 +43,6 @@ func trunc(s string) string {
 	return s
 }
 
-// ── A. 深嵌套 ────────────────────────────────────────────────────────
-
 func TestDeepNesting(t *testing.T) {
 	c := rtConn(t)
 	defer disconnect(c)
@@ -74,8 +71,6 @@ func TestDeepNesting(t *testing.T) {
 	}
 }
 
-// ── B. 宽容器 ────────────────────────────────────────────────────────
-
 func TestWideContainers(t *testing.T) {
 	c := rtConn(t)
 	defer disconnect(c)
@@ -95,8 +90,6 @@ func TestWideContainers(t *testing.T) {
 			`{`+strings.Join(members, ",")+`}`)
 	}
 }
-
-// ── C. 数值边界 ──────────────────────────────────────────────────────
 
 func TestNumericEdges(t *testing.T) {
 	c := rtConn(t)
@@ -129,8 +122,6 @@ func TestNumericEdges(t *testing.T) {
 	}
 }
 
-// ── D. 字符串值边界 ──────────────────────────────────────────────────
-
 func TestStringEdges(t *testing.T) {
 	c := rtConn(t)
 	defer disconnect(c)
@@ -161,8 +152,6 @@ func TestStringEdges(t *testing.T) {
 		fmt.Printf("[%s] %-16s in: %-50s out: %s\n", status, cc.name, trunc(cc.in), trunc(out))
 	}
 }
-
-// ── E. key 边界 ──────────────────────────────────────────────────────
 
 func TestKeyEdges(t *testing.T) {
 	c := rtConn(t)
@@ -197,7 +186,7 @@ func TestKeyEdges(t *testing.T) {
 		case cc.wantRej && rejected:
 			status = "REJ✓"
 		case cc.wantRej && !rejected:
-			status = "LEAK" // 该拒绝却接受了
+			status = "LEAK" 
 		case !cc.wantRej && rejected:
 			status = "ERR "
 		case !eq:
@@ -206,8 +195,6 @@ func TestKeyEdges(t *testing.T) {
 		fmt.Printf("[%s] %-16s in: %-45s out: %s (err=%v)\n", status, cc.name, trunc(cc.in), trunc(out), err)
 	}
 }
-
-// ── F. 空容器组合 ────────────────────────────────────────────────────
 
 func TestEmptyContainers(t *testing.T) {
 	c := rtConn(t)
@@ -227,8 +214,6 @@ func TestEmptyContainers(t *testing.T) {
 	}
 }
 
-// ── G. null 位置 ─────────────────────────────────────────────────────
-
 func TestNullPositions(t *testing.T) {
 	c := rtConn(t)
 	defer disconnect(c)
@@ -245,8 +230,6 @@ func TestNullPositions(t *testing.T) {
 		check(t, c, "/cx/null-"+cc.name, cc.name, cc.in)
 	}
 }
-
-// ── H. 真实世界结构 ──────────────────────────────────────────────────
 
 const geoJSON = `{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[116.3,39.9],[116.4,39.9],[116.4,40.0],[116.3,39.9]]]},"properties":{"name":"区域A","area":12.5,"tags":["park","urban"],"meta":null}},{"type":"Feature","geometry":{"type":"Point","coordinates":[121.47,31.23]},"properties":{"name":"点B","area":0,"tags":[],"meta":{"src":"gps","acc":0.001}}}]}`
 
@@ -270,8 +253,6 @@ func TestRealWorldShapes(t *testing.T) {
 	}
 }
 
-// ── I. 异构与混合 ────────────────────────────────────────────────────
-
 func TestHeterogeneous(t *testing.T) {
 	c := rtConn(t)
 	defer disconnect(c)
@@ -289,8 +270,6 @@ func TestHeterogeneous(t *testing.T) {
 	}
 }
 
-// ── J. 顶层非 object ─────────────────────────────────────────────────
-
 func TestTopLevelNonObject(t *testing.T) {
 	c := rtConn(t)
 	defer disconnect(c)
@@ -301,8 +280,6 @@ func TestTopLevelNonObject(t *testing.T) {
 			map[bool]string{true: "ERR", false: "OK"}[err != nil], in, out, err)
 	}
 }
-
-// ── K. 覆盖写（同 root 重写，旧成员是否残留）─────────────────────────
 
 func TestOverwrite(t *testing.T) {
 	c := rtConn(t)
@@ -329,13 +306,11 @@ func TestOverwrite(t *testing.T) {
 		if err != nil {
 			status = "ERR "
 		} else if !eq {
-			status = "STALE" // 旧数据残留
+			status = "STALE" 
 		}
 		fmt.Printf("[%s] %-18s %s → %s\n       got: %s\n", status, cc.name, cc.first, cc.second, out)
 	}
 }
-
-// ── L. 二次往返的 kind 稳定性（json→kv→json→kv 后落盘 kind 是否漂移）──
 
 func TestKindStability(t *testing.T) {
 	c := rtConn(t)

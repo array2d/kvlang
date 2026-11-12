@@ -21,7 +21,7 @@
   --chart-5: #8250df;
   --chart-6: #cf222e;
 }
-/* 首访跟随系统：无 data-theme 时用暗色令牌；显式 light 覆盖之。 */
+
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0d1117;

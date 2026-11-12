@@ -1,24 +1,4 @@
-// fizzbuzz: FizzBuzz 1-15（else if 多路分支）
-// 期望输出:
-//   1
-//   2
-//   Fizz
-//   4
-//   Buzz
-//   Fizz
-//   7
-//   8
-//   Fizz
-//   Buzz
-//   11
-//   Fizz
-//   13
-//   14
-//   FizzBuzz
-//
-// 期望值变更（2026-11-06）：原块只写了示例的前 4 行，实际输出 15 行（i=1..15）。
-// 逐行对照源码 `while (i <= *N)` + `N=15` 的分支：i=3/6/9/12→Fizz、i=5/10→Buzz、
-// i=15→FizzBuzz、其余打 i 本身。实际输出与之一一对应，故补齐期望，不是让测试迎合实现。
+
 rwfunc fizzbuzz(*int64 #N) -> () {
 	i:int64 = 1
 	while (i <= *N) {

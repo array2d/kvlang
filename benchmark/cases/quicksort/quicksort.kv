@@ -1,9 +1,4 @@
-// quicksort benchmark（compact 形式）— 同 quicksort 算法，待排数组与显式栈都落**单个 compact
-// XValue**（`[N]int64`，storetype=ARRAYND），而非散 key 的 `[int64]·int64` map。
-// 对比点：同一算法的两种 kv 物理形态。
-// 数据由 LCG 确定生成，规模 N 由 __SCALE__ 占位，run.py 按扫描点替换（勿改逻辑）
-// 期望输出（N=64 时）:
-//   qsort: a0 = 1 amid = 52 alast = 99
+
 rwfunc test() -> () {
 	__SCALE__ -> n:int64
 	arr:[__SCALE__]int64 = []
@@ -18,7 +13,7 @@ rwfunc test() -> () {
 		i + 1 -> i:int64
 	}
 	t0:time = time·now()
-	// 显式栈也用 compact：与待排数组一样落单个 ARRAYND XValue，全程只在 compact 数组里直接交换。
+	
 	st_lo:[__SCALE__]int64 = []
 	st_hi:[__SCALE__]int64 = []
 	0 -> top:int64

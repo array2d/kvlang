@@ -1,8 +1,3 @@
-/*
- * 组件：vmbin/vthread_status 的实现
- * 作用：`/vthread/{vid}/‥status` 的唯一写入点。
- * 约束：只调 kvspace C ABI；除调用方提供的缓冲外不分配。
- */
 
 #include "vmbin/vthread_status.h"
 
@@ -23,7 +18,7 @@ runtimec_status_t runtimec_vthread_status_handle(
         return RUNTIMEC_STATUS_INVALID;
     }
     *output_handle = frame->kvspace_handle;
-    /* 空句柄 = 本 session 不接存储，是「没有能力」而不是「请求错了」。 */
+    
     return frame->kvspace_handle != NULL ? RUNTIMEC_STATUS_SUCCESS
                                          : RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
@@ -41,10 +36,7 @@ runtimec_status_t runtimec_vthread_status_key(
         return RUNTIMEC_STATUS_INVALID;
     }
     buffer[0] = '\0';
-    /*
-     * 取到 `/vthread/{vid}` 为止：第二个斜杠（不含首字符那个）之前。
-     * 帧路径形如 `/vthread/2/[1]`，帧内坐标 `[1]` 不参与系统变量键。
-     */
+    
     for (ordinal = 0U; ordinal < frame_path.size; ++ordinal) {
         if (frame_path.data[ordinal] == '/' && ordinal != 0U) {
             slash_count += 1U;
@@ -66,7 +58,6 @@ runtimec_status_t runtimec_vthread_status_key(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/* 统一失败：写 error 并返回状态。本模块只此一处，读与写共用。 */
 static runtimec_status_t runtimec_vthread_status_fail(
     runtimec_error_t *error, runtimec_status_t status, int64_t code,
     const char *message) {
@@ -84,7 +75,7 @@ runtimec_status_t runtimec_vthread_status_write(
         status_key[0] == '\0') {
         return RUNTIMEC_STATUS_INVALID;
     }
-    /* 规范上限，不截断：超了就是错，截断会让状态文本静默变成另一个词。 */
+    
     if (status.size > RUNTIMEC_VTHREAD_STATUS_CONTENT_LIMIT) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -92,15 +83,7 @@ runtimec_status_t runtimec_vthread_status_write(
         return RUNTIMEC_STATUS_INVALID;
     }
     message[0] = '\0';
-    /*
-     * 写路径用 `kvspaceRealloc`：它只收 body/attr 两段长度并返回偏移，
-     * **物理容量由后端自己分配**——「状态槽物理容量 ≥80」这条按裁决已删除
-     * （`final-plan.md` §4.3；架构师裁决 2026-11-10：不扩 ABI 表达容量）。
-     *
-     * attr 区要带 langtype（状态槽是 `[]char/utf8`）：先拼出 attr 记录长度，
-     * 再让 Realloc 分配 head+body+attr，最后由本函数填两段。head 由 Realloc 写，
-     * 这里不再碰它——写两遍会出现「head 说 bodylen=8、实际拷了 12」。
-     */
+    
     const size_t langtype_length = strlen(RUNTIMEC_VTHREAD_STATUS_LANGTYPE);
     const uint64_t attr_length = 3U + (uint64_t)langtype_length;
     uint64_t value_offset = 0U;
@@ -127,12 +110,6 @@ runtimec_status_t runtimec_vthread_status_write(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/*
- * 读入口：形状校验 + 借用视图。契约见头注释。
- *
- * 顺序是**先形状、后内容**：形状不符就是坏槽，此时内容是什么都不该给出去——
- * 先读内容再判形状，会让「坏槽」的字节短暂地成为一个看似合法的状态。
- */
 runtimec_status_t runtimec_vthread_status_read(
     void *kvspace_handle, const char *status_key,
     runtimec_string_view_t *output_text, runtimec_error_t *error) {
@@ -150,20 +127,14 @@ runtimec_status_t runtimec_vthread_status_read(
             error, RUNTIMEC_STATUS_INVALID, 1,
             "invalid status read request");
     }
-    /*
-     * `kvspaceGet` 对 `‥status` 这个 volatile key **每次重读后端**（spec 同一节），
-     * 不走快照——所以这里拿到的是当前值，不是某次快照的值。
-     *
-     * **头一律自己解**：库已不再提供取头函数（那种「解码结构体」是
-     * 第二份字段真相），布局判据只有 `kvspace/kvspace_xvalue.h` 一份。
-     */
+    
     if (!runtimec_kvspace_read_wire(kvspace_handle, status_key, &wire,
                                     &wire_length)) {
         return runtimec_vthread_status_fail(
             error, RUNTIMEC_STATUS_ERROR, 4, "status read failed");
     }
     if (wire == NULL || wire_length == 0U) {
-        /* 键不存在是「没有」，不是「坏」——两者修法不同，状态要分开。 */
+        
         return runtimec_vthread_status_fail(
             error, RUNTIMEC_STATUS_UNSUPPORTED, 2,
             "status key is absent");
@@ -175,16 +146,7 @@ runtimec_status_t runtimec_vthread_status_read(
                 error, RUNTIMEC_STATUS_ERROR, 5, "status wire is truncated");
         }
         memcpy(&head, wire, sizeof(head));
-        /*
-         * 形状判据照抄 spec `02-kvspace模型/04-CABI.kv`：头长恒 16、`padding` 为零、
-         * 有效长度 ≤ LV。状态槽走容量形态（物理容量 ≥80），而「bodylen 是容量还是
-         * 有效长度」由 langtype 判、不在 head 里——head 侧只校验这两个字段。
-         *
-         * 旧实现先后比对过 `storetype == SLACK` 与 `layout == 0/1`；两个字段都已从
-         * head 删除——storage class 是后端写侧的概念，不是 wire 上的属性。
-         *
-         * **本入口只校验与后端无关的项；物理容量由 slot view 把关**（见下方注释）。
-         */
+        
         if (!kvspaceXvalueHeadPaddingIsZero(&head) ||
             kvspaceXvalueHeadTotalLen(&head) == 0U ||
             kvspaceXvalueHeadTotalLen(&head) > (uint64_t)wire_length ||

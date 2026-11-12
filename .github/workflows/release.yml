@@ -11,11 +11,8 @@ on:
 permissions:
   contents: write
 env:
-  # workflow_dispatch 在分支上跑，GITHUB_REF_NAME 含 /；用 tag 输入或固定名
   ABI_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.tag || 'dryrun' }}
 jobs:
-  # 产物布局（repo 即 prefix）：bin/ 可执行、lib/ 库、include/ 头。
-  # tarball 保持同一布局，rpath 相对 $ORIGIN / @loader_path。
   linux:
     runs-on: ubuntu-latest
     env:
@@ -26,9 +23,6 @@ jobs:
       - name: 安装 ABI 依赖到 /usr（系统最终位置）
         env: { GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
         run: sudo env "GH_TOKEN=$GH_TOKEN" ./ci/deps.sh /usr
-      # `ci/deps.sh` 只解发布包、不留源码，而 `make kvspace-cli` 需要 kvspace 仓的
-      # `cli/`（独立 Cargo 项目）。所以这里按 deps.json 的 pin 克隆一份到
-      # $RUNNER_TEMP——**不用 /tmp**，那目录在 runner 上不保证活到后续 step。
       - name: 克隆 kvspace 源码（构建 CLI 用，按 deps.json 的 pin）
         run: |
           set -euo pipefail
@@ -36,29 +30,15 @@ jobs:
           echo "kvspace pin: $ver"
           git clone --depth 1 --branch "$ver" \
             https://github.com/array2d/kvspace.git "$RUNNER_TEMP/kvspace"
-      # 只构建活跃组件。runtimec2 与旧 C runtime 已归档到 oldhero/oldgo/（e927a923）
-      # 并冻结在旧 kvspace ABI 上——它们的源码连 `kvspace/kvspace.h` 都找不到，
-      # 在这里调 `make runtimec2` 会让 release 在第一步就死掉。
-      #
-      # byteseek 暂不发：缺 kvlangDefRwir / kvlangRuntime* / kvlangRwirext* 十二个 ABI
-      # （TASK-035），修复后恢复。它的 Makefile target 保留，不要删。
       - name: 构建 layout + runtimec 运行库
         run: |
-          # 三个 target 都（直接或经 kvlang-xvalue 间接触发）需要 kvspace 的源码路径：
-          # 兄弟仓不是默认值（G11），不传就 $(error)。
           make layout KVSPACE_SRC="$RUNNER_TEMP/kvspace"       # → bin/kvlanglayout + lib/libkvlanglayout.so
           make runtimec-lib KVSPACE_SRC="$RUNNER_TEMP/kvspace" \
             KVSPACE_INCLUDE_DIRECTORY="$DEP_PREFIX/include"    # → lib/libkvlang_runtime.so（自带陈旧 .so 闸）
-          # kvspace CLI 走 Makefile 的 target，不自己写 cargo 命令——那个 target 里
-          # 带着正确的 rpath 与链接参数，另写一份就是第二个真相。
           make kvspace-cli KVSPACE_SRC="$RUNNER_TEMP/kvspace"
       - name: 陈旧 .so 闸（打包前兜底）
         run: |
           set -euo pipefail
-          # `lib/` 是 gitignore 的持久目录，上一次构建的残留会被 `find` 收进发布包。
-          # 已实测：`lib/libkvlang_runtimec_scaffold.so`（改名前的内部 target 产物）
-          # 至今仍引用 kvspaceXvalueHeadNewPtr/Slack，被打进包里就是发布一个坏库。
-          # 逐个文件过 Makefile 里同一道闸，不另写一份判断逻辑。
           make stale-gate
       - name: 打包 ABI 产物
         run: |
@@ -66,27 +46,19 @@ jobs:
           v="${ABI_VERSION}"
           d="kvlang-abi-$v-linux-x86_64"
           mkdir -p "$d/include/kvlang" "$d/lib" "$d/bin"
-          # kvlang 头有两个来源，`runtime/include/` 已随 c2 归档消失（e927a923）：
-          #   include/kvlang/        —— 语言层（xvalue.h 构造器、const.h）
-          #   runtimec/include/kvlang/ —— 运行时 ABI（runtimec.h）
           cp -R include/kvlang/. "$d/include/kvlang/"
           cp -R runtimec/include/kvlang/. "$d/include/kvlang/"
           for h in kvspace blockmalloc slotsboxmalloc; do
             [ -d "$DEP_PREFIX/include/$h" ] && cp -R "$DEP_PREFIX/include/$h" "$d/include/"
           done
-          # 只收**当前构建会产出**的库名，不 `find` 全收——`find` 的开放性是残留
-          # 混进发布包的通道（见上一步的 scaffold .so）。
           for so in libkvlang_runtime libkvlanglayout libkvspace; do
             for f in "lib/$so".so*; do
               [ -e "$f" ] && cp -P "$f" "$d/lib/"
             done
           done
-          # 不发 durable（先不管）：发布包只有前端三库，`lib/kvspace/` 不存在。
-          # 断言：恰好 3 个库名（允许 soname 链接），多一个就是残留。
           names=$(find "$d/lib" -maxdepth 1 -type f -name '*.so*' | sed 's/.*\///;s/\.so.*//' | sort -u)
           test "$names" = "$(printf 'libkvlang_runtime\nlibkvlanglayout\nlibkvspace')" || {
             echo "发布包 lib/ 出现非预期库："; ls "$d/lib"; exit 1; }
-          # byteseek 暂不发（TASK-035），bin/ 只有这两个。
           cp bin/kvlanglayout bin/kvspace "$d/bin/"
           test "$(ls "$d/bin" | sort | tr '\n' ' ')" = "kvlanglayout kvspace " || {
             echo "发布包 bin/ 出现非预期可执行："; ls "$d/bin"; exit 1; }
@@ -102,21 +74,12 @@ jobs:
           run="$RUNNER_TEMP/rel-smoke"
           rm -rf "$run"; mkdir -p "$run"
           tar xzf "$d.tar.gz" -C "$run" --strip-components=1
-          # byteseek 暂不发（TASK-035），所以**不能**用「layout 一个 tutorial 文件」当冒烟：
-          # 那些文件调 println 等 stdlib 函数，而 stdlib 原本靠 byteseek 布进同一个
-          # shm。byteseek 摘掉后那条路的前提就没了（实测报「未定义函数 println」）。
-          # 改为验包内三个产物各自**自证可用**：
-          #   1. kvlanglayout vet  —— 不需 stdlib，验 parse+lower 链路
-          #   2. kvspace 写读往返   —— 验 libkvspace 与 CLI 在同包里能对上
-          #   3. 两个可执行都无系统依赖泄漏（ldd 只应看到包内库与 libc）
           "$run/bin/kvlanglayout" vet "$GITHUB_WORKSPACE/tutorial/runtimec/01-basics/hello.kv" >/dev/null
           usage=$("$run/bin/kvlanglayout" 2>&1 || true)
           echo "smoke layout: $usage"
           echo "$usage" | grep -q '^usage: kvlanglayout'
           env -i PATH=/usr/bin:/bin HOME=/tmp KVSPACE="shm://$run/rt.shm" \
             "$run/bin/kvspace" mkindex /t/
-          # 断言四个字段，不是「命令没报错」——**没报错不等于值对**。
-          # 新建的空索引：body 与 attr 都应为 0，总长 = 16 字节 head，padding 全零。
           head_out=$(env -i PATH=/usr/bin:/bin HOME=/tmp KVSPACE="shm://$run/rt.shm" \
             "$run/bin/kvspace" head /t/)
           echo "smoke kvspace head: $head_out"
@@ -128,10 +91,6 @@ jobs:
           leaked=$(env -i PATH=/usr/bin:/bin HOME=/tmp \
             ldd "$run/bin/kvlanglayout" "$run/bin/kvspace" | grep -E 'kvlang|kvspace' | grep -v "$run" || true)
           test -z "$leaked" || { echo "可执行依赖了包外的 kvlang/kvspace 库："; echo "$leaked"; exit 1; }
-      # 单一二进制（#493）**已停用**，此处不再构建：
-      #   `make single` 是硬失败桩（Makefile:59），embed 源 runtimec2 已归档且
-      #   runtimec 尚无 kvlangDefRwir 等价 ABI（TASK-035）。等 TASK-035 落地后
-      #   连同这两步一起恢复。
       - name: 发布 release
         if: github.event_name == 'push'
         run: |
@@ -139,8 +98,6 @@ jobs:
             kvlang-abi-*-linux-*.tar.gz SHA256SUMS-linux \
             --generate-notes
 
-  # macOS：依赖源码构建后装到 /usr/local（系统最终位置），与 Linux 的 /usr 同构；
-  # tarball 布局与 Linux 相同。
   macos:
     needs: linux
     runs-on: macos-latest
@@ -149,17 +106,10 @@ jobs:
       DEP_PREFIX: /usr/local
     steps:
       - uses: actions/checkout@v4
-      # kvspace-c 已冻结并入 kvspace（shm 引擎在本仓），不再作为依赖构建。
       - name: 安装依赖到 /usr/local（系统最终位置）
         run: |
           set -euo pipefail
-          # 依赖直接装到平台最终位置：Linux /usr，macOS /usr/local（SIP 限制）。
-          # repo 内不再保留任何依赖副本——副本是二义来源：同一个 include/kvspace/
-          # 被 runtimec 的 stale-copy 闸（要求不存在）与冒烟探针（要求存在）以相反
-          # 要求使用。装到最终位置之后，kvspace 的 find_path 第一候选直接命中，
-          # 不需要任何 -D，也没有副本要删。
           for repo in blockmalloc slotsboxmalloc kvspace; do
-            # 用 $RUNNER_TEMP 而不是 /tmp：后者在 runner 上不保证活到后续 step。
             git clone --depth 1 "https://github.com/array2d/$repo.git" "$RUNNER_TEMP/$repo"
             cmake -S "$RUNNER_TEMP/$repo" -B "$RUNNER_TEMP/$repo/build" \
               -DCMAKE_BUILD_TYPE=Release \
@@ -169,33 +119,20 @@ jobs:
             cmake --build "$RUNNER_TEMP/$repo/build" -j
             sudo cmake --install "$RUNNER_TEMP/$repo/build"
           done
-          # durable 不建不发（先不管）。
-      # byteseek 暂不发：缺 kvlangDefRwir / kvlangRuntime* / kvlangRwirext* 十二个 ABI
-      # （TASK-035），修复后恢复。它的 Makefile target 保留，不要删。
       - name: 构建 layout + runtimec 运行库 + kvspace CLI
         run: |
           set -euo pipefail
-          # 同 Linux job：三个 target 都需要 kvspace 源码路径（G11 兄弟仓不是默认值）。
           make layout KVSPACE_SRC="$RUNNER_TEMP/kvspace"
           make runtimec-lib KVSPACE_SRC="$RUNNER_TEMP/kvspace" \
             KVSPACE_INCLUDE_DIRECTORY="$DEP_PREFIX/include"
-          # 走 Makefile 的 target，不自己写 cargo 命令——target 里带着正确的链接参数
-          # 与 rpath，另写一份就是第二个真相。
           make kvspace-cli KVSPACE_SRC="$RUNNER_TEMP/kvspace"
       - name: 陈旧 .so 闸（打包前兜底）
         run: |
           set -euo pipefail
-          # 同 linux job：`lib/` 是持久目录，残留会被 `find` 收进发布包。
-          # `stale-gate` 目标同时扫 *.so* 与 *.dylib，两个平台共用一份判据。
           make stale-gate
       - name: 后端装载冒烟（repo 内前端连 shm）
         run: |
-          # 单库化后 `libkvspace` 只服务 `shm://`（没有运行期 dispatch、不 dlopen），
-          # 其它 scheme 一律返回 NULL。所以这里只验 shm 能连上——原先那条
-          # 「同时要求 fs:// 也成功」的断言在单库模型下永远不成立。
           cat > "$RUNNER_TEMP/conn.c" <<'EOF'
-          #include <kvspace/kvspace.h>
-          #include <stdio.h>
           int main(void) {
               void *shm = kvspaceConnect("shm:///tmp/ks_rel_macos");
               printf("shm=%p\n", shm);
@@ -203,11 +140,6 @@ jobs:
               return shm ? 0 : 1;
           }
           EOF
-          # 头与库都从平台最终位置取：Linux /usr、macOS /usr/local。repo 内没有
-          # 依赖副本，所以这里不需要任何「副本 vs 系统」的取舍。
-          # 两个 `-L`：kvspace 的 CMake 安装规则把前端落到 `lib/kvspace/`，
-          # 而 release tarball 的布局是 `lib/` 顶层；给两处，两种布局都命中。
-          # 这与 durable 无关——`lib/kvspace/` 里是**前端**，不是后端。
           cc "$RUNNER_TEMP/conn.c" -o "$RUNNER_TEMP/conn" \
             -I"$DEP_PREFIX/include" -L"$DEP_PREFIX/lib" \
             -L"$DEP_PREFIX/lib/kvspace" -lkvspace
@@ -219,57 +151,32 @@ jobs:
           v="${ABI_VERSION}"
           d="kvlang-abi-$v-darwin-arm64"
           mkdir -p "$d/include/kvlang" "$d/lib" "$d/bin"
-          # 同 Linux job：`runtime/include/` 已随 c2 归档消失（e927a923）。
           cp -R include/kvlang/. "$d/include/kvlang/"
           cp -R runtimec/include/kvlang/. "$d/include/kvlang/"
           for h in kvspace blockmalloc slotsboxmalloc; do
             [ -d "$DEP_PREFIX/include/$h" ] && cp -R "$DEP_PREFIX/include/$h" "$d/include/"
           done
-          # 只收**当前构建会产出**的库名，不 `find` 全收（同 Linux job 的理由：
-          # `find` 的开放性是残留混进发布包的通道）。
-          # `"$lib"*.dylib` 而不是 `"$lib".dylib`：kvspace 的 CMake 设了
-          # VERSION 1.0.0 / SOVERSION 1，macOS 产物是三个名字——`libkvspace.1.0.0.dylib`
-          # （真文件）+ `.1.dylib` / `.dylib`（指向它的符号链接）。只拷无版本名会把
-          # 一个**悬空链接**放进包里（目标没拷），冒烟里 `test -e libkvspace.1.dylib`
-          # 随即失败。
           for lib in libkvlang_runtime libkvlanglayout libkvspace; do
             for f in "lib/$lib"*.dylib; do
               [ -e "$f" ] && cp -P "$f" "$d/lib/"
             done
           done
-          # 不发 durable（先不管）：发布包只有前端三库，`lib/kvspace/` 不存在。
-          # `-type f` 只看得见真文件 `libkvspace.1.0.0.dylib`，所以剥掉 `.dylib` 后
-          # 还剩版本段 `.1.0.0`——必须再剥一次数字段才能与期望的库名相等。
-          # `libkvlanglayout.dylib` 无版本段，两次 sed 后仍是 `libkvlanglayout`。
           names=$(find "$d/lib" -maxdepth 1 -type f -name '*.dylib' | sed 's/.*\///; s/\.dylib$//; s/\.[0-9][0-9.]*$//' | sort -u)
           test "$names" = "$(printf 'libkvlang_runtime\nlibkvlanglayout\nlibkvspace')" || {
             echo "发布包 lib/ 出现非预期库："; ls "$d/lib"; exit 1; }
-          # byteseek 暂不发（TASK-035），bin/ 只有这两个。
           cp bin/kvlanglayout bin/kvspace "$d/bin/"
           test "$(ls "$d/bin" | sort | tr '\n' ' ')" = "kvlanglayout kvspace " || {
             echo "发布包 bin/ 出现非预期可执行："; ls "$d/bin"; exit 1; }
-          # 抹掉构建机绝对路径：lib/ 里各 dylib 的 install-id 与 bin/ 里各可执行
-          # 的依赖都落到 @rpath，bin/ 与 lib/ 都能从 tarball 内 lib/ 解析。
           has_rpath() { otool -l "$1" | awk '/cmd LC_RPATH/{f=1} f && /path /{print $2; f=0}' | grep -qx "$2"; }
           add_rpath() {
             has_rpath "$1" "$2" && return 0
             install_name_tool -add_rpath "$2" "$1"
           }
-          # **只对真文件跑 `install_name_tool`，不对符号链接跑。**
-          #
-          # `$d/lib` 里 `libkvspace.1.0.0.dylib` 是实体，`.1.dylib` 与 `.dylib` 是指向
-          # 它的链接。用 `*.dylib` glob 会得到三个名字，`install_name_tool` 会**穿过
-          # 链接改同一个实体**三次：最终 id 取决于 glob 顺序（不是确定值），而且
-          # 第二次就会报 `file that has already been changed`，部分 macOS 版本直接失败。
-          #
-          # 所以按 `-type f` 取实体，一个库只改一次。
           while IFS= read -r lib; do
             name=$(basename "$lib")
             cur_id=$(otool -D "$lib" | tail -n +2)
             [ "$cur_id" = "@rpath/$name" ] || install_name_tool -id "@rpath/$name" "$lib"
           done < <(find "$d/lib" -maxdepth 1 -type f -name '*.dylib')
-          # bin/ 里每个可执行：把对 lib/ 下各库的绝对路径依赖改写成 @rpath。
-          # 同样只遍历实体（`bin/` 下本来就全是实体，但保持与上面同一条判据）。
           while IFS= read -r exe; do
             while IFS= read -r lib; do
               name=$(basename "$lib")
@@ -281,7 +188,6 @@ jobs:
               esac
             done < <(find "$d/lib" -maxdepth 1 -type f -name '*.dylib')
           done < <(find "$d/bin" -maxdepth 1 -type f)
-          # add_rpath 也只对实体：对链接重复 -add_rpath 会让 LC_RPATH 出现重复项。
           while IFS= read -r f; do
             add_rpath "$f" @loader_path/../lib
           done < <(find "$d/bin" "$d/lib" -maxdepth 1 -type f)
@@ -299,12 +205,9 @@ jobs:
           run="$RUNNER_TEMP/rel-smoke"
           rm -rf "$run"; mkdir -p "$run"
           tar xzf "$d.tar.gz" -C "$run" --strip-components=1
-          # 同 Linux job：byteseek 摘掉后 stdlib 不在，layout tutorial 文件的前提没了。
-          # 改为 vet（不需 stdlib）+ kvspace 写读往返，验包内产物自证可用。
           "$run/bin/kvlanglayout" vet "$GITHUB_WORKSPACE/tutorial/runtimec/01-basics/hello.kv" >/dev/null
           env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME=/tmp KVSPACE="shm://$run/rt.shm" \
             "$run/bin/kvspace" mkindex /t/
-          # 同 Linux job：断言四个字段，不是「命令没报错」。
           head_out=$(env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME=/tmp KVSPACE="shm://$run/rt.shm" \
             "$run/bin/kvspace" head /t/)
           echo "smoke kvspace head: $head_out"
@@ -312,22 +215,6 @@ jobs:
           echo "$head_out" | grep -q 'attrslen=0'   || { echo "期望 attrslen=0"; exit 1; }
           echo "$head_out" | grep -q 'total=16'     || { echo "期望 total=16"; exit 1; }
           echo "$head_out" | grep -q 'padding=zero' || { echo "期望 padding=zero"; exit 1; }
-          # 依赖封闭性（与 Linux job 的 ldd 检查对称）：两个可执行只许解析到**包内**
-          # 的 lib/，不许出现包外的 kvlang/kvspace 库。
-          #
-          # 三个判据细节，每个都是「写错就恒假或误报」的坑：
-          #   1. `otool -L` 第一行是命令行自身的路径（`.../bin/kvlanglayout:`），
-          #      它不是依赖条目——先 `tail -n +2` 去掉。
-          #   2. **白名单判据**：凡含 kvlang/kvspace 的依赖，必须以 `@rpath/` 或
-          #      `@loader_path/` 开头。打包步骤已把依赖改写成这两类，所以冒烟时
-          #      看到的是 `@rpath/libkvspace.1.dylib`，**不是** `$run/lib/...`。
-          #      出现绝对路径（`/usr/local/...`、`/Users/...`、甚至 `$run/...`）
-          #      都算泄漏——tarball 要可搬移，包内绝对路径同样不合格。
-          #
-          #      曾经的错判据是 `grep -vE "^$run/"`：它按「改写前的绝对路径」写，
-          #      真实输出全是 `@rpath/...`，于是干净包必假红。
-          #   3. 用 `otool -L` 而不是 `otool -l`：后者会连 LC_RPATH 里的
-          #      `@loader_path/../lib` 一起列出，那是**正确**的配置，不是泄漏。
           for exe in "$run/bin/kvlanglayout" "$run/bin/kvspace"; do
             deps=$(otool -L "$exe" | tail -n +2 | awk '{print $1}')
             leaked=$(echo "$deps" | grep -E 'kvlang|kvspace' \

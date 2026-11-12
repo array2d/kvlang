@@ -1,7 +1,6 @@
 import os
 import time
 
-
 def nq(cols, d1, d2, all):
     if cols == all:
         return 1
@@ -12,7 +11,6 @@ def nq(cols, d1, d2, all):
         avail ^= p
         cnt += nq(cols | p, (d1 | p) << 1, (d2 | p) >> 1, all)
     return cnt
-
 
 t0 = time.perf_counter_ns()
 all = (1 << int(os.environ["BENCH_SCALE"])) - 1

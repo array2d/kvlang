@@ -1,4 +1,3 @@
-/* binrwir_compiler/jit/execution_interface 的失败封闭骨架。 */
 
 #include "binrwir_compiler/jit/execution_interface.h"
 

@@ -1,18 +1,4 @@
-//! byteseek —— 功能完整的 runtime 二进制。模式2（runtime 主导 + 就地 rwir stdlib）。
-//! CLI（DSN 取环境变量 KVSPACE，**必填无默认**）。入口须显式给出（不再自动探测）：
-//!   byteseek                 无入口 → 提示 need entry
-//!   byteseek <entry>         运行已 layout 进 kvspace 的入口（pkg·func 或裸名，pkg 可空）
-//!   byteseek <file.kv>       stdlib 先行 → layout 该文件 → 运行约定入口 test
-//!   byteseek -c "<src>"      stdlib 先行 → layout 内存源码 → 运行散语句合成入口 init
-//!   byteseek layout <file>   仅 layout，打印 ENTRY=<entry>
-//!   byteseek vet <file>      仅校验（parse+lower），打印 ok 或错误
-//!   byteseek format <file>   格式化输出到 stdout
-//!   byteseek printlib <file> [prefix]  layout 该文件后，把 /lib（或 prefix）子树重建为可运行 kvlang + 槽位注释（不读 .src）
-//!   byteseek --lib p1:p2:…   layout 各路径下所有 .kv → run 各 lib 的 init（pkg 取自源码 `lib` 声明，同 stdlib）
-//!   byteseek <arg...> --no-stdlib  任意位置：跳过 stdlib 的 layout&run 引导（benchmark 隔离用），
-//!                                  只 layout 用户文件后直接 run 入口，不加载/运行内置库
-//! 驱动循环：executeVthread 主导执行，遇 rwir 停下；就地 rwir（print/json/http/…）
-//! 连续批处理 + nextPc；外部 rwir（如 numpy）handoff 给扩展进程；native/控制帧写回 pc。
+
 #![allow(non_snake_case, non_camel_case_types)]
 
 use std::ffi::c_char;
@@ -21,12 +7,6 @@ use std::ptr::null_mut;
 use byteseek::engine::Engine;
 use byteseek::ffi::*;
 
-/// 存储 DSN。`KVSPACE` 是**唯一**允许的环境变量（G12），但**没有默认值**：
-/// 不给就是配置缺失，直接报错并给出可照抄的命令。
-///
-/// 曾经这里缺省 `redis://127.0.0.1:6379`——那是隐式默认值的典型：单库化之后
-/// `libkvspace` 只服务 `shm://`，那个默认值根本连不上，却要等 connect 才炸，
-/// 而报错不指向这里。
 fn dsn() -> String {
     match std::env::var("KVSPACE") {
         Ok(v) if !v.is_empty() => v,
@@ -38,10 +18,6 @@ fn dsn() -> String {
     }
 }
 
-/// 日志级别。由 `--log-level=` 决定，**不看环境变量**：环境变量是隐式输入，
-/// 不进命令行也不进日志，两个人跑同一条命令可能得出不同结果（G12）。
-///
-/// 缺省 `Warn`：`log_info` 静默，与原「未设 LOG_LEVEL 即静默」等价。
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum LogLevel {
     Warn,
@@ -51,7 +27,6 @@ enum LogLevel {
 
 static LOG_LEVEL: std::sync::OnceLock<LogLevel> = std::sync::OnceLock::new();
 
-/// 解析 `--log-level=warn|info|debug`；非法值硬失败，不静默退回缺省。
 fn parse_log_level(args: &[String]) -> LogLevel {
     let mut level = LogLevel::Warn;
     for a in args {
@@ -70,7 +45,6 @@ fn parse_log_level(args: &[String]) -> LogLevel {
     level
 }
 
-/// info 级日志：以 `<exe>: ` 前缀输出到 stderr，仅在 `--log-level=info|debug` 时。
 fn log_info(msg: &str) {
     if LOG_LEVEL.get().copied().unwrap_or(LogLevel::Warn) >= LogLevel::Info {
         byteseek::elog!("{msg}");
@@ -85,17 +59,15 @@ fn read_file(path: &str) -> String {
 }
 
 fn main() {
-    // #493：先从内存加载嵌入的 .so 并绑定符号（必须在任何 connect 之前）。
+    
     #[cfg(feature = "embed")]
     byteseek::embed::init();
 
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dsn = dsn();
 
-    // `--no-stdlib`（任意位置）：跳过 stdlib 的 layout&run 引导（benchmark 隔离用），
-    // 仅把用户文件 layout 进 kvspace 后直接 run 入口，不加载/运行任何内置库。
     let no_stdlib = args.iter().any(|a| a == "--no-stdlib");
-    // `--log-level=warn|info|debug`（任意位置）：必须在任何 log_info 之前解析并落定。
+    
     let _ = LOG_LEVEL.set(parse_log_level(&args));
     let args: Vec<String> = args
         .into_iter()
@@ -103,7 +75,7 @@ fn main() {
         .collect();
 
     match args.as_slice() {
-        // ── 仅 layout / 校验 / 格式化（不需 runtime）───────────────────
+        
         [cmd, file] if cmd == "layout" => {
             let mut entry = [0u8; 4096];
             let mut err = [0u8; 4096];
@@ -159,26 +131,22 @@ fn main() {
             }
             print!("{}", cbuf(&out));
         }
-        // ── layout 文件后 printlib /lib（或 prefix）子树：审查 layout 结果、调坐标、验 round-trip ──
+        
         [cmd, file] if cmd == "printlib" => printlib_file(file, "/lib", &dsn),
         [cmd, file, prefix] if cmd == "printlib" => printlib_file(file, prefix, &dsn),
 
-        // ── stdlib 先 layout&run → 再 layout 内存源码 → 运行（散语句合成 init）──
         [cmd, src] if cmd == "-c" => {
             let eng = boot(&dsn, no_stdlib);
             layout_code_or_die(src, &dsn);
             drive(&eng, "init");
         }
 
-        // ── stdlib 先 layout&run → 再 layout .kv 文件 → 运行（约定入口 test）──
         [x] if x.ends_with(".kv") && std::path::Path::new(x).is_file() => {
             let eng = boot(&dsn, no_stdlib);
             layout_file_or_die(x, &dsn);
             drive(&eng, "test");
         }
 
-        // ── isa publish：发布 core manifest（connect）并注册 byteseek 的 def rwir，
-        //    使 layout CLI 无需完整 boot 即可独立工作。──
         [cmd, act] if cmd == "isa" && act == "publish" => {
             let rt = unsafe { kvlangRuntimeConnect(cs(&dsn).as_ptr()) };
             if rt.is_null() {
@@ -196,7 +164,6 @@ fn main() {
             unsafe { kvlangRuntimeDisconnect(rt) };
         }
 
-        // ── vthread 两步分离：create 只创建（bootstrap）并把 vid 打到 stdout，不运行 ──
         [cmd, funcname] if cmd == "create" => {
             let eng = boot(&dsn, no_stdlib);
             let vid = take(unsafe {
@@ -206,14 +173,13 @@ fn main() {
                 byteseek::elog!("create {funcname} 失败");
                 std::process::exit(1);
             }
-            println!("{vid}"); // vid 是命令结果 → stdout（区别于运行诊断日志）
+            println!("{vid}"); 
         }
-        // ── run <vid>：以 vid 为参数从持久化 pc 跑到结束（也即崩溃恢复：续跑已有 vthread）──
+        
         [cmd, vid] if cmd == "run" => drive_vid(&boot(&dsn, no_stdlib), vid),
 
-        // ── 运行已入库的显式入口（tutorial 测试主路径：pkg·func 或裸名，pkg 可空）──
         [x] => drive(&boot(&dsn, no_stdlib), x),
-        // ── --lib p1:p2:… → layout 各路径下所有 .kv（相对名=pkg），复用 stdlib 的 run init 引导──
+        
         [flag, lib] if flag == "--lib" => {
             if lib.is_empty() {
                 byteseek::elog!("need entry");
@@ -224,7 +190,7 @@ fn main() {
             let inits = eng.layout_libs(&libs);
             eng.run_inits(&inits);
         }
-        // 无参：直接报错（没有任何“隐式库路径”环境变量）
+        
         [] => {
             byteseek::elog!("need entry (or --lib p1:p2:…)");
             std::process::exit(1);
@@ -236,7 +202,6 @@ fn main() {
     }
 }
 
-// layout <file> 进 kvspace 后 printlib `prefix` 子树到 stdout（审查 layout 结果用，不读 .src）。
 fn printlib_file(path: &str, prefix: &str, dsn: &str) {
     layout_file_or_die(path, dsn);
     let src = read_file(path);
@@ -277,8 +242,6 @@ fn layout_code_or_die(src: &str, dsn: &str) {
     }
 }
 
-/// `--lib`（: 分隔路径）→ (名, 源码)：文件取 basename，目录递归、相对根、排序（确定性）。
-/// 名仅作错误显示；pkg 与 init 由 layout 按源码 `lib` 声明产出，不从此名/路径推导。
 fn collect_libs(spec: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for path in spec.split(':').filter(|s| !s.is_empty()) {
@@ -335,16 +298,13 @@ fn layout_file_or_die(path: &str, dsn: &str) {
     }
 }
 
-/// 连接 runtime+kvspace，注册就地 rwir，layout stdlib 并 run 其 init（一次性引导）。
-/// 先于用户代码 layout —— stdlib 常量（如 /lib/math·Pi）在此落值，用户代码随后可读。
 fn boot(dsn: &str, no_stdlib: bool) -> Engine {
     let rt = unsafe { kvlangRuntimeConnect(cs(dsn).as_ptr()) };
     if rt.is_null() {
         byteseek::elog!("kvlangRuntimeConnect 失败: {dsn}");
         std::process::exit(1);
     }
-    // 复用 rt 内部 kvspace 句柄，绝不另开连接——durable 惰性 flush 只在同句柄内相干，
-    // 跨句柄写不可见（曾致 fs/redis 外部 rwir 后 pc 陈旧、整段重跑；shm 共享 mmap 掩盖）。
+    
     let kv = unsafe { kvlangRuntimeKvspaceHandle(rt) };
     let eng = Engine {
         rt,
@@ -360,23 +320,20 @@ fn boot(dsn: &str, no_stdlib: bool) -> Engine {
     eng
 }
 
-/// 主导驱动 funcname 的 vthread 到结束（就地批处理纯净 rwir，外部 rwir handoff）。
 fn drive(eng: &Engine, funcname: &str) {
     let vid = take(unsafe { kvlangRuntimeBootstrap(eng.rt, cs(funcname).as_ptr(), null_mut(), 0) });
     if vid.is_empty() {
         byteseek::elog!("bootstrap {funcname} 失败");
         std::process::exit(1);
     }
-    log_info(&format!("vthread {vid}")); // 供崩溃恢复：LOG_LEVEL=info 时暴露 vid，可 `byteseek run <vid>`
+    log_info(&format!("vthread {vid}")); 
     drive_vid(eng, &vid);
 }
 
-/// 从 kvspace 里 vid 的持久化 pc 续跑到结束（崩溃恢复入口，与 drive 共用循环，不 bootstrap）。
-/// Delegates to `Engine::drive_vid` (shared with stdlib/`--lib` init); exits 1 on error.
 fn drive_vid(eng: &Engine, vid: &str) {
     if let Err(e) = eng.drive_vid(vid) {
         byteseek::elog!("{e}");
         std::process::exit(1);
     }
-    // kv 属 rt（kvlangRuntimeKvspaceHandle），进程退出时随 rt 回收，此处不 close。
+    
 }

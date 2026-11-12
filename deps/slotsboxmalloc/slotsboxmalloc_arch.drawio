@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="slotsboxmalloc-arch">
+    <mxGraphModel>
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ── Legend ── -->
+        <mxCell id="2" value="Legend" style="text;html=1;fontSize=14;fontStyle=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1"><mxGeometry x="20" y="580" width="80" height="24" as="geometry" /></mxCell>
+        <mxCell id="3" value="Meta area" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1"><mxGeometry x="20" y="610" width="60" height="20" as="geometry" /></mxCell>
+        <mxCell id="4" value="Data area" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1"><mxGeometry x="90" y="610" width="60" height="20" as="geometry" /></mxCell>
+        <mxCell id="5" value="Lock" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1"><mxGeometry x="160" y="610" width="50" height="20" as="geometry" /></mxCell>
+        <mxCell id="6" value="Cache" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1"><mxGeometry x="220" y="610" width="50" height="20" as="geometry" /></mxCell>
+
+        <!-- ── Title ── -->
+        <mxCell id="7" value="slotsboxmalloc Architecture" style="text;html=1;fontSize=18;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="300" y="10" width="300" height="30" as="geometry" /></mxCell>
+
+        <!-- ── Meta area (big container) ── -->
+        <mxCell id="8" value="metaptr (mmap MAP_SHARED)" style="swimlane;startSize=25;fontSize=11;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="20" y="50" width="460" height="520" as="geometry" /></mxCell>
+
+        <!-- box_meta_t -->
+        <mxCell id="9" value="box_meta_t&#xa;magic[16]&#xa;slot_block[16]&#xa;slot_locks[16]&#xa;caches[16]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=9;" vertex="1" parent="8"><mxGeometry x="10" y="35" width="110" height="80" as="geometry" /></mxCell>
+
+        <!-- Per-slot pools -->
+        <mxCell id="10" value="Slot 0 pool&#xa;(blockmalloc)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=8;" vertex="1" parent="8"><mxGeometry x="140" y="35" width="90" height="30" as="geometry" /></mxCell>
+        <mxCell id="11" value="Slot 1 pool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=8;" vertex="1" parent="8"><mxGeometry x="240" y="35" width="90" height="30" as="geometry" /></mxCell>
+        <mxCell id="12" value="... Slot 2-14 ..." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=8;" vertex="1" parent="8"><mxGeometry x="340" y="35" width="110" height="30" as="geometry" /></mxCell>
+
+        <!-- lock array -->
+        <mxCell id="13" value="slot_locks[16]&#xa;(cache-line padded,&#xa;64B each)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="8"><mxGeometry x="10" y="130" width="110" height="50" as="geometry" /></mxCell>
+
+        <!-- free cache -->
+        <mxCell id="14" value="caches[16]&#xa;(LIFO x8 entries,&#xa;64B cache-line)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="8"><mxGeometry x="10" y="195" width="110" height="50" as="geometry" /></mxCell>
+
+        <!-- box_head_t tree -->
+        <mxCell id="15" value="Slot 0 subtree&#xa;box_head_t nodes&#xa;(128B each,&#xa;cache-line aligned)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=9;" vertex="1" parent="8"><mxGeometry x="140" y="80" width="140" height="55" as="geometry" /></mxCell>
+
+        <mxCell id="16" value="Slot 1 subtree" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=9;" vertex="1" parent="8"><mxGeometry x="290" y="80" width="110" height="30" as="geometry" /></mxCell>
+
+        <!-- Tree detail (Slot 0 subtree zoom) -->
+        <mxCell id="17" value="16-ary Buddy Tree (Slot 0)" style="swimlane;startSize=20;fontSize=10;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="8"><mxGeometry x="140" y="145" width="310" height="360" as="geometry" /></mxCell>
+
+        <!-- Tree levels -->
+        <mxCell id="18" value="L5 root&#xa;(level=5, 16 slots)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=8;" vertex="1" parent="17"><mxGeometry x="110" y="30" width="100" height="35" as="geometry" /></mxCell>
+        <mxCell id="19" value="L4" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=8;" vertex="1" parent="17"><mxGeometry x="110" y="80" width="100" height="25" as="geometry" /></mxCell>
+        <mxCell id="20" value="L3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=8;" vertex="1" parent="17"><mxGeometry x="110" y="120" width="100" height="25" as="geometry" /></mxCell>
+        <mxCell id="21" value="L2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=8;" vertex="1" parent="17"><mxGeometry x="110" y="160" width="100" height="25" as="geometry" /></mxCell>
+        <mxCell id="22" value="L1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=8;" vertex="1" parent="17"><mxGeometry x="110" y="200" width="100" height="25" as="geometry" /></mxCell>
+        <mxCell id="23" value="L0 leaf&#xa;(obj slots: 8B each)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=8;" vertex="1" parent="17"><mxGeometry x="105" y="240" width="110" height="35" as="geometry" /></mxCell>
+
+        <!-- Slot states -->
+        <mxCell id="24" value="used_slots[16]:&#xa;0=UNUSED 1=FORMATTED&#xa;2=OBJ_START 3=OBJ_CONTINUED" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=7;align=left;" vertex="1" parent="17"><mxGeometry x="10" y="290" width="140" height="55" as="geometry" /></mxCell>
+        <mxCell id="25" value="childs_blockid[16]&#xa;→ int32 block IDs&#xa;(no absolute pointers)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=7;align=left;" vertex="1" parent="17"><mxGeometry x="160" y="290" width="140" height="55" as="geometry" /></mxCell>
+
+        <!-- Tree edges -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;exitX=0.5;exitY=1;" edge="1" parent="17" source="18" target="19"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;exitX=0.5;exitY=1;" edge="1" parent="17" source="19" target="20"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;exitX=0.5;exitY=1;" edge="1" parent="17" source="20" target="21"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;exitX=0.5;exitY=1;" edge="1" parent="17" source="21" target="22"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;exitX=0.5;exitY=1;" edge="1" parent="17" source="22" target="23"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ── Data area ── -->
+        <mxCell id="26" value="data area (independent mmap)" style="swimlane;startSize=25;fontSize=11;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="500" y="50" width="280" height="200" as="geometry" /></mxCell>
+        <mxCell id="27" value="offset 0" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=9;" vertex="1" parent="26"><mxGeometry x="10" y="35" width="120" height="25" as="geometry" /></mxCell>
+        <mxCell id="28" value="obj data (8B..4096B)&#xa;pure bytes, no metadata" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=9;" vertex="1" parent="26"><mxGeometry x="10" y="70" width="260" height="40" as="geometry" /></mxCell>
+        <mxCell id="29" value="Slot 0: 0 .. slot_bytes-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=8;" vertex="1" parent="26"><mxGeometry x="10" y="120" width="120" height="20" as="geometry" /></mxCell>
+        <mxCell id="30" value="Slot 1: slot_bytes .. 2*slot_bytes-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=8;" vertex="1" parent="26"><mxGeometry x="10" y="145" width="180" height="20" as="geometry" /></mxCell>
+        <mxCell id="31" value="Slot 14: 14*slot_bytes .. box_bytessize-1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=8;" vertex="1" parent="26"><mxGeometry x="10" y="170" width="200" height="20" as="geometry" /></mxCell>
+
+        <!-- ── Alloc flow ── -->
+        <mxCell id="32" value="box_alloc(size)" style="swimlane;startSize=20;fontSize=10;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="500" y="270" width="280" height="140" as="geometry" /></mxCell>
+        <mxCell id="33" value="1. hash size→start slot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=9;" vertex="1" parent="32"><mxGeometry x="10" y="30" width="120" height="30" as="geometry" /></mxCell>
+        <mxCell id="34" value="2. trylock slot → cache.pop() → return ✅" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="32"><mxGeometry x="10" y="70" width="260" height="30" as="geometry" /></mxCell>
+        <mxCell id="35" value="3. cache miss → tree.find_alloc() → return" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="32"><mxGeometry x="10" y="105" width="260" height="25" as="geometry" /></mxCell>
+
+        <mxCell id="ae1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;exitX=0.5;exitY=1;" edge="1" parent="32" source="33" target="34"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ae2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;exitX=0.5;exitY=1;" edge="1" parent="32" source="34" target="35"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ── Free flow ── -->
+        <mxCell id="36" value="box_free(offset)" style="swimlane;startSize=20;fontSize=10;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="500" y="425" width="280" height="130" as="geometry" /></mxCell>
+        <mxCell id="37" value="1. offset / slot_bytes → slot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=9;" vertex="1" parent="36"><mxGeometry x="10" y="30" width="130" height="30" as="geometry" /></mxCell>
+        <mxCell id="38" value="2. cache.push(offset) → return ✅" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="36"><mxGeometry x="10" y="70" width="260" height="30" as="geometry" /></mxCell>
+        <mxCell id="39" value="3. cache full → flush oldest → tree.free()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;" vertex="1" parent="36"><mxGeometry x="10" y="105" width="260" height="25" as="geometry" /></mxCell>
+
+        <mxCell id="fe1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;exitX=0.5;exitY=1;" edge="1" parent="36" source="37" target="38"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="fe2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=0;exitX=0.5;exitY=1;" edge="1" parent="36" source="38" target="39"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ── Concurrency summary ── -->
+        <mxCell id="40" value="Concurrency Model" style="swimlane;startSize=20;fontSize=10;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="20" y="640" width="760" height="100" as="geometry" /></mxCell>
+        <mxCell id="41" value="15 slot locks&#xa;(cache-line padded)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="40"><mxGeometry x="15" y="30" width="100" height="45" as="geometry" /></mxCell>
+        <mxCell id="42" value="trylock polling&#xa;(non-blocking)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="40"><mxGeometry x="135" y="30" width="100" height="45" as="geometry" /></mxCell>
+        <mxCell id="43" value="per-slot blockmalloc&#xa;(physical isolation)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;" vertex="1" parent="40"><mxGeometry x="255" y="30" width="110" height="45" as="geometry" /></mxCell>
+        <mxCell id="44" value="per-slot free cache&#xa;(8-entry LIFO)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=9;" vertex="1" parent="40"><mxGeometry x="385" y="30" width="110" height="45" as="geometry" /></mxCell>
+        <mxCell id="45" value="SHM-safe: zero absolute&#xa;pointers (block IDs)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="40"><mxGeometry x="515" y="30" width="120" height="45" as="geometry" /></mxCell>
+        <mxCell id="46" value="no TLS / static vars&#xa;(fork+mmap safe)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;" vertex="1" parent="40"><mxGeometry x="650" y="30" width="100" height="45" as="geometry" /></mxCell>
+
+        <!-- ── Cross-ref edges ── -->
+        <mxCell id="x1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;dashed=1;" edge="1" parent="1" source="9" target="27"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="x2" value="box_alloc(size)→offset" style="text;html=1;fontSize=8;" vertex="1" parent="1"><mxGeometry x="440" y="80" width="100" height="16" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,20 +1,6 @@
 #ifndef VMBIN_HANDLERS_SCALAR_GENERATED_H
 #define VMBIN_HANDLERS_SCALAR_GENERATED_H
 
-/*
- * 组件：vmbin/handlers/scalar_generated
- * 作用：特化标量 handler 的静态条目表——一条特化 opid 一个 inline 函数。
- * 联系：`scalar_generated.c` 由 tools/architecture/generate_scalar_handlers.py
- *       生成；`scalar.c` 把它与手写特例合并后交给 session。
- * 约束：
- *   - 条目是静态存储，进程级生命周期；调用方不得释放；
- *   - 产品可见的只有表与计数——生成的逻辑函数是 `static inline`，只被条目引用；
- *   - 末尾的 `runtimec_scalar_probe_*` 是**测试探针**：同一份模板文本的可见副本。
- *     它存在的唯一原因是 C 没有反射，测试翻译单元看不见 `static inline`。没有它，
- *     「生成的函数算得对不对」就只能靠表形状间接猜——那等于没测（实测过：把 min
- *     的取反做变异，只验表形状的测试全绿）。
- */
-
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -29,10 +15,6 @@ extern "C" {
 extern const binrwir_registry_entry_t scalar_generated_entries[];
 extern const size_t scalar_generated_entry_count;
 
-/*
- * 测试探针。**不是产品 API**：产品代码不得调用，它们没有做任何参数校验，
- * 只做一次运算。
- */
 void runtimec_scalar_probe_add_int64_int32_int64(const int64_t *a,
                                                  const int32_t *b,
                                                  int64_t *c);

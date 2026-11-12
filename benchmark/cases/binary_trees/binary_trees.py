@@ -1,7 +1,6 @@
 import os
 import time
 
-
 class Node:
     __slots__ = ("l", "r")
 
@@ -9,18 +8,15 @@ class Node:
         self.l = l
         self.r = r
 
-
 def make(d):
     if d == 0:
         return Node(None, None)
     return Node(make(d - 1), make(d - 1))
 
-
 def check(n):
     if n.l is None:
         return 1
     return 1 + check(n.l) + check(n.r)
-
 
 depth = int(os.environ["BENCH_SCALE"])
 t0 = time.perf_counter_ns()

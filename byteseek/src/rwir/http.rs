@@ -1,6 +1,3 @@
-//! rwir `http·call`：网络抓取原语（rust 原生 ureq，不经 curl 子进程）。
-//!   http·call(method, header, url, body) -> resp
-//! header 为 "K: V\nK2: V2" 原文块，空串 = 无 header；body 空串 = 无请求体。
 
 use std::time::Duration;
 

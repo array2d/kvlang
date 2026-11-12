@@ -1,7 +1,4 @@
-// 期望输出:
-//   7
-// crash_resume: same as not_resumable.kv without the absolute-key write
-// (CONDITIONALLY_RESUMABLE:1<-0).
+
 rwfunc test() -> () {
 	a:[]int64 = [1, 2, 3]
 	a[0] = 7

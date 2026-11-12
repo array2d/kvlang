@@ -1,24 +1,4 @@
 #!/usr/bin/env bash
-# #583 验收：binir 序列转储结构检查（RC2_DUMP_BINIR=1）。
-#
-# 运行指定 case，抓 stderr 上的 `[binir]` 转储，逐段校验：
-#   段头 `[binir] func=... ninsn=... nreg=... nconst=...`
-#   指令行 `  0000  add r2, r0, r1 ; int64·add [JIT]`（含 [JIT]/[INTERP] 覆盖标记）
-#   `const[i] ...`、`reg[i] ...`、`exit: JIT x / INTERP y`
-# 并校验每段 JIT + INTERP == ninsn（#583 §2·7.1 全覆盖契约）。
-#
-# dump 由 coding4 实现；当前构建尚无输出时打印 SKIP 并退出 0（--require 则退出 1）。
-#
-# 用法：
-#   scripts/dump-binir-check.sh                      # 默认 benchmark/cases/iops
-#   scripts/dump-binir-check.sh --file some.kv
-#   scripts/dump-binir-check.sh --file x.kv --scale 100
-#   scripts/dump-binir-check.sh --require            # dump 未实现也判失败
-#   scripts/dump-binir-check.sh --keep               # 保留临时文件并打印路径
-#
-# 环境变量：KVLANG_BIN（默认 <repo>/bin/byteseek）、KV_CASE_TIMEOUT（默认 180）
-#
-# 退出码：0 结构通过 / dump 未实现而跳过；1 结构缺项或不一致；2 环境/用法错误。
 set -uo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -88,7 +68,6 @@ fi
 printf 'file=%s scale=%s exit=%s\n' "$FILE" "$SCALE" "$RC"
 [ "$RC" -eq 0 ] || printf '%s[warn]%s 程序退出码非 0，结构检查继续进行\n' "$YELLOW" "$NC"
 
-# 转储按设计走 stderr；兜底也接受 stdout（实现方若写错流仍可检查）。
 DUMP="$TMP/dump.txt"
 if grep -q '^\[binir\]' "$STDERR"; then
 	cp "$STDERR" "$DUMP"
@@ -105,7 +84,6 @@ else
 	exit 0
 fi
 
-# 先给报告一段样例（段头 + 前几条指令）。
 printf '\n-- sample --\n'
 grep -m1 '^\[binir\]' "$DUMP"
 grep -E '^[[:space:]]+[0-9]+[[:space:]]+' "$DUMP" | head -n 6

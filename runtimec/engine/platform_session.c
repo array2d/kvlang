@@ -1,24 +1,3 @@
-/*
- * 组件：engine/platform_session 的实现
- * 作用：装载 kvspace 前端、连接后端、交出借用句柄、创建 session；任一步失败
- *       都按逆序回滚。
- * 联系：interface 只经本组件引导。
- *
- * ── 谁 connect、谁 close：只有一个答案 ────────────────────────────────
- * `contract/kvspace_access.h` 写着「只借用句柄：不 connect、不 close、不拥有」。
- * 下一个读到这里的人会问：那谁连？答案是本组件——它是**组合根**。
- *
- *   platform_session       connect、持有、close      （所有者）
- *   runtimec_kvspace_access_t   只借用 handle，不连接、不关闭（借用者）
- *
- * 两者职责不同，所以「谁 connect」不存在第二个答案。这句话写在这里，是因为
- * 两份文件单独看都自洽，只有摆在一起才看得出这条边界。
- *
- * **释放顺序不可交换**：先 destroy access（它借用 handle 且持有地址台账），
- * 再 close handle。反过来关掉句柄后，access 里登记过的地址全部悬垂。
- *
- * 约束：不读环境变量；装载失败点名 SONAME；失败路径不留半初始化句柄。
- */
 
 #include "engine/platform_session.h"
 
@@ -31,14 +10,12 @@
 #include "contract/kvspace_interface.h"
 #include "contract/kvspace_access.h"
 
-/* kvspace 前端的装载名：Linux 用 .so，macOS 用 .dylib。 */
 #if defined(__APPLE__)
 #define RUNTIMEC_KVSPACE_FRONTEND_SONAME "libkvspace.dylib"
 #else
 #define RUNTIMEC_KVSPACE_FRONTEND_SONAME "libkvspace.so"
 #endif
 
-/* 装载失败的错误文本容量：足够容纳前缀 + SONAME + loader 的诊断。 */
 #define RUNTIMEC_PLATFORM_ERROR_TEXT_CAPACITY 512U
 
 struct runtimec_platform_session_t {
@@ -84,11 +61,6 @@ static runtimec_status_t runtimec_platform_fail(runtimec_error_t *error,
     return status;
 }
 
-/*
- * 装载 kvspace 前端：先按 SONAME 用 RTLD_NOLOAD 复用宿主已加载的副本
- * （单二进制 memfd 场景），命中即借用、不 dlclose；否则按名字正常装载。
- * 两者都失败时错误文本里必须出现 SONAME 本身。
- */
 static runtimec_status_t runtimec_platform_load_frontend(
     runtimec_platform_session_t *platform_session, runtimec_error_t *error) {
     static char error_text[RUNTIMEC_PLATFORM_ERROR_TEXT_CAPACITY];
@@ -119,12 +91,6 @@ static runtimec_status_t runtimec_platform_load_frontend(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/*
- * 按逆序释放链路上已建立的部分；每一段都只在确实持有资源时执行。
- *
- * **顺序不可交换**：先 destroy access（它借用 handle 并保有地址台账），再 close
- * handle。反过来关掉句柄后，access 里登记过的地址全部悬垂。
- */
 static void runtimec_platform_release_chain(
     runtimec_platform_session_t *platform_session) {
     runtimec_error_t ignored;
@@ -140,7 +106,7 @@ static void runtimec_platform_release_chain(
         platform_session->kvspace_access_active = false;
     }
     if (platform_session->kvspace_handle != NULL) {
-        /* 只关闭自己连上的句柄；借用的库句柄不 dlclose。 */
+        
         kvspaceClose(platform_session->kvspace_handle);
     }
     if (platform_session->library != NULL) {

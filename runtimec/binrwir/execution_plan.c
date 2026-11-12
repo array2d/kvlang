@@ -1,10 +1,3 @@
-/*
- * 组件：binrwir/execution_plan 的实现
- * 作用：验证与查询 execution plan，并释放它的 owned storage。
- * 联系：plan 由 binrwir_compiler/optimization 构造；vmbin 与 BinRWIR JIT 只读。
- * 约束：plan 不重复编码 instruction、不解析或缓存地址、不建立中间值存储；本组件
- *       只判形状与身份，不搬动任何数组。
- */
 
 #include "binrwir/execution_plan.h"
 
@@ -25,7 +18,6 @@ static void binrwir_execution_plan_identity_invalidate(
     }
 }
 
-/* identity 可消费当且仅当每个字段都是显式值，且代次就是当前二进制接口代次。 */
 static int binrwir_execution_plan_identity_is_usable(
     const binrwir_execution_plan_identity_t *identity) {
     return identity->snapshot_generation != UINT64_MAX &&
@@ -36,7 +28,6 @@ static int binrwir_execution_plan_identity_is_usable(
            identity->compiler_revision != UINT32_MAX;
 }
 
-/* 规范形状：count 为零时指针必须是 NULL，count 非零时指针必须有值。 */
 static int binrwir_execution_plan_array_shape_is_invalid(const void *array,
                                                          size_t count) {
     if (count == 0U) {
@@ -45,7 +36,6 @@ static int binrwir_execution_plan_array_shape_is_invalid(const void *array,
     return array == NULL;
 }
 
-/* flags 只允许四个已定义位；reserved_32_bits 必须为零。 */
 static int binrwir_execution_plan_flags_are_invalid(uint32_t flags) {
     const uint32_t known_flags =
         (uint32_t)BINRWIR_EXECUTION_PLAN_FLAG_HAS_TYPE_SPECIALIZATION |
@@ -56,7 +46,6 @@ static int binrwir_execution_plan_flags_are_invalid(uint32_t flags) {
     return (flags & ~known_flags) != 0U;
 }
 
-/* owned storage 是 plan 私有派生数组的唯一来源，尺寸与对齐必须自洽。 */
 static int binrwir_execution_plan_storage_is_invalid(
     const binrwir_execution_plan_t *plan) {
     if (plan->owned_storage_size == 0U) {

@@ -1,13 +1,3 @@
-/*
- * 组件：engine/compilation_repository 的实现
- * 作用：按 key（snapshot + 四个版本号）缓存完整 compilation，发放租约，并在
- *       版本失效时撤销新获取资格。
- * 联系：只有 route 调用 find/insert/release；compilation 由 BinRWIR Compiler
- *       产出并移交所有权。
- * 约束：只持有 compilation 的所有权与索引，不调用 vmkv/vmbin/JIT，不改写
- *       compilation。租约按条目计数：仍有租约的条目即使被失效也延迟释放，
- *       保证执行期间 Program、plan 与机器码同时有效。
- */
 
 #include "engine/compilation_repository.h"
 
@@ -15,7 +5,6 @@
 
 #include "binrwir_compiler/compiler.h"
 
-/* 一个缓存条目：key 的深拷贝、compilation 所有权、租约计数与失效标记。 */
 typedef struct runtimec_compilation_repository_entry {
     runtimec_compilation_repository_key_t key;
     char *function_key_text;
@@ -35,7 +24,6 @@ struct runtimec_compilation_repository_t {
     uint64_t next_insertion_order;
 };
 
-/* 租约 token 指回条目：release 只经 token 访问，不依赖调用方保留 key。 */
 typedef struct runtimec_compilation_repository_lease_token {
     runtimec_compilation_repository_t *repository;
     runtimec_compilation_repository_entry_t *entry;
@@ -64,7 +52,6 @@ static char *runtimec_compilation_repository_copy_text(
     return copy;
 }
 
-/* 两个 key 是否描述同一份 compilation：snapshot 逐字段 + 四个版本号。 */
 static bool runtimec_compilation_repository_key_matches(
     const runtimec_compilation_repository_key_t *left,
     const runtimec_compilation_repository_key_t *right) {
@@ -121,7 +108,6 @@ static bool runtimec_compilation_repository_key_is_valid(
            key->snapshot.source_revision.instance_identifier != 0U;
 }
 
-/* 条目的 snapshot 视图指向仓库自己拥有的文本副本，不是调用方的缓冲区。 */
 static void runtimec_compilation_repository_entry_reset_views(
     runtimec_compilation_repository_entry_t *entry) {
     entry->key.snapshot.function_key = runtimec_key_view_from_c_string(
@@ -130,7 +116,6 @@ static void runtimec_compilation_repository_entry_reset_views(
         runtimec_string_view_from_c_string(entry->source_position_text);
 }
 
-/* 释放一个条目持有的全部资源；调用方负责清 occupied。 */
 static void runtimec_compilation_repository_release_entry(
     runtimec_compilation_repository_t *repository,
     runtimec_compilation_repository_entry_t *entry) {
@@ -155,7 +140,6 @@ static void runtimec_compilation_repository_release_entry(
     memset(entry, 0, sizeof(*entry));
 }
 
-/* 失效条目的回收条件：已失效且没有租约在身。 */
 static void runtimec_compilation_repository_reclaim(
     runtimec_compilation_repository_t *repository) {
     for (size_t index = 0U; index < repository->capacity; index++) {
@@ -232,7 +216,6 @@ runtimec_status_t runtimec_compilation_repository_destroy(
         _Alignof(runtimec_compilation_repository_t));
 }
 
-/* 取一个可用槽位：优先空槽，其次按插入顺序淘汰最旧的无租约条目。 */
 static runtimec_compilation_repository_entry_t *
 runtimec_compilation_repository_acquire_slot(
     runtimec_compilation_repository_t *repository) {
@@ -291,7 +274,7 @@ runtimec_status_t runtimec_compilation_repository_find(
             continue;
         }
         if (entry->invalidated) {
-            /* 版本已失效：不得再发放租约，连地址一起作废。 */
+            
             *output_lookup_result =
                 RUNTIMEC_COMPILATION_REPOSITORY_LOOKUP_NOT_FOUND;
             return RUNTIMEC_STATUS_SUCCESS;
@@ -334,7 +317,7 @@ runtimec_status_t runtimec_compilation_repository_insert(
             error, RUNTIMEC_STATUS_INVALID, 6,
             "invalid compilation repository insert request");
     }
-    /* 同一 key 已存在且有效：拒绝重复插入，调用方应先 find 命中。 */
+    
     for (size_t index = 0U; index < repository->capacity; index++) {
         runtimec_compilation_repository_entry_t *existing =
             &repository->entries[index];
@@ -425,7 +408,7 @@ runtimec_status_t runtimec_compilation_repository_release(
     (void)runtimec_allocator_deallocate(
         &repository->allocator, token, sizeof(*token),
         _Alignof(runtimec_compilation_repository_lease_token_t));
-    /* 失效条目在最后一个租约归还时立刻回收；entry 由仓库持有，此时仍有效。 */
+    
     if (entry->invalidated && entry->lease_count == 0U) {
         runtimec_compilation_repository_release_entry(repository, entry);
         repository->occupied_count -= 1U;
@@ -440,7 +423,7 @@ runtimec_status_t runtimec_compilation_repository_invalidate(
     if (repository == NULL || snapshot == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    /* 只标记，不释放：仍有租约的条目必须活到执行结束。 */
+    
     for (size_t index = 0U; index < repository->capacity; index++) {
         runtimec_compilation_repository_entry_t *entry =
             &repository->entries[index];

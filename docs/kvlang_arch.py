@@ -1,23 +1,3 @@
-#!/usr/bin/env python3
-"""SVG generator for the kvlang ecosystem architecture figure (English and Chinese).
-
-The README embeds the PNG renders; this script is their source. Text is laid out with the
-real advance widths of the fonts below, so the SVG must be rendered with the same fonts:
-
-    Inter 4.1            https://github.com/rsms/inter/releases
-    JetBrains Mono 2.304 https://github.com/JetBrains/JetBrainsMono/releases
-    Noto Sans SC         https://github.com/notofonts/noto-cjk (Sans/SubsetOTF/SC)
-
-Run from the repository root with the font files in one directory:
-
-    for l in en zh; do
-        python3 docs/kvlang_arch.py --fonts ~/fonts --lang $l --output /tmp/kvlang-architecture.$l.svg
-        resvg --zoom 2 --skip-system-fonts --use-fonts-dir ~/fonts \
-            /tmp/kvlang-architecture.$l.svg docs/kvlang-architecture.$l.png
-    done
-
-Only the PNGs are committed.
-"""
 from __future__ import annotations
 
 import argparse
@@ -30,7 +10,6 @@ INK, SUB, MUTED, LINE, CANVAS, EDGE = "#0F172A", "#475569", "#64748B", "#E2E8F0"
 BLUE = {"bg": "#EFF6FF", "stroke": "#BFDBFE", "title": "#1E3A8A", "text": "#3B5B9A", "chip": "#1D4ED8"}
 VIOLET = {"bg": "#F5F3FF", "stroke": "#DDD6FE", "title": "#4C1D95", "text": "#6D28D9", "chip": "#6D28D9"}
 TEAL = {"bg": "#F0FDFA", "stroke": "#99F6E4", "title": "#134E4A", "text": "#0F766E", "chip": "#0F766E"}
-# GitHub linguist colours, so the language dots read the way they do on GitHub.
 LANG = {"Rust": "#DEA584", "C": "#555555", "C11": "#555555", "Go": "#00ADD8", "Python": "#3572A5"}
 
 TEXT = {
@@ -74,9 +53,7 @@ TEXT = {
     },
 }
 
-
 class Font:
-    """Advance widths from a TrueType/OpenType file (cmap formats 4 and 12, hmtx)."""
 
     def __init__(self, path: Path):
         data = path.read_bytes()
@@ -135,7 +112,6 @@ class Font:
             return None
         return self.adv[min(gid, len(self.adv) - 1)] * size / self.upm
 
-
 class Fonts:
     def __init__(self, d: Path):
         self.sans = {400: Font(d / "Inter-Regular.ttf"), 500: Font(d / "Inter-Medium.ttf"),
@@ -145,11 +121,6 @@ class Fonts:
                     600: Font(d / "NotoSansSC-Medium.otf"), 700: Font(d / "NotoSansSC-Bold.otf")}
 
     def runs(self, text: str, mono: bool = False) -> list[tuple[str, str]]:
-        """Split text into (family, chars) runs: CJK in Noto Sans SC, the rest in Inter or JetBrains Mono.
-
-        Choosing the family per run, rather than leaving fallback to the renderer, keeps CJK at the
-        requested weight and keeps Latin punctuation such as the middle dot at its Latin width.
-        """
         out: list[tuple[str, str]] = []
         for ch in text:
             fam = "cjk" if is_cjk(ch) else ("mono" if mono else "sans")
@@ -169,15 +140,12 @@ class Fonts:
             total += sum(f.width(ch, size) or size * 0.5 for ch in chars)
         return total
 
-
 def is_cjk(ch: str) -> bool:
     cp = ord(ch)
     return 0x2E80 <= cp <= 0x9FFF or 0xF900 <= cp <= 0xFAFF or 0xFF00 <= cp <= 0xFFEF or 0x3000 <= cp <= 0x303F
 
-
 def esc(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
 
 class Figure:
     def __init__(self, fonts: Fonts, lang: str):
@@ -187,12 +155,10 @@ class Figure:
         self.out.append(s)
 
     def text(self, x, y, s, size=13, weight=400, color=INK, anchor="start", mono=False, spacing=0.0) -> float:
-        """Draw text with its baseline at y; return its width."""
         w = self.f.width(s, size, weight, mono) + spacing * max(len(s) - 1, 0)
         sx = x - w / 2 if anchor == "middle" else (x - w if anchor == "end" else x)
         ls = f' letter-spacing="{spacing}"' if spacing else ""
         family = {"sans": "Inter", "mono": "JetBrains Mono", "cjk": "Noto Sans SC"}
-        # One <text> per run: resvg renders a Latin tspan bold when a CJK tspan shares its <text>.
         for fam, chars in self.f.runs(s, mono):
             self.add(f'<text x="{sx:.1f}" y="{y:.1f}" font-family="{family[fam]}" font-size="{size}" '
                      f'font-weight="{weight}" fill="{color}"{ls} xml:space="preserve">{esc(chars)}</text>')
@@ -206,7 +172,6 @@ class Figure:
                  f'stroke-width="{sw}"{d}{f}/>')
 
     def pill(self, x, y, lang) -> float:
-        """Language pill with its left edge at x and vertical centre at y; return its width."""
         w = self.f.width(lang, 11.5, 500) + 30
         self.rect(x, y - 10, w, 20, r=10, fill="#FFFFFF", stroke=LINE)
         self.add(f'<circle cx="{x + 11}" cy="{y}" r="4" fill="{LANG[lang]}"/>')
@@ -220,7 +185,6 @@ class Figure:
         return w
 
     def card(self, x, y, w, h, title, lang, lines, shadow=True):
-        """White card: title + language pill on the first row, then text rows."""
         self.rect(x, y, w, h, shadow=shadow)
         top = y + h / 2 - (22 + 22 * len(lines)) / 2 + 16
         tw = self.text(x + 20, top, title, 16, 600, INK)
@@ -238,7 +202,6 @@ class Figure:
                  f' stroke-linejoin="round"{da}{mk}/>')
 
     def label(self, x, y, s, color=MUTED, size=11.5, mono=False, bg=CANVAS):
-        """Small label centred on (x, y) with a background that interrupts the line behind it."""
         w = self.f.width(s, size, 500, mono) + 12
         self.add(f'<rect x="{x - w / 2:.1f}" y="{y - 9}" width="{w:.1f}" height="18" rx="9" fill="{bg}"/>')
         self.text(x, y + size * 0.36, s, size, 500, color, "middle", mono)
@@ -256,7 +219,6 @@ class Figure:
         self.rect(0.5, 0.5, W - 1, H - 1, r=20, fill=CANVAS, stroke=LINE)
         self.text(40, 52, t["title"], 22, 700, INK)
 
-        # Legend, right-aligned on the title row.
         x = W - 40
         for key, color, dash in (("leg_planned", "#CBD5E1", "2 4"), ("leg_handoff", EDGE, "6 4"), ("leg_link", EDGE, None)):
             w = self.f.width(t[key], 12, 400)
@@ -264,7 +226,6 @@ class Figure:
             self.arrow([(x - w - 40, 46), (x - w - 10, 46)], color=color, dash=dash)
             x -= w + 40 + 24
 
-        # Host runtime: byteseek links layout and runtime-c.
         hx, hy, hw, hh = 40, 104, 720, 260
         self.rect(hx, hy, hw, hh, r=18, fill=BLUE["bg"], stroke=BLUE["stroke"], sw=1.5)
         tw = self.text(hx + 24, hy + 36, "byteseek", 19, 700, BLUE["title"])
@@ -283,7 +244,6 @@ class Figure:
         for fam in ("term", "json", "http", "networld", "kvlang·*"):
             x += self.chip(x, sy, fam, BLUE["chip"], BLUE["stroke"]) + 8
 
-        # Extension runtimes in separate processes.
         ex, ew = 800, 440
         self.rect(ex, hy, ew, hh, r=18, fill=VIOLET["bg"], stroke=VIOLET["stroke"], sw=1.5)
         tw = self.text(ex + 24, hy + 36, t["ext_title"], 19, 700, VIOLET["title"])
@@ -291,7 +251,6 @@ class Figure:
         self.card(ex + 24, cy, ew - 48, 84, "json-rwirext", "Go", [(t["json_1"], True)])
         self.card(ex + 24, cy + 100, ew - 48, 84, "numpy / op-gpu", "Python", [(t["numpy_1"], False)])
 
-        # kvspace: the one store every runtime talks to.
         ky, kh = 428, 96
         bot = hy + hh
         for x0 in (hx + 24 + cw / 2, hx + hw - 24 - cw / 2, ex + ew - 120):
@@ -314,7 +273,6 @@ class Figure:
         self.text(1216, ky + 38, t["kv_abi_1"], 12.5, 400, TEAL["title"], "end", mono=True)
         self.text(1216, ky + 72, t["kv_abi_2"], 12, 400, TEAL["text"], "end")
 
-        # Implementations, selected by DSN.
         iy, ih = 564, 76
         for x0 in (330, 950):
             self.arrow([(x0, ky + kh), (x0, iy - 2)])
@@ -330,7 +288,6 @@ class Figure:
                           TEAL["stroke"] if not dash else "#CBD5E1", dash=dash)
                 x -= 8
 
-        # Dependencies and backends.
         by, bh = 704, 64
         self.text(64, by - 14, t["libs"], 11.5, 600, MUTED, spacing=0.6)
         self.text(684, by - 14, t["storage"], 11.5, 600, MUTED, spacing=0.6)
@@ -362,7 +319,6 @@ class Figure:
         return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}">'
                 + defs + "".join(self.out) + "</svg>\n")
 
-
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--fonts", type=Path, required=True, help="directory with the font files listed above")
@@ -370,7 +326,6 @@ def main() -> None:
     ap.add_argument("--output", type=Path, required=True)
     a = ap.parse_args()
     a.output.write_text(Figure(Fonts(a.fonts.expanduser()), a.lang).build(), encoding="utf-8")
-
 
 if __name__ == "__main__":
     main()

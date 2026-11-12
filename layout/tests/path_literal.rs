@@ -1,12 +1,7 @@
-//! 路径字面量：不带引号的 `/...` 是路径，带引号的 `"..."` 是字符串（不向后兼容）。
-//! 规范：01-词法/05-绝对路径字面量、04-layout语义/10-常见诊断。
-//! 引号串单独作写槽 → `string "…" is not a path; absolute paths must be unquoted`；
-//! 引号 base + 成员链（`"/x"·*k`）是显式「字符串作路径」形态，仍接受。
 
 use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 use std::process::Command;
 
-/// store 守卫：离开作用域时删目录。先于 `Kv` 声明，故后 drop。
 struct TempStore(String);
 
 impl Drop for TempStore {
@@ -41,7 +36,7 @@ fn unquoted_path_write_is_kept() {
 
 #[test]
 fn quoted_path_in_write_slot_is_rejected() {
-    // 走 CLI 才能断言逐字诊断（规范 04-layout语义/10-常见诊断）。
+    
     let bin = env!("CARGO_BIN_EXE_kvlanglayout");
     let file = std::env::temp_dir().join(format!(
         "kvlanglayout_pathlit_cli_{}.kv",
@@ -103,7 +98,7 @@ fn quoted_string_read_is_a_string_value() {
 
 #[test]
 fn single_quoted_is_a_bare_literal_path() {
-    // 单引号是「裸字面量，按上下文解释」（01-词法/07）：写槽位置按路径。
+    
     let (_store, mut kv) = fresh_kv("single");
     compile(
         &mut kv,
@@ -125,7 +120,7 @@ fn quoted_string_assignment_is_fine() {
 
 #[test]
 fn raw_quoted_path_in_write_slot_is_rejected() {
-    // r"…" 是字符串（quote == b'r'）；判据写成 == b'"' 会漏掉它，必须有这条钉子。
+    
     let bin = env!("CARGO_BIN_EXE_kvlanglayout");
     let file = std::env::temp_dir().join(format!(
         "kvlanglayout_pathlit_raw_{}.kv",
@@ -154,7 +149,7 @@ fn raw_quoted_path_in_write_slot_is_rejected() {
 
 #[test]
 fn unquoted_path_member_base_is_allowed() {
-    // 无引号路径 base + 成员链：重排顺序时必须保持接受。
+    
     let (_store, mut kv) = fresh_kv("pathbase");
     compile(
         &mut kv,

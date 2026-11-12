@@ -1,52 +1,3 @@
-#!/usr/bin/env python3
-"""判 kvspace 的 XValue head 是 8 字节还是 16 字节布局。
-
-为什么需要它：`lib/` 里可能同时存在新旧两份产物，装错位置或加载到旧的那份时，
-真后端用例会红，但**红的原因不是代码错**。先判库，再判代码。
-
-为什么必须判两份：**布局由后端决定，不是前端**。`libkvspace.so` 只是个转发壳
-（`kvspace/src/frontend.c`），真正造 wire / 读 head 的是 `libkvspace-c`（shm）
-或 `libkvspace_durable`。前端重建、后端没重建时，探针只看前端会给出「16 字节，
-没问题」的假结论——这条是用一次完整的红换来的。
-
-判据不看符号是否存在（两版都有 `kvlangXvalueHeadNewSlack`），而是直接造一个值
-看字节：
-
-    8 字节布局 : [len:u48][storetype][ptr]  body  [attr_len:u16][records]
-    16 字节布局: [bodylen:u64][attrslen:u16][padding:6]  body  [records]
-
-后端查找顺序的**依据是规范条款** `workspace/622/routing/README.md` §十
-「后端查找顺序（规范性条款）」，不是 `frontend.c` 的实现：
-
-    1. <前端目录>/<soname>
-    2. <前端目录>/kvspace/<soname>
-    3. <前端目录>/../kvspace/<soname>
-    4. /usr/lib/kvspace/<soname>（macOS: /usr/local/lib/kvspace/<soname>）
-
-第一条存在者即所用。
-
-**为什么依据是条款而不是实现**：先前本文件抄 `frontend.c:backend_paths`，于是实现与
-探针「一致」——但两边同时错也无人能发现，那是自证而不是独立真值。改成对照条款后，
-`frontend.c` 是实现、本文件是校验，两者不一致即漂移；两者一致但都违反条款，由规范
-检查发现。
-
-**已知边界**：条款本身仍需人核（文字不会自己发现错误）。本工具不解析 C 源码来自动比对
-实现与条款——那条路太脆，且会把「解析失败」伪装成「实现合规」。
-
-用法:
-    python3 tools/check_kvspace_head_layout.py [--frontend PATH] [--soname NAME]
-    python3 tools/check_kvspace_head_layout.py --selftest
-
-默认前端 $HOME/github.com/array2d/kvlang/lib/libkvspace.so，默认 soname
-libkvspace-c.so.1（shm 后端，即默认后端）。
-
-退出码：0 = 前端与后端都是 16 字节；1 = 至少一个仍是 8 字节（真后端必红，红得对）；
-2 = 判不出（缺文件 / 构造失败 / 布局无法识别）。
-
-`--selftest` 另有一组语义：它检验的是**本工具**，不是被探的库。0 = 自测通过，
-非零 = 自测失败；编译不出 stub 库同样算自测失败，因为那是「工具跑不了」，不是
-「布局判不出」，不能伪装成 exit 2。
-"""
 
 from __future__ import annotations
 
@@ -60,14 +11,11 @@ import sys
 import tempfile
 
 EXPECTED_BODY = 2
-# `body_cap` 是 `kvspaceWriteNewPlace` 的**物理分配**参数：wire 上不表达容量，所以
-# 探针用 body_cap > body_len 写一条，再看 wire 里的 bodylen 到底是 2 还是 80。
-# 这是把「wire 仍带容量」的旧后端抓出来的唯一手段——构造器已无 capacity 参数。
 PROBE_CAPACITY = 80
 PROBE_LANGTYPE = "int64"
-LANGTYPE_RECORD_BYTES = 3 + len(PROBE_LANGTYPE)  # tag + u16 len + data
-REALLEN_RECORD_BYTES = 11  # tag + u16 len(=8) + u64 value（旧格式的 tag 2）
-ZERO_PADDING = b"\x00" * 6  # head offset 10-15：恒为零
+LANGTYPE_RECORD_BYTES = 3 + len(PROBE_LANGTYPE)
+REALLEN_RECORD_BYTES = 11
+ZERO_PADDING = b"\x00" * 6
 
 RESULT_SIXTEEN = "16-byte"
 RESULT_SIXTEEN_LAYOUT_BYTE = "16-byte-layout-byte"
@@ -79,24 +27,12 @@ RESULT_SKIPPED = "skipped"
 EXPECTED_HEAD_LEN = 16
 LEGACY_HEAD_LEN = 8
 
-
 def classify_wire(data: bytes) -> tuple[str, str]:
-    """按字节判一条 wire 的 head 是哪一代。返回 (verdict, detail)。
-
-    **判据只有一处**：`probe_library`（构造器造的 wire）与 `probe_backend`（后端
-    读回的 wire）走同一段分类，否则两处判据迟早对「尾部残余字节」这类边角判不同。
-
-    现行头：[bodylen:u64][attrslen:u16][padding:6]，bodylen 恒为有效字节数，
-    没有 tag 2。上一代头有两处可辨认的痕迹，都比现行头多东西：
-      - offset 12 是 `layout` 字节而不是 padding 的一部分；
-      - bodylen 是容量（> 有效长度），且带 tag 2 reallen。
-    """
     if len(data) < EXPECTED_HEAD_LEN:
         return RESULT_UNKNOWN, f"wire too short: {len(data)} bytes"
     bodylen = int.from_bytes(data[0:8], "little")
     attrslen = int.from_bytes(data[8:10], "little")
 
-    # 旧 8 字节布局：head 8 + body + u16 attr 长度 + tag 记录。
     if (int.from_bytes(data[0:6], "little") == EXPECTED_BODY and
             len(data) == LEGACY_HEAD_LEN + EXPECTED_BODY + 2 +
             LANGTYPE_RECORD_BYTES):
@@ -108,7 +44,6 @@ def classify_wire(data: bytes) -> tuple[str, str]:
             f"bodylen={bodylen} attrslen={attrslen} total={len(data)} "
             "matches no known layout")
 
-    # 上一代：bodylen 是容量，有效长度在 attr tag 2。
     if bodylen != EXPECTED_BODY:
         reallen = data[EXPECTED_HEAD_LEN + bodylen + LANGTYPE_RECORD_BYTES:
                        EXPECTED_HEAD_LEN + bodylen + LANGTYPE_RECORD_BYTES +
@@ -120,9 +55,6 @@ def classify_wire(data: bytes) -> tuple[str, str]:
                 f"bodylen={bodylen} is a capacity, reallen="
                 f"{int.from_bytes(reallen[3:11], 'little')} in attr tag 2")
 
-    # 上一代：offset 12 是 layout 字节。现行头该位置属于 padding，必须为零，
-    # 而 layout 在「容量 == 长度」时为 0——所以只能靠 bodylen 恒等来判，
-    # 单看 offset 12 会假绿。这里只在既有两代格式都对不上时才用它指认。
     if data[10:16] != ZERO_PADDING:
         if (data[10:12] == b"\x00\x00" and data[12] in (0, 1) and
                 data[13:16] == b"\x00\x00\x00"):
@@ -138,13 +70,7 @@ def classify_wire(data: bytes) -> tuple[str, str]:
     return RESULT_UNKNOWN, (f"bodylen={bodylen} attrslen={attrslen} "
                             f"total={len(data)} matches no known layout")
 
-
 def probe_library(library_path: str) -> str:
-    """构造一条值、按字节判 head 代次。返回 RESULT_*，并打印证据。
-
-    构造器已无 capacity 参数，所以这条只判「16 vs 8」与「padding 是否为零」；
-    「bodylen 是不是容量」那条判据只有后端写路径能触发（见 `probe_backend`）。
-    """
     try:
         library = ctypes.CDLL(library_path)
         new_slack = library.kvlangXvalueHeadNewSlack
@@ -173,9 +99,7 @@ def probe_library(library_path: str) -> str:
     print(f"  layout: {verdict} ({detail})")
     return verdict
 
-
 def backend_candidates(frontend_path: str, soname: str) -> list[str]:
-    """复刻 frontend.c 的 backend_paths：四条候选，按序。"""
     directory = os.path.dirname(os.path.abspath(frontend_path))
     candidates = [
         os.path.join(directory, soname),
@@ -188,23 +112,10 @@ def backend_candidates(frontend_path: str, soname: str) -> list[str]:
         candidates.append(os.path.join("/usr/lib/kvspace", soname))
     return candidates
 
-
-# ---------------------------------------------------------------------------------------
-# 后端覆盖：head 布局由**后端**决定，前端只是个转发壳。只探 shm 会让「durable 还是 8 字节」
-# 在验收阶段才暴露。这里对每个能被前端装载的后端各写一个值、读回原始字节判布局。
-#
-# 判据是 `kvspaceGet` 读回的**整条 wire 的字节**，不是某个后端的私有导出，也不是
-# `headlen` 字段：后者来自 `kvspaceGetHead` + 一个手抄的 head 结构体，那一对已按
-# `kvspace/include/kvspace/kvspace.h` 删除（手抄结构体是第二份字段真相，字段一改副本
-# 不跟着变）。`kvspaceGet` 是两个后端都实现的 C ABI，返回值含 head，足够判布局。
-# ---------------------------------------------------------------------------------------
-# DSN 里给的是**文件路径**不是目录：shm 后端会自己拼 `.sbo.head` 等后缀，
-# 直接传一个已存在的目录会被 O_RDWR 打开成功、随后格式校验失败。
 BACKEND_CASES = (
     ("shm", "shm://{store}/store"),
     ("fs", "fs://{store}/store"),
 )
-
 
 def _load_frontend(frontend_path: str):
     library = ctypes.CDLL(frontend_path)
@@ -225,19 +136,8 @@ def _load_frontend(frontend_path: str):
         ctypes.POINTER(ctypes.c_uint32)]
     return library
 
-
 def probe_backend(frontend_path: str, scheme: str, dsn_template: str,
                   backend_path: str | None) -> tuple[str, str]:
-    """Write one value through the frontend and read the raw wire back.
-
-    值不是裸 body：后端会把它当 wire 解析并按各自 head 布局校验。所以**让后端自己造**
-    ——用 `kvspaceWriteNewPlace`，这是两个后端都实现的 C ABI 入口。
-
-    **判据是读回的原始字节，不是 `headlen` 字段。**
-    原先用 `kvspaceGetHead` 的 `headlen`（8 或 16）——那个「解码结构体 + 取头函数」
-    已按 `kvspace/include/kvspace/kvspace.h` 删除（手抄结构体是第二份字段真相）。
-    现在用 `kvspaceGet` 拿整条 wire，直接按字节判布局，与 `probe_library` 同一套判据。
-    """
     if backend_path is None:
         return RESULT_SKIPPED, "backend library is not built"
     try:
@@ -272,13 +172,6 @@ def probe_backend(frontend_path: str, scheme: str, dsn_template: str,
             library.kvspaceClose(handle)
 def run_main(arguments: list[str],
              capture_output: bool = False) -> tuple[int, str, str]:
-    """Run main with captured stdout so the self-test can read the exit status.
-
-    `main` follows the `sys.argv` shape, so arguments[0] is the program name and is
-    skipped by the option loop; the helper inserts a placeholder so callers can pass only
-    the real arguments. Returns (status, stdout, stderr); without capture the output still
-    goes to the caller.
-    """
     buffer = io.StringIO()
     error = io.StringIO()
     argv = ["check_kvspace_head_layout.py"] + arguments
@@ -289,15 +182,6 @@ def run_main(arguments: list[str],
         status = main(argv)
     return status, buffer.getvalue(), error.getvalue()
 
-
-# ---------------------------------------------------------------------------------------
-# Self-test. The probe's verdict is only trustworthy if it can reach each of its three
-# outcomes; a probe that always answers "16-byte" looks identical to a correct one on a
-# correct tree. Fixtures build real stub libraries with the C compiler — the probe judges
-# bytes produced by a library, so a Python fake would test the fake instead of the probe.
-# ---------------------------------------------------------------------------------------
-# 构造器 stub：签名与现行头一致（无 capacity 参数）。三个宏控制它写哪一代 wire——
-# 探针判的是**字节**，所以每个分支必须真的按各自格式写，否则测的是 stub 不是探针。
 STUB_SOURCE = """\
 #include <stdint.h>
 #include <stdlib.h>
@@ -385,10 +269,6 @@ int kvlangXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
 }
 """
 
-# 最小后端：补齐前端会 dlsym 的全部符号。`kvspaceWriteNewPlace` 写出来的字节决定
-# 探针判什么，所以它必须真的按目标代的格式写，否则测的是 stub 而不是探针。
-#   LEGACY_CAPACITY_FORM —— bodylen 记容量、attr 尾带 tag 2 reallen
-#   LEGACY_LAYOUT_BYTE   —— offset 12 是 layout 字节而不是 padding
 STUB_BACKEND = """/* 最小后端 */
 #include <stdint.h>
 #include <stdlib.h>
@@ -504,8 +384,6 @@ int kvspaceGet(void *h, const char *key, int resolve, uint8_t **out,
 }
 """
 
-# 自测前端：既要能被 probe_library 直接探（导出构造），又要能转发到某个后端
-# （导出 connect/close/write/get）。它把后端选在环境变量里，避免自测依赖 dlopen 路径。
 STUB_FRONTEND = """\
 #include <dlfcn.h>
 #include <stdint.h>
@@ -629,10 +507,8 @@ int kvlangXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
 }
 """
 
-
 class SelftestFailure(Exception):
     pass
-
 
 def compile_stub(directory: str, name: str, source: str,
                  definitions: tuple[str, ...] = ()) -> str:
@@ -655,11 +531,9 @@ def compile_stub(directory: str, name: str, source: str,
             f"cannot run the self-test: building {name} failed:\n{completed.stdout}")
     return library_path
 
-
 def expect(condition: bool, message: str, failures: list[str]) -> None:
     if not condition:
         failures.append(message)
-
 
 def run_selftest() -> int:
     failures: list[str] = []
@@ -686,8 +560,6 @@ def run_selftest() -> int:
             symbol_missing = compile_stub(directory, "libnosym", STUB_WITHOUT_SYMBOL)
             unrecognised = compile_stub(directory, "libodd", STUB_UNRECOGNISED)
 
-            # 1. 纯函数级：probe_library 必须把两版布局区分开。
-            #    探的是「自己造 wire 的库」，所以用前端 stub（它导出构造函数）。
             expect(probe_library(frontend) == RESULT_SIXTEEN,
                    "probe_library(16-byte constructor) must be 16-byte", failures)
             expect(probe_library(unrecognised) == RESULT_UNKNOWN,
@@ -696,7 +568,6 @@ def run_selftest() -> int:
                    "probe_library(library without the symbol) must be unknown", failures)
             expect(probe_library(legacy_eight) == RESULT_EIGHT,
                    "probe_library(8-byte constructor) must be 8-byte", failures)
-            # 两处「上一代痕迹」必须各自能判出来——判不出「旧」就是假绿。
             expect(probe_library(legacy_constructor) == RESULT_SIXTEEN_LAYOUT_BYTE,
                    "probe_library(a head still carrying the `layout` byte) must "
                    "report the removed byte", failures)
@@ -704,7 +575,6 @@ def run_selftest() -> int:
                    "probe_library(a head whose bodylen is a capacity) must report "
                    "the capacity form", failures)
 
-            # 2. 判据核心：写值 + 读 headlen，按后端指认。
             verdict, detail = probe_backend(
                 frontend, "shm", "shm://{store}/store",
                 os.path.join(directory, "backend16.so"))
@@ -730,8 +600,6 @@ def run_selftest() -> int:
             expect(verdict == RESULT_SKIPPED,
                    f"an unbuilt backend must be skipped, got {verdict!r}", failures)
 
-            # 3. 编排层：main 必须遍历**所有**后端，不是只探第一个。
-            #    只在 probe_backend 层测，把 BACKEND_CASES 截成一条也不会红。
             cases_seen: list[str] = []
             original = probe_backend
 
@@ -751,7 +619,6 @@ def run_selftest() -> int:
             expect(status == 0,
                    f"all-16-byte backends must exit 0, got {status}", failures)
 
-            # 4. 红时必须**指认是哪个后端**：只红不指认等于没定位根因。
             def stale(frontend_path, scheme, dsn_template, backend_path):
                 return RESULT_EIGHT, "headlen=8"
 
@@ -780,20 +647,16 @@ def run_selftest() -> int:
           "(both layouts, per-backend verdicts, skip path)")
     return 0
 
-
 BACKEND_SONAMES = {
     "shm": "libkvspace-c.dylib" if sys.platform == "darwin" else "libkvspace-c.so.1",
     "fs": "libkvspace_durable.dylib" if sys.platform == "darwin"
     else "libkvspace_durable.so.1",
 }
 
-
 def backend_library(frontend_path: str, scheme: str) -> str | None:
-    """Locate a backend the same way the frontend would: four candidates, first hit."""
     soname = BACKEND_SONAMES[scheme]
     return next((candidate for candidate in backend_candidates(frontend_path, soname)
                  if os.path.exists(candidate)), None)
-
 
 def main(arguments: list[str]) -> int:
     frontend_path = os.path.expanduser(
@@ -814,8 +677,6 @@ def main(arguments: list[str]) -> int:
         return 2
 
     print(f"frontend: {frontend_path}")
-    # 前端自己也是个 .so，但它只是转发壳：真正造 wire 的是后端。前端的结果照样打印，
-    # 但不作为判据——判据是每个后端的 head 大小。
     print(f"  frontend itself: {probe_library(frontend_path)}")
 
     verdicts: list[tuple[str, str, str, str | None]] = []
@@ -851,7 +712,6 @@ def main(arguments: list[str]) -> int:
                   f"{BACKEND_SONAMES[scheme]} next to the frontend")
     print(f"verdict : {len(judged)} backend(s) use the 16-byte head")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))

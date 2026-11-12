@@ -9,11 +9,6 @@
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "failed: %s\n", #x); return 1; } } while (0)
 
-/* 固定 head 16 字节 [bodylen:u64@0][attrslen:u16@8][padding:6@10-15]，
-   body 偏移恒 16，attr 区紧随 body 且无自带长度前缀。单 key 整体。 */
-
-/* 校验 head 与 attr 区：head 的 bodylen/attrslen/padding 正确，
-   total = 16+bodylen+attrslen；langtype 记录存在且与 lt 一致。 */
 static int attr_ok(const uint8_t *value, uint32_t len, uint64_t body_len,
                    const char *langtype) {
     size_t lt = strlen(langtype);
@@ -86,21 +81,20 @@ int main(void) {
     free(value);
 
     CHECK(kvlangXvalueNewPtr("int64", "/x", &value, &len) == 0);
-    /* langtype 记录带 `*` 前缀：record = "*int64"（6 字节）。 */
+    
     CHECK(len == KVSPACE_XVALUE_HEAD_LEN + 2 + 3 + 6);
     memcpy(&h, value, sizeof h);
     CHECK(kvspaceXvalueHeadLen(&h) == 2);
     CHECK(memcmp(value + KVSPACE_XVALUE_HEAD_LEN, "/x", 2) == 0);
     CHECK(attr_ok(value, len, 2, "*int64"));
     free(value);
-    /* 空 kindexpr = 不约束：Ptr 目标允许为空；`any` 不是类型名，创建即拒。 */
+    
     CHECK(kvlangXvalueNewPtr("", "/x", &value, &len) == 0);
-    /* 空 kindexpr ⇒ 裸 `*` 一条记录。 */
+    
     CHECK(len == KVSPACE_XVALUE_HEAD_LEN + 2 + 3 + 1);
     memcpy(&h, value, sizeof h);
     CHECK(kvspaceXvalueHeadLen(&h) == 2);
-    /* **空 kindexpr 时仍写裸 `*`**：指针形态只有一个落点（langtype 前缀），
-       构造器自己补——否则 runtimec 的 form 判据会在运行期判不出 POINTER。 */
+    
     CHECK(attr_ok(value, len, 2, "*"));
     free(value);
     CHECK(kvlangXvalueNewPtr("any", "/x", &value, &len) != 0);

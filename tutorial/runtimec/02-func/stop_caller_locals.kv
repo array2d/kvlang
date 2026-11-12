@@ -1,11 +1,4 @@
-// stop_caller_locals: handoff Stop (e.g. println in a direct or transitive callee) must
-// flush caller locals and use kvspace frames for callers that may transitively Stop.
-// Expected output:
-//   in f r= 8
-//   in g r= 8
-//   x= 5  y= 7  z= 8
-//   leaf n= 6
-//   x= 5  w= 16
+
 rwfunc f(*int64 #n) -> (*int64 #r) {
 	*r = *n + 1
 	println("in f r=", *r)

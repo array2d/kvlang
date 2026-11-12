@@ -1,10 +1,4 @@
-// 期望阻塞: debugger 由 byteseek stdlib 提供，本 runner 不装载 stdlib
-// pauses: debugger() 恒等价于 vthread·setstatus("paused")
-// 规范依据: 05-runtime语义/05-runtimec内建 §调试；02-kvspace模型/10-系统变量 §debugger()
-// 语义: runtime 无调试/非调试模式之分 —— debugger() 恒置 ‥status=paused 并停止执行，
-//       其后的指令不运行（须由外部驱动改回 running 才恢复）
-// 期望输出:
-//   before
+
 rwfunc test() -> () {
 	println("before")
 	debugger()

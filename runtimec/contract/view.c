@@ -1,9 +1,3 @@
-/*
- * 组件：contract/view 的实现
- * 作用：视图/缓冲的零分配构造与形状校验。
- * 联系：被 host 与 vmbin/vmkv/BinRWIR Compiler 的公共契约共同使用；本文件不
- *       依赖任何上层组件，也不触碰 kvspace。
- */
 
 #include "contract/view.h"
 

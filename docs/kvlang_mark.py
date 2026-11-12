@@ -1,19 +1,3 @@
-#!/usr/bin/env python3
-"""Parametric SVG generator for the kvlang k-v mark.
-
-The geometry is described by six points and five lines:
-
-    l14: p1 -> p4   left stem
-    l23: p2 -> p3   tapered upper arm
-    l35: p3 -> p5   tapered lower arm
-    l46: p4 -> p6   left side of v
-    l56: p5 -> p6   right side of v
-
-Run from the repository root:
-
-    python3 docs/kvlang_mark.py --output docs/kvlang-mark-generated.svg
-    python3 docs/kvlang_mark.py --print-geometry
-"""
 
 from __future__ import annotations
 
@@ -24,16 +8,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
-
 @dataclass(frozen=True)
 class Point:
-    """A structural midpoint with a horizontal left-right extent."""
 
     name: str
     x: float
     y: float
     width: float
-
 
 @dataclass(frozen=True)
 class Line:
@@ -41,51 +22,8 @@ class Line:
     start: str
     end: str
 
-
 @dataclass(frozen=True)
 class MarkParams:
-    """Parameters that define the complete mark.
-
-    Args:
-        p14_width:
-            Width of the horizontal terminals at p1 and p4. This is also the
-            width of the vertical stem and the arm width where the chevron
-            joins the stem.
-        p25_width:
-            Width of the horizontal terminals at p2 and p5. A value smaller
-            than ``p14_width`` makes the k arms taper toward their ends.
-        p3_width:
-            Width of the horizontal terminal at p3. Defaults to ``p14_width``
-            so the two k arms begin at the same width as the stem.
-        p6_width:
-            Width of the horizontal terminal at p6. Defaults to ``p14_width``
-            so p6 matches p1 and p4. A positive value prevents the two sides
-            of the v from collapsing into a zero-width point.
-        k_height_ratio:
-            K height divided by the horizontal distance p4--p5.
-        v_aspect_ratio:
-            V height divided by the horizontal distance p4--p5.
-        background_color, k_color, v_color:
-            Optional explicit SVG fill colors. When background_color or
-            v_color is omitted, it is derived from base_color.
-        base_color:
-            Shared RGB source for the default background and V colors.
-        background_transparency, v_transparency:
-            Transparency where 0 is opaque and 1 is fully transparent. Default
-            tones are composited over white independently, so the more opaque
-            background is darker than the lighter V.
-        canvas_size:
-            Width and height of the square SVG canvas.
-        span_ratio:
-            Horizontal distance p4--p5 divided by ``canvas_size``.
-        logo_scale:
-            Uniform scale for the mark inside the canvas. Values above 1 zoom
-            the mark and reduce its outer margins without changing ratios.
-        fit_padding:
-            Minimum margin, in SVG units, retained around the rendered mark.
-            If the requested scale exceeds the available space, the geometry is
-            reduced uniformly around the canvas center until it fits.
-    """
 
     p14_width: float = 48.0
     p25_width: float = 44.0
@@ -126,7 +64,6 @@ class MarkParams:
         if self.fit_padding < 0 or self.fit_padding * 2 >= self.canvas_size:
             raise ValueError("fit_padding must leave a positive drawable area")
 
-
 @dataclass(frozen=True)
 class MarkGeometry:
     canvas_size: int
@@ -146,14 +83,7 @@ class MarkGeometry:
             "lines": [asdict(line) for line in self.lines],
         }
 
-
 def build_geometry(params: MarkParams) -> MarkGeometry:
-    """Create the six-point, five-line geometry from the high-level params.
-
-    The mark is centered on the canvas. P1/P4 and P2/P5 share their respective
-    x coordinates. P3 is centered on the stem at the K midpoint. P6 is centered
-    between the two V terminals. Every point has a horizontal width.
-    """
 
     params.validate()
     size = params.canvas_size
@@ -214,13 +144,11 @@ def build_geometry(params: MarkParams) -> MarkGeometry:
     )
     return MarkGeometry(size, span, k_height, v_height, points, lines)
 
-
 def _format_number(value: float) -> str:
     rounded = round(value, 4)
     if rounded == int(rounded):
         return str(int(rounded))
     return f"{rounded:.4f}".rstrip("0").rstrip(".")
-
 
 def _parse_hex_color(color: str) -> tuple[int, int, int]:
     value = color.removeprefix("#")
@@ -228,9 +156,7 @@ def _parse_hex_color(color: str) -> tuple[int, int, int]:
         raise ValueError(f"expected a six-digit hex color, got {color!r}")
     return tuple(int(value[index : index + 2], 16) for index in (0, 2, 4))
 
-
 def composite_over_white(color: str, transparency: float) -> str:
-    """Resolve an RGB + transparency color against a white backdrop."""
 
     if not 0 <= transparency <= 1:
         raise ValueError("transparency must be between 0 and 1")
@@ -241,9 +167,7 @@ def composite_over_white(color: str, transparency: float) -> str:
     )
     return "#" + "".join(f"{channel:02X}" for channel in channels)
 
-
 def effective_colors(params: MarkParams) -> tuple[str, str, str]:
-    """Return effective background, K, and V fill colors."""
 
     background = (
         params.background_color
@@ -257,13 +181,10 @@ def effective_colors(params: MarkParams) -> tuple[str, str, str]:
     )
     return background, params.k_color, value
 
-
 def horizontal_span(point: Point) -> tuple[tuple[float, float], tuple[float, float]]:
-    """Return the left and right endpoints of a point's horizontal width."""
 
     half = point.width / 2.0
     return (point.x - half, point.y), (point.x + half, point.y)
-
 
 def _segments_cross(
     a: tuple[float, float],
@@ -283,9 +204,7 @@ def _segments_cross(
         and orientation(c, d, a) * orientation(c, d, b) < 0
     )
 
-
 def line_polygon(points: dict[str, Point], line: Line) -> tuple[tuple[float, float], ...]:
-    """Return a quad connecting two horizontal point widths."""
 
     start = points[line.start]
     end = points[line.end]
@@ -308,7 +227,6 @@ def line_polygon(points: dict[str, Point], line: Line) -> tuple[tuple[float, flo
         raise ValueError(f"{line.name} produces a self-intersecting polygon")
     return polygon if signed_area >= 0 else tuple(reversed(polygon))
 
-
 def _polygons_path(polygons: Iterable[tuple[tuple[float, float], ...]]) -> str:
     commands: list[str] = []
     for polygon in polygons:
@@ -320,9 +238,7 @@ def _polygons_path(polygons: Iterable[tuple[tuple[float, float], ...]]) -> str:
         commands.append("Z")
     return " ".join(commands)
 
-
 def render_svg(params: MarkParams) -> str:
-    """Render a complete standalone SVG string."""
 
     geometry = build_geometry(params)
     k_polygons = [
@@ -362,13 +278,11 @@ def render_svg(params: MarkParams) -> str:
 </svg>
 """
 
-
 def save_svg(path: str | Path, params: MarkParams) -> Path:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(render_svg(params), encoding="utf-8")
     return output
-
 
 @dataclass(frozen=True)
 class Example:
@@ -376,7 +290,6 @@ class Example:
     title: str
     note: str
     params: MarkParams
-
 
 EXAMPLES = (
     Example("01-standard.svg", "标准结构", "默认同色相深灰底", MarkParams()),
@@ -618,9 +531,7 @@ EXAMPLES = (
     ),
 )
 
-
 def generate_examples(output_dir: str | Path) -> Path:
-    """Generate all example SVGs and the single color/parameter CSV."""
 
     svg_dir = Path(output_dir)
     svg_dir.mkdir(parents=True, exist_ok=True)
@@ -693,7 +604,6 @@ def generate_examples(output_dir: str | Path) -> Path:
             )
     return svg_dir / "examples.csv"
 
-
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=Path("kvlang-mark.svg"))
@@ -730,7 +640,6 @@ def _parse_args() -> argparse.Namespace:
     )
     return parser.parse_args()
 
-
 def main() -> None:
     args = _parse_args()
     if args.generate_examples:
@@ -759,7 +668,6 @@ def main() -> None:
         return
     output = save_svg(args.output, params)
     print(output)
-
 
 if __name__ == "__main__":
     main()

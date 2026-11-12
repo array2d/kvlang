@@ -1,21 +1,6 @@
 #ifndef RUNTIMEC_BINRWIR_JIT_VERIFIER_H
 #define RUNTIMEC_BINRWIR_JIT_VERIFIER_H
 
-/*
- * 组件：binrwir_compiler/jit/verifier
- * 作用：binrwir_jit eligibility 的 fail-closed 判定：先按中立 BinRWIR 合同验证
- *       Program，再判定 operation/backend 支持、所有参数具有非零 V.body 地址、
- *       控制流 guard、binary interface 限制、side effect、call、builtin、
- *       handoff、每条 instruction completion、observable boundary 与 source
- *       program counter map 可构建。guard failure/error 必须可区分未完成状态。
- *       寄存器压力只属于后续 register_allocation，不得进入中立 BinRWIR 合同。
- * 联系：binrwir_compiler/jit/compiler 在 plan 前调用；拒绝结果以结构化 refusal 返回，
- *       compiler 据此产生 NOT_COMPILABLE。
- * 约束：未知架构或不支持的 operation 返回 RUNTIMEC_STATUS_UNSUPPORTED 并
- *       填写 refusal；非法 BinRWIR 返回 INVALID。顶层 binrwir_jit_compile 只把
- *       UNSUPPORTED 映射为成功的 NOT_COMPILABLE；其它错误不得转成拒绝。
- */
-
 #include <stdint.h>
 
 #include "contract/status.h"

@@ -1,7 +1,6 @@
 import os
 import time
 
-
 def iops(n: int) -> int:
     a = 0
     i = 1
@@ -9,7 +8,6 @@ def iops(n: int) -> int:
         a = a + 1
         i = i + 1
     return a
-
 
 t0 = time.perf_counter_ns()
 ans = iops(int(os.environ["BENCH_SCALE"]))

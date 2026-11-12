@@ -1,17 +1,9 @@
-//! 读 .kv 文件，用 Rust layout 检查语法并布局进 kvspace（默认 redis），并输出入口（ENTRY=...），
-//! 供 Go runtime 执行验证。
-//! 用法：
-//!   kvlanglayout <file.kv> [dsn]              仅 layout，打印 ENTRY=<entry>（默认子命令）
-//!   kvlanglayout vet <file.kv>                仅校验（parse+lower），打印 ok 或错误
-//!   kvlanglayout format <file.kv>             格式化输出到 stdout
-//!   kvlanglayout printlib <file.kv> [prefix] [dsn]  layout 后把 /lib（或 prefix）子树重建为可运行 kvlang + 槽位注释（不读 .src）
 
 use std::env;
 use std::fs;
 
 use kvlanglayout::{compile, format, init_dirs, printlib, vet, vet_with_store, Kv};
 
-/// 复刻 Go runtime 的 findEntry：DFS /lib/ 找首个 init（顶层 `init` 或 lib 块内 `pkg·init`）。
 fn find_entry(kv: &mut Kv, prefix: &str, pkg: &str) -> String {
     let children = kv.list(prefix, false, true);
     for c in &children {
@@ -45,18 +37,10 @@ fn find_entry(kv: &mut Kv, prefix: &str, pkg: &str) -> String {
     String::new()
 }
 
-/// Read source file, printing an error and exiting 1 on failure.
 fn read_src(path: &str) -> String {
     fs::read_to_string(path).unwrap_or_else(|e| die(&format!("read {path}: {e}")))
 }
 
-/// DSN **必填**，缺失即报错退出——**不回落任何默认值**。
-///
-/// 曾经这里 `unwrap_or("redis://127.0.0.1:6379")`：不给 DSN 就静默连本机 redis。
-/// 那种默认值的危害不在它存在，而在它没人记得自己存在——单库化之后 `libkvspace`
-/// 只服务 `shm://`，那个默认值根本连不上，却要等到连的时候才炸，报错也不指向这里。
-///
-/// 报错给一条能直接照抄的命令，而不是只说「缺 DSN」。
 fn require_dsn(arg: Option<&str>) -> String {
     match arg {
         Some(v) if !v.is_empty() => v.to_string(),
@@ -74,7 +58,6 @@ fn die(msg: &str) -> ! {
     std::process::exit(1);
 }
 
-/// Connect, initialize root dirs, and compile; exits 1 on any error.
 fn layout_or_die(src: &str, dsn: &str) -> Kv {
     let mut kv = Kv::try_conn(dsn).unwrap_or_else(|e| die(&e));
     if let Err(e) = init_dirs(&mut kv) {
@@ -90,8 +73,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() >= 3 && args[1] == "vet" {
         let src = read_src(&args[2]);
-        // `vet <file> [dsn]`：给了 dsn 就按 `compile` 的判据再跑一遍依赖 `/lib` 声明的检查。
-        // 不给就只做纯检查——此时「ok」**不**等于「能编译」，见 `code::vet` 的注释。
+        
         let result = match args.get(3) {
             Some(dsn) => {
                 let mut kv = Kv::conn(dsn);

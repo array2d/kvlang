@@ -1,9 +1,0 @@
-// `scatterarray·append` receiving a compact array through an untyped param must raise `TypeError`.
-rwfunc bad(x:) -> (y:) {
-	scatterarray·append(x, 4) -> y
-}
-rwfunc test() -> () {
-	a:[]int64 = [1, 2, 3]
-	bad(a) -> r
-	println(r)
-}

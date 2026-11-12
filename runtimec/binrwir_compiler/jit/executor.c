@@ -1,4 +1,3 @@
-/* BinRWIR JIT 确定执行入口的失败封闭骨架。 */
 
 #include "binrwir_compiler/jit/executor.h"
 

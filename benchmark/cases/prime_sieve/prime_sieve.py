@@ -1,7 +1,6 @@
 import os
 import time
 
-
 def prime_sieve(limit: int) -> None:
     print("primes up to", limit)
     count = 0
@@ -19,7 +18,6 @@ def prime_sieve(limit: int) -> None:
             count += 1
         n += 1
     print("total primes up to", limit, "=", count)
-
 
 t0 = time.perf_counter_ns()
 prime_sieve(int(os.environ["BENCH_SCALE"]))

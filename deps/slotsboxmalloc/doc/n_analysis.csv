@@ -1,0 +1,6 @@
+N,N_bits,L0,L1_slot,L1_box,L2_slot,freebitmap_bits,freebitmap_B,freebitmap_CL,freebitmap_scan,1GB_max_level,1GB_depth,1GB_root_slots,32GB_max_level,32GB_depth,32GB_root_slots,small_range,small_levels,small_level_count,small_descent_1GB,small_descent_32GB,small_alloc_ops_1GB,small_free_ops_1GB,small_alloc_ops_32GB,small_free_ops_32GB,small_gc_worst,small_gc_safe,large_range,large_levels,large_level_count,large_descent_1GB,large_descent_32GB,large_gc_worst,large_gc_safe,GC_L0,GC_L1,GC_L2,GC_L3,box_head_no_gc_B,box_head_with_gc_B,box_head_no_gc_CL,box_head_with_gc_CL
+2,1,8B (无slot),8B,16B,16B,2,1,1,tzcnt×1,27,28,1,32,33,1,8B-256B,L0-L6,6,21,26,22,22,27,27,256B,Y,1MB-100MB,L18-L25,8,2,7,128.0MB,N,8B,8B,16B,32B,29,33,1,1
+16,4,8B (无slot),8B,128B,128B,16,2,1,tzcnt×1,6,7,8,8,9,1,8B-256B,L0-L2,3,4,6,5,5,7,7,2KB,Y,1MB-100MB,L5-L6,2,0,2,120.0MB,N,8B,120B,2KB,30KB,86,118,2,2
+64,6,8B (无slot),8B,512B,512B,64,8,1,tzcnt×1,4,5,8,5,6,4,8B-256B,L0-L1,2,3,4,4,4,5,5,504B,Y,1MB-100MB,L3-L4,2,0,1,126.0MB,N,8B,504B,32KB,2.0MB,284,412,5,7
+256,8,8B (无slot),8B,2KB,2KB,256,32,1,AVX2×1,3,4,8,4,5,1,8B-256B,L0-L1,2,2,3,6,3,7,4,2KB,Y,1MB-100MB,L3-L3,1,0,1,127.5MB,N,8B,2KB,510KB,127.5MB,1076,1588,17,25
+1024,10,8B (无slot),8B,8KB,8KB,1024,128,2,AVX512×2,2,3,128,3,4,4,8B-256B,L0-L1,2,1,2,17,2,18,3,8KB,Y,1MB-100MB,L2-L3,2,0,0,7.99GB,N,8B,8KB,8.0MB,7.99GB,4244,6292,67,99

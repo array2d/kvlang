@@ -1,18 +1,3 @@
-/*
- * `contract/key_resolution` 的 std:: 用例：**Ptr 前缀解析**。
- *
- * 判据逐条对照后端 `kvspace-c/src/kvspace.c:resolve_fetch`：
- *   1. 非 Ptr 的前缀原样返回（后端不跟）；
- *   2. Ptr 的前缀跟到 body 指向的路径；
- *   3. **多跳**：跟随 Ptr 链直到非 Ptr 或 16 跳上限（不是单步跟）；
- *   4. 键不存在 → 用当前路径，**不是错误**；
- *   5. 跳数上限 16 → 错误（不是「用最后那个」）；
- *   6. `@` 扩展引用**不跟**（后端只判 PTR）；
- *   7. `**T` 同样算 Ptr（判据是首字符 `*`）。
- *
- * 用假 reader 而不是真后端：本模块刻意不依赖 kvspace 符号（见头注释），所以它的
- * 测试也不该需要后端——否则「换了 ABI 测试就跑不动」会把这条逻辑锁死在旧接口上。
- */
 
 #include <stdio.h>
 #include <string.h>
@@ -28,9 +13,6 @@ static void check(int condition, const char *message) {
     }
 }
 
-/* ── 假 reader ──────────────────────────────────────────────────────
- * `entries` 是一个静态表：key → (langtype, body)。查不到即「键不存在」。
- */
 typedef struct fake_entry {
     const char *key;
     const char *langtype;
@@ -40,7 +22,7 @@ typedef struct fake_entry {
 typedef struct fake_store {
     const fake_entry_t *entries;
     size_t count;
-    int reads; /* 被读了几次（用来钉住「不该读时确实没读」） */
+    int reads; 
 } fake_store_t;
 
 static runtimec_status_t fake_reader(void *context, const char *key,
@@ -63,7 +45,7 @@ static runtimec_status_t fake_reader(void *context, const char *key,
     *output_langtype_size = 0U;
     *output_body = NULL;
     *output_body_size = 0U;
-    return RUNTIMEC_STATUS_INVALID; /* 键不存在 */
+    return RUNTIMEC_STATUS_INVALID; 
 }
 
 static void expect_resolved(const fake_entry_t *entries, size_t count,
@@ -88,7 +70,6 @@ static void expect_resolved(const fake_entry_t *entries, size_t count,
     }
 }
 
-/* 1. 非 Ptr：原样返回，且只读一次。 */
 static void test_plain_prefix_is_returned_as_is(void) {
     static const fake_entry_t entries[] = {
         {"/a/", "int64", "42"},
@@ -106,7 +87,6 @@ static void test_plain_prefix_is_returned_as_is(void) {
     check(store.reads == 1, "a plain prefix costs exactly one read");
 }
 
-/* 2. 单跳 Ptr。 */
 static void test_single_hop(void) {
     static const fake_entry_t entries[] = {
         {"/link", "*char", "/target/"},
@@ -114,7 +94,6 @@ static void test_single_hop(void) {
     expect_resolved(entries, 1U, "/link", "/target/", "one pointer hop follows its body");
 }
 
-/* 3. Ptr 链：一路跟到非 Ptr 为止。 */
 static void test_multi_hop(void) {
     static const fake_entry_t entries[] = {
         {"/one", "*char", "/two"},
@@ -124,7 +103,6 @@ static void test_multi_hop(void) {
                     "a pointer chain is followed until it reaches a non-pointer");
 }
 
-/* 3b. 链尾那一跳键不存在：用最后那个路径。 */
 static void test_chain_ending_at_missing_key(void) {
     static const fake_entry_t entries[] = {
         {"/one", "*char", "/missing/"},
@@ -133,7 +111,6 @@ static void test_chain_ending_at_missing_key(void) {
                     "a chain that ends at a missing key keeps that path");
 }
 
-/* 4. 键不存在（根本不是 Ptr）：原样返回，不报错。 */
 static void test_missing_key_is_not_an_error(void) {
     fake_store_t store;
     store.entries = NULL;
@@ -147,9 +124,8 @@ static void test_missing_key_is_not_an_error(void) {
           "a missing key resolves to itself, so listing it yields an empty list");
 }
 
-/* 5. 跳数上限：17 跳的自环必须失败，不是「用最后那个」。 */
 static void test_hop_limit(void) {
-    /* 自环：/loop 指向自己。 */
+    
     static const fake_entry_t entries[] = {
         {"/loop", "*char", "/loop"},
     };
@@ -165,7 +141,6 @@ static void test_hop_limit(void) {
           "the hop limit bounds how many reads the cycle costs");
 }
 
-/* 6. `@` 扩展引用不跟。 */
 static void test_extension_reference_is_not_followed(void) {
     static const fake_entry_t entries[] = {
         {"/ext", "@s3://bucket/key", "/should-not-be-used"},
@@ -174,7 +149,6 @@ static void test_extension_reference_is_not_followed(void) {
                     "an @ extension reference is not followed (backend only follows PTR)");
 }
 
-/* 7. `**T` 也算 Ptr。 */
 static void test_double_pointer_counts(void) {
     static const fake_entry_t entries[] = {
         {"/double", "**char", "/through/"},
@@ -183,7 +157,6 @@ static void test_double_pointer_counts(void) {
                     "**T starts with * and therefore counts as a pointer");
 }
 
-/* 8. 缓冲不足：具名失败，不截断。 */
 static void test_capacity_short(void) {
     static const fake_entry_t entries[] = {
         {"/link", "*char", "/a-rather-long-target/"},
@@ -199,7 +172,6 @@ static void test_capacity_short(void) {
           "a target that does not fit is reported, never truncated");
 }
 
-/* 9. reader 报的真错误要透传，不能被当成「键不存在」。 */
 static runtimec_status_t failing_reader(void *context, const char *key,
                                         const char **output_langtype,
                                         size_t *output_langtype_size,

@@ -1,15 +1,4 @@
-// string 修剪与填充：trim / trimstart / trimend / trimprefix / trimsuffix / padstart / padend
-// 期望输出:
-//   trim=[hi]
-//   tstart=[hi  ]
-//   tend=[  hi]
-//   tpre= world
-//   tpre-miss= hello world
-//   tsuf= file
-//   tsuf-miss= file.kv
-//   padstart= 121abc
-//   padend= abc121
-//   padshort= abcdef
+
 rwfunc test() -> () {
 	println("trim=[" + string·trim("  hi\t\n") + "]")
 	println("tstart=[" + string·trimstart("  hi  ") + "]")

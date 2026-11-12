@@ -17,7 +17,6 @@ function systemDark(): boolean {
   return matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
-/** 当前实际生效的主题：显式 data-theme 优先，否则跟随系统。 */
 function effectiveTheme(): "dark" | "light" {
   const attr = root.getAttribute("data-theme");
   if (attr === "dark" || attr === "light") return attr;
@@ -34,18 +33,17 @@ syncThemeButton();
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", syncThemeButton);
 
 themeBtn?.addEventListener("click", () => {
-  // 系统深色且无显式选择时，首次点击必须切到浅色。
+  
   const next = effectiveTheme() === "dark" ? "light" : "dark";
   root.setAttribute("data-theme", next);
   try {
     localStorage.setItem("theme", next);
   } catch {
-    /* 隐私模式下不可写，忽略 */
+    
   }
   syncThemeButton();
 });
 
-// 复制安装命令。按钮用 data-copy 指向目标元素选择器。
 const copiedLabel = isZh ? "已复制" : "Copied";
 document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((btn) => {
   btn.addEventListener("click", async () => {
@@ -57,7 +55,7 @@ document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((btn) => {
       btn.textContent = copiedLabel;
       setTimeout(() => (btn.textContent = label), 1200);
     } catch {
-      /* 剪贴板被拒时保持原样，用户可手动选中 */
+      
     }
   });
 });

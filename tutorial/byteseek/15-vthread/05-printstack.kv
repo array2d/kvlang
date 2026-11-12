@@ -1,12 +1,4 @@
-// kvlang·printstack(vid)：把 /vthread 的活动栈渲染成文本（帧链 + 实参 + 当前指令）
-//   只读：调用后 ‥pc/‥status 不变；vid 传空串 = 当前 vthread
-// 期望输出:
-//   status= true
-//   frames= true
-//   outer-lib= true
-//   inner-lib= true
-//   arg= true
-//   cur= true
+
 rwfunc ps_inner(*int64 #n) -> (*int64 #r) {
 	div(*n, 0) -> x:int64
 }

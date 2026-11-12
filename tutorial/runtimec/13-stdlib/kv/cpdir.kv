@@ -1,14 +1,10 @@
-// kvspace·cpdir：拷贝 key 子树，改 src 子节点不影响 dst
-// 期望输出:
-//   child: 1
-//   after: 1
 
 rwfunc test() -> () {
 	1 -> /cptree/a
 	kvspace·cpdir("/cptree") -> /cptree2:int64
-	v:int64 = /cptree2/a      // 类型依据：同文件第 7 行字面量 1 写入 /cptree/a
+	v:int64 = /cptree2/a      
 	println("child:", v)
 	9 -> /cptree/a
-	v2:int64 = /cptree2/a     // 类型依据：同文件第 7 行字面量 1 写入 /cptree/a
+	v2:int64 = /cptree2/a     
 	println("after:", v2)
 }

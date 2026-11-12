@@ -1,23 +1,3 @@
-//! kvspace Rust FFI wrapper over libkvspace.so.
-//!
-//! **只用公开 12 存储符号**：Connect / Close / XvalueInProcessAddress / Resolve /
-//! Realloc / Free / Cp / Mkindex / Deltree / Cpdir / Listlen / List。
-//!
-//! 原先这里调 `kvspaceShm*` 内部引擎符号，单库化后在生产配置下已被
-//! `-fvisibility=hidden` 隐藏——它们是实现细节，不是 API。
-//!
-//! 读写模型：`Resolve` 给偏移、`XvalueInProcessAddress` 给基址，值就在
-//! `base+offset` 起的那段内存里；写走 `Realloc`（head 由它写）。
-//!
-//! ```no_run
-//! use kvspace::{KVSpace, xvalue};
-//!
-//! let kv = KVSpace::open("/tmp/test.shm").unwrap();
-//! kv.mkindex("/t/", 0);
-//! kv.set("/t/x", &xvalue::int64(42));
-//! let v = kv.get("/t/x").unwrap();
-//! assert_eq!(xvalue::from_wire(&v), (xvalue::REF_INLINE, &[42, 0, 0, 0, 0, 0, 0, 0][..]));
-//! ```
 
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
@@ -97,7 +77,7 @@ mod ffi {
             err: *mut c_char,
             err_cap: u32,
         ) -> i32;
-        /* 构造器：TASK-082 后迁往 kvlang 侧，届时由那里的库提供。 */
+        
         pub fn kvlangXvalueHeadNewScalar(
             raw: *const u8,
             raw_len: u32,
@@ -130,30 +110,21 @@ mod ffi {
     }
 }
 
-// ── xvalue helpers ─────────────────────────────────────────────
-//
-// 固定 16 字节 head：[bodylen:u64 LE@0][attrslen:u16 LE@8][padding:6@10-15]，body@16，
-// attr 紧随 body 且没有长度前缀，total = 16 + bodylen + attrslen。
-// record = [tag:u8][len:u16 LE][data]，tag 1 = langtype；tag 2（旧 reallen）已删除，出现即拒。
-// 构造走 C 的 kvlangXvalueHeadNew*；这里的 helper 写无类型值（空 attr）。
-
 pub mod xvalue {
     use super::ffi;
     use super::*;
 
-    /// 引用性：head 里没有 ptr 位，由 langtype 首字节的 `*` / `@` 前缀表达。
     pub const REF_INLINE: u8 = 0;
     pub const REF_PTR: u8 = 1;
     pub const REF_EXT: u8 = 2;
     pub const HEAD_LEN: usize = 16;
     pub const PADDING_LEN: usize = 6;
     pub const ATTR_TAG_LANGTYPE: u8 = 1;
-    /// 旧 wire 的 tag 2（reallen）：已删除，出现即拒。
+    
     pub const BANNED_ATTR_TAG_REALLEN: u8 = 2;
-    /// Empty langtype (untyped, empty attr).
+    
     const NO_TYPE: *const c_char = b"\0".as_ptr() as *const c_char;
 
-    /// Copy and free malloc buffer returned by C constructor.
     fn take(out: *mut u8, total: u64) -> Vec<u8> {
         let bytes = unsafe { std::slice::from_raw_parts(out, total as usize).to_vec() };
         unsafe { ffi::free(out as *mut std::ffi::c_void) };
@@ -195,7 +166,7 @@ pub mod xvalue {
         }
         take(out, total)
     }
-    /// Directory value (empty body, untyped).
+    
     pub fn index() -> Vec<u8> {
         let mut out: *mut u8 = ptr::null_mut();
         let mut total: u64 = 0;
@@ -207,7 +178,7 @@ pub mod xvalue {
         }
         take(out, total)
     }
-    /// Pointer value：body = target key，构造器给 langtype 补 `*` 前缀。
+    
     pub fn link(target: &str) -> Vec<u8> {
         let mut out: *mut u8 = ptr::null_mut();
         let mut total: u64 = 0;
@@ -219,7 +190,7 @@ pub mod xvalue {
         }
         take(out, total)
     }
-    /// External locator：body = locator，构造器给 langtype 补 `@` 前缀。
+    
     pub fn ext(locator: &str) -> Vec<u8> {
         let mut out: *mut u8 = ptr::null_mut();
         let mut total: u64 = 0;
@@ -238,10 +209,6 @@ pub mod xvalue {
         take(out, total)
     }
 
-    /// 读 wire -> (ref, body)；畸形返回 (REF_INLINE, &[])。
-    ///
-    /// 判据全部来自 head 本身：padding 10-15 全零、16+bodylen+attrslen == len(data)、
-    /// attr 区逐条 record 自洽且不含已删除的 tag 2。ref 由 langtype 首字节决定。
     pub fn from_wire(data: &[u8]) -> (u8, &[u8]) {
         if data.len() < HEAD_LEN {
             return (REF_INLINE, &[]);
@@ -289,11 +256,8 @@ pub mod xvalue {
     }
 }
 
-// ── KVSpace ──────────────────────────────────────────────────
-
-/// 公开 ABI 的错误码：负数 errno（不是 0/-1 哨兵）。
 const KVSPACE_OK: i32 = 0;
-const KVSPACE_MISSING: i32 = -2; // -ENOENT
+const KVSPACE_MISSING: i32 = -2; 
 
 pub struct KVSpace {
     ptr: *mut std::ffi::c_void,
@@ -301,7 +265,7 @@ pub struct KVSpace {
 }
 
 impl KVSpace {
-    /// 打开（或新建）一个 shm store。`path` 是 store 文件路径。
+    
     pub fn open(path: &str) -> Result<Self, String> {
         let _ = std::fs::remove_file(path);
         let dsn = CString::new(format!("shm://{path}")).map_err(|e| e.to_string())?;
@@ -317,7 +281,6 @@ impl KVSpace {
         (!b.is_null()).then_some(b)
     }
 
-    /// 读整条 wire（拷贝）。不存在返回 None。
     pub fn get(&self, key: &str) -> Option<Vec<u8>> {
         let ckey = CString::new(key).ok()?;
         let mut off: u64 = 0;
@@ -330,7 +293,7 @@ impl KVSpace {
         }
         let base = self.base()?;
         unsafe {
-            // head 决定整条 wire 长度：bodylen@0-7、attrslen@8-9，body@16。
+            
             let head = std::slice::from_raw_parts(base.add(off as usize), 16);
             let body_len = u64::from_le_bytes(head[0..8].try_into().ok()?) as usize;
             let attr_len = u16::from_le_bytes(head[8..10].try_into().ok()?) as usize;
@@ -339,7 +302,6 @@ impl KVSpace {
         }
     }
 
-    /// 写整条 wire：Realloc 写 head 并交出位置，本层只拷 body 与 attr。
     pub fn set(&self, key: &str, wire: &[u8]) -> Result<(), String> {
         if wire.len() < 16 {
             return Err(format!("set {key}: wire shorter than head"));
@@ -383,7 +345,6 @@ impl KVSpace {
         Ok(())
     }
 
-    /// 删值。/ 不存在不算错误（与既有语义一致）。
     pub fn delete(&self, key: &str) -> Result<(), String> {
         let ckey = CString::new(key).map_err(|e| e.to_string())?;
         let mut err = [0 as c_char; 256];
@@ -420,8 +381,6 @@ impl KVSpace {
         if rc == KVSPACE_OK { Ok(()) } else { Err(err_str(&err)) }
     }
 
-    /// 建索引。`capacity` 参数保留兼容但**已无意义**：容量是存储层物理分配属性，
-    /// 不进 wire，新 ABI 也没有这个参数。
     pub fn mkindex(&self, path: &str, capacity: u32) -> Result<(), String> {
         let _ = capacity;
         let cp = CString::new(path).map_err(|e| e.to_string())?;
@@ -430,7 +389,6 @@ impl KVSpace {
         if rc == KVSPACE_OK { Ok(()) } else { Err(err_str(&err)) }
     }
 
-    /// 直接子项名。**顺序是后端顺序，不排序**——排序在上层做。
     pub fn list(&self, prefix: &str) -> Vec<String> {
         let cp = match CString::new(prefix) {
             Ok(c) => c,

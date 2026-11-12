@@ -1,4 +1,3 @@
-// 入口：编排目录列表 → 侧边栏 → 选中渲染，hash 路由支持深链。
 
 import "../tokens.css";
 import "../styles.css";
@@ -64,14 +63,12 @@ function route(): void {
   }
 }
 
-// 侧边栏统一追加 Agent 源清单入口。
 function setSidebar(html: string): void {
   sidebar.innerHTML =
     html +
     `<div class="side-agent"><a href="#agent-sources">⚙ 给 Agent 的源清单</a></div>`;
 }
 
-// 首页给人看的 Agent 源清单卡片（用 HEAD 跟随默认分支，避免分支名硬编码）。
 function agentCard(): string {
   return `<section class="agent-card">
     <h2>给 Agent / 爬虫</h2>
@@ -89,7 +86,7 @@ function initTheme(): void {
   try {
     saved = localStorage.getItem("theme");
   } catch {
-    /* ignore */
+    
   }
   if (saved) document.documentElement.setAttribute("data-theme", saved);
   themeBtn.addEventListener("click", () => {
@@ -101,7 +98,7 @@ function initTheme(): void {
     try {
       localStorage.setItem("theme", cur);
     } catch {
-      /* ignore */
+      
     }
   });
 }

@@ -1,4 +1,3 @@
-/* binrwir_compiler/jit/verifier 的失败封闭骨架。 */
 
 #include "binrwir_compiler/jit/verifier.h"
 

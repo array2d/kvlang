@@ -1,12 +1,6 @@
-//! 未定型整数字面量适配（spec 03-类型系统/01-种类与定宽类型 第 10 条）：
-//! `uint64(5) + 1` 的 `1` 按上下文适配到 uint64，不算混合确定性符号；
-//! 两侧都是确定类型且符号冲突（`uint64_var + int64_var`）保持通用算子（运行时 TypeError）。
-//!
-//! opcode 只发语义名（`add`/`eq`），所以这里断言的是**字面量操作数槽的 kind**。
 
 use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 
-/// store 守卫：离开作用域时删目录。先于 `Kv` 声明，故后 drop。
 struct TempStore(String);
 
 impl Drop for TempStore {
@@ -31,7 +25,6 @@ fn slot_text(kv: &mut Kv, key: &str) -> String {
     String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 
-/// 收集函数里所有 opcode 槽（[i,0]）的文本。
 fn ops(kv: &mut Kv, func: &str) -> Vec<String> {
     let prefix = format!("/lib/{func}/");
     let children = kv.list(&prefix, false, false);
@@ -46,8 +39,6 @@ fn ops(kv: &mut Kv, func: &str) -> Vec<String> {
     out
 }
 
-/// 字面量操作数落槽用的 kind：读参槽 body 是裸字面量文本时，其 attr langtype
-/// 就是该字面量的 kind（变量读参的 attr langtype 恒为 `rwir`）。
 fn literal_kinds(kv: &mut Kv, func: &str) -> Vec<String> {
     let prefix = format!("/lib/{func}/");
     let mut out = Vec::new();
@@ -65,7 +56,6 @@ fn literal_kinds(kv: &mut Kv, func: &str) -> Vec<String> {
     out
 }
 
-/// 写槽的声明类型（rwir 槽 body = `名字\0类型`）。
 fn write_kind(kv: &mut Kv, key: &str) -> String {
     let text = slot_text(kv, key);
     text.rsplit('\0').next().unwrap_or("").to_string()
@@ -96,7 +86,7 @@ fn cast_plus_literal_adapts_to_unsigned() {
 fn write_slot_kind_matches_specialized_op() {
     let (_store, mut kv) = fresh_kv("kind");
     compile(&mut kv, "rwfunc f() -> () {\n    uint64(5) + 1 -> r\n}\n").unwrap();
-    // [2] 是 add；写槽 [2,1] 的 kind 必须是 uint64（不能算对却记 int64）。
+    
     let k = write_kind(&mut kv, "/lib/f/[2,1]");
     assert_eq!(k, "uint64", "写槽 kind 应为 uint64，实际 {k}");
 }

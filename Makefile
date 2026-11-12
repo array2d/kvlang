@@ -1,10 +1,7 @@
 # kvlang 统一构建：各自包含在 repo 内（可执行 bin/，库 lib/，后端 lib/kvspace/），
 # 不装 /usr；各组件独立编译。
-#   make runtime    旧 C runtime（已归档 oldhero/oldgo/runtime，非默认）
-#   make runtimec2  旧 c2 runtime（已归档 oldhero/oldgo/runtimec2，非默认）
 #   make byteseek   功能完整 Rust runtime → 编译为 byteseek（term/json/http/kvlanglayout/networld 就地 rwir）
 #   make layout     Rust layout（kvlanglayout）
-#   make oldhero    Go 旧 runtime（kvlang-go，兼容保留，即将归档）
 #   make test       全量 tutorial 回归
 #   make json       Go json 扩展（json-rwirext；待 TASK-042 升级，当前构建不出）
 #   make clean      清理 bin/ 与各构建目录
@@ -12,9 +9,6 @@
 #   make status     列出系统目录里已安装的库 / 可执行 / 头
 # kvspace 后端由 libkvspace dispatch 前端按 DSN 运行时选择，不再编译期切换。
 
-# runtime / runtimec2 已归档到 oldhero/oldgo/（TASK-041），不再参与默认构建：
-# 它们的源码冻结在旧 kvspace ABI 上，构建出来的是链接旧符号的库。
-# 归档目录的产物落点是 oldhero/oldgo/lib，**不再落 kvlang/lib**，别误用。
 # 两级布局（repo 即 prefix）：可执行 → bin/，库 → lib/（后端在 lib/kvspace/）。
 BIN         := bin
 LIB         := lib
@@ -32,7 +26,7 @@ else
 LAYOUT_LIB := libkvlanglayout.so
 endif
 
-.PHONY: all runtime runtimec2 byteseek layout json oldhero test clean \
+.PHONY: all byteseek layout json test clean \
         status clear clear-headers clear-all single \
         kvspace-libs check-kvspace-head stale-gate
 
@@ -133,12 +127,6 @@ embed-payload: stale-gate
 	@echo "embed payload: $(EMBED_DIR)"
 	@ls -l $(EMBED_DIR)
 
-# 归档靶：源码在 oldhero/oldgo/，产物落 oldhero/oldgo/lib（不进 kvlang/lib）。
-# 仅用于归档构建/取证，**不是**日常构建路径。
-runtime:
-	cmake -S oldhero/oldgo/runtime -B build/runtime -DCMAKE_BUILD_TYPE=Release
-	cmake --build build/runtime --target kvlang_runtime -j
-
 # runtimec 的两个命令行入口，**并存且分工不同**：
 #   kv_runner  —— 吃语料目录，批量编/跑（tools/ 下的诊断与回归用）
 #   kvlangrun  —— 单文件 `create <src>` / `run <vid>` 两阶段驱动，
@@ -177,10 +165,6 @@ runtimec-lib: stale-gate kvlang-xvalue
 	# darwin 上必然 `No such file or directory`。`libkvlang_runtime.*` 两平台各自
 	# 只匹配该库自己的产物，比再维护一个 Darwin 分支少一条路。
 	cp build/runtimec/libkvlang_runtime.* $(LIB)/
-
-runtimec2:
-	cmake -S oldhero/oldgo/runtimec2 -B build/runtimec2 -DCMAKE_BUILD_TYPE=Release
-	cmake --build build/runtimec2 --target kvlang_runtimec2 binircompiler -j
 
 # stdlib 是 byteseek 的**编译期输入**：build.rs 用 include_str! 把 stdlib/**/*.kv
 # 逐个编进 EMBEDDED_KV。而 cargo 的 rerun-if-changed 只覆盖单次 build，
@@ -434,9 +418,6 @@ layout: stale-gate kvlang-xvalue
 # 等 TASK-042（runtimec 补齐扩展 ABI）后升级源码并重建。
 json:
 	cd extruntime_tutorial/go/json && CGO_LDFLAGS="-L$(CURDIR)/$(LIB) -lkvspace" go build -o ../../../bin/json-rwirext ./cmd/
-
-oldhero:
-	cd oldhero && go build -ldflags="-s -w" -o ../bin/kvlang-go ./cmd/kvlang/
 
 clean:
 	rm -rf $(BIN) $(LIB) build

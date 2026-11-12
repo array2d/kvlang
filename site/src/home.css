@@ -1,4 +1,3 @@
-/* 主页：排版即设计。无阴影、无渐变、无大圆角；两色 + 一个强调色。 */
 
 .home-body {
   margin: 0;
@@ -15,8 +14,6 @@
   padding: 0 16px;
 }
 
-/* 全宽容器：宽表格（多版本对比）铺满浏览区，桌面全屏时不再受 68ch 限制；
-   区内文字块仍保持 68ch 排版宽度。 */
 .wrap.bench-wrap {
   max-width: none;
   padding: 0 24px;
@@ -35,7 +32,6 @@ pre {
     monospace;
 }
 
-/* ── 导航 ── */
 .site-nav {
   position: sticky;
   top: 0;
@@ -85,7 +81,6 @@ pre {
   cursor: pointer;
 }
 
-/* ── Hero ── */
 .hero {
   padding: 64px 0 44px;
   border-bottom: 1px solid var(--border);
@@ -155,7 +150,6 @@ pre {
   color: var(--accent);
 }
 
-/* ── 分区 ── */
 section {
   padding: 44px 0;
   border-bottom: 1px solid var(--border);
@@ -170,7 +164,6 @@ section .section-lead {
   margin: 0 0 24px;
 }
 
-/* ── Runtime 扩展表 ── */
 .runtimes {
   padding: 32px 0 56px;
 }
@@ -179,7 +172,7 @@ section .section-lead {
 }
 .runtime-table {
   width: 100%;
-  min-width: 760px; /* 4 列；窄屏由 .table-wrap 横向滚动 */
+  min-width: 760px; 
   border-collapse: collapse;
   font-size: 14px;
 }
@@ -214,7 +207,6 @@ section .section-lead {
   max-width: 80ch;
 }
 
-/* ── 特性 ── */
 .feature {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
@@ -262,7 +254,6 @@ code.inline {
   font-size: 0.92em;
 }
 
-/* ── 生态图 ── */
 .eco-figure {
   margin: 0 0 20px;
   overflow-x: auto;
@@ -270,7 +261,7 @@ code.inline {
 .eco-figure img {
   display: block;
   width: 100%;
-  /* 小屏不缩到不可读：保持 720px 可读宽度，由 .eco-figure 横向滚动。 */
+  
   min-width: 720px;
   height: auto;
   border: 1px solid var(--border);
@@ -290,7 +281,6 @@ code.inline {
   font-size: 14px;
 }
 
-/* ── 三步 ── */
 .steps {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -322,7 +312,6 @@ details.source-build pre.code {
   margin-top: 12px;
 }
 
-/* ── 学习路径 ── */
 .cards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -348,7 +337,6 @@ details.source-build pre.code {
   font-weight: 600;
 }
 
-/* ── 页脚 ── */
 .site-footer {
   padding: 32px 0 56px;
   color: var(--fg-dim);
@@ -397,7 +385,6 @@ details.source-build pre.code {
   outline-offset: 2px;
 }
 
-/* ── Benchmarks ── */
 .bench-chart {
   display: block;
   width: 100%;
@@ -489,7 +476,6 @@ details.source-build pre.code {
   fill: var(--fg-dim);
 }
 
-/* ── 多版本对比表 ── */
 .bench-versions {
   width: 100%;
   min-width: 980px;

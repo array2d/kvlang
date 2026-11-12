@@ -1,27 +1,4 @@
-// networld/edit：文件编辑语义 —— 行号窗口读 / 精确替换（唯一命中）/ 事务式多处替换
-//   read    行号窗口视图（from 行起 lines 行，lines <= 0 = 到末尾）
-//   write   覆盖写 + 回读校验
-//   replace 单处精确替换：old 须恰命中 1 处，否则一个字节都不动（dry = 1 只预演）
-//   multi   事务式多处替换：全部成功才落盘
-//   code    0 成功 / 1 未找到 / 2 歧义 / 3 不可读 / 4 写失败 / 5 回读不一致 / 6 长度不等
-// 期望输出:
-//   window= 2: beta
-//   3: alpha
-//   (total,sz)=( 4 , 23 )
-//   dry= ( 1 , 1 , 0 )
-//   unchanged= alpha
-//   ambiguous= ( 0 , 2 , 2 )
-//   missing= ( 0 , 0 , 1 )
-//   ok= ( 1 , 1 , 0 )
-//   after= alpha
-//   multi= ( 2 , -1 , 0 )
-//   rolled= ( 1 , 1 , 2 )
-//   keep= alpha
-//   lenbad= ( 0 , -1 , 6 )
-//   final= x
-//   tmpleft= 0
-//   bin-total= -2
-//   bin-code= 7
+
 rwfunc test() -> () {
 	d:[]char/utf32 = "/tmp/kvlang_edit"
 	p:[]char/utf32 = "/tmp/kvlang_edit/t.txt"

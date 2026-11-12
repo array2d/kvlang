@@ -1,9 +1,4 @@
-// prime_sieve benchmark — 试除法求 <=N 的质数（嵌套 while + 取模，计算/控制流密集）
-// 上界 N 由 __SCALE__ 占位（勿改逻辑）
-// 期望输出（N=100 时）:
-//   primes up to 100
-//   ...
-//   total primes up to 100 = 25
+
 rwfunc prime_sieve(*int64 #limit) -> () {
 	println("primes up to", *limit)
 	count:int64 = 0

@@ -1,6 +1,3 @@
-//! 验收：layout 只发语义算子名，`<kind>·<op>`（`int64·add`、`float64·lt`…）一律不再出现。
-//!
-//! 用独立 layout 进程跑一组覆盖各类型族的源码，逐条检查落库的 opcode 槽。
 
 use kvlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
@@ -24,15 +21,14 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
         tag,
         std::process::id()
     ));
-    // 写前删同名：异常退出会留下残骸，反复跑会累积。
+    
     let _ = std::fs::remove_file(&path);
     std::fs::write(&path, src).unwrap();
     path
 }
 
 fn dsn(tag: &str) -> String {
-    // shm 而非 fs：单库后 libkvspace 只服务 shm://，而 shm 也是 file-backed
-    // mmap，持久化/重开能力齐全。测的是布局语义，不是后端语义。
+    
     kvlanglayout::ffi::test_dsn(&format!("shape_{tag}"))
 }
 
@@ -42,7 +38,6 @@ fn slot_text(kv: &mut Kv, key: &str) -> String {
     String::from_utf8_lossy(&b[5.min(b.len())..]).into_owned()
 }
 
-/// 跑一次 layout，返回函数里所有 opcode 槽文本。
 fn opcodes(tag: &str, func: &str, src: &str) -> Vec<String> {
     let file = temp_file(tag, src);
     let db = dsn(tag);
@@ -66,7 +61,7 @@ fn opcodes(tag: &str, func: &str, src: &str) -> Vec<String> {
             ops.push(text);
         }
     }
-    // 用完即清：`.kv` 与 fs store 都删。反复跑不留残骸（曾累积到 421G）。
+    
     drop(kv);
     let _ = std::fs::remove_file(&file);
     kvlanglayout::ffi::remove_test_store(&db);
@@ -139,7 +134,6 @@ fn string_plus_emits_concat_and_mixed_is_rejected() {
     );
     assert!(!ops.iter().any(|o| o == "add" || o == "+"), "{ops:?}");
 
-    // 混合字符串与数值在 layout 阶段被拒（不留运行时）。
     let file = temp_file("mixed", "rwfunc f() -> () {\n\ta = \"x\" + 1\n}\n");
     let db = dsn("mixed");
     let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();
@@ -155,10 +149,7 @@ fn string_plus_emits_concat_and_mixed_is_rejected() {
 
 #[test]
 fn no_switch_can_bring_typed_names_back() {
-    // 开关（`KVLANG_LAYOUT_SEMANTIC_OP` / `KVLANG_LAYOUT_STRING_CONCAT`）已随改动
-    // 一并删除，layout 源码不再读它们。原先这里跑 `["1","0",""]` 三轮，是为了证明
-    // 「任何开关值都不影响产物」——开关没了，三轮就是同一件事跑三遍。
-    // 按 p11：被测对象已删，测试直接收敛成一轮、不设任何 env。
+    
     let file = temp_file("switch", "rwfunc f(*int64 #a) -> () {\n\t*a + *a -> w\n}\n");
     let db = dsn("switch");
     let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();

@@ -1,8 +1,0 @@
-// Writing `None` into a typed numeric local (`float32`) raises `TypeError`.
-rwfunc test() -> () {
-	n = None
-	x:float32 = 1.5
-	println("x:", x)
-	n -> x
-	println("unreachable", x)
-}

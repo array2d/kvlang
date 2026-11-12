@@ -1,8 +1,3 @@
-/*
- * 组件：vmbin/frame_target_key 的实现
- * 作用：写参 → 存储绝对 key（`<frame_path>/<符号名>`）。
- * 约束：不猜、不回退：帧路径无效、符号取不到、引用种类不是 LOCAL，一律失败。
- */
 
 #include "frame_target_key.h"
 
@@ -43,13 +38,6 @@ runtimec_status_t vmbin_frame_target_key(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/*
- * 写目标的 key 文本。LOCAL 走 `<frame_path>/<符号名>`，STATIC 直接是符号名
- * （绝对路径本身就是完整 key），其余种类 INVALID。
- *
- * **不创建、不触碰存储**：只回答「这条写指令的 key 是什么」。创建的语义归
- * `vmbin_value_access_write_*` 那几条（#632）。
- */
 runtimec_status_t vmbin_value_access_argument_key(
     const binrwir_binvthread_frame_t *frame,
     const binrwir_argument_t *argument, char *buffer, size_t capacity,
@@ -65,9 +53,7 @@ runtimec_status_t vmbin_value_access_argument_key(
         return vmbin_frame_target_key(frame, argument, buffer, capacity);
     }
     if (argument->reference_kind != BINRWIR_REFERENCE_STATIC) {
-        /* **失败必须带原因**：`runtimec_error_reset` 把 status 置 0（SUCCESS），
-         * 而下游若直接读 `error.status` 就会拿到 0——那是「失败却没有原因」。
-         * 这里显式填，让 `error` 在任何返回路径上都是可读的。 */
+        
         runtimec_error_set(error, RUNTIMEC_STATUS_INVALID,
                            RUNTIMEC_ERROR_DOMAIN_CONTRACT, 0,
                            runtimec_string_view_from_c_string(
@@ -76,8 +62,7 @@ runtimec_status_t vmbin_value_access_argument_key(
                            RUNTIMEC_PROGRAM_COUNTER_NONE);
         return RUNTIMEC_STATUS_INVALID;
     }
-    /* STATIC：符号池里的名字就是**完整 key**（`/tmp/adk` 这类绝对路径）。
-     * 拼 `frame_path` 是错的——那会得到 `/vthread/.../\/tmp/adk`。 */
+    
     if (binrwir_binfunc_get_symbol(frame->program, argument->slot, &name,
                                    &langtype) != RUNTIMEC_STATUS_SUCCESS ||
         name.size == 0U) {

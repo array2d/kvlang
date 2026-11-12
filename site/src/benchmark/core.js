@@ -1,8 +1,6 @@
-// 构建脚本与浏览器共用的 benchmark 渲染核心。纯 ESM，无 DOM / Node 依赖。
 
 const FILE_RE = /^results-v(\d+)\.(\d+)\.(\d+)-(\d{8}T\d{6}Z)\.csv$/;
 
-/** 最小 RFC4180 解析器：引号、转义引号、CRLF。 */
 export function parseCsv(text) {
   const table = [];
   let row = [];
@@ -47,7 +45,6 @@ export function parseCsv(text) {
     .map((r) => Object.fromEntries(header.map((h, i) => [h, r[i]])));
 }
 
-/** 从 Contents API 条目中按 semver + 时间戳选最新 CSV。 */
 export function pickLatest(entries) {
   if (!Array.isArray(entries)) return null;
   let best = null;
@@ -76,10 +73,6 @@ export function compareVersion(a, b) {
   return 0;
 }
 
-/**
- * 列表中存在比 currentKey 更新的版本时返回 { entry, key }，否则 null。
- * key = "vX.Y.Z-<timestamp>"；同版本的新时间戳会被视为更新。
- */
 export function pickNewerVersion(entries, currentKey) {
   const latest = pickLatest(entries);
   if (!latest) return null;
@@ -106,7 +99,6 @@ function inputNum(input) {
   return m ? Number(m[1]) : 0;
 }
 
-/** 过滤有效行，按 case 分组并按规模点数值排序。 */
 export function normalizeRows(rows) {
   const ok = rows.filter((r) => r.valid === "True" && r.kvlang_shm_ns !== "");
   const grouped = new Map();
@@ -126,7 +118,6 @@ export function rowCount(groups) {
   return groups.reduce((n, g) => n + g.points.length, 0);
 }
 
-/** ns 自适应单位，3 位有效数字；空值返回 —。 */
 export function formatNs(ns) {
   if (ns === "" || ns == null) return "—";
   const n = Number(ns);
@@ -137,7 +128,6 @@ export function formatNs(ns) {
   return `${(n / 1e9).toPrecision(3)} s`;
 }
 
-/** 从 CSV 行取展示元数据。 */
 export function csvMeta(rows) {
   const r = rows[0] || {};
   return {
@@ -149,7 +139,6 @@ export function csvMeta(rows) {
   };
 }
 
-/** 元信息行：版本 / commit / 日期 / CPU / 原始 CSV 链接。 */
 export function buildMetaHtml(meta, labels, csvHref) {
   const parts = [`${escapeXml(labels.versionLabel)} <strong>${escapeXml(meta.version)}</strong>`];
   if (meta.commit) parts.push(`commit <code>${escapeXml(meta.commit)}</code>`);
@@ -210,10 +199,9 @@ function legendItem(shape, cls, x, y) {
   return `<g class="bench-point ${cls}">${mark}</g>`;
 }
 
-/** 10 个 case 的小多图；纵轴为对数刻度的 ns。 */
 export function buildChartSvg(groups, labels) {
   const rows = Math.ceil(groups.length / COLS);
-  const width = COLS * PANEL_W + 48; // 右侧留出最后一个 x 标签的宽度
+  const width = COLS * PANEL_W + 48; 
   const height = LEGEND_H + rows * PANEL_H;
   const parts = [];
   parts.push(
@@ -223,7 +211,6 @@ export function buildChartSvg(groups, labels) {
     `<g class="bench-legend">`,
   );
 
-  // 图例：6 项，颜色 + 点形与图中一致
   const itemW = width / 6;
   SERIES.forEach((s, i) => {
     const x = i * itemW + 10;
@@ -255,7 +242,7 @@ export function buildChartSvg(groups, labels) {
       parts.push(
         `<line class="bench-grid" x1="${x0}" y1="${y.toFixed(1)}" x2="${x1}" y2="${y.toFixed(1)}"/>`,
       );
-      // 只在左列标刻度值，避免重复
+      
       if (col === 0) {
         const label = tick === 1e3 ? "1µs" : tick === 1e6 ? "1ms" : "1s";
         parts.push(
@@ -297,7 +284,6 @@ export function buildChartSvg(groups, labels) {
   return parts.join("");
 }
 
-/** 全部有效行的表格；单位自适应。 */
 export function buildTableHtml(groups, labels) {
   const head = labels.tableHeaders
     .map((h) => `<th scope="col">${escapeXml(h)}</th>`)
@@ -325,7 +311,6 @@ export function fullResultsLabel(labels, groups) {
   return String(labels.fullResults || "").replace("{n}", String(rowCount(groups)));
 }
 
-/** 比值格式化：≥1000 显示千分位整数，<1000 用 3 位有效数字；空值返回 —。 */
 export function formatRatio(v) {
   if (v === "" || v == null) return "—";
   const n = Number(v);
@@ -334,7 +319,6 @@ export function formatRatio(v) {
   return `${n.toPrecision(3)}×`;
 }
 
-/** 一个 case 在某版本下按 key 取三输入点数值，竖排成 <br> 分隔的一格。 */
 function cellLines(points, key) {
   return points
     .map((p) => {
@@ -344,7 +328,6 @@ function cellLines(points, key) {
     .join("<br>");
 }
 
-/** 比值格：每输入点 "input ratio×"，主口径 vs C（C=1）。 */
 function cellRatios(points, numKey, denKey) {
   return points
     .map((p) => {
@@ -358,10 +341,6 @@ function cellRatios(points, numKey, denKey) {
     .join("<br>");
 }
 
-/**
- * 多版本对比表：列为 10 个 case，每个版本 3 行（耗时 / vs Python / vs C）。
- * 每格竖排该 case 的三个输入点；vs C 行是主口径（C=1），加强调色。
- */
 export function buildVersionsTableHtml(versions, labels) {
   const [timeLabel, pyLabel, cLabel] = labels.versionRowLabels || ["time", "vs Python", "vs C"];
   const cases = versions[0].groups.map((g) => g.case);
@@ -386,7 +365,6 @@ export function buildVersionsTableHtml(versions, labels) {
   return `<table class="bench-versions"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
-/** 多版本元信息行：版本 / CPU / 工具链 / 日期。 */
 export function buildVersionsMetaHtml(versions, labels) {
   const items = [];
   for (const v of versions) {

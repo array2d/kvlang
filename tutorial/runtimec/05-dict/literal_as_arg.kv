@@ -1,9 +1,4 @@
-// 语义: 散 key 字面量只能作赋值右值或 for-in 源——作实参须先绑定到带类型的临时变量，
-//       容器类型由标注提供（`{…} -> m` 写实参同规则，见 [[map容器]]）。
-//       layout 对字面量出现在其它位置有专门的诊断（见 error_cases/syntax_error）。
-// 期望输出:
-//   3
-//   hi
+
 rwfunc count(*'[int64]'[]char/utf32 #a) -> (*int64 #n) {
 	kvspace·listlen(*a) -> *n
 }

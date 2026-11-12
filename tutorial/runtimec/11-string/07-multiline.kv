@@ -1,14 +1,4 @@
-// 字符串三形式（对齐 Rust）：
-//   "..."      转义串，\n \t 等转义生效，可跨行
-//   r"..."     原始串，零转义
-//   r#"..."#   原始串带井号栏，内容可含 "
-// 期望输出:
-//   line1
-//   line2
-//   one
-//   two
-//   raw\nliteral
-//   he said "hi"
+
 rwfunc test() -> () {
 	s:[]char/utf32 = "line1
 line2"

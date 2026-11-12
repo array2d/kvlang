@@ -1,25 +1,15 @@
-//! KVSpace C ABI bindings for layout.
 
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int, c_void};
 
-// ── 不透明句柄 ─────────────────────────────────────────────────────────
-
-/// kvspace-durable 侧 `*mut Box<dyn KVSpace>` 的不透明视图。
 pub type Handle = *mut c_void;
-
-// ── extern "C" 声明 ─────────────────────────────────────────────────────
 
 extern "C" {
     fn kvspaceConnect(dsn: *const c_char) -> Handle;
     fn kvspaceClose(h: Handle);
-    /// codec 产出为 frontend malloc 缓冲，调用方以 libc free 释放（无 kvspaceBytesFree）。
+    
     fn free(p: *mut c_void);
 
-    // 新存储 ABI：读走 Resolve + 进程内基址，写走 Realloc + 直写，枚举走 Listlen + List。
-    // 旧 ABI 的 Get/SetValue/Del/ListLen/ListAt/DelTree 已从库里删除，不再声明。
-
-    /// key → 偏移。0 是合法偏移，错误由返回码表达（不用 0/-1 当哨兵）。
     fn kvspaceResolveOffset(
         h: Handle,
         key: *const c_char,
@@ -28,7 +18,7 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    /// 唯一写原语：不存在则创建（清零），存在则调整容量。
+    
     fn kvspaceRealloc(
         h: Handle,
         key: *const c_char,
@@ -38,11 +28,11 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    /// 删除 key 的值并释放 box；空索引连索引节点一起删。
+    
     fn kvspaceFree(h: Handle, key: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
-    /// 进程内值区基址。地址 = 基址 + offset；非映射后端（durable）返回 NULL。
+    
     fn kvspaceXvalueInProcessAddress(h: Handle) -> *mut u8;
-    /// 直接子项数 N 与最长子项名字节数 M；非索引返回 NOT_INDEX，空索引 N=M=0。
+    
     fn kvspaceListlen(
         h: Handle,
         key: *const c_char,
@@ -51,7 +41,7 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    /// 一次取全部直接子项名（NUL 分隔，后端顺序、不排序）。
+    
     fn kvspaceList(
         h: Handle,
         key: *const c_char,
@@ -65,14 +55,9 @@ extern "C" {
     ) -> c_int;
     fn kvspaceDeltree(h: Handle, key: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
     fn kvspaceMkindex(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
-    /// 固定 16 字节 head 构造器（直接 memcpy struct + body + attr 区；langtype 空 = 空 attr）。
+    
     fn kvlangXvalueHeadNewNone(out: *mut *mut u8, out_len: *mut u64) -> c_int;
-    /// **没有 `storetype` 形参**：head 的 storetype 由构造器按 kind 自己定，
-    /// 调用方不再决定。签名以 `kvspace/include/kvspace/xvalue_head.h` 为准。
-    ///
-    /// 早先这里多传一个 `storetype: u8`，而新库已经改成 4 个形参——
-    /// **实参个数与形参个数不符是 UB**：Debug 构建侥幸不崩，Release 必段错误
-    /// （14:0x 实测，`kvlangXvalueHeadNewScalar` 里 SIGSEGV）。
+    
     fn kvlangXvalueHeadNewScalar(
         raw: *const u8,
         raw_len: u32,
@@ -131,22 +116,12 @@ extern "C" {
     ) -> c_int;
 }
 
-// ── 原位 head 访问（16 字节固定头：长度全在 head 里，attr 区无前缀）──
-
-/// wire: [bodylen:u64 @0-7][attrslen:u16 @8-9][padding:6 @10-15][body][attr records]；
-/// body 偏移恒 = 16。总长 = 16 + bodylen + attrslen。padding 必须为零。
-///
-/// **head 只描述「字节怎么读」**（`kvspace/include/kvspace/xvalue_head.h`）：
-/// bodylen 是 body 区字节数，它是容量还是有效长度由 **langtype** 判（bufferarray ⇒
-/// 容量，定长数组/标量 ⇒ 有效长度），head 不承载。`storetype` / `ptr` / `layout`
-/// 三个字段先后作废，现在头里只有两个字段加 padding。
 pub const PREFIX: usize = 16;
 
 const OFF_ATTRSLEN: usize = 8;
-/// padding 的起始偏移（6 字节，到 15 为止）。
+
 const OFF_PADDING: usize = 10;
 
-/// body 长度（u64 小端 @0-7）。data 过短 → 0。
 #[inline]
 pub fn xh_len(data: &[u8]) -> u64 {
     match data.get(0..8) {
@@ -154,7 +129,7 @@ pub fn xh_len(data: &[u8]) -> u64 {
         None => 0,
     }
 }
-/// attr 区字节数（u16 小端 @8-9）；data 过短 → 0。
+
 #[inline]
 pub fn xh_attrs_len(data: &[u8]) -> u16 {
     match data.get(OFF_ATTRSLEN..OFF_ATTRSLEN + 2) {
@@ -162,28 +137,22 @@ pub fn xh_attrs_len(data: &[u8]) -> u16 {
         None => 0,
     }
 }
-/// padding（offset 10-15）必须为零：head ABI 的一部分，非零即非法。
+
 #[inline]
 pub fn xh_padding(data: &[u8]) -> Option<&[u8]> {
     data.get(OFF_PADDING..PREFIX)
 }
-/// 指针性**从 langtype 推**，不再读 head 位。
-///
-/// 新 head 没有 `ptr` 字段（`xvalue_head.h`：存储形态与引用性都从 langtype 推出）。
-/// 判据是 langtype 首字节为 `*`（`*T` / `**T` / `(*T)` 都算指针形态）。
-/// 调用方拿不到 langtype 时应返回 false 而不是猜——本函数只做文本判定。
+
 #[inline]
 pub fn langtype_is_pointer(langtype: &str) -> bool {
     langtype.starts_with('*')
 }
-/// None：空字节，或固定头 bodylen=0。容量形态由 langtype 判而不在头里，所以
-/// 「len=0」就是唯一可从 head 独立断定的 None 判据。
+
 #[inline]
 pub fn xh_is_none(data: &[u8]) -> bool {
     data.is_empty() || (data.len() >= PREFIX && xh_len(data) == 0)
 }
 
-/// body 切片（偏移恒 = PREFIX，长度 = head 的 bodylen）；越界 → 空。
 pub fn xh_body_slice(data: &[u8]) -> &[u8] {
     let len = xh_len(data) as usize;
     let Some(end) = PREFIX.checked_add(len) else {
@@ -194,8 +163,6 @@ pub fn xh_body_slice(data: &[u8]) -> &[u8] {
     }
     &data[PREFIX..end]
 }
-
-// ── 内部助手 ─────────────────────────────────────────────────────────
 
 fn err_ret(buf: &mut [c_char; 256], ret: c_int) -> Result<(), String> {
     if ret == 0 {
@@ -211,8 +178,6 @@ fn err_ret(buf: &mut [c_char; 256], ret: c_int) -> Result<(), String> {
     })
 }
 
-/// codec 调用：产出 frontend malloc 缓冲，拷出后以 libc free 释放。
-/// Non-zero rc or empty output is an `Err` (passing an empty `Vec` to [`Kv::set`] would delete the key).
 fn call_codec(
     what: &str,
     f: impl FnOnce(*mut *mut u8, *mut u32) -> c_int,
@@ -233,7 +198,6 @@ fn call_codec(
     Ok(bytes)
 }
 
-/// 固定头构造器调用（New* 的 out_len 为 u64）：成功且 total<=u32::MAX 才转 u32。
 fn call_codec64(
     what: &str,
     f: impl FnOnce(*mut *mut u8, *mut u64) -> c_int,
@@ -254,8 +218,6 @@ fn call_codec64(
     Ok(bytes)
 }
 
-// ── 安全句柄 ─────────────────────────────────────────────────────────
-
 fn connect_or_panic(dsn: &str) -> Handle {
     let c = CString::new(dsn).expect("no NUL in dsn");
     let h = unsafe { kvspaceConnect(c.as_ptr()) };
@@ -265,23 +227,10 @@ fn connect_or_panic(dsn: &str) -> Handle {
     h
 }
 
-/// 测试用 DSN：`shm://<临时路径>`。
-///
-/// **为什么不是 `fs://`**：单库化后 `libkvspace` 只服务 `shm://`（`kvspace_dsn_path`
-/// 拒绝其它 scheme）。而 `shm` 本身就是 file-backed mmap——持久化、重开、崩溃恢复
-/// 这些能力它都有。layout 的测试要验的是**布局语义**，不是后端语义，换一个真能跑
-/// 的后端比跳过它更接近本意。
-///
-/// `tag` 用来区分同一测试进程内的多个 store，避免互相覆盖。
 pub fn test_dsn(tag: &str) -> String {
     format!("shm:///tmp/kvlanglayout_{}_{}", tag, std::process::id())
 }
 
-/// 删除一个 shm store 的全部文件。
-///
-/// shm 后端一个 store 是**四个文件**（`<path>`、`.garb`、`.gen`、`.sbo.data`、
-/// `.sbo.head`），不是目录——`remove_dir_all` 对它无效。全删干净才不会在
-/// /tmp 累积（表观几百 MB、实际 sparse 几 KB，但文件数会堆）。
 pub fn remove_test_store(dsn: &str) {
     let path = dsn.trim_start_matches("shm://");
     for suffix in ["", ".garb", ".gen", ".sbo.data", ".sbo.head"] {
@@ -289,18 +238,12 @@ pub fn remove_test_store(dsn: &str) {
     }
 }
 
-/// 尝试连接；失败返回 None（不 panic）。
-///
-/// 给「后端本期不支持」这类**环境缺口**用：单库化后 `libkvspace` 只服务
-/// `shm://`，`fs://` 会在 DSN 解析处被拒。那是后端能力边界，不是被测代码错，
-/// 按「跳过≠损坏」应当显式 SKIP 并打印原因，而不是长期红着让人以为是回归。
 pub fn try_connect(dsn: &str) -> Option<Handle> {
     let c = CString::new(dsn).ok()?;
     let h = unsafe { kvspaceConnect(c.as_ptr()) };
     (!h.is_null()).then_some(h)
 }
 
-/// KVSpace 安全封装（Drop 时释放底层句柄）。单数据 store，无控制 store。
 pub struct Kv {
     h: Handle,
 }
@@ -312,7 +255,6 @@ impl Kv {
         }
     }
 
-    /// Like [`Kv::conn`], but returns `Err` instead of panicking on connection failure.
     pub fn try_conn(dsn: &str) -> Result<Kv, String> {
         let c = CString::new(dsn).map_err(|_| format!("dsn contains NUL: {dsn:?}"))?;
         let h = unsafe { kvspaceConnect(c.as_ptr()) };
@@ -322,17 +264,11 @@ impl Kv {
         Ok(Kv { h })
     }
 
-    /// 写多对 (key, langtype, wire)：langtype 拼入值 attr 区整体单写（无 attr key）。
-    /// wire 空字节 = None → 删该 key。8 字节空头是目录 marker 等合法值（len=0 非
-    /// None），照常写——None 语义恒空字节（[[kvlang-layout-rust]]）。
     pub fn set(&mut self, pairs: &[(String, String, Vec<u8>)]) -> Result<(), String> {
         for (key, lt, xvalue) in pairs {
-            // 末段含 ‥ 的 key 是系统变量本体：无类型（保留 codec 空 attr）。
-            // 前缀可含 ‥（如 /lib/‥labels/），只拦末段。
+            
             let last_seg = key.rsplit('/').next().unwrap_or(key);
-            /* langtype 必须在**构造期**就进 wire：head 的 attrslen 与 attr 区是
-             * 一次成形的。构造器拿不到类型时（系统变量本体、空 lt），保持它产的
-             * 空 attr（attrslen=0）。这里只做这一次拼装，且**不带任何 attr 前缀**。 */
+            
             let wire = if xvalue.is_empty() || lt.is_empty() || last_seg.contains('\u{2025}') {
                 xvalue.clone()
             } else {
@@ -343,17 +279,10 @@ impl Kv {
         Ok(())
     }
 
-    /// 写一条完整 wire（含 head + body + attr）：realloc 出空间，再把 body/attr
-    /// 从 wire 里原样搬过去，**不重写 head**——head 已由构造器成形，这里只是搬运。
-    ///
-    /// 为什么必须先查 base 再写：durable 没有进程内值区，`kvspaceRealloc` 返回
-    /// UNSUPPORTED、`kvspaceXvalueInProcessAddress` 返回 NULL。那种后端上写不了，
-    /// 必须给出可读错误而不是拿 NULL 去做指针算术。
     fn set_one(&mut self, key: &str, xvalue: &[u8]) -> Result<(), String> {
         let ck = CString::new(key).expect("no NUL in key");
         let mut err: [c_char; 256] = [0; 256];
 
-        // wire 空字节 = None → 删该 key。
         if xvalue.is_empty() {
             let ret =
                 unsafe { kvspaceFree(self.h, ck.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
@@ -362,7 +291,7 @@ impl Kv {
         if xvalue.len() < 16 {
             return Err(format!("{key}: wire shorter than 16-byte head"));
         }
-        // head 里的两个长度就是这次要写的 body/attr 字节数，直接读，不重算。
+        
         let body_len = u64::from_le_bytes(xvalue[0..8].try_into().unwrap());
         let attr_len = u16::from_le_bytes([xvalue[8], xvalue[9]]) as u64;
         let want = 16u64
@@ -414,8 +343,6 @@ impl Kv {
         Ok(())
     }
 
-    /// 单点读：resolve 拿 offset，再从进程内基址拷出整条 wire（自持）。
-    /// 不存在 / 后端非映射 → 空字节（调用方按「没有这个值」处理）。
     pub fn get_one(&mut self, key: &str) -> Vec<u8> {
         let c = CString::new(key).expect("no NUL in key");
         let mut off: u64 = 0;
@@ -438,7 +365,7 @@ impl Kv {
             return Vec::new();
         }
         unsafe {
-            // 整条 wire 的长度由 head 自己算出：16 + bodylen + attrslen。
+            
             let head = std::slice::from_raw_parts(base.add(off as usize), 16);
             let body_len = u64::from_le_bytes(head[0..8].try_into().unwrap()) as usize;
             let attrs_len = u16::from_le_bytes([head[8], head[9]]) as usize;
@@ -447,20 +374,11 @@ impl Kv {
         }
     }
 
-    /// 读 key 的完整 langtype；无该 key / 无 langtype 记录 → 空串。
-    ///
-    /// **直接解析 wire，不再问 `kvspaceGetHead`**（用户裁决：删掉那条 ABI——
-    /// 它只是 `load` 的内部步骤，暴露出去等于给「读头」开了个可编程旁路）。
-    /// wire 的 attr 区自描述：`[tag:u8][len:u16][data]`，tag 1 = langtype。
-    /// 几何全部来自 head（`xh_len` / `xh_attrs_len`），不写偏移算术。
     pub fn langtype_of(&mut self, key: &str) -> String {
         let wire = self.get_one(key);
         wire_langtype(&wire).unwrap_or_default()
     }
 
-    /// 直接子项名（后端顺序、**不排序**）。`expand_ext` / `resolve` 两个旧参数
-    /// 已无对应语义：新 ABI 的 List 只列物理直接子项，不展开 extindex、不解析 Ptr。
-    /// 参数保留是为了不动调用点签名，实现忽略它们。
     pub fn list(&mut self, prefix: &str, _expand_ext: bool, _resolve: bool) -> Vec<String> {
         let c = CString::new(prefix).expect("no NUL in prefix");
         let mut count: i64 = 0;
@@ -479,7 +397,7 @@ impl Kv {
         if ret != 0 || count <= 0 {
             return Vec::new();
         }
-        // listlen 给出的 N 和 M 就是为了这一次分配：N*(M+1) 必然装得下全部名字。
+        
         let cap = (count as usize).saturating_mul(max_name as usize + 1);
         if cap == 0 {
             return Vec::new();
@@ -532,9 +450,6 @@ impl Drop for Kv {
     }
 }
 
-// XValue codec.
-
-/// array_len → dims：char/* 恒一维（含空串/单字符）；其余标量(≤1)=0 维、多元素=1 维。
 fn al_to_dims(kind: &str, array_len: i32) -> Vec<i32> {
     if kind.starts_with("char/") {
         vec![array_len.max(0)]
@@ -545,23 +460,12 @@ fn al_to_dims(kind: &str, array_len: i32) -> Vec<i32> {
     }
 }
 
-/// 空 C 串（langtype 参数的"无类型"取值：attrslen=0，attr 区零字节）。
 pub static EMPTY_CSTR: [u8; 1] = [0];
 
-/// langtype 的 C 串。空串 → [`EMPTY_CSTR`]。
-///
-/// 构造器**直接收 langtype**：wire 一次成形，`Kv::set` 不再二次拼 attr。此前是
-/// 「构造器传空串、`Kv::set` 用 `attr_bytes` 覆写」两段拼装，head 扩容后两处各按
-/// 自己的布局拼，必然对不上。
 pub fn langtype_cstr(langtype: &str) -> CString {
     CString::new(langtype).unwrap_or_else(|_| CString::new("").unwrap())
 }
 
-/// 给已构造的 wire 换上 langtype：保留 head 的 bodylen/storetype/ptr 与 body，
-/// 按**新布局**重写 attrslen 与 attr 区（record = `[tag][len:u16][data]`，无前缀）。
-///
-/// 之所以不是「拼一段前缀」：attrslen 住在 head 里，attr 区本身没有长度字段。
-/// 一次成形、只写一处，才不会出现「head 说 3 字节、实际拼了 5 字节」这种裂开。
 pub fn with_langtype(wire: &[u8], langtype: &str) -> Vec<u8> {
     if wire.len() < PREFIX {
         return wire.to_vec();
@@ -575,7 +479,7 @@ pub fn with_langtype(wire: &[u8], langtype: &str) -> Vec<u8> {
     }
     let mut out = wire[..body_end].to_vec();
     let attr_len_pos = OFF_ATTRSLEN;
-    out[OFF_PADDING..PREFIX].fill(0); // padding 恒为零
+    out[OFF_PADDING..PREFIX].fill(0); 
     if langtype.is_empty() {
         out[attr_len_pos..attr_len_pos + 2].copy_from_slice(&0u16.to_le_bytes());
         return out;
@@ -585,7 +489,7 @@ pub fn with_langtype(wire: &[u8], langtype: &str) -> Vec<u8> {
         return wire.to_vec();
     }
     let mut attr = Vec::with_capacity(3 + l);
-    attr.push(1u8); // tag = langtype
+    attr.push(1u8); 
     attr.extend_from_slice(&(l as u16).to_le_bytes());
     attr.extend_from_slice(langtype.as_bytes());
     let alen = u16::try_from(attr.len()).expect("attr region fits u16");
@@ -594,9 +498,6 @@ pub fn with_langtype(wire: &[u8], langtype: &str) -> Vec<u8> {
     out
 }
 
-/// 按 kind+body 产 wire（固定 8 字节 head + body + 空 attr 占位；真实类型由 Kv::set 按
-/// pair 的 lt 替换）。storetype 判定对齐 durable to_wire_head：char/* 与 rwir 族→SLACK、
-/// ndim>0 非容器→LARGE、其余标量→SHORT。
 pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>, String> {
     let dims = al_to_dims(kind, array_len);
     if (kind.is_empty() || kind == "None") && raw.is_empty() {
@@ -634,18 +535,11 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>,
     })
 }
 
-/// 按 wire 字节原位填 head 视图（16 字节固定头）。
-/// langtype 不在 head 的结构体视图里——调用方若已知道类型可传入；否则留空，
-/// 由 `langtype_from_wire` 从 attr 区取。
 #[inline]
 fn xh_padding_is_zero(data: &[u8]) -> bool {
     xh_padding(data).is_some_and(|p| p.iter().all(|&byte| byte == 0))
 }
 
-/// 从一条 wire 里取 langtype 文本（attr tag 1）；没有该记录 → None。
-///
-/// attr 区自描述：`[tag:u8][len:u16][data]`，紧跟 body 之后，长度由 head 的
-/// `attrslen` 给出（**没有**独立长度前缀）。几何全部取自 head，不写偏移算术。
 pub fn wire_langtype(wire: &[u8]) -> Option<String> {
     if wire.len() < PREFIX || !xh_padding_is_zero(wire) {
         return None;
@@ -674,8 +568,6 @@ pub fn wire_langtype(wire: &[u8]) -> Option<String> {
     None
 }
 
-// ── 标准标量构造器 ───────────────────────────────────────────────────
-
 pub fn new_char(kind: &str, s: &str) -> Result<Vec<u8>, String> {
     let bytes = s.as_bytes();
     if kind == "char/utf8" {
@@ -699,11 +591,6 @@ pub fn new_char_byte(bytes: &[u8]) -> Result<Vec<u8>, String> {
     })
 }
 
-/// 空值字面量 `None` 的 wire：长度 0 的短内联头（空 body、无 langtype，16 字节）。
-///
-/// **不是零字节**——存储层以 `invalid XValue` 拒绝零字节值（实测见
-/// `workspace/tmp/coding1/none_wire_probe.c`）。也不要手拼这 16 字节：
-/// 头布局的唯一来源是 kvspace 的 `kvlangXvalueHeadNewNone`。
 pub fn new_none() -> Result<Vec<u8>, String> {
     call_codec64("HeadNewNone", |out, out_len| unsafe {
         kvlangXvalueHeadNewNone(out, out_len)
@@ -735,12 +622,11 @@ pub fn new_float64(v: f64) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
 
-    /// Codec failure must return `Err` rather than an empty `Vec` (which `Kv::set` treats as key deletion).
     #[test]
     fn codec_failure_is_error_not_empty_value() {
         assert!(call_codec("t", |_, _| -1).is_err());
         assert!(call_codec64("t", |_, _| -1).is_err());
-        // `rc == 0` with empty output is also an error.
+        
         assert!(call_codec("t", |_, _| 0).is_err());
         assert!(call_codec64("t", |_, _| 0).is_err());
         let v = new_int64(7).unwrap();

@@ -1,9 +1,6 @@
-//! 调用名解析：调用名必须是「全路径去掉 /lib」——全局写 `name`，包内写 `包名·name`。
-//! 包内裸名不回退到同包函数；与同包函数同名时 layout 报错。
 
 use kvlanglayout::{compile, init_dirs, Kv};
 
-/// store 守卫：离开作用域时删目录。先于 `Kv` 声明，故后 drop。
 struct TempStore(String);
 
 impl Drop for TempStore {
@@ -76,7 +73,7 @@ fn absolute_global_path_is_accepted() {
 
 #[test]
 fn global_wins_over_same_package_function() {
-    // 裸名只指向全局 /lib/name：即使同包有同名函数，也按全局解析。
+    
     let (_store, mut kv) = fresh_kv("shadow");
     compile(
         &mut kv,
@@ -87,8 +84,7 @@ fn global_wins_over_same_package_function() {
 
 #[test]
 fn unknown_bare_call_is_rejected() {
-    // 未实现的内建（如 debugger）：既不是全局函数、也未 def rwir 声明 → 明确报错，
-    // 不放行到运行期（运行期同样 unknown rwir，只会把失败推迟）。
+    
     let (_store, mut kv) = fresh_kv("unknown");
     let err = compile(&mut kv, "rwfunc t() -> () {\n    debugger()\n}\n").unwrap_err();
     assert!(err.contains("未定义函数 debugger"), "{err}");

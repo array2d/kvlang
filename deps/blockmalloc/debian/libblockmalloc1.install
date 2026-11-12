@@ -1,0 +1,5 @@
+# runtime package: include versioned shared libraries only
+# match all multiarch libdirs
+usr/lib/x86_64-linux-gnu/libblockmalloc.so.*
+usr/lib/*/libblockmalloc.so.*
+# keep docs handled by dh_installdocs (copyright, changelog)

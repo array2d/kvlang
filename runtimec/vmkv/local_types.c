@@ -1,9 +1,3 @@
-/*
- * 组件：vmkv/local_types 的实现
- * 作用：顺序读一遍明文 RWIR，按名字收集局部符号的写位置类型；读位置只用于
- *       判定「该名字是否真的有定值」。
- * 约束：不做类型提升，不按出现顺序取第一个，也不允许同一名字有两种类型。
- */
 
 #include "vmkv/local_types.h"
 
@@ -16,7 +10,6 @@
 #include "vmkv/rwir_manifest.h"
 #include "vmkv/rwir.h"
 
-/* 诊断码：source 占 1–11，encoder 占 20–37，本组件从 40 起。 */
 enum {
     VMKV_LOCAL_TYPES_DIAG_INVALID_REQUEST = 40,
     VMKV_LOCAL_TYPES_DIAG_CONFLICT = 41,
@@ -58,14 +51,6 @@ static bool vmkv_local_types_view_equals(runtimec_string_view_t left,
            (left.size == 0U || memcmp(left.data, right.data, left.size) == 0);
 }
 
-/*
- * 裸标识符才是局部：内联字面量有字节视图，绝对路径是 STATIC，`*[d,±k]` 是帧内
- * 槽表达式（编码器会另行拒绝），**含 `·` 的是容器成员键**，四者都不是局部名。
- *
- * 成员键不是局部变量（spec `05-runtime语义/03-成员访问`）：它是 `base·name` 这段
- * 物理 key，kvspace 按前缀枚举，不需要先被写过。把它当局部会要求「先写后读」，
- * 而那个判据只对**变量**成立——读一个不存在的成员是确定的失败，不是「变量未定义」。
- */
 static bool vmkv_local_types_name_of(const vmkv_rwir_argument_view_t *argument,
                                      runtimec_string_view_t *output_name) {
     *output_name = runtimec_string_view_make(NULL, 0U);
@@ -79,7 +64,6 @@ static bool vmkv_local_types_name_of(const vmkv_rwir_argument_view_t *argument,
     return true;
 }
 
-/* 找到同名记录；没有就追加一条空类型记录。失败返回 NULL 并置 error。 */
 static vmkv_local_type_record_t *vmkv_local_types_record(
     vmkv_local_types_t *local_types, runtimec_string_view_t name,
     runtimec_program_counter_t logical_program_counter, runtimec_error_t *error) {
@@ -124,18 +108,6 @@ static vmkv_local_type_record_t *vmkv_local_types_record(
     return record;
 }
 
-/*
- * 一个写位置槽携带的 langtype 是否是一个**类型**。
- *
- * 不是所有 langtype 串都是类型：`rwir` / `rwfunc` 是槽的**引用形态标记**——slot 的
- * langtype 为它们时，body 存的是表达式或函数名，不是一个值的类型。把它们当成
- * 局部类型登记进符号池，route 会拿着 "rwir" 去查宽度表，必然查不到；更糟的是
- * 那看起来像「有类型」，会掩盖 layout 本该给出类型却没给的事实。
- *
- * 其余判定（非空、非并集）在这里一并做。**不做类别判定**：本层只回答「这个局部
- * 被写成了哪一个类型」，不回答「我认不认识这个类型」——后者是宿主的宽度问题。
- * 编码器不知道 time 有几个字节，硬让它判断只会得到一个假的确定。
- */
 static bool vmkv_local_types_is_concrete(runtimec_string_view_t langtype) {
     if (langtype.size == 0U || langtype.data == NULL ||
         memchr(langtype.data, '|', langtype.size) != NULL) {
@@ -154,14 +126,6 @@ static bool vmkv_local_types_is_concrete(runtimec_string_view_t langtype) {
     return true;
 }
 
-/*
- * 写位置：类型必须具体；同一名字的第二个不同类型即失败。
- *
- * **没有例外。** 这里曾有一条豁免（裁决 `decision-type-from-target-local.md`）：
- * 写来源是单个 STATIC 绝对 key 时，允许局部槽类型缺席、运行期从目标 XValue 头取。
- * 那条豁免随「局部必须声明类型」的规则落地而失效——实测 246 条语料（40 + 206）
- * 里豁免分支**一次都没被进入**，是死代码，已删。
- */
 static runtimec_status_t vmkv_local_types_note_write(
     vmkv_local_types_t *local_types, runtimec_string_view_t name,
     runtimec_string_view_t langtype, bool *output_usable,
@@ -205,9 +169,6 @@ static runtimec_status_t vmkv_local_types_note_write(
         logical_program_counter);
 }
 
-/* 采集时用一次性文本化的程序计数器：出错时至少指出是哪一条指令。 */
-/* 源码行号 → 诊断 pc。vmkv 不知道运行时帧号，stack_identifier 取
- * STACK_IDENTIFIER_NONE（源码侧位置形态）；0 是合法帧号，不能用。 */
 static runtimec_program_counter_t vmkv_local_types_program_counter(
     uint32_t line) {
     return (runtimec_program_counter_t){
@@ -260,7 +221,7 @@ runtimec_status_t vmkv_local_types_collect(
         for (size_t ordinal = 0U; ordinal < instruction.read_argument_count;
              ++ordinal) {
             if (call_target && ordinal == 0U) {
-                continue; /* `call` 的第一个读参是函数名，不是局部 */
+                continue; 
             }
             runtimec_string_view_t name = runtimec_string_view_make(NULL, 0U);
             if (!vmkv_local_types_name_of(&instruction.read_arguments[ordinal],
@@ -304,26 +265,7 @@ runtimec_status_t vmkv_local_types_collect(
             if (record->written) {
                 continue;
             }
-            /*
-             * **成员键不是局部变量**：spec `05-runtime语义/03-成员访问` 说
-             * `base·name` 是独立物理 key，读它就是取那个 key——不存在时是**运行期
-             * 的确定失败**，不是「变量未定义」这种编译期错误。所以它不参与本文件
-             * 的「读必先写」判据。
-             *
-             * **帧准备也不为它建槽、不绑定**（裁决见
-             * `workspace/622/architect/decision-member-slot-binding.md`）：
-             * 成员槽由**写路径按 key 现建**。曾经这里说「仍要登记，进而让
-             * `materialize_locals` 建槽」——那条已作废，原因正是下面这个失效链：
-             *
-             *   帧准备建零值并绑定地址 → `struct·new` 克隆整棵子树 →
-             *   那具地址作废 → 后续 `输出算子(p·x)` 读到旧地址上的 0
-             *   （期望 3），而按 key 读 `/vthread/1/[1]/p·x` 是 3。
-             *
-             * ⇒ **帧准备阶段既建又绑**会造出一个在克隆时必然失效的地址；
-             * 改成「写路径按 key 现建」之后，地址只在使用点产生，不会跨克隆存活。
-             *
-             * 本处只跳过检查，不改变任何逻辑。
-             */
+            
             if (vmkv_rwir_key_is_member(
                     runtimec_key_view_make(record->name.data,
                                            record->name.size))) {

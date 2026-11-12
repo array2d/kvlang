@@ -1,5 +1,3 @@
-//! 字符串 `+` 脱糖：全字符串 → `string·concat`（规范 05-runtime语义/11），无开关；
-//! 字符串 + 可证明非字符串在 layout 阶段报错。
 
 use kvlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
@@ -15,7 +13,7 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
         tag,
         std::process::id()
     ));
-    // 写前删同名：异常退出会留下残骸，反复跑会累积。
+    
     let _ = std::fs::remove_file(&path);
     std::fs::write(&path, src).unwrap();
     path
@@ -25,8 +23,6 @@ fn dsn(tag: &str) -> String {
     kvlanglayout::ffi::test_dsn(&format!("concat_{tag}"))
 }
 
-/// 一次 layout 的产物：`.kv` 路径 + fs store DSN + 输出。
-/// `Drop` 时把两者删掉——测试红了也不会留残骸，反复跑不累积。
 struct Fixture {
     file: std::path::PathBuf,
     db: String,

@@ -1,9 +1,3 @@
-/*
- * 组件：contract/error 的实现
- * 作用：错误值的重置、写入与自洽校验；不分配、不读外部状态。
- * 联系：host 适配层把 kvspace 错误翻译成本域错误，vmkv/vmbin/engine 只
- *       透传或补充逻辑程序计数器，不得抹去原错误分类。
- */
 
 #include "contract/error.h"
 

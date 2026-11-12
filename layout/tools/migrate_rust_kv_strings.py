@@ -1,32 +1,3 @@
-#!/usr/bin/env python3
-"""把 Rust 测试文件里**字符串字面量中的** kv 源码迁移成新参数语法。
-
-用法：
-    migrate_rust_kv_strings.py --dry-run <文件.rs…>     # 只打 diff，不写
-    migrate_rust_kv_strings.py --write <文件.rs…>       # 就地写
-
-与 `migrate_param_syntax.py` 的区别只有一个：输入形态。
-
-Rust 测试把 kv 源码写成字符串字面量：
-
-    compile(&mut kv, "lib p {\\n\\trwfunc f(x:int64) -> (r:int64) { x -> r }\\n}\\n")
-
-本工具按**字符串边界**切割，只改 `"..."` 与 `r#"..."#` 的内部；Rust 代码本体、
-注释、`env!(...)` 一律不碰。
-
-## 三条跳过规则（不满足就原样保留）
-
-1. **整文件排除**：`EXCLUDED_FILES` 里的文件不参与迁移。语法形态测试的字符串是**样本**，
-   不是待迁移的代码——改了就把负向测试变成假绿。
-2. **函数级幂等**：一个 rwfunc 的签名已经是全 `*T $name` / `T $name` 形态 → **整块跳过**，
-   含函数体。这样刻意写的 `p·x`（负向样本）永远不会被碰。
-3. **空 kindexpr**：`f(a:)` 这种形参没有类型，新写法尚未定义。**跳过该函数并报告**，
-   不发明语法。
-
-## 迁移规则本身
-
-复用 `migrate_param_syntax.convert_text`，不复制实现。
-"""
 
 from __future__ import annotations
 
@@ -37,15 +8,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from migrate_param_syntax import convert_text  # noqa: E402
+from migrate_param_syntax import convert_text
 
-# 语法形态测试：字符串是**样本**，不是待迁移代码。改了会把负向测试变成假绿。
 EXCLUDED_FILES = {
     "wave0_parameter_syntax.rs",
 }
 
-# `\` 在 Rust 字符串里先行处理：行尾 `\` 是**续行**（吞掉换行与后续缩进），
-# 不是字面反斜杠。不识别它就会把续行变成 `\\` + 换行，kv 源码里多一个反斜杠。
 _RUST_ESCAPES = {
     "n": "\n",
     "t": "\t",
@@ -55,15 +23,9 @@ _RUST_ESCAPES = {
     "\\": "\\",
 }
 
-SIGNATURE = __import__("migrate_param_syntax").SIGNATURE  # 同一份签名正则
-
+SIGNATURE = __import__("migrate_param_syntax").SIGNATURE
 
 def unescape(raw: str) -> str:
-    """`\\n` `\\t` `\\"` 与行尾续行 `\\<newline>` → 真实字符。
-
-    行尾 `\\` 后跟换行时，Rust 会吞掉换行与下一行前导空白；这里照做，
-    否则迁移器会把它当成字面反斜杠再转义成 `\\\\`。
-    """
     out: list[str] = []
     index = 0
     while index < len(raw):
@@ -74,7 +36,6 @@ def unescape(raw: str) -> str:
             continue
         nxt = raw[index + 1]
         if nxt == "\n":
-            # 续行：吞掉换行与下一行前导空白。
             index += 2
             while index < len(raw) and raw[index] in " \t":
                 index += 1
@@ -87,9 +48,7 @@ def unescape(raw: str) -> str:
         index += 1
     return "".join(out)
 
-
 def escape(text: str) -> str:
-    """真实字符 → Rust 字面量形态。"""
     return (
         text.replace("\\", "\\\\")
         .replace('"', '\\"')
@@ -99,9 +58,7 @@ def escape(text: str) -> str:
         .replace("\0", "\\0")
     )
 
-
 def string_spans(source: str) -> list[tuple[int, int, bool]]:
-    """`("..." / r#"..."#)` 的位置 → (内容起点, 内容终点, 是否原始串)。"""
     spans: list[tuple[int, int, bool]] = []
     index = 0
     length = len(source)
@@ -142,9 +99,7 @@ def string_spans(source: str) -> list[tuple[int, int, bool]]:
         index += 1
     return spans
 
-
 def already_migrated(params: str, returns: str) -> bool:
-    """签名是否已是全 `*T $name` / `T $name` 形态。"""
     from migrate_param_syntax import parse_item, split_params
 
     items = split_params(params) + split_params(returns)
@@ -152,15 +107,7 @@ def already_migrated(params: str, returns: str) -> bool:
         return False
     return all("$" in item for item in items)
 
-
 def migrate_kv(kv: str) -> tuple[str, list[str], list[str]]:
-    """迁移一段 kv 源码。返回 (结果, 跳过清单, 冲突清单)。
-
-    逐函数判定：已是新形态的整块原样保留（含函数体）。
-
-    空 kindexpr（`a:`）现在**参与迁移**，产出 `* $a`——那是它唯一的合法新形态
-    （值复制没有类型就没有值可拷贝）。
-    """
     migrated, conflicts = convert_text(kv)
     skipped: list[str] = []
     for match in SIGNATURE.finditer(kv):
@@ -171,12 +118,7 @@ def migrate_kv(kv: str) -> tuple[str, list[str], list[str]]:
         return migrated, skipped, conflicts
     return _assemble(kv, migrated, skipped), skipped, conflicts
 
-
 def _assemble(original: str, migrated: str, skipped: list[str]) -> str:
-    """取 migrated 为基底，把被跳过的函数块换回原文。
-
-    `migrated` 与 `original` 长度不同，按签名块下标对齐。
-    """
     if not skipped:
         return migrated
     orig_blocks = list(SIGNATURE.finditer(original))
@@ -199,9 +141,7 @@ def _assemble(original: str, migrated: str, skipped: list[str]) -> str:
     pieces.append(migrated[pos_mig:])
     return "".join(pieces)
 
-
 def convert_source(source: str, path: str) -> tuple[str, list[str], list[str]]:
-    """迁移一份 Rust 源码。返回 (新源码, 跳过清单, 冲突清单)。"""
     if Path(path).name in EXCLUDED_FILES:
         return source, [f"{Path(path).name}: 整文件排除（语法形态样本）"], []
 
@@ -228,7 +168,6 @@ def convert_source(source: str, path: str) -> tuple[str, list[str], list[str]]:
         pos = end
     pieces.append(source[pos:])
     return "".join(pieces), skipped, conflicts
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -263,7 +202,6 @@ def main() -> int:
             Path(path).write_text(migrated, encoding="utf-8")
             print(f"migrated: {path}", file=sys.stderr)
     return 1 if failed else 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

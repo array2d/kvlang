@@ -1,13 +1,4 @@
-// jit_alias: x86_64 JIT loop shapes covering destination aliasing (`t = i + t`),
-// callee-saved registers (R12-R15), zero-extended setcc booleans, and bool return values.
-// Expected output:
-//   sum_alias(10) = 45
-//   alias_dst(5) = 1136
-//   locals8(10) = 7347
-//   locals9(10) = 9492
-//   cmp_var(10) = 45
-//   lt5(3) = true
-//   lt5(7) = false
+
 rwfunc sum_alias(*int64 #n) -> (*int64 #total) {
 	*total = 0
 	i:int64 = 0
@@ -69,7 +60,7 @@ rwfunc locals9(*int64 #n) -> (*int64 #r) {
 	}
 }
 rwfunc cmp_var(*int64 #n) -> (*int64 #r) {
-	// Store comparison result in a local before `while` to exercise standalone setcc.
+	
 	*r = 0
 	i = 0
 	c = i < *n

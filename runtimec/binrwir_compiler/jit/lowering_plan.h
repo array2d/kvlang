@@ -1,20 +1,6 @@
 #ifndef RUNTIMEC_BINRWIR_JIT_LOWERING_PLAN_H
 #define RUNTIMEC_BINRWIR_JIT_LOWERING_PLAN_H
 
-/*
- * 组件：binrwir_compiler/jit/lowering_plan
- * 作用：把已验证 Program 与顶层 Compiler 的 execution plan 绑定为目标相关
- *       lowering 输入，包括调用约定、JIT 专属 register allocation、spill、
- *       safepoint materialization 和 source logical program counter 映射。
- * 联系：binrwir_jit compiler 构建，lower 消费；backend 只消费 emit request。
- * 约束：每条 logical instruction completion 必须生成不可关闭的 commit
- *       safepoint；guard failure/error 必须生成 discard 路径。不得重新优化
- *       BinRWIR、改变 execution target 或建立执行期替代路径；
- *       无法精确表达 execution plan 时必须在机器码生成前返回
- *       RUNTIMEC_STATUS_UNSUPPORTED 并填写 refusal。顶层 binrwir_jit_compile 只把
- *       UNSUPPORTED 映射为成功的 NOT_COMPILABLE，其它错误原样停止。
- */
-
 #include <stddef.h>
 #include <stdint.h>
 

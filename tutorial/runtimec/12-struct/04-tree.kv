@@ -1,10 +1,4 @@
-// tree: 二叉树存进 map（int 键、struct 值），左右孩子用 *TNode 指针
-// 语义: /tree 是 [int64]·TNode 的 map；left/right 是 *TNode（None=空指针）；
-//       inorder 递归中序遍历，node 是指针，node·field 经指针解引用。
-// 期望输出:
-//   3
-//   5
-//   8
+
 struct TNode {
 	val:int64=0
 	left:*TNode=None

@@ -1,7 +1,3 @@
-//! rwir `print` / `println` / `cerr` / `printf` / `input`。它们不是 kvlang runtime 的 builtin，
-//! 由本 runtime 就地实现：print* 拼行输出；`printf` C 风格格式化串到 stdout（不自动换行，换行靠 `\n`）；
-//! `input` 读一行 stdin 回填写槽。
-//! TTY 走 rustyline（方向键移动光标 / 上下翻历史 / 按字符退格）；管道走 read_line（脚本/测试）。
 
 use std::cell::RefCell;
 use std::ffi::{c_char, c_void};
@@ -10,16 +6,6 @@ use std::io::Write;
 use crate::engine::{Engine, KvResult};
 use crate::ffi::*;
 
-// ── 新 API 版输出算子（TASK-042a）─────────────────────────────────
-//
-// 按裁决「一个 opid 一个 handler」：print / println / cerr 各一个 thin handler，
-// **共用渲染核心** `render_arguments`，行为差异由参数表达，**不在 handler 里 match 名字**。
-//
-// 取参走 runtimec 的 `kvlang_runtime_read_argument_text(frame, instruction, i, ...)`，
-// **不碰 kvspace 句柄**——这是与旧 `print_line` 的根本区别：旧版经
-// `kvlangRwirextParams(eng.kv, pc)` 自己去 kvspace 里解析操作数，那正是要消除的旁路。
-
-/// 三个输出算子共用的执行体：`sep` 分隔、`to_stderr` 选流、`newline` 决定末尾换行。
 unsafe fn emit(
     frame: *mut c_void,
     instruction: *const c_void,
@@ -29,9 +15,7 @@ unsafe fn emit(
     newline: bool,
     error: *mut kvlang_runtime_error_t,
 ) -> runtimec_status_t {
-    // 读参数 = 该指令的读参个数。新 API 没有「数一下有几个」的入口，
-    // 所以由注册时的签名决定：三个算子都是变参（`*...`），逐个数到失败为止。
-    // runtimec 对越界返回 INVALID —— 用它当循环终止条件，不预设上限。
+    
     let mut pieces: Vec<String> = Vec::new();
     let mut index = 0usize;
     loop {
@@ -50,7 +34,7 @@ unsafe fn emit(
             continue;
         }
         if status != RuntimecStatus::InsufficientCapacity {
-            break; // INVALID = 没有更多参数了
+            break; 
         }
         let needed = buffer.required_length;
         let mut owned = vec![0u8; needed + 1];
@@ -83,7 +67,6 @@ unsafe fn emit(
     runtimec_status_t::Success
 }
 
-/// `print`：无分隔、无换行。
 pub unsafe extern "C" fn print_handler(
     frame: *mut c_void,
     instruction: *const c_void,
@@ -93,7 +76,6 @@ pub unsafe extern "C" fn print_handler(
     emit(frame, instruction, output_exit, "", false, false, &mut error)
 }
 
-/// `println`：空格分隔、末尾换行。
 pub unsafe extern "C" fn println_handler(
     frame: *mut c_void,
     instruction: *const c_void,
@@ -103,7 +85,6 @@ pub unsafe extern "C" fn println_handler(
     emit(frame, instruction, output_exit, " ", false, true, &mut error)
 }
 
-/// `cerr`：空格分隔、走 stderr、末尾换行。
 pub unsafe extern "C" fn cerr_handler(
     frame: *mut c_void,
     instruction: *const c_void,
@@ -113,7 +94,6 @@ pub unsafe extern "C" fn cerr_handler(
     emit(frame, instruction, output_exit, " ", true, true, &mut error)
 }
 
-/// 清零的错误对象：runtimec 在成功时不写它，失败时只写 message 缓冲以外部分。
 fn zeroed_error() -> kvlang_runtime_error_t {
     kvlang_runtime_error_t {
         status: RuntimecStatus::Success,
@@ -161,9 +141,6 @@ pub fn print_line(eng: &Engine, pc: &str) -> KvResult {
     Ok(())
 }
 
-/// printf(fmt, args...)：C 风格格式化串就地输出到 stdout（不自动换行，换行靠 fmt 里的 `\n`）。
-/// 支持转换 `d i u o x X f F e E g G c s %`、标志 `- 0 + 空格 #`、宽度、`.精度`；
-/// 实参经 read_at 取显示串，数值型转换按需 parse 回 i64/f64。
 pub fn printf(eng: &Engine, pc: &str) -> KvResult {
     let params = take(unsafe { kvlangRwirextParams(eng.kv, cs(pc).as_ptr()) });
     let nslots = params.split('\n').count().saturating_sub(1);
@@ -256,7 +233,6 @@ fn format_c(fmt: &str, args: &[String]) -> String {
     out
 }
 
-/// 数值符号：负号恒先；正数按 `+` / 空格标志补前缀。
 fn sign_of(neg: bool, plus: bool, space: bool) -> &'static str {
     if neg {
         "-"
@@ -269,7 +245,6 @@ fn sign_of(neg: bool, plus: bool, space: bool) -> &'static str {
     }
 }
 
-/// 宽度填充：prefix（符号 / `0x`）恒留左侧，零填充嵌在 prefix 与数字之间。
 fn pad(prefix: &str, body: &str, s: &Spec, zeroable: bool) -> String {
     let len = prefix.chars().count() + body.chars().count();
     match s.width {
@@ -377,7 +352,6 @@ fn render(s: &Spec, arg: &str) -> String {
     }
 }
 
-/// 整数精度：至少 prec 位，不足前补 0（区别于宽度的空格填充）。
 fn zpad_prec(d: String, prec: Option<usize>) -> String {
     match prec {
         Some(p) if d.chars().count() < p => format!("{}{d}", "0".repeat(p - d.chars().count())),
@@ -385,7 +359,6 @@ fn zpad_prec(d: String, prec: Option<usize>) -> String {
     }
 }
 
-/// C 风格 `%e`：尾数 . 精度 + `e±dd`（指数至少两位）。
 fn fmt_e(mag: f64, prec: usize, upper: bool) -> String {
     let (mant, exp) = decompose(mag, prec);
     let e = if upper { 'E' } else { 'e' };
@@ -393,7 +366,6 @@ fn fmt_e(mag: f64, prec: usize, upper: bool) -> String {
     format!("{mant}{e}{sign}{:02}", exp.unsigned_abs())
 }
 
-/// 把 mag 拆成 [尾数串(含 prec 位小数, ∈[1,10)), 十进制指数]；含进位归一。mag≥0。
 fn decompose(mag: f64, prec: usize) -> (String, i32) {
     if mag == 0.0 {
         return (format!("{:.*}", prec, 0.0), 0);
@@ -407,7 +379,6 @@ fn decompose(mag: f64, prec: usize) -> (String, i32) {
     (mant, exp)
 }
 
-/// C 风格 `%g`：按指数在 %e / %f 间取短者，精度=有效位数；除非 `#`，去尾零与尾点。
 fn fmt_g(mag: f64, prec: usize, upper: bool, alt: bool) -> String {
     let p = prec.max(1);
     let exp = if mag == 0.0 {
@@ -436,8 +407,6 @@ thread_local! {
         RefCell::new(rustyline::DefaultEditor::new().expect("初始化 line editor 失败"));
 }
 
-/// input(prompt) -> line：读一行 stdin → 回填写槽。
-/// Ctrl-C / Ctrl-D 视作 "exit"，让主循环优雅退出。
 pub fn input(eng: &Engine, pc: &str) -> KvResult {
     let prompt = eng.read0(pc);
     let line = if unsafe { libc::isatty(libc::STDIN_FILENO) } != 0 {
@@ -448,7 +417,6 @@ pub fn input(eng: &Engine, pc: &str) -> KvResult {
     eng.set_kv(&eng.write0(pc), &line)
 }
 
-/// TTY：rustyline 行编辑（方向键 / 历史 / 多字节退格）。
 fn rl_readline(prompt: &str) -> String {
     EDITOR.with(|e| {
         let mut ed = e.borrow_mut();
@@ -469,7 +437,6 @@ fn rl_readline(prompt: &str) -> String {
     })
 }
 
-/// 管道：纯 read_line（脚本/测试，无 TTY 行编辑）。
 fn pipe_readline(prompt: &str) -> String {
     print!("{prompt}");
     std::io::stdout().flush().ok();
@@ -484,7 +451,7 @@ fn pipe_readline(prompt: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    // 逐条对拍真实 C printf（gcc -O2）：实参以 read_at 的显示串形态传入。
+    
     fn f(fmt: &str, args: &[&str]) -> String {
         super::format_c(fmt, &args.iter().map(|s| s.to_string()).collect::<Vec<_>>())
     }

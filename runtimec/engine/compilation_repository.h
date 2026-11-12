@@ -1,20 +1,6 @@
 #ifndef RUNTIMEC_ENGINE_COMPILATION_REPOSITORY_H
 #define RUNTIMEC_ENGINE_COMPILATION_REPOSITORY_H
 
-/*
- * 组件：engine/compilation_repository
- * 作用：缓存完整 BinRWIR compilation 并提供租约。find 只查询不可变
- *       compilation；insert 只接收 BinRWIR Compiler 已完成的 compilation；
- *       release 归还 lease；invalidate/clear 撤销新获取资格，但不得释放仍被
- *       lease 持有的 compilation。
- * 联系：route 在编码和编译前查询，在 BinRWIR Compiler 完成后插入；lease
- *       保证 canonical Program、执行计划与可选机器码在执行期间同时有效。
- * 约束：repository 只持有 compilation 的所有权、租约与索引，不调用 vmkv、
- *       vmbin 或 BinRWIR JIT，也不改变已确定的执行目标。Program 中的 argaddr
- *       只在 key.snapshot 对应的 source revision 有效期间可用；revision 失效
- *       必须使整份 compilation 失效，禁止只刷新地址或保留 plan/机器码。
- */
-
 #include "binrwir_compiler/compiler.h"
 #include "contract/allocator.h"
 #include "contract/snapshot.h"
@@ -34,13 +20,6 @@ typedef struct runtimec_compilation_repository_key_t {
     uint32_t binrwir_binary_interface_generation;
     uint32_t compiler_revision;
 } runtimec_compilation_repository_key_t;
-
-/*
- * find 只在调用期间借用 key 中的视图。insert 必须深拷贝 function key 与
- * logical program counter 字节；lease.snapshot 的视图指向 repository
- * 拥有的不可变副本，并只在 lease 释放前有效。find 必须先确认完整 source
- * revision 仍匹配，不能只比较 generation 或复用旧 Program 的 body 地址。
- */
 
 typedef enum runtimec_compilation_repository_lookup_result_t {
     RUNTIMEC_COMPILATION_REPOSITORY_LOOKUP_INVALID = 0,

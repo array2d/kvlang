@@ -1,9 +1,3 @@
-/*
- * 组件：vmkv/rwir_manifest 的实现
- * 作用：唯一一次展开 rwir_catalog.def 与 rwir_alias_table.def，得到能力行表、
- *       别名表与改选规则表；其余查询都在这些表上做线性查找。
- * 约束：表中不出现第二个签名来源；未注册名字返回未找到，不猜、不回退。
- */
 
 #include "vmkv/rwir_manifest.h"
 
@@ -11,10 +5,7 @@
 
 static const vmkv_rwir_capability_t vmkv_rwir_capabilities
     [VMKV_RWIR_CAPABILITY_IDENTIFIER_LIMIT] = {
-/*
- * 宏形参一律避开结构体字段名：`.字段` 里的标识符也会被预处理器替换，
- * 形参一旦与字段同名，designator 就会被参数文本吃掉。
- */
+
 #define RUNTIMEC_RWIR_OPERATION(identifier, operation_name, numeric_identifier, \
                                 read_mask, write_mask,                         \
                                 read_roles, write_roles,                       \
@@ -96,10 +87,7 @@ bool vmkv_rwir_manifest_find_operation_by_identifier(
     if (output_name == NULL) {
         return false;
     }
-    /*
-     * 线性扫同一张能力表。表只有 131 行且只在打印路径上调用，不建索引——
-     * 建索引就等于把 opid 到名字的映射存了第二份，而那份会和 .def 漂移。
-     */
+    
     for (size_t identifier = 0U;
          identifier < (size_t)VMKV_RWIR_CAPABILITY_IDENTIFIER_LIMIT;
          ++identifier) {
@@ -151,7 +139,6 @@ const vmkv_rwir_capability_t *vmkv_rwir_manifest_find_operation(
     return NULL;
 }
 
-/* 改选只对二元规则成立：两个操作数必须各自整体落进对应掩码。 */
 vmkv_rwir_specialization_result_t vmkv_rwir_manifest_find_specialization(
     runtimec_string_view_t surface_name,
     const uint32_t *parameter_type_sets, size_t parameter_count,

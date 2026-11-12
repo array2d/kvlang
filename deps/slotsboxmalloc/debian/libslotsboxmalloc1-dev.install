@@ -1,0 +1,6 @@
+usr/include/slotsboxmalloc/*
+
+usr/lib/x86_64-linux-gnu/libslotsboxmalloc.so
+usr/lib/*/libslotsboxmalloc.so
+usr/lib/x86_64-linux-gnu/cmake/slotsboxmalloc-*/*
+usr/lib/*/cmake/slotsboxmalloc-*/*

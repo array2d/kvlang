@@ -1,4 +1,3 @@
-/* JIT 专属寄存器分配的失败封闭骨架。 */
 
 #include "binrwir_compiler/jit/register_allocation.h"
 

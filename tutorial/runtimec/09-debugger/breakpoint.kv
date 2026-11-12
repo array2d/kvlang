@@ -1,8 +1,8 @@
-// 期望阻塞: debugger 由 byteseek stdlib 提供，本 runner 不装载 stdlib
+
 rwfunc loop(*int64 #n) -> () {
     1 -> i:int64
     while (i <= *n) {
-        debugger()   // 内联断点：执行至此暂停，等待 agent 命令
+        debugger()   
         println(i)
         i + 1 -> i
     }

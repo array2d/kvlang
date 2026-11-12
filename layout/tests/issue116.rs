@@ -1,9 +1,8 @@
-//! Control-flow after lower: one [irseq,j] plane, goto/br to int64, no scope keys.
+
 use std::collections::{BTreeMap, HashMap};
 
 use kvlanglayout::{compile, init_dirs, kvkind, Kv};
 
-/// 读 tutorial 语料：找不到就红并指名，不静默跳过。
 fn read_tutorial(path: &str) -> String {
     std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("读不到语料 {path:?}（tutorial 分组可能变了）: {e}"))
@@ -31,10 +30,6 @@ fn slot_text(data: &[u8], lt: &str) -> String {
     }
 }
 
-/// 测试用 store：离开作用域时删掉目录（含 panic 展开）。
-///
-/// `Kv` 持有 store 句柄，不 drop 就删不掉目录；而用例结束时 `kv` 通常还在作用域里。
-/// 这个守卫让删除发生在 `Kv` 之后（声明顺序 -> drop 顺序相反）。
 struct TempStore {
     dir: String,
 }
@@ -46,14 +41,10 @@ impl Drop for TempStore {
 }
 
 fn fresh_kv() -> (TempStore, Kv) {
-    // 路径必须**每个用例唯一**：`cargo test` 默认多线程并行，同 pid 同路径会互相冲掉。
-    // 用进程内自增序号代替原来的 `as_nanos()`——同样唯一，但目录名不含时间戳，
-    // 便于清理时按前缀批量删。
+    
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    /* 临时目录**放仓库内**，不放 `/tmp`：后者是 tmpfs、跨会话共享，
-     * 别的会话的残留目录会让本仓测试红绿颠倒（实测过一次 8 红 / 清目录后全绿）。
-     * `workspace/` 已 gitignore，且 `/home` 跨 pod 持久。 */
+    
     let dsn = format!(
         "shm://{}/../workspace/tmp/layout-tests/i116_{}_{seq}",
         env!("CARGO_MANIFEST_DIR"),
@@ -63,8 +54,7 @@ fn fresh_kv() -> (TempStore, Kv) {
 
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
-    // 裸名必须有声明来源：运行时 boot 会发布这些内建的 /lib/<op> def rwir，
-    // 测试直接在空 store 上布局源码，按同样形状补声明（变参）。
+    
     for op in ["println", "print", "cerr"] {
         kv.set(&[(
             format!("/lib/{op}"),
@@ -319,7 +309,7 @@ fn lib_plane_has_no_scope_flat_keys() {
             children.iter().any(|c| c.starts_with('[')),
             "{fn_} has no [i,j]: {children:?}"
         );
-        // `kvspace` parent listings omit `‥` system segments; query `‥labels/` directly.
+        
         assert!(
             !labels_of(&mut kv, fn_).is_empty(),
             "{fn_} missing ‥labels: {children:?}"
@@ -564,7 +554,7 @@ fn continue_is_goto_cond() {
 #[test]
 fn for_is_br_goto_single_plane() {
     let (_store, mut kv) = compile_fn(
-        // Declare container before member writes (`lower::check_map_defined`).
+        
         "rwfunc f() -> () {\n    data:'[int64]'int64 = {}\n    data·0 = 0\n    data·1 = 1\n    for (x in data) {\n        x -> _\n    }\n}\n",
     );
     assert_single_plane(&mut kv, "f");
@@ -625,8 +615,7 @@ fn tutorial_control_files_single_plane() {
         ("../tutorial/runtimec/03-control/for.kv", &["test"][..]),
     ] {
         let (_store, mut kv) = fresh_kv();
-        // 找不到就红并指名——路径会随 tutorial 分组调整而变，
-        // 静默跳过会让这条用例变成空跑。
+        
         let src = std::fs::read_to_string(file)
             .unwrap_or_else(|e| panic!("读不到语料 {file:?}（tutorial 分组可能变了）: {e}"));
         compile(&mut kv, &src).unwrap();

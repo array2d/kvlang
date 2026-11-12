@@ -10,7 +10,6 @@ import (
 	"testing"
 )
 
-// genValue 随机生成 JSON 值（用 json.Number 保留数值精度）。
 func genValue(r *rand.Rand, depth int) interface{} {
 	if depth > 4 {
 		return genScalar(r)
@@ -26,14 +25,14 @@ func genValue(r *rand.Rand, depth int) interface{} {
 		return json.Number(fmt.Sprintf("%.4f", r.Float64()*2000-1000))
 	case 4:
 		return genString(r)
-	case 5: // array
+	case 5: 
 		n := r.Intn(6)
 		arr := make([]interface{}, n)
 		for i := range arr {
 			arr[i] = genValue(r, depth+1)
 		}
 		return arr
-	case 6: // object
+	case 6: 
 		n := r.Intn(6)
 		m := map[string]interface{}{}
 		for i := 0; i < n; i++ {
@@ -68,7 +67,6 @@ func genKey(r *rand.Rand) string {
 	return pool[r.Intn(len(pool))]
 }
 
-// normalize 把 json.Number 转成 int64/float64，供 reflect.DeepEqual 语义比较。
 func normalize(v interface{}) interface{} {
 	switch t := v.(type) {
 	case json.Number:

@@ -1,24 +1,8 @@
-//! 容器字面量只有 `map·new` 一种算子（spec 03-类型系统/14-map容器）。
-//!
-//! 规约原文两处：
-//! 1. 「**任何**容器字面量都必须在写目标处带完整 map langtype……类型来源二选一：
-//!    写目标的 `:` 标注，或签名里形参/写参的声明类型」；
-//! 2. 容器值的 langtype **就是**该 mapexpr——kvspace 里不存在「langtype = 种类名
-//!    `stringkeymap` 的值」。
-//!
-//! 因此本文件锁三件事：
-//! - 空 `{}` 落 `map·new`（零读参），写槽类型来自标注的完整 mapexpr；
-//! - 无标注的容器字面量被拒绝（不猜类型）；
-//! - structref 写槽走 `struct·new`（成员名来自原型），不落 map。
-//!
-//! 判据直接读 kvspace 的 opcode 槽与写槽 body，不看 layout 内部结构。
 
 use kvlanglayout::{init_dirs, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
-/// 测试用的临时目录，**离开作用域即删**（含 panic 展开时）。
-/// 普通清理语句在断言失败时会被跳过——测试红了反而留下最多垃圾。
 struct TempDir(PathBuf);
 
 impl Drop for TempDir {
@@ -43,7 +27,7 @@ fn temp_dir(tag: &str) -> TempDir {
         tag,
         std::process::id()
     ));
-    // 先删同名旧目录：测试在同一 pod 反复跑会累积，/tmp 曾因此 OOM。
+    
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     TempDir(dir)
@@ -58,13 +42,11 @@ fn layout(tag: &str, src: &str) -> (TempDir, Result<std::process::Output, String
     (dir, Ok(out))
 }
 
-/// 一个 XValue 的 body：head 前 8 字节是 body 长度，body 紧接 16 字节 head 之后。
 fn body<'a>(wire: &'a [u8]) -> &'a [u8] {
     let len = u64::from_le_bytes(wire[0..8].try_into().unwrap()) as usize;
     &wire[16..16 + len]
 }
 
-/// `[n,0]` opcode 槽的算子名：body = 5 字节计数头 + 名字。
 fn opcode(kv: &mut Kv, dir: &str, instruction: usize) -> String {
     let wire = kv.get_one(&format!("{dir}/[{instruction},0]"));
     assert!(!wire.is_empty(), "{dir}/[{instruction},0] 不存在");
@@ -72,7 +54,6 @@ fn opcode(kv: &mut Kv, dir: &str, instruction: usize) -> String {
     String::from_utf8_lossy(&body[5..]).into_owned()
 }
 
-/// 写槽 `[n,1]` 的类型标注（body 里 NUL 之后那段）。
 fn write_type(kv: &mut Kv, dir: &str, instruction: usize) -> String {
     let wire = kv.get_one(&format!("{dir}/[{instruction},1]"));
     assert!(!wire.is_empty(), "{dir}/[{instruction},1] 不存在");
@@ -89,7 +70,6 @@ fn connect(dir: &TempDir) -> Kv {
     kv
 }
 
-/// 空 `{}` 落 `map·new`（零读参），写槽带完整 mapexpr。
 #[test]
 fn empty_map_literal_is_map_new_with_annotated_type() {
     let (dir, out) = layout(
@@ -114,7 +94,6 @@ fn empty_map_literal_is_map_new_with_annotated_type() {
     );
 }
 
-/// 非空 `{}` 同样是 `map·new`，元素落读参。
 #[test]
 fn non_empty_map_literal_is_map_new() {
     let (dir, out) = layout(
@@ -127,7 +106,6 @@ fn non_empty_map_literal_is_map_new() {
     assert_eq!(declared(&mut kv, "/lib/p·f", 1), (3, 1));
 }
 
-/// structref 写槽走 `struct·new`，参数形态是 `(原型路径, 字段名, 值, …)`。
 #[test]
 fn struct_literal_is_struct_new_not_map() {
     let (dir, out) = layout(
@@ -137,11 +115,10 @@ fn struct_literal_is_struct_new_not_map() {
     assert!(out.unwrap().status.success());
     let mut kv = connect(&dir);
     assert_eq!(opcode(&mut kv, "/lib/p·f", 1), "struct·new");
-    // 1 个类型路径 + 2 个字段 × (名字, 值) = 5 个读参。
+    
     assert_eq!(declared(&mut kv, "/lib/p·f", 1), (5, 1));
 }
 
-/// 无标注的容器字面量必须被拒绝：空容器不含成员，无法推断类型。
 #[test]
 fn unannotated_container_literal_is_rejected() {
     let (_dir, out) = layout(
@@ -157,7 +134,6 @@ fn unannotated_container_literal_is_rejected() {
     );
 }
 
-/// 任何路径都不得再产出 `obj`：容器语义全由 langtype 表达。
 #[test]
 fn no_literal_form_emits_obj() {
     for (tag, body) in [
@@ -189,7 +165,6 @@ fn no_literal_form_emits_obj() {
     }
 }
 
-/// 签名里的声明类型也能提供容器类型（`{n=42} -> m`，见 spec 14-map容器）。
 #[test]
 fn signature_declaration_supplies_the_map_type() {
     let (dir, out) = layout(
@@ -203,7 +178,7 @@ fn signature_declaration_supplies_the_map_type() {
         String::from_utf8_lossy(&out.stderr)
     );
     let mut kv = connect(&dir);
-    // 具名型是「名字, 值」交错：2 个成员 = 4 个读参。
+    
     assert_eq!(declared(&mut kv, "/lib/build", 1), (4, 1));
 }
 

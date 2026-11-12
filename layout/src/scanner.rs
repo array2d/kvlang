@@ -1,4 +1,3 @@
-//! 词法分析（对齐 parser/scanner.go）。Scan(src) → Vec<Token>，末尾附 EOF 哨兵。
 
 use std::fmt;
 
@@ -6,16 +5,16 @@ use super::symbol;
 
 #[derive(Clone, Copy, Default)]
 pub struct Pos {
-    pub line: i32, // 1-based
-    pub col: i32,  // 1-based
+    pub line: i32, 
+    pub col: i32,  
 }
 
 #[derive(Clone)]
 pub struct Diagnostic {
     pub pos: Pos,
     pub message: String,
-    pub warn: bool, // true = 警告
-    pub info: bool, // true = 提示（优先级高于 warn）
+    pub warn: bool, 
+    pub info: bool, 
     pub source: String,
     pub src_file: String,
     pub src_name: String,
@@ -115,7 +114,7 @@ pub struct Token {
     pub kind: Kind,
     pub value: String,
     pub pos: Pos,
-    pub quote: u8, // 0=无, '"'=转义串 "...", 'r'=原始串 r#"..."#
+    pub quote: u8, 
 }
 
 impl Token {
@@ -166,7 +165,6 @@ fn escaped_byte(c: u8) -> u8 {
     }
 }
 
-/// Returns `(content, next_index, closed)`; unterminated literals consume to EOF with `closed = false`.
 fn scan_quoted(src: &[u8], mut i: usize, quote: u8) -> (String, usize, bool) {
     i += 1;
     let mut b: Vec<u8> = Vec::new();
@@ -189,8 +187,6 @@ fn scan_quoted(src: &[u8], mut i: usize, quote: u8) -> (String, usize, bool) {
     (String::from_utf8_lossy(&b).into_owned(), src.len(), false)
 }
 
-/// Rust 原始字符串 `r"..."` / `r#"..."#` / `r##"..."##` … —— 跨行，零转义。
-/// `i` points to `r`. Returns `(content, next_index, is_raw, closed)`.
 fn scan_raw(src: &[u8], i: usize) -> (String, usize, bool, bool) {
     let mut j = i + 1;
     let mut hashes = 0usize;
@@ -224,7 +220,6 @@ fn scan_raw(src: &[u8], i: usize) -> (String, usize, bool, bool) {
     )
 }
 
-/// Nested `/* ... */` block comment starting at `i`; returns `(full_slice, next_index, closed)`.
 fn scan_block_comment(src: &[u8], i: usize) -> (String, usize, bool) {
     let mut j = i + 2;
     let mut depth = 1usize;
@@ -248,7 +243,6 @@ fn scan_block_comment(src: &[u8], i: usize) -> (String, usize, bool) {
     )
 }
 
-/// 跨行字面量消费后同步 line/line_start（字面量内部换行不产生 Newline Token，但行号需前进）。
 fn advance_line_count(
     src: &[u8],
     start: usize,
@@ -264,12 +258,6 @@ fn advance_line_count(
     }
 }
 
-/// 标识符/路径段的合法字节判定：凡**不是**分隔符者皆可入标识符（CJK 等多字节字符的
-/// 各字节都不在分隔符集内，故中文标识符天然合法，见 tutorial/01-basics/chinese_ident.kv）。
-/// Reused by structref validation ([`has_token_delim`]) so identifiers and type names share one charset.
-///
-/// The only multi-byte delimiter is `·` (U+00B7 = `C2 B7`); match the exact 2-byte sequence so other
-/// `0xC2`-prefixed characters (`°`, `µ`, etc.) are not split.
 pub(crate) fn is_token_delim_at(src: &[u8], i: usize) -> bool {
     match src[i] {
         0xC2 => src.get(i + 1) == Some(&0xB7),
@@ -277,7 +265,6 @@ pub(crate) fn is_token_delim_at(src: &[u8], i: usize) -> bool {
     }
 }
 
-/// Reports whether `s` contains any token delimiter ([`is_token_delim_at`]).
 pub(crate) fn has_token_delim(s: &str) -> bool {
     let b = s.as_bytes();
     (0..b.len()).any(|i| is_token_delim_at(b, i))
@@ -319,12 +306,10 @@ fn is_abs_path_start(c: u8) -> bool {
         || c == b'_'
 }
 
-/// 将整个源扫描为平坦 Token 流，末尾附 EOF。
 pub fn scan(src: &str) -> Vec<Token> {
     scan_with_diags(src).0
 }
 
-/// Build an error-level lexical diagnostic at the opening delimiter position.
 fn lex_error(pos: Pos, message: &str) -> Diagnostic {
     Diagnostic {
         pos,
@@ -337,7 +322,6 @@ fn lex_error(pos: Pos, message: &str) -> Diagnostic {
     }
 }
 
-/// [`scan`] with lexical diagnostics: report an error at the opening delimiter of any unterminated literal or block comment.
 pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     let src = src.as_bytes();
     let mut diags: Vec<Diagnostic> = Vec::new();
@@ -355,7 +339,6 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     while i < src.len() {
         let c = src[i];
 
-        // 换行：折叠连续换行
         if c == b'\n' {
             if !prev_newline && !tokens.is_empty() {
                 tokens.push(Token {
@@ -375,12 +358,12 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             i += 1;
             continue;
         }
-        // 空白（非换行）
+        
         if c == b' ' || c == b'\t' {
             i += 1;
             continue;
         }
-        // ';' — 显式语句分隔符
+        
         if c == b';' {
             if !prev_newline && !tokens.is_empty() {
                 tokens.push(Token {
@@ -397,7 +380,6 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
         prev_newline = false;
         let p = pos(i, line, line_start);
 
-        // Rust 原始字符串 r"..." / r#"..."# — 跨行，零转义
         if c == b'r' {
             let (val, next, ok, closed) = scan_raw(src, i);
             if ok {
@@ -419,21 +401,12 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             }
         }
 
-        // 引号字符串 "..." — 跨行，转义
         if c == b'\'' || c == b'"' {
             let (val, next, closed) = scan_quoted(src, i, c);
             if !closed {
                 diags.push(lex_error(p, "unterminated string literal"));
             }
-            /*
-             * **`'` 与 `"` 各自保留**（issue #631）。两者都是字符串定界符，
-             * 走同一条 `scan_quoted` 路径；旧代码把单引号串标成 `quote = 0`，
-             * 与普通标识符无法区分——那是**丢失了「这里是字符串」这个事实**，
-             * 不是「它本来不是字符串」。
-             *
-             * 谁需要区分两者？只有**类型位置**：`'K'V` 里的 `'K'` 是 formatter，
-             * 而表达式位置的 `'hi'` 仍是普通字符串。位置决定含义，与 `·` 同一条原则。
-             */
+            
             let quote = c;
             tokens.push(Token {
                 kind: Kind::Literal,
@@ -446,7 +419,6 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             continue;
         }
 
-        // 右箭头 ->
         if c == b'-' && i + 1 < src.len() && src[i + 1] == b'>' {
             tokens.push(Token {
                 kind: Kind::Arrow,
@@ -458,7 +430,6 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             continue;
         }
 
-        // 双字符算子
         if i + 1 < src.len() {
             let two = &src[i..i + 2];
             if symbol::scanner_two_char_ops()
@@ -476,7 +447,6 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             }
         }
 
-        // 赋值算子 =
         if c == b'=' {
             tokens.push(Token {
                 kind: Kind::Arrow,
@@ -488,27 +458,13 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             continue;
         }
 
-        /*
-         * `#` — **行内注释**（参数注释名，见 workspace/param-comment-name.md）。
-         *
-         * 终止符是「空白或 token 分隔符」，不是只认空格：纯空格规则会让 `#acc)`
-         * 把右括号一起吞进注释，参数列表从此缺一个 `)`。
-         *
-         * 原始字符串 `r#"…"#` 在上面已被消费，块注释/行注释不经过这里，
-         * 所以本条规则只在**字符串与注释之外**生效。
-         *
-         * value 保留 `#` 本身（与 `//`/`/* */` 保留定界符同一约定）：注释文本原样
-         * 回写才幂等；取参数名时由 parser 剥掉首个 `#`。
-         */
         if c == b'#' {
             let start = i;
             i += 1;
             while i < src.len() && !is_token_delim_at(src, i) {
                 i += 1;
             }
-            /* `#` 后立刻是空白/分隔符 ⇒ 注释体为空。那不是「空注释」这种无害形态：
-             * 注释止于分隔符，于是空格之后的文字被当成代码继续解析，裸名表达式
-             * 语句又被静默编成「读并丢弃」——编译成功、零诊断。 */
+            
             if i == start + 1 {
                 diags.push(lex_error(
                     p,
@@ -524,7 +480,6 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             continue;
         }
 
-        // '/' — // 行注释 或 /* */ 块注释 或 绝对路径字面量 或 除法算子
         if c == b'/' {
             if i + 1 < src.len() && src[i + 1] == b'/' {
                 let start = i;
@@ -558,11 +513,9 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
                 let start = i;
                 i += 1;
                 while i < src.len() {
-                    // ·（U+00B7）与 .（释放给小数 key）是路径字符；· 后的坐标段 [0,1] 是成员链。
+                    
                     if src[i] == 0xC2 && i + 1 < src.len() && src[i + 1] == 0xB7 {
-                        // `·*`（动态成员名）不并入路径：让 `·`/`*`/`k` 单独成 token，交成员链解析
-                        // 成 `base·k` 成员读/写（=` 读写）。`·` 后接名字的情况（`/lib/json·to` 的
-                        // 包·函数分隔符、`/tmp/ts·5` 的静态成员）仍按原样整段吃进路径 token。
+                        
                         if i + 2 < src.len() && src[i + 2] == b'*' {
                             break;
                         }
@@ -572,7 +525,7 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
                                 i += 1;
                             }
                             if i < src.len() {
-                                i += 1; // 跳过 ]
+                                i += 1; 
                             }
                         }
                         continue;
@@ -604,7 +557,6 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             continue;
         }
 
-        // 成员分隔符 ·（U+00B7，2 字节）
         if c == 0xC2 && i + 1 < src.len() && src[i + 1] == 0xB7 {
             tokens.push(Token {
                 kind: Kind::Dot,
@@ -617,7 +569,6 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             continue;
         }
 
-        // 单字符标点
         if let Some(k) = single_char_token(c) {
             tokens.push(Token {
                 kind: k,
@@ -629,7 +580,6 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             continue;
         }
 
-        // 单字符符号算子
         if symbol::scanner_one_char_ops().contains(&c) {
             tokens.push(Token {
                 kind: Kind::Ident,
@@ -641,7 +591,6 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             continue;
         }
 
-        // Unicode 符号算子
         if let Some(op) = symbol::unicode_ops()
             .iter()
             .find(|op| src[i..].starts_with(op.as_bytes()))
@@ -656,13 +605,12 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             continue;
         }
 
-        // 数字字面量
         if c.is_ascii_digit() {
             let start = i;
             while i < src.len() && src[i].is_ascii_digit() {
                 i += 1;
             }
-            // `.` 后紧跟另一 `.`（即 `...` 填充标记）时不并入小数点：`1...` = `1` + `...`。
+            
             if i < src.len() && src[i] == b'.' && !(i + 1 < src.len() && src[i + 1] == b'.') {
                 i += 1;
                 while i < src.len() && src[i].is_ascii_digit() {
@@ -687,7 +635,6 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             continue;
         }
 
-        // 关键字 / 标识符
         let start = i;
         while i < src.len() && !is_token_delim_at(src, i) {
             i += 1;
@@ -722,7 +669,6 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
 mod tests {
     use super::*;
 
-    /// Format non-EOF tokens as `I:<val>` / `D:<val>` / `?:<val>`.
     fn toks(src: &str) -> Vec<String> {
         scan(src)
             .into_iter()
@@ -745,12 +691,12 @@ mod tests {
 
     #[test]
     fn only_c2_b7_is_member_delimiter() {
-        // U+00B0 `°` and U+00B5 `µ` start with 0xC2 but are identifier chars, not delimiters.
+        
         assert_eq!(toks("温度°C"), vec!["I:温度°C"]);
         assert_eq!(toks("µs"), vec!["I:µs"]);
         assert_eq!(toks("a·b"), vec!["I:a", "D:·", "I:b"]);
         assert_eq!(toks("a·*k"), vec!["I:a", "D:·", "I:*", "I:k"]);
-        // Structref segment names share the identifier charset.
+        
         assert!(!has_token_delim("点°"));
         assert!(has_token_delim("a·b"));
     }
@@ -764,21 +710,20 @@ mod tests {
                 .map(|t| t.value)
                 .collect()
         };
-        // 终止符是分隔符集，不是只认空格：`)` 必须留在注释之外。
+        
         assert_eq!(cs("(*int64 #acc)"), vec!["#acc"]);
         assert_eq!(
             toks("f(*int64 #delta) -> ()"),
             vec!["I:f", "?:(", "I:*", "I:int64", "?:#delta", "?:)", "?:->", "?:(", "?:)"]
         );
-        // 注释体是**一个词**：空白与分隔符都终止它（`#` 不是通用注释标记，
-        // 它标的是单个词——参数名）。字符串内的 `#` 不是注释。
+        
         assert_eq!(cs("#acc\nx = 1\n"), vec!["#acc"]);
         assert_eq!(cs("# trailing note\n"), vec!["#"]);
         assert_eq!(cs("println(\"guess #\", n)"), Vec::<String>::new());
-        // 原始字符串先被消费，其中的 `#` 不另起作用。
+        
         assert_eq!(cs("x = r#\"a # b\"#"), Vec::<String>::new());
         assert_eq!(cs("x = r####\"a # b\"# c\"####"), Vec::<String>::new());
-        // `//` 与 `/* */` 内的 `#` 不另起作用。
+        
         assert_eq!(cs("// # one\nx = 1\n"), vec!["// # one"]);
         assert_eq!(
             cs("/* # one\n # two */ x = 1\n"),

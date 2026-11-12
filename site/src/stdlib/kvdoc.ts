@@ -1,8 +1,3 @@
-// .kv 文档结构化解析：把一份 .kv 源码切成有序的三类块并渲染为 HTML。
-//  - comment  : 开头/独立的 # 注释块 → 作说明富文本（按 Markdown 渲染）
-//  - markdown : lib{ """…""" } 里的三引号字符串 → 内嵌 Markdown 富文本
-//  - code     : 其余真实 kvlang 代码 → <code language="kvlang"> 高亮块
-// 顺序严格保持源码出现次序。
 
 import { renderMarkdown } from "./markdown";
 import { highlightKv } from "./highlight";

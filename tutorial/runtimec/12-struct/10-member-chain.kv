@@ -1,11 +1,4 @@
-// 10-member-chain: multi-segment member reads (`t·1·val`), member address-of (`&t·2`),
-// `*T` read-params in pure-memory callees, and member writes on write-only struct params (`r·x`).
-// Expected output:
-//   chain= 7 7 9
-//   isnone= 0 7 1
-//   depth= 2
-//   mk= 2 2
-//   mk2= 5 15
+
 struct N {
 	val:int64=0
 	left:*N=None

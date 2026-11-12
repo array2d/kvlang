@@ -1,14 +1,11 @@
-// GitHub API 客户端：运行时列出 stdlib/ 目录树并拉取 .kv 原文。
-// 纯静态托管无法读目录，改由前端调用 GitHub REST API。
-// 响应按内容 sha 缓存进 sessionStorage，缓解未认证 60 次/时 的限流。
 
 const OWNER = "array2d";
 const REPO = "kvlang";
 const DIR = "stdlib";
 
 export interface KvFile {
-  path: string; // 仓库内完整路径，如 stdlib/time/duration.kv
-  name: string; // 文件名，如 duration.kv
+  path: string; 
+  name: string; 
   sha: string;
 }
 
@@ -31,7 +28,7 @@ function cacheSet(key: string, val: string): void {
   try {
     sessionStorage.setItem(key, val);
   } catch {
-    /* 隐私模式/超额：静默降级 */
+    
   }
 }
 

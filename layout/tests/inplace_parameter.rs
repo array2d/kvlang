@@ -1,7 +1,3 @@
-//! `inplace` 写参修饰符的三条深度校验（spec `04-layout语义/04-函数写槽与布局`）。
-//!
-//! 判据是「**同一条指令**内既读又写」，不是「先后都出现过」——后者是「先读后覆盖」，
-//! 必须拒绝。三条各自有正例与反例。
 
 mod support;
 
@@ -21,12 +17,10 @@ fn fresh_kv() -> (TempDirectory, Kv) {
     (dir, kv)
 }
 
-/// 编译（含 `validate_writes`），返回是否通过。
 fn passes(src: &str) -> bool {
     vet(src).is_ok()
 }
 
-/// 编译失败时的诊断消息（用于断言「缺的是哪一条」）。
 fn diagnostic(src: &str) -> String {
     match vet(src) {
         Ok(()) => String::new(),
@@ -36,7 +30,7 @@ fn diagnostic(src: &str) -> String {
 
 #[test]
 fn inplace_positive_same_instruction_read_write() {
-    // 正例：`*acc + d -> *acc` 同一条指令既读又写。
+    
     let src = "\
 rwfunc add_to(*int64 #n, int64 #d) -> (inplace *int64 #acc) {
 \t*acc + d -> *acc
@@ -51,7 +45,7 @@ rwfunc add_to(*int64 #n, int64 #d) -> (inplace *int64 #acc) {
 
 #[test]
 fn inplace_negative_never_read() {
-    // 反例 1：只写不读 ⇒ 缺第 1 条。
+    
     let src = "\
 rwfunc only_write(*int64 #a) -> (inplace *int64 #acc) {
 \t5 -> *acc
@@ -67,7 +61,7 @@ rwfunc only_write(*int64 #a) -> (inplace *int64 #acc) {
 
 #[test]
 fn inplace_negative_never_write() {
-    // 反例 2：只读不写 ⇒ 缺第 2 条。
+    
     let src = "\
 rwfunc only_read(*int64 #a) -> (inplace *int64 #acc) {
 \t*acc -> x:int64
@@ -84,8 +78,7 @@ rwfunc only_read(*int64 #a) -> (inplace *int64 #acc) {
 
 #[test]
 fn inplace_negative_read_then_overwrite() {
-    /* 反例 3（架构师点名的那条）：先读后覆盖。
-     * 满足 1、2，但没有**同一条指令**同时读写 ⇒ 必须拒，且诊断指第 3 条。 */
+    
     let src = "\
 rwfunc read_then_overwrite(*int64 #a) -> (inplace *int64 #acc) {
 \t*acc -> x:int64
@@ -106,21 +99,19 @@ rwfunc read_then_overwrite(*int64 #a) -> (inplace *int64 #acc) {
 
 #[test]
 fn inplace_rejected_on_read_parameter() {
-    // `inplace` 只能修饰写参；读参上出现它是错误。
+    
     let src = "\
 rwfunc bad(inplace *int64 #a) -> (*int64 #acc) {
 \t*a + 1 -> *acc
 }
 ";
-    /* 这条的判据是**解析期**拒绝（`is_read_side` 在 `parse_param_list_side` 里
-     * 就知道自己是读参），所以 `vet` 返回的是汇总串，详细消息在 stderr。
-     * 断言「被拒」即可——消息原文由 CLI 侧验（见交付报告）。 */
+    
     assert!(!passes(src), "读参上的 inplace 必须被拒");
 }
 
 #[test]
 fn inplace_multiple_parameters_each_validated() {
-    // 多个 inplace 写参逐个校验：第二个缺「同指令读写」，必须报。
+    
     let src = "\
 rwfunc two(*int64 #d) -> (inplace *int64 #a, inplace *int64 #b) {
 \t*a + d -> *a
@@ -141,10 +132,7 @@ rwfunc two(*int64 #d) -> (inplace *int64 #a, inplace *int64 #b) {
 
 #[test]
 fn without_inplace_modifier_the_same_bodies_are_accepted() {
-    /* 反向对照：**去掉修饰符**后，同样三个函数体都应当通过。
-     *
-     * 这一条防的是「校验写成了无条件规则」——如果某个实现把「同指令读写」当成
-     * 对所有写参的要求，那普通的 `5 -> *acc` 也会被拒，这里就会红。 */
+    
     for body in [
         "5 -> *acc\n",
         "*acc -> x:int64\n\tprint(x)\n",
@@ -196,8 +184,6 @@ fn compile_persists_inplace_in_kvspace_and_printlib_reconstructs_it() {
     );
     compile(&mut kv, src).unwrap();
 
-    // 1. /lib/add_to.[0,1] stores the mark; the body is the bare langtype.
-    // 参数名是源码注释（`#name`），不落库——body 里既没有名字，也没有 `\0` 分隔符。
     let write_param_wire = kv.get_one("/lib/add_to.[0,1]");
     assert_eq!(
         kvkind::def_param_full(&write_param_wire),
@@ -209,7 +195,6 @@ fn compile_persists_inplace_in_kvspace_and_printlib_reconstructs_it() {
         Some(("int64".to_string(), false))
     );
 
-    // 2. def rwir slot /lib/native_acc/[0,1] stores the mark
     let rwir_write_wire = kv.get_one("/lib/native_acc/[0,1]");
     assert_eq!(
         kvkind::def_langtype_full(&rwir_write_wire),
@@ -221,7 +206,6 @@ fn compile_persists_inplace_in_kvspace_and_printlib_reconstructs_it() {
         Some(("int64".to_string(), false))
     );
 
-    // 3. .src and printlib keep the mark; printlib(/lib) does not print a def rwir as an empty rwfunc
     let src_copy = kvkind::value_string(&kv.get_one("/lib/add_to.src"));
     assert!(
         src_copy.contains("inplace *int64 #acc"),
@@ -242,13 +226,12 @@ fn compile_persists_inplace_in_kvspace_and_printlib_reconstructs_it() {
         "printlib(/lib) must list the def rwir write slot, got={full_dump:?}"
     );
 
-    // 4. Lowering loads `*acc` into a temp first, so every step of add_to replays alone.
     assert_eq!(record(&mut kv, "/lib/add_to"), "ALWAYS_RESUMABLE");
 }
 
 #[test]
 fn inplace_supports_member_writes_and_delegation_and_crash_resume_propagation() {
-    // 1. Member read and write in one instruction: `(*p)·x + *d -> (*p)·x`
+    
     let member_src = "\
 struct Counter {
     x:int64=0
@@ -263,7 +246,6 @@ rwfunc bump(*int64 #d) -> (inplace */lib/Counter #p) {
         diagnostic(member_src)
     );
 
-    // 2. Delegating to inplace rwir/rwfunc, and the callers' crash_resume records
     let (_store, mut kv) = fresh_kv();
     let delegate_src = concat!(
         "rwir native_acc(*int64 #d) -> (inplace *int64 #acc)\n",
@@ -281,7 +263,6 @@ rwfunc bump(*int64 #d) -> (inplace */lib/Counter #p) {
     );
     compile(&mut kv, delegate_src).unwrap();
 
-    /* A user rwir is unverified: it never joins a longer range, entry or caller. */
     assert_eq!(
         record(&mut kv, "/lib/wrap_acc"),
         "NOT_RESUMABLE:1:unverified:native_acc"
@@ -296,13 +277,10 @@ rwfunc bump(*int64 #d) -> (inplace */lib/Counter #p) {
     );
 }
 
-// ── crash/resume verdicts (layout/src/crash_resume.rs) ─────────────────
-
 fn record(kv: &mut Kv, func_dir: &str) -> String {
     kvkind::value_string(&kv.get_one(&format!("{func_dir}/\u{2025}crash_resume")))
 }
 
-/// Lay `src` out into a fresh store and return the record of each function in `names`.
 fn verdicts(src: &str, names: &[&str]) -> Vec<String> {
     let (_store, mut kv) = fresh_kv();
     compile(&mut kv, src).unwrap();
@@ -326,7 +304,6 @@ fn crash_resume_loop_increment_needs_entry() {
     assert_eq!(verdicts(src, &["lp"]), ["CONDITIONALLY_RESUMABLE:4<-entry"]);
 }
 
-/// No replay range may re-run the committed `*c + 1 -> *c`; here none is needed at all.
 #[test]
 fn crash_resume_window_replays_each_step_alone() {
     let src = concat!(
@@ -336,7 +313,6 @@ fn crash_resume_window_replays_each_step_alone() {
     assert_eq!(verdicts(src, &["window"]), ["ALWAYS_RESUMABLE"]);
 }
 
-/// `caller` needs one step that both reads and writes a parameter; a user rwir blocks it.
 #[test]
 fn crash_resume_parameter_rmw_defers_to_caller() {
     let src = format!(
@@ -357,7 +333,6 @@ fn crash_resume_parameter_rmw_defers_to_caller() {
     );
 }
 
-/// The multi-step range for the global target re-reads a key the function writes.
 #[test]
 fn crash_resume_callers_of_a_reading_callee() {
     let src = concat!(
@@ -389,7 +364,6 @@ fn crash_resume_plain_unresolved_and_unmarked_read() {
     );
 }
 
-/// `a -> t; t + 1 -> a; a + t -> a` in one block: anchor after the read of live-in `a`.
 #[test]
 fn crash_resume_read_then_overwrite_and_join() {
     let src = concat!(
@@ -407,7 +381,6 @@ fn crash_resume_read_then_overwrite_and_join() {
     );
 }
 
-/// Reviewer repros g1, g2b, g4, g5.
 #[test]
 fn crash_resume_anchor_regressions() {
     let src = format!(
@@ -428,7 +401,6 @@ fn crash_resume_anchor_regressions() {
     );
 }
 
-/// Callees laid out earlier into the same store count for both the inplace check and the verdict.
 #[test]
 fn store_resident_callees_are_resolved() {
     let (_store, mut kv) = fresh_kv();
@@ -456,7 +428,7 @@ fn store_resident_callees_are_resolved() {
         ),
     )
     .unwrap();
-    /* The store `def rwir` is found, and unverified like any declared rwir. */
+    
     assert_eq!(
         record(&mut kv, "/lib/other·g"),
         "NOT_RESUMABLE:1:unverified:mp·native_acc"
@@ -465,14 +437,13 @@ fn store_resident_callees_are_resolved() {
         record(&mut kv, "/lib/other·h"),
         "NOT_RESUMABLE:1:unverified:mp·native_acc"
     );
-    /* A store rwfunc body is invisible: never replayed. */
+    
     assert_eq!(
         record(&mut kv, "/lib/other·k"),
         "NOT_RESUMABLE:1:callee:mp·add_to"
     );
 }
 
-/// A callee's mark counts only after it verifies, so recursion cannot justify itself.
 #[test]
 fn inplace_recursion_does_not_justify_itself() {
     for body in [
@@ -501,7 +472,6 @@ fn inplace_recursion_does_not_justify_itself() {
     );
 }
 
-/// Quoted literals, static member keys and shadowing loop variables are not reads of the param.
 #[test]
 fn inplace_reads_ignore_literals_member_keys_and_shadowing() {
     for src in [
@@ -517,7 +487,7 @@ fn inplace_reads_ignore_literals_member_keys_and_shadowing() {
         "{}",
         diagnostic(shadow)
     );
-    /* The loop variable would be emitted as the parameter slot; read params were already refused. */
+    
     let write_shadow =
         "rwfunc f(*[]int64 #d) -> (*int64 #r) {\n\tfor (r in *d) {\n\t\tprint(r)\n\t}\n}\n";
     assert!(
@@ -530,7 +500,6 @@ fn inplace_reads_ignore_literals_member_keys_and_shadowing() {
     ));
 }
 
-/// `(*m)·*k` desugars to a `kvlang·resolvekey` position slot; the write still counts for `m`.
 #[test]
 fn inplace_dynamic_member_write_counts() {
     let src = "rwfunc put(*int64 #k, *int64 #v) -> (inplace *'[int64]'int64 #m) {\n\t(*m)·*k + *v -> (*m)·*k\n}\n";
@@ -541,7 +510,6 @@ fn inplace_dynamic_member_write_counts() {
     );
 }
 
-/// `vet` with a store accepts a call to an rwir declared in the same file, as `compile` does.
 #[test]
 fn vet_with_store_sees_same_unit_rwir_decls() {
     let src = "rwir native_acc(*int64 #d) -> (*int64 #acc)\nrwfunc w(*int64 #d) -> (*int64 #acc) {\n\tnative_acc(*d) -> *acc\n}\n";
@@ -555,7 +523,6 @@ fn vet_with_store_sees_same_unit_rwir_decls() {
     assert!(compile(&mut kv2, src).is_ok());
 }
 
-/// `format` output of a dynamic member RMW still verifies.
 #[test]
 fn inplace_dynamic_member_write_survives_format() {
     let src = "rwfunc put(*int64 #k, *int64 #v) -> (inplace *'[int64]'int64 #m) {\n\t(*m)·*k + *v -> (*m)·*k\n}\n";
@@ -567,7 +534,6 @@ fn inplace_dynamic_member_write_survives_format() {
     );
 }
 
-/// Duplicate definitions: the last one is what the store keeps, so it decides the credit.
 #[test]
 fn inplace_credit_uses_last_duplicate_definition() {
     let rwfunc = concat!(
@@ -592,7 +558,6 @@ fn inplace_credit_uses_last_duplicate_definition() {
     );
 }
 
-/// An rwir decl reusing an operator word gets no credit: the call is emitted as the builtin.
 #[test]
 fn inplace_operator_word_rwir_decl_gets_no_credit() {
     let src = "rwir add(*int64 #a, *int64 #b) -> (inplace *int64 #acc)\nrwfunc f(int64 #x) -> (inplace *int64 #r) {\n\tadd(x, 1) -> *r\n}\n";

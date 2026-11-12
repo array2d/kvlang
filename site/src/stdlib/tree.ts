@@ -1,4 +1,3 @@
-// 侧边栏目录树：把扁平的 stdlib .kv 路径列表构造成嵌套树并渲染为导航。
 
 import type { KvFile } from "./github";
 
@@ -14,7 +13,7 @@ function newNode(): Node {
 function build(files: KvFile[]): Node {
   const root = newNode();
   for (const f of files) {
-    const rel = f.path.replace(/^stdlib\//, "");
+    const rel = f.path.replace(/^stdlib\
     const parts = rel.split("/");
     let node = root;
     for (let i = 0; i < parts.length - 1; i++) {
@@ -31,7 +30,6 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// 目录是否包含当前选中文件（决定 <details> 默认展开）。
 function hasActive(node: Node, active: string): boolean {
   if (node.files.some((f) => f.path === active)) return true;
   for (const child of node.dirs.values())

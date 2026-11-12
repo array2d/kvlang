@@ -1,18 +1,7 @@
-// 048: Rotate Image — 原地旋转矩阵 90° 顺时针
-// 来源: LeetCode #48
-// 期望输出:
-//   7
-//   4
-//   1
-//   8
-//   5
-//   2
-//   9
-//   6
-//   3
+
 rwfunc rotate(*int64 #N) -> () {
 	mat:[]int64 = [1, 2, 3, 4, 5, 6, 7, 8, 9]
-	// transpose
+	
 	i:int64 = 0
 	while (i < *N) {
 		j:int64 = i + 1
@@ -29,7 +18,7 @@ rwfunc rotate(*int64 #N) -> () {
 		}
 		i + 1 -> i
 	}
-	// reverse each row
+	
 	r:int64 = 0
 	while (r < *N) {
 		l:int64 = r × *N
@@ -45,7 +34,7 @@ rwfunc rotate(*int64 #N) -> () {
 		}
 		r + 1 -> r
 	}
-	// print
+	
 	row:int64 = 0
 	while (row < *N) {
 		col:int64 = 0

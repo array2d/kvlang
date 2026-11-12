@@ -1,10 +1,4 @@
-// networld/fs·exists：存在性判定，写入/删除前后对比
-//   fs·exists(p) -> bool
-// 期望输出:
-//   before= false
-//   after_write= true
-//   after_del= false
-// file_exists 封装存在性判定：输入路径，输出 bool
+
 rwfunc file_exists(*[]char/utf32 #p) -> (*bool #b) {
 	networld/fs·exists(*p) -> *b
 }

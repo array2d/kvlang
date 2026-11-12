@@ -1,7 +1,6 @@
 import os
 import time
 
-
 def bsearch(arr, n, target):
     lo, hi = 0, n - 1
     idx = -1
@@ -16,7 +15,6 @@ def bsearch(arr, n, target):
         else:
             hi = mid - 1
     return idx
-
 
 n = int(os.environ["BENCH_SCALE"])
 arr = [i for i in range(n)]

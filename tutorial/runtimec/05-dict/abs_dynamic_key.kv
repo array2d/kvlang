@@ -1,9 +1,4 @@
-// abs_dynamic_key: dynamic member writes on absolute paths (`/tmp/m·*k = v` and `v -> "/tmp/m"·*k`)
-// evaluate `k` at runtime instead of writing the literal key `/tmp/m·*k`.
-// Expected output:
-//   a0= 0 a1= 10 a2= 20
-//   b1= 101 b2= 102
-//   s= 5
+
 rwfunc test() -> () {
 	/tmp/adk:'int64'int64 = {}
 	i:int64 = 0

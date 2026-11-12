@@ -1,8 +1,3 @@
-/*
- * 06_multiprocess — A 进程写，B 进程读，共享 file-backed mmap（shm:// 后端）
- *
- * 用法: ./06_multiprocess /tmp/kv.shm
- */
 
 #include "common.h"
 #include <stdio.h>

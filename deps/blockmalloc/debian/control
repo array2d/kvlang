@@ -1,0 +1,20 @@
+Source: blockmalloc
+Section: libs
+Priority: optional
+Maintainer: miaobyte <peng.li24@nio.com>
+Build-Depends: debhelper (>= 12), cmake, build-essential
+Standards-Version: 4.5.0
+Homepage: https://github.com/miaobyte/blockmalloc
+
+Package: libblockmalloc1
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: small fixed-block memory allocator library
+ A compact shared library providing a fixed-size block allocator API.
+
+Package: libblockmalloc1-dev
+Section: libdevel
+Architecture: any
+Depends: libblockmalloc1 (= ${binary:Version}), ${misc:Depends}
+Description: development files for blockmalloc
+ Header files and unversioned symlink for developing and linking against libblockmalloc1.

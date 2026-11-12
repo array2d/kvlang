@@ -1,7 +1,3 @@
-// 04_rust — Rust FFI 直调 libkvspace（dispatch 前端），shm:// 后端
-// head 固定 16 字节 [bodylen:u64@0][attrslen:u16@8][padding:6@10-15]，body 偏移恒 16，
-// langtype 在 body 之后的 attr 区。bodylen 恒为有效字节数，容量归存储后端。
-// 编译: rustc 04_rust.rs -l kvspace
 
 use std::convert::TryInto;
 use std::ffi::{c_char, c_int, c_void, CString};
@@ -10,10 +6,6 @@ use std::ptr;
 const KVSPACE_XVALUE_HEAD_LEN: usize = 16;
 const KVLANG_XVALUE_ATTR_TAG_LANGTYPE: u8 = 1;
 
-/// 扫描 16 字节 head + attr 区，返回 langtype（无记录/坏 wire → 空）。
-/// 与 C 的 `kvspaceXvalueGetAttr` 同语义；Rust 侧没有 inline 头可用，
-/// 这里按线格式直接解，**不复制 C 的结构体字段**（那是第二份字段真相）。
-/// wire: [bodylen:u64][attrslen:u16][padding:6][body][attrs]
 fn xvalue_head_scan(wire: &[u8]) -> Vec<u8> {
     if wire.len() < KVSPACE_XVALUE_HEAD_LEN {
         return vec![];
@@ -37,7 +29,7 @@ fn xvalue_head_scan(wire: &[u8]) -> Vec<u8> {
         }
         match tag {
             KVLANG_XVALUE_ATTR_TAG_LANGTYPE => langtype = wire[p + 3..p + 3 + rlen].to_vec(),
-            2 => return vec![], // 旧 reallen tag 已删除，出现即拒
+            2 => return vec![], 
             _ => {}
         }
         p += 3 + rlen;
@@ -46,7 +38,6 @@ fn xvalue_head_scan(wire: &[u8]) -> Vec<u8> {
     langtype
 }
 
-/// 有效长度 = bodylen（head 里没有 layout，也没有 tag 2）。
 fn xvalue_head_effective_len(wire: &[u8]) -> Option<u64> {
     if wire.len() < KVSPACE_XVALUE_HEAD_LEN {
         return None;
@@ -56,7 +47,7 @@ fn xvalue_head_effective_len(wire: &[u8]) -> Option<u64> {
 extern "C" {
     fn kvspaceConnect(dsn: *const c_char) -> *mut c_void;
     fn kvspaceClose(h: *mut c_void);
-    // 新 ABI 三个动作：resolve 拿 offset / realloc 拿写入位置 / listlen+list 枚举目录。
+    
     fn kvspaceResolveOffset(h: *mut c_void, key: *const c_char, anchor: u64,
                       out_offset: *mut u64, err: *mut c_char, err_cap: u32) -> c_int;
     fn kvspaceRealloc(h: *mut c_void, key: *const c_char, body_len: u64,
@@ -70,7 +61,7 @@ extern "C" {
     fn kvspaceList(h: *mut c_void, key: *const c_char, out_names: *mut c_char,
                    out_cap: u32, out_len: *mut u32, out_count: *mut u32,
                    out_gen: *mut u64, err: *mut c_char, err_cap: u32) -> c_int;
-    // 值区基址：offset 只有加上它才是地址。
+    
     fn kvspaceXvalueInProcessAddress(h: *mut c_void) -> *mut u8;
 }
 
@@ -86,14 +77,13 @@ impl KV {
         assert!(!ptr.is_null());
         KV { ptr, path: path.to_string() }
     }
-    // 基址：offset 只有加上它才是地址。shm 映射在进程内且稳定。
+    
     fn base(&self) -> *mut u8 {
         let b = unsafe { kvspaceXvalueInProcessAddress(self.ptr) };
         assert!(!b.is_null(), "no in-process address space (shm backend expected)");
         b
     }
 
-    // 写入：realloc 出 body+attr 空间，再直接写 base+offset。
     fn set(&self, key: &str, langtype: &str, body: &[u8]) {
         let lt = langtype.as_bytes();
         let attr_len = if lt.is_empty() { 0 } else { 3 + lt.len() as u64 };
@@ -122,8 +112,6 @@ impl KV {
         }
     }
 
-    // 读：resolve 拿 offset，在 base+offset 处解 head/body/attr。
-    // 返回 (kind, body)，body 是拷贝出来的，随即可用。
     fn get(&self, key: &str) -> Option<(String, Vec<u8>)> {
         let ck = cs(key);
         let mut off: u64 = 0;
@@ -135,7 +123,7 @@ impl KV {
             return None;
         }
         let base = self.base();
-        // 整条 wire 的长度由 head 自己算出：16 + bodylen + attrslen。
+        
         let head = unsafe { std::slice::from_raw_parts(base.add(off as usize), KVSPACE_XVALUE_HEAD_LEN) };
         let body_len = u64::from_le_bytes(head[0..8].try_into().unwrap()) as usize;
         let attrs_len = u16::from_le_bytes([head[8], head[9]]) as usize;
@@ -166,7 +154,7 @@ impl KV {
         let mut err = [0 as c_char; 256];
         unsafe { kvspaceDeltree(self.ptr, cp.as_ptr(), err.as_mut_ptr(), 256); }
     }
-    // 目录：listlen 给 N/M，list 一次取全部名字（NUL 分隔）。
+    
     fn list(&self, prefix: &str) -> Vec<String> {
         let cp = cs(prefix);
         let mut count: i64 = 0;

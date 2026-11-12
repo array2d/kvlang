@@ -1,15 +1,4 @@
-// wip 本期不支持 @ 扩展存储（2026-11-06 用户裁决）：本用例排除在自动测试之外
-// networld/proc·exec：捕获子进程 stdout/stderr
-//   exec(args, envs) -> code, out, err。绑定 out/err 写槽即捕获（未绑定则继承父终端）
-//   out/err are @[]uint8 ext handles pointing to /networld/{host}/proc/{pid}-{n}/{stdout,stderr}
-//   (stored under per-user private /tmp/byteseek-{uid}/, with {n} disambiguating PID reuse)
-//   读该句柄时按 body 前缀路由回 /lib/networld/proc 兑现物理字节
-// 期望输出:
-//   code= 0
-//   out= hi
-//   err= oops
-// run_capture 把 code/out/err 三个结果一并带回调用方；
-// 捕获句柄的类型是 @[]uint8（外部世界引用的字节流），不是"不约束"
+
 rwfunc run_capture(*'[int64]'[]char/utf32 #args,
 		*'[int64]'[]char/utf32 #envs) -> (*uint8 #code,
 		@[]uint8 #out, @[]uint8 #err) {

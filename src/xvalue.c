@@ -3,21 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* kvlang 语言层的 wire 构造器：把 langtype（含 [dims] 与 * / @ 前缀）写进
- * attr tag 1。字节布局全部委托给 kvspace_xvalue.h 的 head 访问器——本文件
- * 只决定「写哪些 attr 记录、内容是什么」，不手写偏移。 */
-
-/* Failure helper: clear *out per header contract. */
 static int fail(uint8_t **out) {
     if (out)
         *out = NULL;
     return -1;
 }
 
-/* Single wire builder. Zero-fills the body when body is NULL (Reserve
-   placeholder); public entry points validate whether non-zero body_len
-   requires non-NULL body.
-   langtype_prefix 只由 NewPtr/NewExt 传入 '*' 或 '@'，构造成 langtype 记录的前缀。 */
 static int build(const uint8_t *body, uint64_t body_len, char langtype_prefix,
                  const char *langtype, uint8_t **out, uint64_t *out_len) {
     if (!out || !out_len)
@@ -83,13 +74,12 @@ int kvlangXvalueHeadNewTensor(const uint64_t *dims, uint32_t ndim,
                               const uint8_t *raw, uint64_t raw_len,
                               const char *langtype,
                               uint8_t **out, uint64_t *out_len) {
-    /* Shape lives in leading [dims] of langtype; body byte length is raw_len. */
+    
     if (!dims || ndim == 0 || ndim > 64 || (raw_len && !raw))
         return fail(out);
     return build(raw, raw_len, 0, langtype, out, out_len);
 }
 
-/* path_len == 0 是合法的 None 指针：`*T` + 空 body。 */
 int kvlangXvalueHeadNewPtr(const uint8_t *path, uint32_t path_len,
                            const char *langtype,
                            uint8_t **out, uint64_t *out_len) {
@@ -118,7 +108,6 @@ int kvlangXvalueHeadNewCode(const uint8_t *body, uint64_t body_len,
 
 int kvlangXvalueHeadReserve(uint64_t body_len, const char *langtype,
                             uint8_t **out, uint64_t *out_len) {
-    /* 预留 = 产 body_len 字节零 body 的占位（后由调用方填充），
-       attr 区只含 langtype；容量由存储后端另行保留。 */
+    
     return build(NULL, body_len, 0, langtype, out, out_len);
 }

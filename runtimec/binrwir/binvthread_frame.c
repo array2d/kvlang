@@ -1,8 +1,3 @@
-/*
- * 组件：binrwir/binvthread_frame 的实现
- * 作用：安全初始化和重置只保存控制状态的 Frame，并借用调用入口的绑定表。
- * 约束：Frame 不拥有 Program，也不拥有绑定表；不保存 V.body 地址或内容。
- */
 
 #include "binrwir/binvthread_frame.h"
 

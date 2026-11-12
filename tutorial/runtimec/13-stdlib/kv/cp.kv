@@ -1,17 +1,12 @@
-// kvspace·cp：拷贝单 key，之后改 src 不影响 dst
-// 期望输出:
-//   dst: 10
-//   src after: 20
-//   dst after: 10
 
 rwfunc test() -> () {
 	10 -> /cp_src
 	kvspace·cp("/cp_src") -> /cp_dst:int64
-	d1:int64 = /cp_dst      // 类型依据：同文件第 8 行字面量 10 写入 /cp_src
+	d1:int64 = /cp_dst      
 	println("dst:", d1)
 	20 -> /cp_src
 	s2:int64 = /cp_src
-	d2:int64 = /cp_dst      // 类型依据：同文件第 8 行字面量 10 写入 /cp_src
+	d2:int64 = /cp_dst      
 	println("src after:", s2)
 	println("dst after:", d2)
 }

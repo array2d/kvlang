@@ -1,6 +1,3 @@
-//! 所有符号的权威双向查找表（对齐 symbol/symbol.go）。禁止其他模块 hardcode 符号字符串。
-
-// ── 显示用字符串常量 ─────────────────────────────────────────────────
 
 pub const ARROW_RIGHT: &str = " -> ";
 pub const ARROW_EQ: &str = " = ";
@@ -9,7 +6,7 @@ pub const ARROW_EQ: &str = " = ";
 pub struct Entry {
     pub word: &'static str,
     pub glyphs: &'static [&'static str],
-    pub precedence: i32, // 0 = 非中缀
+    pub precedence: i32, 
     pub arith: bool,
     pub cmp: bool,
     pub unary: bool,
@@ -28,10 +25,8 @@ impl Default for Entry {
     }
 }
 
-// ── 符号表（word 唯一主键） ──────────────────────────────────────────
-
 static ENTRIES: &[Entry] = &[
-    // 分组符
+    
     Entry {
         word: "lparen",
         glyphs: &["("],
@@ -112,7 +107,7 @@ static ENTRIES: &[Entry] = &[
         cmp: false,
         unary: false,
     },
-    // 箭头 / 赋值（= 兼作 copy opcode）
+    
     Entry {
         word: "assign",
         glyphs: &["->", "="],
@@ -121,7 +116,7 @@ static ENTRIES: &[Entry] = &[
         cmp: false,
         unary: false,
     },
-    // 算术
+    
     Entry {
         word: "add",
         glyphs: &["+"],
@@ -144,7 +139,7 @@ static ENTRIES: &[Entry] = &[
         precedence: 0,
         arith: false,
         cmp: false,
-        unary: true, // 表达式前缀位置 = 解引用（类型位置仍是 ref 标注，由 parse_type 剥离）
+        unary: true, 
     },
     Entry {
         word: "mul",
@@ -170,7 +165,7 @@ static ENTRIES: &[Entry] = &[
         cmp: false,
         unary: false,
     },
-    // 比较
+    
     Entry {
         word: "eq",
         glyphs: &["=="],
@@ -219,7 +214,7 @@ static ENTRIES: &[Entry] = &[
         cmp: true,
         unary: false,
     },
-    // 逻辑
+    
     Entry {
         word: "and",
         glyphs: &["&&"],
@@ -244,7 +239,7 @@ static ENTRIES: &[Entry] = &[
         cmp: true,
         unary: true,
     },
-    // 数学符号
+    
     Entry {
         word: "sqrt",
         glyphs: &["√"],
@@ -253,7 +248,7 @@ static ENTRIES: &[Entry] = &[
         cmp: false,
         unary: true,
     },
-    // 位运算
+    
     Entry {
         word: "bitand",
         glyphs: &["&"],
@@ -296,9 +291,6 @@ static ENTRIES: &[Entry] = &[
     },
 ];
 
-// ── 查询 ─────────────────────────────────────────────────────────────
-
-/// 按 glyph 查 Entry（未命中返回零值）。
 pub fn lookup(glyph: &str) -> Entry {
     for e in ENTRIES {
         if e.glyphs.contains(&glyph) {
@@ -308,7 +300,6 @@ pub fn lookup(glyph: &str) -> Entry {
     Entry::default()
 }
 
-/// 按 word 查 Entry（未命中返回零值）。
 pub fn by_word(word: &str) -> Entry {
     for e in ENTRIES {
         if e.word == word {
@@ -321,8 +312,6 @@ pub fn by_word(word: &str) -> Entry {
 fn is_ascii(s: &str) -> bool {
     s.bytes().all(|b| b < 128)
 }
-
-// Cache operator tables once per process via `OnceLock` instead of rebuilding `Vec<String>` per token.
 
 pub fn scanner_two_char_ops() -> &'static [String] {
     static T: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();

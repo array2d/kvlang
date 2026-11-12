@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-"""Enforce the runtimec vocabulary and reject alternate architecture paths."""
 
 from __future__ import annotations
 
@@ -10,25 +8,19 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-
 PRODUCT_DIRECTORIES = (
     "include", "interface", "contract", "host", "binrwir", "vmkv",
     "binrwir_compiler", "vmbin", "engine", "generated",
     "specification", "tests",
 )
 TEXT_SUFFIXES = {".c", ".h", ".cmake", ".in", ".map", ".exports", ".def"}
-# runtimec 交付形态是共享库：产品代码没有 stdout/stderr 的语义，诊断走 error 对象
-# （routing/README.md §六之三第 2 条）。测试打印失败信息是正当的，所以这个守卫
-# 只看产品目录——`PRODUCT_DIRECTORIES` 含 tests（缩写规则要扫它），不能直接复用。
 OUTPUT_FREE_DIRECTORIES = (
     "include", "interface", "contract", "host", "binrwir", "vmkv",
     "binrwir_compiler", "vmbin", "engine", "generated",
 )
-# `printf(` 会把 `snprintf(` 一起匹配——写这种判据时词边界是必需品，不是讲究。
 STDOUT_WRITE_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_])(?:fprintf\s*\(\s*stderr|fprintf\s*\(\s*stdout|"
     r"f?printf\s*\(|puts\s*\(|putchar\s*\()")
-# 调试标记：只看字符串字面量里的，注释里写 TODO 是正常的。
 DEBUG_MARKER_PATTERN = re.compile(r'"(?:[^"\\]|\\.)*\b(?:DBG|TODO|XXX|FIXME)\b')
 FORBIDDEN_PATH_PARTS = {
     "abi": "execution_interface", "api": "interface", "compat": "delete",
@@ -109,8 +101,6 @@ ABBREVIATIONS = {
     "arg": "argument", "buf": "buffer", "cfg": "control_flow_graph",
     "ctx": "context", "desc": "descriptor", "dst": "destination",
     "fn": "function", "id": "identifier", "impl": "implementation",
-    # `pc` 允许：与语言键名 `‥pc` 对齐（用户裁决 2026-11-02，见
-    # workspace/622/architect/decision-frame-addressing.md §B）。
     "len": "length", "op": "operation",
     "ptr": "pointer", "ref": "reference", "req": "request",
     "src": "source", "tmp": "temporary",
@@ -131,16 +121,11 @@ VOID_LIFECYCLE_PATTERN = re.compile(
     r"\s*\([^;{}]*\)\s*(?:;|\{)",
     re.IGNORECASE | re.DOTALL,
 )
-# 上游 ABI 的 void 生命周期声明：`extern void kvspaceClose(void *)`。
-# **两个条件同时满足**才跳过——带 `extern`（声明而非本仓定义），且函数名以
-# 上游前缀 `kvspace` 开头。本仓自己的 `void foo_close(...)` 仍然报错：那条规则
-# 治的正是「本仓的生命周期函数吞掉失败」，给外部签名开口子不该顺手放过自己。
 EXTERNAL_VOID_LIFECYCLE_PATTERN = re.compile(
     r"\bextern\s+void\s+(kvspace[A-Za-z0-9_]*(?:destroy|close)[A-Za-z0-9_]*)"
     r"\s*\([^;{}]*\)\s*;",
     re.IGNORECASE | re.DOTALL,
 )
-
 
 @dataclass(frozen=True, order=True)
 class Finding:
@@ -151,7 +136,6 @@ class Finding:
 
     def render(self) -> str:
         return f"{self.path}:{self.line}: [{self.rule}] forbidden name {self.token!r}"
-
 
 def parse_arguments(command_arguments: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -165,19 +149,16 @@ def parse_arguments(command_arguments: list[str]) -> argparse.Namespace:
                         help="prove every judgment can fire, using synthetic fixtures")
     return parser.parse_args(command_arguments)
 
-
 def locate_runtimec(source_root: Path) -> tuple[Path, Path]:
     source_root = source_root.resolve()
     return ((source_root.parent, source_root) if source_root.name == "runtimec"
             else (source_root, source_root / "runtimec"))
-
 
 def relative_display(path: Path, repository_root: Path) -> str:
     try:
         return path.resolve().relative_to(repository_root).as_posix()
     except ValueError:
         return path.as_posix()
-
 
 def iter_product_files(runtimec_root: Path):
     cmake_lists = runtimec_root / "CMakeLists.txt"
@@ -192,7 +173,6 @@ def iter_product_files(runtimec_root: Path):
                 ):
                     yield path
 
-
 def audit_public_headers(runtimec_root: Path, repository_root: Path) -> list[Finding]:
     include_root = runtimec_root / "include"
     allowed_header = include_root / "kvlang" / "runtimec.h"
@@ -204,52 +184,28 @@ def audit_public_headers(runtimec_root: Path, repository_root: Path) -> list[Fin
         if header != allowed_header
     ] if include_root.is_dir() else []
 
-
 def c_code_without_comments_or_literals(text: str) -> str:
     return C_NON_CODE_PATTERN.sub(
         lambda match: re.sub(r"[^\n]", " ", match.group(0)), text,
     )
 
-
-# 只抹注释、**保留字符串字面量**。调试标记判据要的正是这个区分：注释里写
-# TODO 是正常批注，字符串里写 TODO 才是「把调试标记留进产品」。
 C_COMMENTS_ONLY_PATTERN = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
 
-
 def c_code_without_comments(text: str) -> str:
-    """把注释抹成空白，保留字符串字面量与代码结构。
-
-    抹成**等长空白**而不是删除：行号与列号必须与原文件一致，否则诊断指到
-    别处——这个判据之前就吃过一次亏（匹配在 44 行，却报在 22 行，因为旧实现
-    扫的是原文、正则跨行匹配把起点算在了更早的位置）。
-    """
     return C_COMMENTS_ONLY_PATTERN.sub(
         lambda match: re.sub(r"[^\n]", " ", match.group(0)), text,
     )
 
-
-# 上游 ABI 里的短字段名（如 kvspace 值头的 `ptr`）在我们这里没有命名权：成员访问与
-# `offsetof` 第二参数里的标识符必须与上游同名。缩写规则要守的是「我们自己命名时不用
-# 缩写」，所以这些位置不参与缩写检查。独立出现的同名标识符仍然照报。
 MEMBER_ACCESS_PATTERN = re.compile(r"(?:->|\.)\s*([A-Za-z_][A-Za-z0-9_]*)")
 OFFSETOF_FIELD_PATTERN = re.compile(r"\boffsetof\s*\([^,()]*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")
 
-
-# 上游 ABI 的宏名同样由上游定义。列出具体名字而不是整体豁免大写标识符的缩写检查：
-# 白名单膨胀是可见的，而「宏名一律放过」会连带放过我们自己造的大写缩写。
 FOREIGN_ABI_IDENTIFIERS = (
     "KVSPACE_XVALUE_HEAD_LEN", "KVSPACE_XVALUE_PTR_INLINE",
-    # `ptr` 字段的取值：INLINE / PTR。两者都是上游线格式的拼写，我们没有命名权；
-    # 造本地常量（如 `TEST_HEAD_POINTER 1U`）等于把上游数值抄一份，值变了会静默测错。
     "KVSPACE_XVALUE_PTR_PTR",
-    # kvspace C ABI 的存储位置常量：`ref` 是上游的拼写，这里没有命名权。
-    # 调用方要用 `kvspaceWriteNewPlace` 指定 ref 时只能写这个名字。
     "KVSPACE_REF_INLINE", "KVSPACE_REF_PTR", "KVSPACE_REF_EXT",
 )
 
-
 def mask_foreign_abi_positions(code: str) -> str:
-    """Blank out identifiers whose spelling is dictated by an upstream ABI."""
     def blank(match: re.Match[str]) -> str:
         start, end = match.span(1)
         return match.group(0)[:start - match.start()] + " " * (end - start) + \
@@ -260,10 +216,8 @@ def mask_foreign_abi_positions(code: str) -> str:
         masked = masked.replace(identifier, " " * len(identifier))
     return masked
 
-
 def audit_output_channels(runtimec_root: Path,
                           repository_root: Path) -> list[Finding]:
-    """产品源不得直写标准输出，也不得在字符串里留调试标记。"""
     findings: list[Finding] = []
     for directory_name in OUTPUT_FREE_DIRECTORIES:
         directory = runtimec_root / directory_name
@@ -286,9 +240,6 @@ def audit_output_channels(runtimec_root: Path,
                     "the shared library has no stdout; report diagnostics through the "
                     "error object",
                 ))
-            # 判据是「字符串字面量里不许有调试标记，注释里写是正常批注」。
-            # 所以先抹注释再扫，而不是扫原文：扫原文会把注释里的 TODO 报成
-            # 违规，与这条判据自己的定义相反。
             for match in DEBUG_MARKER_PATTERN.finditer(code_without_comments):
                 findings.append(Finding(
                     display,
@@ -297,7 +248,6 @@ def audit_output_channels(runtimec_root: Path,
                     "a debug marker left in a product string literal",
                 ))
     return findings
-
 
 def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], int]:
     findings = audit_public_headers(runtimec_root, repository_root)
@@ -340,8 +290,6 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
             continue
         if path.suffix in {".c", ".h"}:
             code = c_code_without_comments_or_literals(text)
-            # 上游 ABI 的 void 生命周期声明先登记豁免位置，再逐个判其余命中；
-            # 用**位置**而不是名字排除：同一个名字在本仓又被定义一次时，那处仍要报。
             exempt_spans = [
                 (match.start(), match.end())
                 for match in EXTERNAL_VOID_LIFECYCLE_PATTERN.finditer(code)
@@ -356,8 +304,6 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                     "void-lifecycle-function",
                     match.group(1),
                 ))
-        # 缩写规则只看标识符：注释与字符串字面量先按等长空白抹掉（保留行号）。
-        # 否则 opcode 名字里的 `string·len`、文档里的 `pc` 会被误判为标识符缩写。
         masked = c_code_without_comments_or_literals(text).splitlines()
         for line_number, line in enumerate(lines, 1):
             masked_line = masked[line_number - 1] if line_number <= len(masked) else ""
@@ -375,13 +321,7 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                     ))
     return sorted(set(findings)), scanned
 
-
-# ---------------------------------------------------------------------------------------
-# Self-test: every judgment must be able to fire, and the positional exemption must be an
-# explicit exemption rather than a coincidence. Fixtures live in a temporary tree.
-# ---------------------------------------------------------------------------------------
 SELFTEST_CASES = (
-    # 上游 ABI 的短字段名：成员访问与 offsetof 字段位置不参与缩写检查。
     ("foreign-member-access", "static void probe(const kvspaceXvalueHead *head) {\n"
                               "    int value = head->ptr;\n"
                               "    int other = head.ptr;\n"
@@ -389,19 +329,15 @@ SELFTEST_CASES = (
     ("foreign-offsetof-field", "static int probe(void) {\n"
                                "    return (int)offsetof(kvspaceXvalueHead, ptr);\n"
                                "}\n", ()),
-    # 我们自己命名时仍然不许用缩写。
     ("local-variable", "static int ptr;\n", ("abbreviation-ptr-use-pointer",)),
     ("parameter", "static int probe(int ptr) { return ptr; }\n",
      ("abbreviation-ptr-use-pointer",)),
     ("type-alias", "typedef int ptr;\n", ("abbreviation-ptr-use-pointer",)),
-    # 上游宏名由上游定义；但豁免只覆盖具体名字，不是「所有大写都放过」。
     ("foreign-macro", "static unsigned probe(void) {\n"
                       "    return (unsigned)KVSPACE_XVALUE_PTR_INLINE;\n"
                       "}\n", ()),
     ("own-uppercase-abbreviation", "#define OUR_PTR_LIMIT 4\n",
      ("abbreviation-ptr-use-pointer",)),
-    # 外部 ABI 的 void 生命周期声明可以放行，但口子必须钉窄：
-    # `extern` 与 `kvspace` 前缀**两条同时满足**才豁免。
     ("external-void-lifecycle-is-allowed",
      "extern void kvspaceClose(void *handle);\n", ()),
     ("local-void-lifecycle-is-still-rejected",
@@ -413,7 +349,6 @@ SELFTEST_CASES = (
     ("upstream-name-without-extern-is-rejected",
      "void kvspaceClose(void *handle);\n",
      ("void-lifecycle-function",)),
-    # 产品源不得直写标准输出；测试可以（它们是正当的失败信息）。
     ("stdout-write", "static void probe(void) {\n"
                      '    fprintf(stderr, "boom");\n'
                      "}\n", ("stdout-write-in-product-source",)),
@@ -426,13 +361,6 @@ SELFTEST_CASES = (
      ("debug-marker-in-product-source",)),
     ("todo-in-comment-is-fine", "/* TODO: 稍后处理 */\nstatic int probe(void) { return 0; }\n",
      ()),
-    # 跨行误匹配：`#include "..."` 的引号与几十行后注释里的 TODO 被同一个正则
-    # 从一对引号跨行连起来，于是**误报**、而且行号指到 include 那一行。
-    #
-    # 这条 fixture 必须带上前面的含引号行——只写一个注释块测不出来：正则要求以
-    # `"` 开头，纯注释永远不会匹配，两种实现都绿，缺陷就被藏住了。
-    # （2026-11-04 真实踩到：`vmbin/handlers/host.c` 注释里的 TODO 被报在
-    #  include 行，实际位置在几十行之后。）
     ("todo-in-comment-across-includes-is-fine",
      '#include "contract/status.h"\n'
      '#include "kvspace/kvspace.h"\n'
@@ -442,18 +370,14 @@ SELFTEST_CASES = (
      " */\n"
      "static int probe(void) { return 0; }\n",
      ()),
-    # 反过来：字符串字面量里的标记必须报。否则「注释里的不报」可能被实现成
-    # 「一律不报」，判据就废了。
     ("todo-in-string-is-reported",
      'static const char *message = "TODO remove before ship";\n',
      ("debug-marker-in-product-source",)),
-    # 成员访问旁边的独立使用不得被豁免连带放过。
     ("mixed-member-and-local",
      "static int ptr;\n"
      "static void probe(const kvspaceXvalueHead *head) { (void)head->ptr; }\n",
      ("abbreviation-ptr-use-pointer",)),
 )
-
 
 def run_selftest() -> int:
     failures: list[str] = []
@@ -476,7 +400,6 @@ def run_selftest() -> int:
     print(f"check_names selftest: OK ({len(SELFTEST_CASES)} fixtures)")
     return 0
 
-
 def main(command_arguments: list[str] | None = None) -> int:
     arguments = parse_arguments(command_arguments or sys.argv[1:])
     if arguments.selftest:
@@ -494,7 +417,6 @@ def main(command_arguments: list[str] | None = None) -> int:
     if not arguments.quiet:
         print(f"check_names: OK ({scanned} file(s) scanned)")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

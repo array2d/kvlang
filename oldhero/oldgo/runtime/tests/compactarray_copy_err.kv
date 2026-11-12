@@ -1,9 +1,0 @@
-// `compactarray·copy` accepts only compact arrays and rejects scalars or scatterarrays.
-rwfunc test() -> () {
-	a = [10, 20, 30]
-	b = compactarray·copy(a)
-	println("copied:", b[0], b[1], b[2])
-	s = scatterarray·new("int64", 1, 2)
-	c = compactarray·copy(s)
-	println("unreachable", c)
-}

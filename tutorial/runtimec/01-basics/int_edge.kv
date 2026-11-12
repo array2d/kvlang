@@ -1,34 +1,6 @@
-// int_edge: two's-complement wraparound, truncating integer division (INT64_MIN / -1 wraps,
-// INT64_MIN % -1 == 0 without SIGFPE), and unsigned uint64 arithmetic/comparison for >= 2^63.
-// Expected output:
-//   a/b = -9223372036854775808
-//   a%b = 0
-//   loop q = -9223372036854775808
-//   loop r = 0
-//   max+1 = -9223372036854775808
-//   min-1 = 9223372036854775807
-//   min*-1 = -9223372036854775808
-//   neg min = -9223372036854775808
-//   abs min = -9223372036854775808
-//   i32 min/-1 = -2147483648
-//   i8 min/-1 = -128
-//   -7/2 = -3
-//   -7%2 = -1
-//   u64 3+4 = 7
-//   u64 3-4 = 18446744073709551615
-//   u64max*3 = 18446744073709551613
-//   u64max/2 = 9223372036854775807
-//   u64max%10 = 5
-//   u64max>>60 = 15
-//   u64 1<<63 = 9223372036854775808
-//   u64 max(big,3) = 18446744073709551615
-//   u64 min(big,3) = 3
-//   u64 big>3 = true
-//   u64 big<3 = false
-//   u8 200+100 = 44
-//   u8 200/3 = 66
+
 rwfunc divmod_loop(*int64 #n) -> (*int64 #q) {
-	// Exercise int64 div/mod inside a loop (fast kernel hot path).
+	
 	*q = 0
 	m:int64 = -9223372036854775807 - 1
 	i:int64 = 0

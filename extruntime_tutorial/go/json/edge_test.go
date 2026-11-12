@@ -10,15 +10,15 @@ func TestEdgeKeys(t *testing.T) {
 	c := rtConn(t)
 	defer disconnect(c)
 	cases := []string{
-		`{"a.b":1}`,              // 点号 key（合法，· 才是成员分隔符）
-		`{"a/b":1}`,              // 斜杠 key（应拒绝）
-		`{"a[b]":1}`,             // 方括号 key（应拒绝）
-		`{"a·b":1}`,              // 成员分隔符 key（应拒绝）
-		`{"a‥b":1}`,              // 运行时私有后缀 key（应拒绝）
-		`{"a\nb":1}`,             // 换行 key（应拒绝）
-		`{"0":"zero","1":"one"}`, // 数字字符串 key（合法）
-		`{"":1}`,                 // 空 key（应拒绝）
-		`{"a":"v.b/c\nx"}`,       // 值含特殊字符（应允许）
+		`{"a.b":1}`,              
+		`{"a/b":1}`,              
+		`{"a[b]":1}`,             
+		`{"a·b":1}`,              
+		`{"a‥b":1}`,              
+		`{"a\nb":1}`,             
+		`{"0":"zero","1":"one"}`, 
+		`{"":1}`,                 
+		`{"a":"v.b/c\nx"}`,       
 	}
 	for i, in := range cases {
 		root := "/rt/edge" + fmt.Sprint(i)

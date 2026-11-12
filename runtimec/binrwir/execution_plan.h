@@ -1,16 +1,6 @@
 #ifndef BINRWIR_EXECUTION_PLAN_H
 #define BINRWIR_EXECUTION_PLAN_H
 
-/*
- * execution plan 是 canonical BinRWIR Program 的只读派生物。它可以随时
- * 删除并从同一 Program 重建；它不是 RWIR 或 BinRWIR 的语义事实源。
- * execution plan 只承载类型特化、dispatch 融合、控制流和 source logical
- * program counter 映射。Program 已经是地址化二进制，不得在 plan 中重复
- * 编码 instruction、解析或缓存地址，也不得建立任何中间值存储模型。
- * BinRWIR Compiler 在编译阶段确定执行目标；vmbin 与 BinRWIR JIT 只执行
- * 已选择的目标，不拒绝计划、不重新选路。
- */
-
 #include <stddef.h>
 #include <stdint.h>
 
@@ -47,10 +37,6 @@ typedef struct binrwir_type_specialization {
     uint16_t flags;
 } binrwir_type_specialization_t;
 
-/*
- * dispatch fusion 只减少解释器分发。它必须保持每条逻辑 instruction 的
- * V.body 写回和 source mapping，且不得跨越 recovery boundary。
- */
 typedef struct binrwir_dispatch_fusion {
     uint32_t first_instruction_identifier;
     uint32_t instruction_count;

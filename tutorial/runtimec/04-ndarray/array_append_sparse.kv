@@ -1,9 +1,4 @@
-// array_append_sparse: 散列数组的 append 坐标由 memindex 决定，不得假设坐标键连续
-// 规范依据: 03-类型系统/11-stringkeymap形态、05-runtime语义/03-成员访问 ——
-//           memindex 是成员集合的唯一权威，遍历/追加必须据它枚举
-// 语义: 散列 {[0],[1],[2],[5]} 追加 7，应落 [6]（最大坐标 5 + 1），不得落 [3]
-// 期望输出:
-//   7
+
 rwfunc test() -> () {
 	a:[]int64 = [1, 2, 3]
 	b:'[int64]'int64 = scatterarray·newscatter(a)

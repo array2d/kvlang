@@ -1,7 +1,4 @@
-// binary search benchmark — 有序数组二分查找（数组访问 + 循环 + 整除）
-// 建 arr[i]=i，对 0..N-1 逐个二分，累加命中下标；N 由 __SCALE__ 占位（勿改逻辑）
-// 期望输出（N=32 时）:
-//   bsearch: found = 32 sum = 496
+
 rwfunc bsearch(*'[int64]'int64 #arr, *int64 #n, *int64 #target) -> (*int64 #idx) {
 	0 -> lo:int64
 	*n - 1 -> hi:int64

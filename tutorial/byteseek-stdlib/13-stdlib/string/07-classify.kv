@@ -1,15 +1,4 @@
-// string 字符分类：isalpha / isdigit / isalnum / isspace / isupper / islower /
-//   isxdigit / ispunct（一律 ASCII；空串一律 false；
-//   至少一个字母且无相反大小写，数字与符号不影响判定）
-// 期望输出:
-//   isalpha true false false
-//   isdigit true false
-//   isalnum true false
-//   isspace true false
-//   isupper true false false
-//   islower true false
-//   isxdigit true false
-//   ispunct true false
+
 rwfunc test() -> () {
 	a1:bool = string·isalpha("ab")
 	a2:bool = string·isalpha("ab1")

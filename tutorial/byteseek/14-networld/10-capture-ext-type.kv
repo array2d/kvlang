@@ -1,11 +1,4 @@
-// wip 本期不支持 @ 扩展存储（2026-11-06 用户裁决）：本用例排除在自动测试之外
-// 语义: @ext 句柄（ref=2）的源码类型写作 `@T`——源码里指针/扩展引用以
-//       `*`/`@` 前缀写在类型最前，layout 解析时剥离并落成 head.ref
-//       （见 [[ref存储位置]]），故捕获句柄不必再退化成 any。
-//       `@T` 已可解析，`@[]char/utf32` 直接写在参数类型里即可。
-// 期望输出:
-//   hi
-//   oops
+
 rwfunc run_capture(*'[int64]'[]char/utf32 #args,
 		*'[int64]'[]char/utf32 #envs) -> (*uint8 #c, @[]char/utf32 #out,
 		@[]char/utf32 #err) {

@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/slotsboxmallocTargets.cmake")
+
+# Provide a hint where blockmalloc is expected to be found via CMake config
+if(NOT TARGET blockmalloc)
+    find_package(blockmalloc CONFIG REQUIRED)
+endif()

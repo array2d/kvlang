@@ -1,16 +1,8 @@
-/*
- * 组件：contract/char_codec 的实现
- * 作用：char/utf32（4 字节小端码点序列）→ char/utf8。
- * 联系：由 vmbin 的打印与字符串算子共用；本文件不依赖任何上层组件。
- * 约束：纯函数、不分配。缓冲装不下、码点越界、输入长度非 4 的倍数一律失败，
- *       不做任何截断或替换字符——半个 UTF-8 序列比失败更难发现。
- */
 
 #include "contract/char_codec.h"
 
 #include <string.h>
 
-/* 把一个码点编码进 out；返回字节数，非法码点返回 0。 */
 static size_t runtimec_char_encode_codepoint(uint32_t codepoint,
                                              uint8_t *out) {
     if (codepoint <= 0x7FU) {
@@ -63,7 +55,7 @@ bool runtimec_char_utf32_to_utf8(const uint8_t *input, size_t input_size,
         if (encoded_size == 0U) {
             return false;
         }
-        /* 保留末字节：调用方按「总能留一个位置」约定分配文本缓冲。 */
+        
         if (used + encoded_size >= output_capacity) {
             return false;
         }
@@ -74,7 +66,6 @@ bool runtimec_char_utf32_to_utf8(const uint8_t *input, size_t input_size,
     return true;
 }
 
-/* 从一个 UTF-8 序列解出一个码点；返回消耗的字节数，非法返回 0。 */
 static size_t runtimec_char_decode_codepoint(const uint8_t *input,
                                              size_t available,
                                              uint32_t *output_codepoint) {
@@ -111,7 +102,7 @@ static size_t runtimec_char_decode_codepoint(const uint8_t *input,
         }
         codepoint = (codepoint << 6U) | (uint32_t)(input[index] & 0x3FU);
     }
-    /* 超长编码、代理区、越界都拒绝：它们能编码出「看起来对」的错值。 */
+    
     if ((needed == 2U && codepoint < 0x80U) ||
         (needed == 3U && codepoint < 0x800U) ||
         (needed == 4U && codepoint < 0x10000U) ||

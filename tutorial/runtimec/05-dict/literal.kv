@@ -1,10 +1,4 @@
-// literal: 字典（stringkeymap）成员赋值与访问
-// 语义: h:'[]char/utf32'int64 = {} 建空字典；h·key = v 成员赋值；base·key 访问；
-//       kvspace·get 检查存在性（缺失键返回 None）
-// 期望输出:
-//   h·x = 1
-//   h·z = 42
-//   has x: true
+
 rwfunc test() -> () {
 	h:'[]char/utf32'int64 = {}
 	h·x = 1

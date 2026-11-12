@@ -1,13 +1,3 @@
-/*
- * 组件：BinRWIR Compiler optimization 的实现
- * 作用：从已地址化的 canonical Program 派生只读 execution plan。本阶段只派生
- *       source logical program counter 映射——它是指令标识符与 source pc 之间
- *       唯一的对应关系，供恢复与观察使用；类型特化已在编码期完成，dispatch
- *       融合与控制流派生属于 JIT 阶段，本阶段不产出。
- * 联系：只由 binrwir_compiler/compiler.c 调用；vmbin 与 JIT 只读。
- * 约束：plan 不复制 instruction、不解析或缓存地址、不建立中间值存储；它借用
- *       调用方的 Program，生命周期由 compilation 保证。
- */
 
 #include "binrwir_compiler/optimization.h"
 
@@ -64,10 +54,7 @@ runtimec_status_t binrwir_compiler_build_execution_plan(
                 error, RUNTIMEC_STATUS_OUT_OF_MEMORY, 3,
                 "source mapping allocation failed");
         }
-        /*
-         * 本阶段的映射是恒等映射：第 i 条指令自成一段。它不是占位——vmbin 的
-         * 稠密游标与 source pc 就是靠这张表对应，恢复时只认它。
-         */
+        
         for (mapping_ordinal = 0U; mapping_ordinal < instruction_count;
              ++mapping_ordinal) {
             binrwir_instruction_view_t instruction;

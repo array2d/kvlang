@@ -1,9 +1,0 @@
-// Non-finite floats (`+Inf` from `exp` overflow) are rejected as member read keys (`m·*k`).
-rwfunc test() -> () {
-	m:float64·int64 = {}
-	big = 1000.0
-	float64·exp(big) -> k
-	println("before")
-	x = m·*k
-	println("unreachable", x)
-}

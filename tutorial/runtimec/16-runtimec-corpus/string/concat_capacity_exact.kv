@@ -1,14 +1,4 @@
-// `string·concat` 的**恰好上限**：16 × 64 = 1024 码点，必须成功。
-//
-// 与 `body_capacity_exact.kv`（容器那条）同一个形态：容量是**行为**判据，
-// 改小 `STRING_TEXT_CODEPOINT_CAPACITY` 这条会红。
-//
-// 超限那一半（1025 码点必须报 0x4A0B）**本轮没有语料用例**：
-//   TODO(#待建): over-limit 用例等语料运行器支持「期望运行期失败」。
-// 同 `known-limitations/body_capacity_over_limit.kv` 的理由。
-//
-// 期望输出:
-//   len = 1024
+
 rwfunc test() -> () {
 	"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" -> base:[]char/utf32
 	"" -> s:[]char/utf32

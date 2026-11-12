@@ -1,11 +1,3 @@
-#!/usr/bin/env python3
-"""kvlang tutorial test — 从 .kv 文件 # 期望输出 头注释自动生成测试。
-
-运行依赖（macOS）：
-  - `kvspace` CLI 必须在 PATH：共享后端每用例前由它清空；
-  - DYLD_LIBRARY_PATH 需含 kvspace 前缀的 lib 与 lib/kvspace，以及本仓 bin/。
-缺任何一项都会以明确错误中止，而不是在未清理的后端上继续跑。
-"""
 
 from __future__ import annotations
 
@@ -26,33 +18,21 @@ from unittest import mock
 RED, GREEN, YELLOW, NC = "\033[0;31m", "\033[0;32m", "\033[1;33m", "\033[0m"
 ROOT = Path(__file__).resolve().parent.parent
 KV = str(ROOT / "kvlang")
-# 被测二进制的路径走 **argv**（`--layout-bin=` / `--term-bin=`），不走环境变量：
-# 环境变量是隐式输入，不进命令行也不进日志（G12）。这里的默认值是本仓产物路径，
-# 不是外部配置。
 LAYOUT_BIN = str(ROOT / "bin" / "kvlanglayout")
 TERM_BIN = str(ROOT / "bin" / "byteseek")
-# 单用例运行超时（秒）。走 argv 的 `--case-timeout=`，不走环境变量（G12）。
 CASE_TIMEOUT = 120
-# DSN 无默认值：没给 `--kvspace=` 就报错退出。曾经这里缺省 redis，单库化后
-# `libkvspace` 只服务 shm://，那个默认值根本连不上，却要等用的时候才炸。
 _C_DSN = ""
 FAIL_CSV = (ROOT / "tutorial" / "test_failures.csv").resolve()
 BENCH_CSV = (ROOT / "tutorial" / "benchmark.csv").resolve()
 MODULE = sys.modules[__name__]
 
-# DSN 由 argv 的 `--kvspace=` 决定（见 _C_DSN），这里**不读环境变量**。
 _KV_ENV = {**os.environ}
 
-# shm/fs 后端每用例一个独立文件，见 _case_dsn。
 _BACKEND_TMP = None
 _CASE_SEQ = itertools.count()
 _LAST_BACKEND = None
 
-
 def _drop_backend(dsn: str) -> None:
-    """删掉某个后端 DSN 对应的私有文件（只用于本进程自己造的那些）。
-
-    P1a 控制面独立 store：shm/fs 的控制 store 是 `<dsn>.isa`，一并清理。"""
     path = dsn.split("://", 1)[1]
     if dsn.startswith("shm://"):
         for base in (path, path + ".isa"):
@@ -65,18 +45,7 @@ def _drop_backend(dsn: str) -> None:
         shutil.rmtree(path, ignore_errors=True)
         shutil.rmtree(path + ".isa", ignore_errors=True)
 
-
 def _case_dsn() -> str:
-    """每个用例一个独立的后端文件。
-
-    原实现是在共享路径上 unlink/rmtree 清空。若此时仍有残留进程 mmap 着该文件
-    （上一用例的 kvlanglayout 未完全退出、或并发的另一轮测试），内核要等映射
-    撤销、映射持有者又在等锁，进程会卡在不可中断等待（ps 的 U 态），kill -9
-    无效、只能重启。
-
-    改为各用例写自己的文件：进入新用例时清掉**上一个用例的**（它的进程此时
-    已退出，删它安全），既不碰别人的文件，磁盘也只驻留一份。
-    """
     global _LAST_BACKEND
     if _BACKEND_TMP is None:
         return _C_DSN
@@ -84,25 +53,14 @@ def _case_dsn() -> str:
         _drop_backend(_LAST_BACKEND)
         _LAST_BACKEND = None
     n = next(_CASE_SEQ)
-    # 只有 shm（G17：durable 的 fs/redis/s3 不在测试面出现，也不留分支）。
     dsn = f"shm://{_BACKEND_TMP.name}/{n}.shm"
     _LAST_BACKEND = dsn
     return dsn
 
-
 def discover(root: Path) -> list[Path]:
     return sorted(root.rglob("*.kv"))
 
-
 def parse_expects(f: Path) -> list[str]:
-    """从 .kv 文件头提取 // 期望输出，支持行内与块两种形态。
-
-    行内： // 期望输出: a, b
-    块：   // 期望输出:
-           //   a
-           //   b
-    行尾的「（说明）」只在其前面还有内容时才剥离，避免把 `(())` 这类输出本身删掉。
-    """
     tail_note = re.compile(r"(?<=\S)\s+\([^()]*\)\s*$")
     pats = []
     in_block = False
@@ -131,9 +89,7 @@ def parse_expects(f: Path) -> list[str]:
                     break
     return pats
 
-
 def _needs_skip(f: Path) -> bool:
-    """文件头含 // extern 或 // wip 标记 = 不参与自动测试（外部 rwirext / 待实现特性）。"""
     with open(f) as fh:
         for line in fh:
             if line.startswith("// extern") or line.startswith("// wip"):
@@ -142,9 +98,7 @@ def _needs_skip(f: Path) -> bool:
                 return False
     return False
 
-
 def _flush_backend() -> None:
-    """清空共享后端。失败必须中止：未清理会让后续用例在脏状态上跑。"""
     try:
         r = subprocess.run(
             ["kvspace", "clear"],
@@ -160,9 +114,7 @@ def _flush_backend() -> None:
             f"kvspace clear failed ({r.returncode}): {r.stderr.strip()[:200]}"
         )
 
-
 def _extract_bench_us(stdout: str) -> tuple[str, float]:
-    """从 stdout 提取 __bench_ns: 或 __bench_us: 行，返回 (清理后stdout, us)。"""
     bench_us = 0.0
     lines = stdout.split("\n")
     clean = []
@@ -175,13 +127,11 @@ def _extract_bench_us(stdout: str) -> tuple[str, float]:
             clean.append(line)
     return "\n".join(clean), bench_us
 
-
 def _timed_run(command: list[str], env: dict | None = None) -> tuple[subprocess.CompletedProcess[str], float]:
     result = subprocess.run(command, capture_output=True, text=True,
                             timeout=60, cwd=str(ROOT), env=env)
     _, us = _extract_bench_us(result.stdout)
-    return result, us / 1000.0  # 返回 ms，兼容旧格式
-
+    return result, us / 1000.0
 
 def _benchmark_error(results: dict[str, subprocess.CompletedProcess[str]],
                      expects: list[str]) -> str:
@@ -199,7 +149,6 @@ def _benchmark_error(results: dict[str, subprocess.CompletedProcess[str]],
         return "program outputs differ"
     return ""
 
-
 def _invalid_row(f: Path) -> dict[str, str]:
     return {
         "file": str(f.relative_to(ROOT)),
@@ -207,7 +156,6 @@ def _invalid_row(f: Path) -> dict[str, str]:
         "python_ms": "invalid",
         "c_ms": "invalid",
     }
-
 
 def _benchmark_file(f: Path, expects: list[str]) -> tuple[dict[str, str], str]:
     rel = str(f.relative_to(ROOT))
@@ -248,7 +196,6 @@ def _benchmark_file(f: Path, expects: list[str]) -> tuple[dict[str, str], str]:
         "c_ms": f"{c_ms:.3f}",
     }, ""
 
-
 def run_benchmarks(files: list[Path], errorexit: bool = False) -> int:
     rows = []
     skipped = invalid = 0
@@ -276,14 +223,11 @@ def run_benchmarks(files: list[Path], errorexit: bool = False) -> int:
     print(f"report: {BENCH_CSV}")
     return invalid
 
-
 def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
-    """Rust layout → kvspace(dsn) → runtime（bin/kvlang，链 C ABI），检查输出。"""
     rel = str(f.relative_to(ROOT))
     dsn = _case_dsn()
     if dsn == _C_DSN:
-        _flush_backend()  # 只有共享后端（redis 等）才需要显式清空
-    # P1a：layout 前必须由 runtime-c 发布控制 store 的 /‥isa（全 live registry）。
+        _flush_backend()
     boot = subprocess.run([TERM_BIN, "-c", 'print("boot")'], capture_output=True,
                           text=True, timeout=60, cwd=str(ROOT),
                           env={**env, "KVSPACE": dsn})
@@ -293,7 +237,7 @@ def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
                             timeout=60, cwd=str(ROOT), env=env)
     if layout.returncode != 0:
         return False, f"layout failed: {layout.stderr.strip()[:100]}"
-    entry = "test"  # 约定入口：每个 tutorial 顶层 rwfunc test()（pkg 空、裸名）
+    entry = "test"
     try:
         crun = subprocess.run([TERM_BIN, entry], capture_output=True, text=True,
                               timeout=CASE_TIMEOUT, cwd=str(ROOT), env={**env, "KVSPACE": dsn})
@@ -306,25 +250,12 @@ def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
         return False, detail
     return True, crun.stdout[:200]
 
-
 def _normalize_output_lines(text: str) -> list[str]:
-    """按行切分并剥掉行尾空白。
-
-    行尾空白是唯一的归一化：编辑器与不同 printf 实现会在行尾留空格，
-    那不是语义差异。除此之外不做任何宽容——不去空行、不排序、不去重、
-    不折叠内部空白。
-    """
     if not text:
         return []
     return [line.rstrip() for line in text.splitlines()]
 
-
 def _compare_lines(expects: list[str], actual_stdout: str) -> tuple[bool, str]:
-    """逐行完全相同：行数相等且每一行 ==。
-
-    以前这里是 `pat in stdout` 的子串包含，那是个假绿生成器：
-    多打印不管、顺序错不管、期望 `1` 还能匹到 `12`。
-    """
     expected_lines = [line.rstrip() for line in expects]
     actual_lines = _normalize_output_lines(actual_stdout)
     if len(expected_lines) != len(actual_lines):
@@ -335,9 +266,7 @@ def _compare_lines(expects: list[str], actual_stdout: str) -> tuple[bool, str]:
             return False, f"line {ordinal}: want {want!r} got {got!r}"
     return True, ""
 
-
 def main():
-    # 三个名字用于 argv 的 default=，所以 global 必须在**任何使用之前**声明。
     global _C_DSN, _BACKEND_TMP, LAYOUT_BIN, TERM_BIN, CASE_TIMEOUT
     ap = argparse.ArgumentParser(description="tutorial test")
     ap.add_argument("--filter", default="", help="按路径子串过滤（如 11-string/01 / 08-leetcode/01）")
@@ -413,7 +342,6 @@ def main():
     print(f"report: {FAIL_CSV}")
     sys.exit(0 if failed == 0 else 1)
 
-
 def _write_csv(failures: list[dict]) -> None:
     if not failures:
         FAIL_CSV.write_text("file,reason,expected,stdout\n", encoding="utf-8")
@@ -424,7 +352,6 @@ def _write_csv(failures: list[dict]) -> None:
         for row in failures:
             w.writerow(row)
 
-
 def _write_benchmark_csv(rows: list[dict[str, str]]) -> None:
     with open(BENCH_CSV, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(
@@ -434,7 +361,6 @@ def _write_benchmark_csv(rows: list[dict[str, str]]) -> None:
         )
         w.writeheader()
         w.writerows(rows)
-
 
 class BenchmarkTest(unittest.TestCase):
     def setUp(self):

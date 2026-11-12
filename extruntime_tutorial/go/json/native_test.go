@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// TestNativeDataTo：json·to 对 kvlang 原生数据（/ 目录树 + compact ndarray + 散 key 数组）序列化。
 func TestNativeDataTo(t *testing.T) {
 	c := rtConn(t)
 	defer disconnect(c)
@@ -26,7 +25,6 @@ func TestNativeDataTo(t *testing.T) {
 		t.Errorf("compact got %s", got)
 	}
 
-	// 散 key 数组成员目录（/d/scat·）作为 / 目录的子节点，子名带 · 需 strip。
 	if err := write(c, "/d/scat", []interface{}{json.Number("10"), json.Number("20"), json.Number("30")}); err != nil {
 		t.Fatal(err)
 	}
@@ -35,12 +33,10 @@ func TestNativeDataTo(t *testing.T) {
 	}
 }
 
-// TestLocalContainer：object/stringkeymap 值（模拟 kvlang 局部变量，无尾 / 的帧槽路径）→ json。
 func TestLocalContainer(t *testing.T) {
 	c := rtConn(t)
 	defer disconnect(c)
 
-	// object 局部变量：混合类型 + compact 数组成员
 	if err := write(c, "/rt/profile", map[string]any{
 		"name": "alice", "age": json.Number("42"),
 		"active": true, "score": json.Number("3.14"),
@@ -52,7 +48,6 @@ func TestLocalContainer(t *testing.T) {
 		t.Errorf("obj got %s", got)
 	}
 
-	// stringkeymap 局部变量：整型散 key 数组
 	if err := write(c, "/rt/map", []interface{}{json.Number("10"), json.Number("20"), json.Number("30")}); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +55,6 @@ func TestLocalContainer(t *testing.T) {
 		t.Errorf("map got %s", got)
 	}
 
-	// stringkeymap 局部变量：字符串散 key 数组
 	if err := write(c, "/rt/tags", []interface{}{"a", "b", "c"}); err != nil {
 		t.Fatal(err)
 	}

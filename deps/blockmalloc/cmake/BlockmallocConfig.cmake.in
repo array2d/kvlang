@@ -1,0 +1,6 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/blockmallocTargets.cmake")
+
+# Optionally set variables for consumers
+set(blockmalloc_INCLUDE_DIR ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR})

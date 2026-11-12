@@ -1,9 +1,3 @@
-/*
- * 组件：binrwir/frame_bindings 的实现
- * 作用：帧派生绑定表的创建、绑定、解析、失效与销毁。
- * 约束：只保存 XValue 基址与 generation，不保存 body 地址、不保存值，也不
- *       在解析成功之外给出任何猜测地址。
- */
 
 #include "binrwir/frame_bindings.h"
 
@@ -13,12 +7,7 @@
 struct binrwir_frame_bindings {
     runtimec_allocator_t allocator;
     binrwir_frame_binding_t *entries;
-    /*
-     * 每个槽一份自有 key 字节块：`[slot_key][caller_key]`。绑定表比创建它的
-     * 那一层活得久（帧准备与 handler 都会在分配 key 缓冲之后绑完就返回），
-     * 所以键必须由表自己拥有；存借用视图就是 use-after-free。
-     * 块长度 = binding->slot_key.size + binding->caller_key.size。
-     */
+    
     char **key_storage;
     size_t capacity;
 };
@@ -29,7 +18,6 @@ static void binrwir_frame_binding_clear(binrwir_frame_binding_t *binding) {
     binding->valid = false;
 }
 
-/* 释放某槽的自有 key 块。**必须在清空 binding 之前调用**：长度从视图里取。 */
 static void binrwir_frame_bindings_release_keys(
     binrwir_frame_bindings_t *bindings, size_t slot) {
     size_t size;
@@ -44,10 +32,6 @@ static void binrwir_frame_bindings_release_keys(
     bindings->key_storage[slot] = NULL;
 }
 
-/*
- * 复制两张键并由表持有，返回指向自有字节的视图。**先分配成功再覆盖旧绑定**：
- * 分配失败时旧绑定原样保留，不制造「表里有一个半条绑定」。
- */
 static runtimec_status_t binrwir_frame_bindings_copy_keys(
     binrwir_frame_bindings_t *bindings, size_t slot,
     runtimec_key_view_t slot_key, runtimec_key_view_t caller_key,
@@ -283,16 +267,12 @@ runtimec_status_t binrwir_frame_bindings_get(
     }
     entry = &bindings->entries[slot];
     if (!entry->valid || entry->generation != expected_generation) {
-        /* 失效或 generation 不匹配：绝不交出旧绑定。 */
+        
         return RUNTIMEC_STATUS_UNSUPPORTED;
     }
     *output_binding = entry;
     return RUNTIMEC_STATUS_SUCCESS;
 }
-
-/*
- * 帧内槽 key 的**唯一拼法**。声明处的长注释解释了为什么放这里而不是调用方各自拼。
- */
 
 size_t binrwir_frame_local_key(runtimec_string_view_t frame_path,
                                runtimec_string_view_t name, char *output,
@@ -302,7 +282,7 @@ size_t binrwir_frame_local_key(runtimec_string_view_t frame_path,
         name.size == 0U || output == NULL) {
         return SIZE_MAX;
     }
-    /* 需要的字节：帧路径 + '/' + 名字 + 结尾 NUL。 */
+    
     if (frame_path.size > SIZE_MAX - name.size - 2U) {
         return SIZE_MAX;
     }
@@ -325,10 +305,7 @@ size_t binrwir_frame_parameter_key(runtimec_string_view_t frame_path,
         frame_path.size == 0U || output == NULL) {
         return SIZE_MAX;
     }
-    /*
-     * 序号从 0 起、坐标从 1 起：argidx 0 对应 `[0,-1]`（读）或 `[0,+1]`（写）。
-     * `parameter_ordinal` 是 uint16，加 1 不会溢出到符号位之外。
-     */
+    
     const unsigned coordinate = (unsigned)parameter_ordinal + 1U;
     const char sign = write_parameter ? '+' : '-';
     char suffix[32];

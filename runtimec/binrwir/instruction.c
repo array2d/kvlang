@@ -1,8 +1,3 @@
-/*
- * 组件：binrwir/instruction 的实现
- * 作用：校验增量构建请求，并生成借出参数切片的只读视图。
- * 约束：不拥有参数池，不复制参数，也不缓存 V.body 或 XValue。
- */
 
 #include "binrwir/instruction.h"
 
@@ -10,7 +5,6 @@
 
 #include "binrwir/execution_exit.h"
 
-/* 每个参数都必须是一个合法引用：argidx、引用种类、槽号与 payload 按 kind 自洽。 */
 static int binrwir_argument_span_is_invalid(
     const binrwir_argument_span_t *arguments) {
     size_t argument_ordinal;
@@ -25,23 +19,17 @@ static int binrwir_argument_span_is_invalid(
     return 0;
 }
 
-/* operation identifier 与 source logical program counter 都是身份字段，绝不接受 NONE。 */
 static runtimec_status_t binrwir_instruction_validate_content(
     uint32_t source_logical_program_counter,
     binrwir_operation_identifier_t operation_identifier,
     binrwir_argument_span_t read_arguments,
     binrwir_argument_span_t write_arguments) {
-    /* FOREIGN 是结构标记：合法 opid，但必须零读参零写参。 */
+    
     if (operation_identifier == BINRWIR_OPERATION_IDENTIFIER_FOREIGN &&
         (read_arguments.count != 0U || write_arguments.count != 0U)) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    /*
-     * 0 不是合法 opid：catalog 里没有任何一行分配 0，`0x0001` 起才是能力行。
-     * 只拦 `NONE` 会放过 0——而 0 恰恰是「结构体没填」的默认值，最容易被漏写
-     * 带进来，且读侧 `vmbin` 会把它当非法指令头报出来：写侧放行、读侧才拦，
-     * 错误离出错点太远。
-     */
+    
     if (operation_identifier == 0U ||
         operation_identifier == BINRWIR_OPERATION_IDENTIFIER_NONE ||
         source_logical_program_counter ==

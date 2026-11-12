@@ -1,13 +1,3 @@
-/*
- * 组件：binrwir/program 的实现
- * 作用：增量构造不可变 BinRWIR Program，并提供只读查询。
- * 联系：vmkv 经 builder 登记签名、三个私有池与 instruction；BinRWIR Compiler 与
- *       vmbin 只读。
- * 约束：Program 自持全部存储，不指向 builder 或调用方内存；参数池只存引用与常量，
- *       不存帧实参地址，也不缓存 V.body。空数组的指针恒为 NULL、count 恒为零，
- *       没有第二种表示。符号池在 finalize 时排成名字字典序并同步改写参数槽，
- *       同一函数体因此总产出同一个 Program。
- */
 
 #include "binrwir/binfunc.h"
 
@@ -18,16 +8,11 @@
 
 #include "binrwir/execution_exit.h"
 #include "contract/kvspace_access.h"
-/* 线格式只有一份：None 字面量的判据走公共头的访问器，本文件不写偏移算术。 */
+
 #include <kvspace/kvspace_xvalue.h>
 
 #define BINRWIR_BINFUNC_INITIAL_CAPACITY 4U
 
-/*
- * instruction 的私有 framing。二进制载荷只有 heads[ordinal] 的 opid 与参数池里的
- * 参数项；source logical program counter 与两个方向的边界留在这里，不进 instruction。
- * 读区起点是 read_argument_offset，写区紧接读区，因此只存一个偏移。
- */
 typedef struct binrwir_binfunc_instruction_record {
     uint32_t source_logical_program_counter;
     uint32_t read_argument_offset;
@@ -35,7 +20,6 @@ typedef struct binrwir_binfunc_instruction_record {
     uint32_t write_argument_count;
 } binrwir_binfunc_instruction_record_t;
 
-/* 参数表：argidx 与具体 langtype 是两个平行数组，共用同一个 count 与 capacity。 */
 typedef struct binrwir_binfunc_parameter_arrays {
     uint32_t *argument_indices;
     runtimec_string_view_t *types;
@@ -43,7 +27,6 @@ typedef struct binrwir_binfunc_parameter_arrays {
     size_t capacity;
 } binrwir_binfunc_parameter_arrays_t;
 
-/* 指令表：二进制头与私有 framing 平行，共用同一个 count 与 capacity。 */
 typedef struct binrwir_binfunc_instruction_arrays {
     binrwir_instruction_t *heads;
     binrwir_binfunc_instruction_record_t *records;
@@ -51,16 +34,11 @@ typedef struct binrwir_binfunc_instruction_arrays {
     size_t capacity;
 } binrwir_binfunc_instruction_arrays_t;
 
-/* 字面量池项：已编码的值字节与它的具体 langtype，两者都指向 Program 自持存储。 */
 typedef struct binrwir_binfunc_literal_record {
     runtimec_bytes_view_t wire_bytes;
     runtimec_string_view_t langtype;
 } binrwir_binfunc_literal_record_t;
 
-/*
- * 符号池项：名字 + 语言类型。类型让调用入口在没有第二事实源的前提下知道槽该多大
- * ——局部槽必须先以正确长度存在，而执行器只接受等长写入。
- */
 typedef struct binrwir_binfunc_symbol_record {
     runtimec_string_view_t name;
     runtimec_string_view_t langtype;
@@ -118,7 +96,6 @@ static void binrwir_binfunc_identity_invalidate(
     }
 }
 
-/* identity 是可消费的当且仅当版本字段都是显式值，且二进制接口代次就是当前代次。 */
 static int binrwir_binfunc_identity_is_usable(
     const binrwir_binfunc_identity_t *identity) {
     return identity->schema_version != UINT32_MAX &&
@@ -128,7 +105,6 @@ static int binrwir_binfunc_identity_is_usable(
            identity->canonical_encoding_revision != UINT32_MAX;
 }
 
-/* 规范形状：count 为零时指针必须是 NULL，count 非零时指针必须有值。 */
 static int binrwir_binfunc_array_shape_is_invalid(const void *array,
                                                   size_t count) {
     if (count == 0U) {
@@ -151,7 +127,6 @@ static size_t binrwir_binfunc_grown_capacity(size_t capacity,
     return grown_capacity;
 }
 
-/* 换一块更大数组并保留前 capacity 个元素；失败返回 NULL 且不动旧数组。 */
 static void *binrwir_binfunc_regrow(const runtimec_allocator_t *allocator,
                                     const void *array, size_t capacity,
                                     size_t grown_capacity, size_t element_size,
@@ -175,7 +150,6 @@ static void *binrwir_binfunc_regrow(const runtimec_allocator_t *allocator,
     return grown;
 }
 
-/* 精确尺寸分配；count 为零时返回 NULL（调用方把它当「该池为空」）。 */
 static void *binrwir_binfunc_allocate_exact(
     const runtimec_allocator_t *allocator, size_t count, size_t element_size,
     size_t element_alignment) {
@@ -198,7 +172,6 @@ static void binrwir_binfunc_release_array(const runtimec_allocator_t *allocator,
                                         element_alignment);
 }
 
-/* 名字的字节字典序：先比公共前缀，再短者在前。 */
 static int binrwir_binfunc_symbol_compare(runtimec_string_view_t left,
                                           runtimec_string_view_t right) {
     size_t common = left.size < right.size ? left.size : right.size;
@@ -216,7 +189,6 @@ static int binrwir_binfunc_symbol_compare(runtimec_string_view_t left,
     return 0;
 }
 
-/* 把符号池排成规范顺序：n 很小，插入排序让「稳定 + 总序」一眼可读。 */
 static void binrwir_binfunc_symbol_order(
     const binrwir_binfunc_symbol_record_t *symbols, size_t count,
     size_t *output_order) {
@@ -247,7 +219,6 @@ static int binrwir_binfunc_size_add(size_t *total, size_t size) {
     return 1;
 }
 
-/* 文本池总长：参数类型 + 符号名 + 字面量类型文本，四组共用一个文本块。 */
 static int binrwir_binfunc_text_size(
     const binrwir_binfunc_parameter_arrays_t *read_parameters,
     const binrwir_binfunc_parameter_arrays_t *write_parameters,
@@ -284,17 +255,6 @@ static int binrwir_binfunc_text_size(
     return 1;
 }
 
-/*
- * 字节池里每条 wire 的起点必须 8 字节对齐。
- *
- * 为什么：wire 布局是 `[16 字节头][body][attr]`，body = wire + 16 只保证 8 的
- * 倍数**当且仅当** wire 起点也是 8 的倍数。而特化后的 handler 会直接
- * `*(const int64_t *)body` 取标量——x86 容忍未对齐，**aarch64 是 UB**，JIT 出
- * 单条 `ldr` 就真崩。
- *
- * shm 侧没有这个问题：`kvspace-c` 自己强制 `off%8==0 && val%8==0`。只有 Program
- * 的私有字面量池需要这里补。
- */
 #define BINRWIR_BINFUNC_POOL_ALIGNMENT 8U
 
 static size_t binrwir_binfunc_pool_padded_size(size_t size) {
@@ -308,8 +268,7 @@ static int binrwir_binfunc_bytes_size(
     size_t ordinal;
 
     for (ordinal = 0U; ordinal < literal_count; ++ordinal) {
-        /* 累加**补齐后**的长度：池的总大小与逐条起点必须用同一套算术，
-         * 否则分配够了下标却越界。 */
+        
         if (!binrwir_binfunc_size_add(
                 output_size,
                 binrwir_binfunc_pool_padded_size(
@@ -320,7 +279,6 @@ static int binrwir_binfunc_bytes_size(
     return 1;
 }
 
-/* 深拷贝一段文本进 Program 文本池，返回指向副本的视图。 */
 static runtimec_string_view_t binrwir_binfunc_copy_text(
     binrwir_binfunc_t *program, runtimec_string_view_t text,
     size_t *text_offset) {
@@ -333,14 +291,6 @@ static runtimec_string_view_t binrwir_binfunc_copy_text(
     return runtimec_string_view_make(copy, text.size);
 }
 
-/*
- * 深拷贝一段字节进 Program 字节池，返回指向副本的视图。
- *
- * 每条 wire 的起点补到 8 的倍数（理由见 `binrwir_binfunc_bytes_size` 上方）。
- * 填充字节写成 0：它们不属于任何视图，但 memset 让「同一份 Program 两次构建
- * 字节相同」这条性质继续成立——否则比较两棵 Program 会因为填充区是栈残留而
- * 假不等。
- */
 static runtimec_bytes_view_t binrwir_binfunc_copy_bytes(
     binrwir_binfunc_t *program, runtimec_bytes_view_t bytes,
     size_t *bytes_offset) {
@@ -353,11 +303,6 @@ static runtimec_bytes_view_t binrwir_binfunc_copy_bytes(
     return runtimec_bytes_view_make(copy, bytes.size);
 }
 
-/*
- * LOCAL / FUNCTION 的 slot 与 LITERAL 的 payload 都是 Program 私有池下标，
- * PARAMETER_READ / PARAMETER_WRITE 的 slot 必须指回签名里同一个 argidx。任何一条
- * 对不上，同一个引用就有了第二处真相。
- */
 static int binrwir_binfunc_argument_is_unbound(
     const binrwir_binfunc_t *program, const binrwir_argument_t *argument) {
     switch (argument->reference_kind) {
@@ -372,7 +317,7 @@ static int binrwir_binfunc_argument_is_unbound(
     case BINRWIR_REFERENCE_LOCAL:
     case BINRWIR_REFERENCE_FUNCTION:
     case BINRWIR_REFERENCE_STATIC:
-        /* 三个 kind 的 slot 都是符号池下标：越界会被当成合法并越界取文本。 */
+        
         return (size_t)argument->slot >= program->symbol_count;
     case BINRWIR_REFERENCE_LITERAL:
         return argument->payload >= (uint64_t)program->literal_count;
@@ -381,7 +326,6 @@ static int binrwir_binfunc_argument_is_unbound(
     }
 }
 
-/* 局部符号必须带具体 langtype：调用入口靠它决定槽的长度，没有类型就建不出槽。 */
 static int binrwir_binfunc_local_symbol_is_untyped(
     const binrwir_binfunc_t *program, const binrwir_argument_t *argument) {
     if (argument->reference_kind != BINRWIR_REFERENCE_LOCAL) {
@@ -391,37 +335,8 @@ static int binrwir_binfunc_local_symbol_is_untyped(
            program->symbols[argument->slot].langtype.size == 0U;
 }
 
-/*
- * 一个参数区段是否合法。**读、写两侧的「无类型局部」判据不同**
- * （裁决 `decision-type-from-target-local.md`）：
- *
- *   读 span  —— 局部符号必须带类型。**这一条不动**：读一个无类型局部，运行期
- *               无从判宽，必然退化成「按字节猜」。
- *   写 span  —— 允许类型缺席，**但要求本指令至少有一个 STATIC 读参**。
- *
- * 为什么写侧要那条附加条件：「类型来自目标」的形态是
- *   `绝对 key -> 局部`（`/lib/math·Pi -> pi`）
- * ——读参是 STATIC（本来就不受本判据管），写参是 LOCAL（类型缺席，由运行期从
- * 目标 XValue 的头取）。**附加条件把口子精确钉在这一格**：没有 STATIC 读参的
- * 指令，写参照样必须有类型，不许变成「写参随便无类型」。
- */
-/*
- * 类型来自目标的局部：**程序级一张表**（裁决 `decision-type-from-target-local.md` §2）。
- *
- *   `type_from_target_locals` = 所有「被一条带 STATIC 读参的指令写过」的
- *   **无类型**局部符号下标。
- *
- * 为什么需要一张表而不是逐条指令判：写侧的那一格（`绝对 key -> 局部`）只说明
- * 「这个槽的类型将来由运行期定」，而 `输出算子("dst:", d1)` 这样的**读**发生在
- * 另一条指令上——逐条判看不到「它被 STATIC 写过」，于是读会被误拒。
- *
- * **判据是写来源，不是读位置**：集合里放的是「被谁写过」，读在哪条指令不参与。
- * **不做顺序分析**：读在任何写之前由运行期 `UNBOUND_SLOT` 具名失败，静态不管。
- *
- * 只收**无类型**局部：有类型的局部本来就走原校验路径，不受本表影响。
- */
 typedef struct binrwir_type_from_target_set {
-    /* 位图按符号下标索引；symbol_count 在 validate 时已知且有限。 */
+    
     uint8_t *bits;
     size_t size;
 } binrwir_type_from_target_set_t;
@@ -443,7 +358,6 @@ static void binrwir_type_from_target_insert(binrwir_type_from_target_set_t *set,
     set->bits[symbol_index / 8U] |= (uint8_t)(1U << (symbol_index % 8U));
 }
 
-/* 扫一遍指令表，收集「带 STATIC 读参的指令」写过的无类型局部。 */
 static void binrwir_type_from_target_collect(
     const binrwir_binfunc_t *program, binrwir_type_from_target_set_t *set) {
     for (size_t instruction_ordinal = 0U;
@@ -480,16 +394,6 @@ static void binrwir_type_from_target_collect(
     }
 }
 
-/*
- * 一个参数区段是否合法。**读、写两侧的「无类型局部」判据不同**
- * （裁决 `decision-type-from-target-local.md` §2）：
- *
- *   写 span —— 本指令含 STATIC 读参时，无类型局部放行（它会被登记进集合）；
- *   读 span —— 该局部**在集合里**才放行：集合说明它的类型由运行期从目标
- *              XValue 头取；不在集合里说明它是**真·无类型局部**，仍拒。
- *
- * 两条都只针对**无类型局部**；有类型的局部判据一字不动。
- */
 static int binrwir_binfunc_span_is_invalid(
     const binrwir_binfunc_t *program, const binrwir_argument_t *arguments,
     size_t count, bool is_write_span, bool instruction_has_static_read,
@@ -520,10 +424,7 @@ static int binrwir_binfunc_span_is_invalid(
 
 static int binrwir_binfunc_instructions_are_invalid(
     const binrwir_binfunc_t *program) {
-    /*
-     * 程序级集合：只在 `symbol_count` 有限时可行；位图分配失败即视为非法
-     * （本函数是纯判定，没有 error 通道——分配不了就不放行，失败封闭）。
-     */
+    
     binrwir_type_from_target_set_t type_from_target = {NULL, 0U};
     size_t instruction_ordinal;
     int invalid = 0;
@@ -560,7 +461,7 @@ static int binrwir_binfunc_instructions_are_invalid(
             read_offset > program->argument_count - span_count) {
             return 1;
         }
-        /* 本指令是否至少有一个 STATIC 读参——写侧「类型来自目标」的附加条件。 */
+        
         bool instruction_has_static_read = false;
         for (size_t ordinal = 0U; ordinal < read_count; ++ordinal) {
             if (program->arguments[read_offset + ordinal].reference_kind ==
@@ -592,8 +493,6 @@ static int binrwir_binfunc_instructions_are_invalid(
     return invalid;
 }
 
-/* 三个私有池的形状：空池即空指针；符号名非空且严格字典升序（规范顺序）；
- * 字面量必须带字节且类型是具体 langtype。 */
 static int binrwir_binfunc_pools_are_invalid(
     const binrwir_binfunc_t *program) {
     size_t ordinal;
@@ -614,8 +513,6 @@ static int binrwir_binfunc_pools_are_invalid(
         const binrwir_binfunc_symbol_record_t *symbol =
             &program->symbols[ordinal];
 
-        /* 名字非空；类型要么为空（函数名、静态 key 没有值类型），要么是具体
-         * langtype。局部符号不允许为空——下面的 instructions 校验会强制这一条。 */
         if (symbol->name.size == 0U ||
             (symbol->langtype.size != 0U &&
              binrwir_signature_validate_parameter_type(symbol->langtype) !=
@@ -632,11 +529,6 @@ static int binrwir_binfunc_pools_are_invalid(
         const binrwir_binfunc_literal_record_t *literal =
             &program->literals[ordinal];
 
-        /*
-         * 与 `add_literal` 是**同一个判据**，只是位置在 Program 的池上：
-         * 空 langtype 合法当且仅当该字面量本身是 None 值。三处调用同一个谓词，
-         * 判据只有一份。
-         */
         if (literal->wire_bytes.size == 0U) {
             return 1;
         }
@@ -681,16 +573,6 @@ runtimec_status_t binrwir_binfunc_get_identity(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/*
- * 签名校验的回调：**空参数类型何时合法**。
- *
- * 合法当且仅当该参数项是 **LITERAL** 引用，且它指向的字面量满足
- * `binrwir_literal_is_none_value`（空 body + 空 attr + head 自洽）。
- *
- * 判据本体只有一份（那个谓词），本函数只做「参数项 → 引用种类 → 字面量」的
- * 三段交叉。`rwfunc` 形参签名里不可能出现 LITERAL 引用，所以函数签名那一侧
- * 天然不会被放宽——放行的是「None **字面量**」这个事实，不是「空类型」的形状。
- */
 static bool binrwir_binfunc_empty_parameter_type_is_legal(void *context,
                                                           int is_write,
                                                           size_t ordinal) {
@@ -749,8 +631,7 @@ runtimec_status_t binrwir_binfunc_validate(const binrwir_binfunc_t *program) {
             RUNTIMEC_STATUS_SUCCESS) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    /* 文本池恰好装下全部类型串与符号名、字节池恰好装下全部字面量：多一个字节或
-     * 少一个字节都是被改坏的 Program。 */
+    
     if (!binrwir_binfunc_text_size(&program->read_parameters,
                                    &program->write_parameters,
                                    program->symbols, program->symbol_count,
@@ -965,7 +846,6 @@ runtimec_status_t binrwir_binfunc_destroy(binrwir_binfunc_t *program) {
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/* 按精确尺寸一次分配 Program 需要的全部数组；空池留 NULL。 */
 static runtimec_status_t binrwir_binfunc_allocate_storage(
     binrwir_binfunc_t *program, const binrwir_binfunc_builder_t *builder) {
     const runtimec_allocator_t *allocator = &program->allocator;
@@ -1067,8 +947,7 @@ static runtimec_status_t binrwir_binfunc_allocate_storage(
     }
     program->pool_text = (char *)binrwir_binfunc_allocate_exact(
         allocator, program->pool_text_size, sizeof(char), _Alignof(char));
-    /* 分配对齐用 uint64_t：池里每条 wire 自己起点 8 对齐，池基址必须同样对齐，
-     * 否则 `wire 起点对齐` 这条性质整体平移失效。 */
+    
     program->pool_bytes = (uint8_t *)binrwir_binfunc_allocate_exact(
         allocator, program->pool_bytes_size, sizeof(uint8_t),
         _Alignof(uint64_t));
@@ -1079,10 +958,6 @@ static runtimec_status_t binrwir_binfunc_allocate_storage(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/*
- * 三个池的深拷贝与规范化。符号池在这里排成字典序，同时算出「builder 序号 →
- * Program 序号」的重映射，并把参数池里 LOCAL / FUNCTION 的 slot 改写成新下标。
- */
 static void binrwir_binfunc_copy_pools(binrwir_binfunc_t *program,
                                        const binrwir_binfunc_builder_t *builder,
                                        size_t *symbol_order,
@@ -1121,8 +996,6 @@ static void binrwir_binfunc_copy_pools(binrwir_binfunc_t *program,
     for (ordinal = 0U; ordinal < program->argument_count; ++ordinal) {
         binrwir_argument_t *argument = &program->arguments[ordinal];
 
-        /* STATIC 的 slot 也是符号池下标（key 文本），和 LOCAL / FUNCTION 一起
-         * 重映射；越界的 slot 不猜、也不查表，留给 validate 判 INVALID。 */
         if ((argument->reference_kind == BINRWIR_REFERENCE_LOCAL ||
              argument->reference_kind == BINRWIR_REFERENCE_FUNCTION ||
              argument->reference_kind == BINRWIR_REFERENCE_STATIC) &&
@@ -1138,7 +1011,6 @@ static int binrwir_binfunc_builder_is_writable(
            runtimec_allocator_is_valid(&builder->allocator);
 }
 
-/* 参数表扩容：argidx 与类型两个平行数组一起长，容量只有一个。 */
 static int binrwir_binfunc_builder_reserve_parameters(
     binrwir_binfunc_builder_t *builder,
     binrwir_binfunc_parameter_arrays_t *arrays, size_t required_count) {
@@ -1334,7 +1206,6 @@ runtimec_status_t binrwir_binfunc_builder_create(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/* 回到空的可写状态并保留已分配容量；也是定稿之后唯一的复用入口。 */
 runtimec_status_t binrwir_binfunc_builder_reset(
     binrwir_binfunc_builder_t *builder) {
     if (builder == NULL ||
@@ -1514,7 +1385,7 @@ runtimec_status_t binrwir_binfunc_builder_add_symbol(
                 0) {
             continue;
         }
-        /* 同名同类型 = 幂等；同名不同类型 = 冲突，不选其一。 */
+        
         if (builder->symbols[ordinal].langtype.size != langtype.size ||
             memcmp(builder->symbols[ordinal].langtype.data, langtype.data,
                    langtype.size) != 0) {
@@ -1545,15 +1416,9 @@ bool binrwir_literal_is_none_value(runtimec_bytes_view_t wire_bytes) {
         return false;
     }
     head = (const kvspaceXvalueHead *)(const void *)wire_bytes.data;
-    /* `TotalLen` 一并校验 padding、layout 与总长溢出；0 表示 head 不自洽
-       （合法总长至少 16）。 */
+    
     total = kvspaceXvalueHeadTotalLen(head);
-    /*
-     * **`total == size`，不是 `<=`**：字面量的 `wire_bytes` 就是一条**完整**
-     * wire（槽的 wire + 它的 size），没有拼接存储。`<=` 会放过「尾巴上挂着
-     * 多余字节」的畸形 wire——那种 wire 的 body 偏移与总长对不上，属于该被拒的
-     * 形态。
-     */
+    
     return total != 0U && total == (uint64_t)wire_bytes.size &&
            kvspaceXvalueHeadAttrsLen(head) == 0U &&
            runtimec_xvalue_body_from_wire(wire_bytes).size == 0U;
@@ -1565,17 +1430,7 @@ runtimec_status_t binrwir_binfunc_builder_add_literal(
     if (output_literal_index != NULL) {
         *output_literal_index = BINRWIR_LITERAL_INDEX_NONE;
     }
-    /*
-     * **空 langtype 合法，当且仅当 `wire_bytes` 本身恰好是一条 None 值。**
-     *
-     * None 的定义（spec `03-类型系统/03-种类-代码与特殊值.kv`「None 判据」）：
-     * head 自洽 + `bodylen == 0` + `attrslen == 0`——即「空 body、无 langtype 记录」。
-     * 它没有类型**就是**它的语义，所以不能让 `validate_parameter_type` 把它拒掉。
-     *
-     * 谓词必须窄到只容它一个：放宽成「wire 非空即可」会让**任何忘记给类型的
-     * 字面量**都进池，而这条检查是登记处唯一拦「无类型操作数」的地方。
-     * 非 None 的 wire（`bodylen != 0` 或带 attr）配空 langtype 仍然拒绝。
-     */
+    
     if (!binrwir_binfunc_builder_is_writable(builder) ||
         output_literal_index == NULL || wire_bytes.size == 0U ||
         wire_bytes.data == NULL) {
@@ -1738,10 +1593,7 @@ runtimec_status_t binrwir_binfunc_builder_finalize(
 }
 
 bool binrwir_symbol_name_is_member(runtimec_string_view_t name) {
-    /*
-     * `·` 是 U+00B7，UTF-8 两字节 `0xC2 0xB7`。**必须按完整序列匹配**：
-     * 只判 `0xC2` 会把任何以它开头的其他字符也当成成员符。
-     */
+    
     static const char separator[] = "\xC2\xB7";
     if (name.data == NULL || name.size < 2U) {
         return false;

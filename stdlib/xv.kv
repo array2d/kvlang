@@ -1,14 +1,3 @@
-// 欢迎加入kvspace世界
-// lib xv —— 数组操作便利库。native rwir：compactarray·at/set/newreshape/newreinterpret/
-// langtype/bodylen/parselangtype、compactarray·numel/dim/shape；
-// rwfunc 补充（[]int64 一维/多维 compact 数组）：
-//   first / last         首/尾元素
-//   swap                 交换两下标元素，返回新数组
-//   reverse              反转一维数组，返回新数组
-//   contains / find / count  包含判定、首次出现下标（无则 -1）、元素计数
-//   sum / min / max      求和、最小值、最大值
-//   flatten              多维 compact 数组展平为一维 []int64
-// 值语义铁律：compactarray·set 仅同槽 patch；异槽变换必须先 compactarray·copy。
 
 lib xv {
 	rwfunc swap(*[]int64 #arr, *int64 #i, *int64 #j) -> (*[]int64 #result) {
@@ -105,8 +94,7 @@ lib xv {
 		n:int64 = compactarray·numel(*arr)
 		compactarray·newreshape(*arr, n) -> *result
 	}
-	// ── 以下为 #514 增补吸收（原 xv·at/set、ndarray·numel 改写为
-	//    compactarray 系；mutating 函数先 compactarray·copy 再 set）──
+	
 	rwfunc argmin(*[]int64 #arr) -> (*int64 #idx) {
 		n:int64 = compactarray·numel(*arr)
 		if (n == 0) {

@@ -1,6 +1,3 @@
-// 极简 Markdown → HTML：标题 / 列表 / 段落 / 行内 code、粗体、行内 ` ` /
-// 围栏代码块（```kv 走 kvlang 高亮，其余走普通 <pre><code>）。
-// 仅覆盖 stdlib 文档实际用到的语法子集。
 
 import { highlightKv } from "./highlight";
 
@@ -12,7 +9,7 @@ function esc(s: string): string {
 }
 
 function inline(s: string): string {
-  // 先按行内 `code` 切分，code 段内不再处理其它标记。
+  
   const parts = s.split(/(`[^`]+`)/g);
   return parts
     .map((p) => {
@@ -63,7 +60,6 @@ export function renderMarkdown(src: string, breaks = false): string {
       continue;
     }
 
-    // 标题
     const h = line.match(/^(#{1,4})\s+(.*)$/);
     if (h) {
       closeList();
@@ -73,7 +69,6 @@ export function renderMarkdown(src: string, breaks = false): string {
       continue;
     }
 
-    // 列表项
     const li = line.match(/^\s*[-*]\s+(.*)$/);
     if (li) {
       if (!listOpen) {
@@ -85,14 +80,12 @@ export function renderMarkdown(src: string, breaks = false): string {
       continue;
     }
 
-    // 空行
     if (/^\s*$/.test(line)) {
       closeList();
       i++;
       continue;
     }
 
-    // 表格（GFM：表头行 + |---|---| 分隔行）
     if (
       /\|/.test(line) &&
       i + 1 < lines.length &&
@@ -124,7 +117,6 @@ export function renderMarkdown(src: string, breaks = false): string {
       continue;
     }
 
-    // 段落（合并连续非空、非特殊行）
     closeList();
     const para: string[] = [line];
     i++;

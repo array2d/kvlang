@@ -1,22 +1,4 @@
-//! 签名 langtype（runtime篇-07，修订：无家族简写）：语法校验 + 值匹配。
-//!
-//! type   = atom ("|" atom)*
-//! atom   = shape | mapexpr
-//! shape  = [dims] kind
-//! mapexpr= key "·" type      # stringkeymap；value 递归 → 嵌套 map[string]map[…]
-//! key    = "[]" char-enc     # 字符串键（= Go map[string]V）
-//!        | "[" scalar ("," scalar)* "]"   # 标量元组键（物理以字符串格式落 key）
-//! dims   = "[]" | "[" elem ("," elem)* "]"   # 至多一个变元量词 ?/*/+
-//! elem   = integer | "." | "?" | "*" | "+"   # 轴量词（借鉴正则：. .? .* .+）
-//! （空 type_expr = 空 kindexp「不约束」；`any` 不是类型名，见 [[文法与合法性]]）
-//! kind   = 精确 kind 串    # 见 [`known_kind`]
-//!
-//! 铁律：不提供 int/uint/float/num 数值家族简写（位宽开放，纳入须逐个显式命名，
-//! 如低精度浮点 float16/bfloat16/float8/e4m3/float8/e5m2；int4 等仍未纳入），
-//! 也不提供 char 编码简写（编码须写明确，如 char/utf8、char/utf32）。多态靠显式 "|" 枚举。
-//! 变参 "..." 是签名层 arity（吸收 0..N 个实参），不是 langtype 的一部分——由主槽 dynamic 字节承载。
 
-/// 精确 kind 集合（对齐 runtime kind 常量，不含 None）。
 fn known_kind(k: &str) -> bool {
     matches!(
         k,
@@ -48,14 +30,12 @@ fn known_kind(k: &str) -> bool {
     )
 }
 
-/// structref = "/" path：指向 /lib 下类型定义节点的完整路径（实例 langtype、struct 字段类型）。
-/// 仅做语法承认（`/` + 合法路径段），不解析 /lib 是否存在该类型 —— 存在性/字段一致性留给 runtime。
 fn valid_structref(s: &str) -> bool {
     let rest = match s.strip_prefix('/') {
         Some(r) => r,
         None => return false,
     };
-    // Segment charset matches identifiers (see scanner::is_token_delim_at), allowing CJK struct names.
+    
     !rest.is_empty()
         && rest.split('/').all(|seg| {
             !seg.is_empty()
@@ -75,7 +55,6 @@ fn elem_is_variable(s: &str) -> bool {
     s == "?" || s == "*" || s == "+"
 }
 
-/// elem = integer | "." | "?" | "*" | "+"（借鉴正则的轴量词）。
 fn valid_elem(s: &str) -> bool {
     if s.is_empty() {
         return false;
@@ -83,7 +62,6 @@ fn valid_elem(s: &str) -> bool {
     matches!(s, "." | "?" | "*" | "+") || s.bytes().all(|b| b.is_ascii_digit())
 }
 
-/// dims = ε（空 [] = 1 维任意，等价 [.]） | elem ("," elem)*；至多一个变元量词 ?/*/+。
 fn valid_dims(s: &str) -> bool {
     if s.is_empty() {
         return true;
@@ -121,7 +99,6 @@ fn valid_shape(s: &str) -> bool {
     valid_base(s)
 }
 
-/// 标量 kind（可作元组键元素；不含 char/stringkeymap/index 等）。
 fn valid_scalar(s: &str) -> bool {
     matches!(
         s,
@@ -139,12 +116,8 @@ fn valid_scalar(s: &str) -> bool {
     )
 }
 
-/// stringkeymap 的 key 恒 `[…]` 起头，两式：
-///   `[]char/<enc>`      —— 字符串键（= Go `map[string]V`）
-///   `[T1,T2,…]`         —— 标量元组键（元素为标量 kind，物理以字符串格式落 key）
 fn valid_key(s: &str) -> bool {
-    // memitemkey 三选一（见 [[map容器]]）：裸标量（`int64`）、字符串键 `[]char/<enc>`、
-    // 标量元组键 `[scalar,…]`。裸标量必须认——`b:int64·int64 = {}` 是 spec 的标准写法。
+    
     if valid_scalar(s) {
         return true;
     }
@@ -164,13 +137,10 @@ fn valid_key(s: &str) -> bool {
     tail.is_empty() && inner.split(',').all(valid_scalar)
 }
 
-/// atom = shape | mapexpr | structref；mapexpr = key "·" type；structref = "/" path。
-/// 最前 `*` 是 ref 前缀（Ptr 存储位置），校验剥离后剩余部分（见 [[类型表达式文法]]）。
 fn valid_atom(s: &str) -> bool {
-    // `*`=ref ptr、`@`=ref @ext（见 [[ref存储位置]]）：两者都只是**源码**前缀，
-    // layout 解析时剥离并落成 head.ref 字节，wire langtype 不含前缀。
+    
     if let Some(rest) = s.strip_prefix('*').or_else(|| s.strip_prefix('@')) {
-        // `*`/`@` 后可为空：Ptr 目标空 kindexp = 不约束（见 [[文法与合法性]]）。
+        
         return rest.is_empty() || valid_atom(rest);
     }
     if s.starts_with('/') {
@@ -182,22 +152,15 @@ fn valid_atom(s: &str) -> bool {
     valid_shape(s)
 }
 
-/// 类型表达式语法校验（装载期）。空串 = 空 kindexp（不约束，合法）；变参 `...` 是签名层
-/// arity、不入 langtype 串，此处永不见。`any` 不是类型名。
 pub fn valid_langtype(expr: &str) -> bool {
-    // 括号分组 `(A|B)`：括号内是一个完整的类型表达式，整体当一个 atom 校验。
+    
     if let Some(inner) = expr.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
         return valid_langtype(inner);
     }
-    /*
-     * **map 类型（`'<formatter>'<value>`，issue #631）**：按文法校验三段——
-     * 首字符 `'`、恰好一个闭引号、闭引号后非空且不含 `'`（本轮不支持嵌套）。
-     *
-     * 不交给 `valid_atom`：它按「裸名 / `[...]`」判，`'...'` 两样都不是。
-     */
+    
     if crate::kvkind::is_map_langtype(expr) {
         let Some(closing) = expr[1..].find('\'') else {
-            return false; /* 引号未闭合 */
+            return false; 
         };
         let value = &expr[closing + 2..];
         return !value.is_empty() && !value.contains('\'');
@@ -205,25 +168,10 @@ pub fn valid_langtype(expr: &str) -> bool {
     expr.is_empty() || expr.split('|').all(valid_atom)
 }
 
-/// `rwfunc` 参数/返回值的额外约束：**必须是单一类型**，串里不得出现 `|`。
-///
-/// 判据就是「整串是否含 `|`」——不是「base kind 是否唯一」：`[2]int64|[3]int64` 的 base
-/// kind 相同但形状不同，调用方照样无从定类型；`int64|int64` 是只有一个成员的并集，写它就是错。
-/// 括号分组 `(A|B)` 同样违规。轴量词 `[.,*]float32` 不含 `|`，合法。
-///
-/// 路径段与键表达式都不产生 `|`，所以不必做词法切分。
-///
-/// rwir 算子不受此约束：它有编译期特化器把并集收敛成唯一 opid；`rwfunc` 的调用方只能从
-/// 声明推类型，并集会让编译器没有唯一答案（见 [[langtype签名类型表达式]]）。
 pub fn has_union(expr: &str) -> bool {
     expr.contains('|')
 }
 
-/// 是否只由**已知种类名**构成——即「标量字面量可写入的类型」。
-/// `*`/`@` 前缀先剥（源码传递方式，不是类型本体）；structref（`/lib/…`）与形状、mapexpr 皆否。
-/// 用途见 `parser`（局部声明的写目标、struct 字段默认值）：裸名 `int`/`intg64` 经
-/// [`expand_struct_refs`] 变成 `/lib/int` 后，正是靠这条落网——它**不是**种类名，标量写不进去
-/// （见 [[文法与合法性]]）。
 pub fn is_plain_kind(ty: &str) -> bool {
     !ty.is_empty()
         && ty.split('|').all(|a| {
@@ -232,12 +180,8 @@ pub fn is_plain_kind(ty: &str) -> bool {
         })
 }
 
-/// 隐式 struct 名解析：把 langtype 中裸 struct 名（非 known kind 的标识符）展开为
-/// `/lib/<name>`，使 kv 源可写 `x:Node` / `[int64]·Node`，runtime 恒收到完整 `/lib/…` 路径。
-/// 已 `/` 开头或 known kind 原样返回。mapexpr 只对 value 递归展开（key 恒 `[…]` 非 struct）。
 pub fn expand_struct_refs(s: &str) -> String {
-    // 括号分组内的 `|` 不属于外层的并集切分：`*(int64|float64)` 是一个 atom，
-    // 先在 `depth == 0` 处切，括号内递归展开。
+    
     if let Some(inner) = s.strip_prefix('*').and_then(|r| r.strip_prefix('(')) {
         if let Some(inner) = inner.strip_suffix(')') {
             return format!("*({})", expand_struct_refs(inner));
@@ -247,18 +191,7 @@ pub fn expand_struct_refs(s: &str) -> String {
 }
 
 fn expand_atom(s: &str) -> String {
-    /*
-     * 变参 `...` 是**签名层 arity**，不是 langtype 的一部分：它最终落计数头的
-     * dynamic 字节，类型串要「纯净、不含 `...`」（spec `03-类型系统/22`）。
-     *
-     * 但**不能在这里删掉它**：`Instruction::dynamic()` 与 `langtype_list()` 都
-     * 靠 `p.ty` 的尾缀识别变参；在此删掉，dynamic 字节会静默变 0，变参被当成
-     * 普通参数。所以这里只保证「判种类时看剥掉 `...` 的基名」，返回值仍保留标记；
-     * 由 `ast.rs:langtype_list()` 在落 wire 前剥。
-     *
-     * 修的是：`int64...` 不在种类表里，直接进 `known_kind` 会落进「裸名 →
-     * `/lib/<名>`」，把 `int64` 展开成 `/lib/int64`——类型名字全错且不报错。
-     */
+    
     if let Some(base) = s.strip_suffix("...") {
         if base.is_empty() || known_kind(base) {
             return s.to_string();
@@ -274,24 +207,16 @@ fn expand_atom(s: &str) -> String {
     if s.starts_with('/') {
         return s.to_string();
     }
-    // mapexpr `key·value`：键可以是 `[` 起头（字符串键/标量元组键）或**裸标量**，
-    /*
-     * **map 类型（`'<formatter>'<value>`，issue #631）：键侧原样、值侧递归展开。**
-     *
-     * 判据走 `is_map_langtype`（唯一）。旧写法按 `·` 切，新形式里 `·` 已消除，
-     * 于是 map 串会一路落到末尾的 `format!("/lib/{s}")`——实测
-     * `'[]char/utf8'int64` 被包成 `/lib/'[]char/utf8'int64`，
-     * 首字符成了 `/` 而不是 `'`，所有 `is_map_langtype` 判据随之失效（连锁）。
-     */
+    
     if crate::kvkind::is_map_langtype(s) {
         if let Some(closing) = s[1..].find('\'') {
             let key = &s[1..closing + 1];
             let value = &s[closing + 2..];
             return format!("'{key}'{}", expand_struct_refs(value));
         }
-        return s.to_string(); /* 引号未闭合：原样返回，由下游判据拒绝 */
+        return s.to_string(); 
     }
-    // 只有 value 侧需要展开 struct 名；整串当 structref 包成 `/lib/<key·value>` 是错的。
+    
     if let Some(i) = s.find('·') {
         let key = &s[..i];
         if valid_key(key) {
@@ -301,8 +226,7 @@ fn expand_atom(s: &str) -> String {
     if s.starts_with('[') {
         return s.to_string();
     }
-    // 括号分组 `*(int64|float64)`：括号内是完整的类型表达式，逐成员展开，
-    // 整串当裸名包成 `/lib/(…)` 是错的（`*` 已在上层剥掉）。
+    
     if let Some(inner) = s.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
         return format!("({})", expand_struct_refs(inner));
     }
@@ -316,12 +240,10 @@ fn base_match(s: &str, kind: &str) -> bool {
     s == kind
 }
 
-/// 定长元（整数或 `.`）匹配单轴：`.` 任意长，整数须精确相等。
 fn fixed_elem_match(e: &str, d: i32) -> bool {
     e == "." || e.parse::<i32>().ok() == Some(d)
 }
 
-/// 轴量词序列 → (ndim,dims)。空串等价 `[.]`（恰一维）。至多一个变元量词，切分唯一无回溯。
 fn match_shape(s: &str, ndim: i32, dims: &[i32]) -> bool {
     if s.is_empty() {
         return ndim == 1;
@@ -340,23 +262,23 @@ fn match_shape(s: &str, ndim: i32, dims: &[i32]) -> bool {
                 .all(|(i, e)| fixed_elem_match(e, dims[i]))
         }
         Some(vpos) => {
-            let f = (m - 1) as i32; // 定长元个数
-            let rem = ndim - f; // 变元量词吸收的轴数
+            let f = (m - 1) as i32; 
+            let rem = ndim - f; 
             let ok_rem = match elems[vpos] {
                 "?" => rem == 0 || rem == 1,
                 "*" => rem >= 0,
-                _ => rem >= 1, // "+"
+                _ => rem >= 1, 
             };
             if !ok_rem {
                 return false;
             }
-            // 前缀定长元 → dims[0..vpos]
+            
             for (i, e) in elems.iter().take(vpos).enumerate() {
                 if !fixed_elem_match(e, dims[i]) {
                     return false;
                 }
             }
-            // 后缀定长元 → dims 末 suf 轴
+            
             let suf = m - 1 - vpos;
             for k in 0..suf {
                 if !fixed_elem_match(elems[vpos + 1 + k], dims[ndim as usize - suf + k]) {
@@ -368,9 +290,8 @@ fn match_shape(s: &str, ndim: i32, dims: &[i32]) -> bool {
     }
 }
 
-/// ndim = -1 表示「已消费 dims，不再判 ndim」（递归哨兵）。
 fn match_atom(s: &str, kind: &str, ndim: i32, dims: &[i32]) -> bool {
-    // mapexpr（含 `·`）：容器值的 kind 恒为 stringkeymap，key/value 型不在此判。
+    
     if s.contains('·') {
         return kind == "stringkeymap";
     }
@@ -390,10 +311,8 @@ fn match_atom(s: &str, kind: &str, ndim: i32, dims: &[i32]) -> bool {
     base_match(s, kind)
 }
 
-/// 单值（kind/ndim/dims）是否匹配类型表达式：任一 atom 命中即 true。
-/// 变参 arity 不在此判（靠主槽 dynamic 字节 + 派发循环）。
 pub fn match_langtype(expr: &str, kind: &str, ndim: i32, dims: &[i32]) -> bool {
-    // 空 kindexp = 不约束：命中任意值（含 None）。
+    
     expr.is_empty()
         || expr
             .split('|')
@@ -443,14 +362,14 @@ mod tests {
             "/lib/geom/Point",
             "/lib/Node",
             "/lib/Point|/lib/Node",
-            // `*`/`@` 是**源码**前缀（layout 剥离落 head.ref），书于类型标注最前——合法（见 [[文法与合法性]]）。
+            
             "*int64",
             "@int64",
             "@[256,256]uint8",
             "*[int32,int32]·[]char/utf8",
-            "",             // 空 kindexp（不约束）
-            "[]char/utf8·", // mapexpr value 空 = 不约束
-            "*",            // Ptr 目标空
+            "",             
+            "[]char/utf8·", 
+            "*",            
         ] {
             assert!(valid_langtype(e), "{e} should be valid");
         }
@@ -483,20 +402,20 @@ mod tests {
 
     #[test]
     fn quantifiers() {
-        // "." 恰 1 轴任意长
+        
         assert!(match_langtype("[.]int64", "int64", 1, &[5]));
         assert!(!match_langtype("[.]int64", "int64", 2, &[2, 3]));
-        // "*" 0+ 轴
+        
         assert!(match_langtype("[*]int64", "int64", 0, &[]));
         assert!(match_langtype("[*]int64", "int64", 3, &[2, 3, 4]));
-        // "+" 1+ 轴
+        
         assert!(!match_langtype("[+]int64", "int64", 0, &[]));
         assert!(match_langtype("[+]int64", "int64", 2, &[2, 3]));
-        // "?" 0 或 1 轴
+        
         assert!(match_langtype("[?,3]int64", "int64", 1, &[3]));
         assert!(match_langtype("[?,3]int64", "int64", 2, &[7, 3]));
         assert!(!match_langtype("[?,3]int64", "int64", 3, &[7, 8, 3]));
-        // 前缀定长 + 尾量词
+        
         assert!(match_langtype("[512,*]int64", "int64", 1, &[512]));
         assert!(match_langtype("[512,*]int64", "int64", 3, &[512, 8, 8]));
         assert!(!match_langtype("[512,*]int64", "int64", 2, &[7, 8]));

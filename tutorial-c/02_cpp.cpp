@@ -1,11 +1,3 @@
-/*
- * 02_cpp — C++ RAII 封装：extern "C" 直接调用 libkvspace dispatch 前端
- *
- * head 固定 16 字节 [bodylen:u64@0][attrslen:u16@8][padding:6@10-15]，body 偏移恒 16，
- * langtype 在 body 之后的 attr 区。bodylen 恒为有效字节数，容量归存储后端。
- *
- * 编译: g++ -std=c++17 02_cpp.cpp -lkvspace
- */
 
 extern "C" {
     #include <kvspace/kvspace.h>
@@ -34,7 +26,6 @@ struct KV {
     }
     ~KV() { kvspaceClose(kv); ::unlink(path.c_str()); }
 
-    // 写入：realloc 出 body+attr 空间，再直接写 base+offset。
     void set(const char *key, const char *langtype, const uint8_t *body, uint32_t len) {
         const uint16_t lt_len = (langtype && langtype[0]) ? (uint16_t)strlen(langtype) : 0;
         const uint64_t attr_len = lt_len ? 3ull + lt_len : 0ull;
@@ -53,7 +44,7 @@ struct KV {
             memcpy(a + 3, langtype, lt_len);
         }
     }
-    // 读：resolve 拿 offset，在 base+offset 处解 head/body/attr。
+    
     bool get(const char *key, std::string &kind, std::string &raw) {
         uint64_t offset = 0; char err[256];
         if (kvspaceResolveOffset(kv, key, 0, &offset, err, sizeof(err)) != KVSPACE_OK)
@@ -65,14 +56,13 @@ struct KV {
         const uint64_t total = kvspaceXvalueHeadTotalLen(h);
         if (total == 0) return false;
         const uint8_t *lt = nullptr;
-        /* 返回字节数；0 表示没有 langtype。早先这里把返回值丢掉了，lt_len 一直
-         * 是 0，于是 kind 永远为空——「取到了却不用」比取不到更难察觉。 */
+        
         const uint16_t lt_len = kvlangXvalueHeadLangtypeBounded(wire, total, &lt);
         if (lt_len == 0 || lt == nullptr) return false;
         const char *k = reinterpret_cast<const char *>(lt);
         uint16_t k_len = lt_len;
         if (k != nullptr && k_len != 0) {
-            // 去掉 `*`/`@` 前缀与 `[dims]` 形状段，只留基种类。
+            
             if (k[0] == '*' || k[0] == '@') { k++; k_len--; }
             if (k_len != 0 && k[0] == '[') {
                 const char *close = static_cast<const char *>(memchr(k, ']', k_len));
@@ -91,7 +81,7 @@ struct KV {
     void del(const char *key) { char err[256]; kvspaceFree(kv, key, err, sizeof(err)); }
     void deltree(const char *p) { char err[256]; kvspaceDeltree(kv, p, err, sizeof(err)); }
     void mkindex(const char *p) { kvspaceMkindex(kv, p, nullptr, 0); }
-    // 目录：listlen 给出 N/M，list 一次取全部名字（NUL 分隔），拷入 vector。
+    
     std::vector<std::string> list(const char *prefix) {
         std::vector<std::string> r;
         int64_t count = 0; uint32_t max_name = 0; char err[256];

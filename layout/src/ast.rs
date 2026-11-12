@@ -1,11 +1,8 @@
-//! AST 节点类型（对齐 ast/ast.go、astfile.go、escape.go）。纯数据结构，不依赖存储层。
 
 use std::fmt;
 
 use super::scanner::Pos;
 use super::symbol;
-
-// ── 语句 ─────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub enum Stmt {
@@ -46,7 +43,6 @@ impl Stmt {
     }
 }
 
-/// 返回语句的前置行注释（供 FullText 使用）。
 pub fn stmt_comments(st: &Stmt) -> &[String] {
     match st {
         Stmt::Instruction(s) => &s.comments,
@@ -59,55 +55,29 @@ pub fn stmt_comments(st: &Stmt) -> &[String] {
     }
 }
 
-// ── 签名 ─────────────────────────────────────────────────────────────
-
 #[derive(Clone)]
 pub struct Param {
     pub name: String,
-    /// 参数的**类型表达式**，不含 `*`/`@`：传递方式不是类型的一部分
-    /// （spec 04-layout语义/03-函数:17「wire langtype 不含 `*`/`@` 前缀」）。
-    /// "" = 空 kindexp（不约束）。
+    
     pub ty: String,
-    /// 声明前缀：`*` 传址、`@` 扩展句柄、空串值复制。存**完整前缀串**——
-    /// `**T`（指向指针的指针）也合法，只存一个字符会丢掉多余的 `*`。
+    
     pub by_ref: String,
-    pub has_ty: bool, // 源码是否写了冒号（区分「空 kindexp」与「缺注解」）
-    /// 写参修饰符：该参数**在同一指令内既读又写**（`add(*acc, x) -> *acc`）。
-    ///
-    /// Write params of rwfunc or rwir only. For rwfunc, `lower::check_inplace_unit`
-    /// requires one instruction that both reads and writes it.
+    pub has_ty: bool, 
+    
     pub inplace: bool,
 }
 
 impl Param {
-    /// 形参作为**变量**的类型：`by_ref` 前缀拼回类型表达式。
-    ///
-    /// `ty` 只存类型表达式（wire langtype 不含 `*`/`@`），但推导表 `declared`/`tm`
-    /// 记的是「这个名字是什么」——指针形参就记 `*T`。`p` 得**地址值**、`*p` 得**值**
-    /// （spec 16-ptr），两者必须可区分，否则 `root -> map[*N]` 会被当成值与指针同型。
+    
     pub fn pointer_type(&self) -> String {
         format!("{}{}", self.by_ref, self.ty)
     }
 
-    /// 进类型表（`declared` / `infer`）的形态：带传递方式前缀，但**不带变参标记**。
-    ///
-    /// `...` 是签名层 arity，不是类型（spec 03-类型系统/22）。它留在 `ty` 里是
-    /// 为了让 `FuncSig::dynamic()` 能识别；而由它推出的类型一旦进了指令槽，就是
-    /// 「类型串里混进 arity 标记」——槽类型必须纯净。
     pub fn declared_type(&self) -> String {
         let ty = self.ty.strip_suffix("...").unwrap_or(&self.ty);
         format!("{}{ty}", self.by_ref)
     }
 
-    /// 形参/返回**值的类型**（进 `declared` / 类型集合）。
-    ///
-    /// `*T #x` 的 `*` 是**传递方式**，不是值类型的一部分：
-    ///   - `*int64 #x`：`x` 的值是 `int64`——标量不可空，`x == None` 非法；
-    ///   - `*TNode #root`：`TNode` 是结构体引用，值本身即指针 `*TNode`，`root == None` 合法。
-    ///
-    /// 判据落在「被指向的 T 是不是引用类」：结构体引用（`/lib/…`）或已带 `*` 的类型
-    /// 保留 `*` 前缀，其余标量剥掉。这条直接决定 `None` 判空左值是否合法
-    /// （spec `03-类型系统/16-ptr`「空引用判定的左值」）。
     pub fn value_type(&self) -> String {
         let ty = self.ty.strip_suffix("...").unwrap_or(&self.ty);
         if ty.starts_with('/') || ty.starts_with('*') {
@@ -125,11 +95,6 @@ pub struct FuncSig {
     pub returns: Vec<Param>,
 }
 
-/// 一个参数声明的规范文本：`[inplace ]<by_ref><ty>[ #name]`。
-///
-/// 名字是**注释**（`#name`），落在类型之后；`inplace` 是修饰符，落在类型**之前**。
-/// 省略名字时不留尾随空格——这样 format/printlib 的输出能被 parser 重新读回
-/// （往返幂等），省略形态也不被写成 `#`。
 fn param_decl(p: &Param) -> String {
     let mut sb = String::new();
     if p.inplace {
@@ -171,11 +136,6 @@ impl FuncSig {
         sb
     }
 
-    /// 参数 langtype 列表（读参在前、写参在后），落盘于 rwir/rwfunc body。
-    ///
-    /// 剥两样东西：末读参尾缀 `...`（签名层变参标记，落 dynamic 字节）、
-    /// 以及前导 `*`/`@`——spec 04-layout语义/03-函数:17 明写「wire langtype 不含
-    /// `*`/`@` 前缀」，传递方式由帧槽的指针位承载，不进类型串。
     pub fn langtype_list(&self) -> Vec<String> {
         self.params
             .iter()
@@ -187,7 +147,6 @@ impl FuncSig {
             .collect()
     }
 
-    /// 末读参是否变参（源尾缀 `...`）→ 落成主槽 body 的 dynamic 字节。
     pub fn dynamic(&self) -> bool {
         self.params.last().is_some_and(|p| p.ty.ends_with("..."))
     }
@@ -206,8 +165,6 @@ impl fmt::Display for FuncSig {
         write!(f, "{}", self.sig_string("rwfunc"))
     }
 }
-
-// ── 函数 ─────────────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct Func {
@@ -254,13 +211,11 @@ impl RwirDecl {
     }
 }
 
-// ── struct ───────────────────────────────────────────────────────────
-
 #[derive(Clone)]
 pub struct Field {
     pub name: String,
-    pub ty: String,            // langtype（字段类型）
-    pub default: Option<Expr>, // 默认值字面量（None = 未给）
+    pub ty: String,            
+    pub default: Option<Expr>, 
 }
 
 #[derive(Clone)]
@@ -291,8 +246,6 @@ impl StructDecl {
     }
 }
 
-// ── Expr ─────────────────────────────────────────────────────────────
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum LitKind {
     LitNone,
@@ -321,20 +274,15 @@ impl fmt::Display for LitKind {
 
 #[derive(Clone)]
 pub struct Expr {
-    pub op: String,      // 算子/函数名（"" = 叶节点）
-    pub args: Vec<Expr>, // 操作数（叶节点为空）
-    pub val: String,     // 叶节点值
-    pub quote: u8,       // 0=非字符串, '"'=字符串（转义或原始，由 lit 区分）
-    pub lit: LitKind,    // 字面量类型（仅叶节点有意义）
+    pub op: String,      
+    pub args: Vec<Expr>, 
+    pub val: String,     
+    pub quote: u8,       
+    pub lit: LitKind,    
 }
 
-/// 一元前缀 `*` 解引用在 AST 里的算子名。落成读参/写槽名时前缀到名字上（`*p`），
-/// runtime 按该槽里的 Ptr 解引用到目标——与形参槽 `*[0,±k]` 同一约定（见 spec [[ptr]]）。
 pub const DEREF_OP: &str = "*";
 
-/// 成员读（`base·key`/`base·*key`）在 AST 里的算子名。layout 把成员链展开成
-/// `base·seg…` 读表达式（等价 `=` 拷贝读的成员路径），runtime 拼路径读值。
-/// 不再经 `kvspace·get`（清理方案：get 死刑）。
 pub const MEMBER_READ_OP: &str = "=";
 
 impl Expr {
@@ -404,7 +352,7 @@ pub fn call(op: &str, args: Vec<Expr>) -> Expr {
 }
 
 impl Expr {
-    /// 算子的中缀优先级（0 = 非中缀）。
+    
     pub fn infix_prec(op: &str) -> i32 {
         symbol::lookup(op).precedence
     }
@@ -419,7 +367,7 @@ impl Expr {
             }
             return self.val.clone();
         }
-        // Render `MEMBER_READ_OP(base, seg...)` back as `base·seg...` rather than unparseable `=(...)`.
+        
         if self.op == MEMBER_READ_OP && self.args.len() >= 2 {
             let base = &self.args[0];
             let bare_base = base.is_leaf()
@@ -461,26 +409,18 @@ impl fmt::Display for Expr {
     }
 }
 
-// ── Instruction ──────────────────────────────────────────────────────
-
 #[derive(Clone, Default)]
 pub struct Instruction {
     pub comments: Vec<String>,
-    pub expr: Option<Expr>, // None = 空指令
+    pub expr: Option<Expr>, 
     pub writes: Vec<String>,
     pub write_types: Vec<String>,
-    pub arrow_left: bool, // true = 写槽在左（=）
-    /// true = lower 认定为算子（不是函数调用）：发射语义名时不得被同包同名
-    /// rwfunc 抢走（`==`→`eq` 与 `lib string { rwfunc eq }` 冲突）。
+    pub arrow_left: bool, 
+    
     pub operator: bool,
-    /// 该算子的操作数目标 kind（promotion 结果）。opcode 不再携带类型后，未定型
-    /// 整数字面量操作数要按它落槽，否则 `uint64_var > 1` 里的 `1` 会落成 int64。
+    
     pub operand_kind: String,
-    /// 这条指令在源码里的起始位置（1-based）。
-    ///
-    /// 诊断要指路就必须有它：`error: 0:0:` 对 1900 处迁移毫无用处，而
-    /// `error: <file>:5:1:` 能直接跳过去。由 `parse_inst` 在解析该语句时记录；
-    /// layout 自己合成的指令留 `Pos::default()`（0:0），它们没有源码位置可言。
+    
     pub pos: Pos,
 }
 
@@ -489,7 +429,6 @@ impl Instruction {
         symbol::ARROW_EQ
     }
 
-    /// 扁平化 (opcode, reads)。前提：lower 已把复合子表达式展开为叶节点。
     pub fn flat(&self) -> (String, Vec<String>) {
         let e = match &self.expr {
             Some(e) => e,
@@ -505,12 +444,11 @@ impl Instruction {
             }
             return ("=".to_string(), vec![v.clone()]);
         }
-        // 解引用：`*<叶>` → 读参/写槽名 `*name`（与形参槽 `*[0,±k]` 同一约定，runtime 按该槽里的
-        // Ptr 解引用到目标）。非叶操作数由 lower 先展开成临时槽，故此处必为叶。
+        
         if e.op == DEREF_OP {
             match e.args.first() {
                 Some(a) if a.is_leaf() => return ("=".to_string(), vec![format!("*{}", a.val)]),
-                // Before lowering, `*(a + 1)` or `*f(x)` has a non-leaf operand; return as a regular op.
+                
                 _ => {
                     return (
                         DEREF_OP.to_string(),
@@ -519,28 +457,11 @@ impl Instruction {
                 }
             }
         }
-        /*
-         * 成员读：`MEMBER_READ_OP(base, seg…)` 是 layout 的**内部记号**，没有对应的
-         * runtime 能力。落盘时必须发成「一个路径文本读参」——`base·seg…`，与**写参
-         * 同形**（写路的写参 key 本来就是 `m·k`，runtime 已能解析这种路径文本）。
-         *
-         * 不这么做的话，`=` 会带着 2 个读参落盘，而 runtime 把 `=` 当 COPY 处理，
-         * 硬要求 1 读 1 写 ⇒ `WRONG_ARITY`。实测：`m·k` 与 `struct·x` 都这样。
-         *
-         * 路径文本的拼法与 `Display`（本文件 413-430）同一规则——**同一事实不写两份**，
-         * 这里直接借它的输出。
-         */
+        
         if e.op == MEMBER_READ_OP && e.args.len() >= 2 {
             return ("=".to_string(), vec![e.to_string()]);
         }
-        /*
-         * 成员读：`MEMBER_READ_OP(base, seg…)` 是 layout 的**内部记号**，没有对应的
-         * runtime 能力。落盘时必须发成「一个路径文本读参」——`base·seg…`，与**写参
-         * 同形**（写路的写参 key 本来就是 `m·k`，runtime 已能解析这种路径文本）。
-         *
-         * 路径文本的拼法与 `Display`（本文件 413-430）同一规则——**同一事实不写两份**，
-         * 这里直接借它的输出。
-         */
+        
         if e.op == MEMBER_READ_OP && e.args.len() >= 2 {
             return ("=".to_string(), vec![e.to_string()]);
         }
@@ -598,7 +519,7 @@ impl fmt::Display for Instruction {
             None => return write!(f, ""),
         };
         let writes = self.join_typed_writes();
-        // array·fill(langtype[, v]) → [] / [v...]（首参 langtype 由写类型隐含，不回显）
+        
         if e.op == "compactarray·fill" {
             let s = match e.args.get(1) {
                 Some(v) => format!("[{}...]", v),
@@ -612,7 +533,7 @@ impl fmt::Display for Instruction {
             }
             return write!(f, "{s}");
         }
-        // array·new(...) → [...]
+        
         if e.op == "compactarray·new" {
             let args: Vec<String> = e.args.iter().map(|a| a.to_string()).collect();
             let s = format!("[{}]", args.join(", "));
@@ -624,7 +545,7 @@ impl fmt::Display for Instruction {
             }
             return write!(f, "{s}");
         }
-        // map·new(v0, v1, ...) → { v0, v1, ... }（含空 `{}`）
+        
         if e.op == "map·new" {
             let items: Vec<String> = e.args.iter().map(ToString::to_string).collect();
             let s = if items.is_empty() {
@@ -640,7 +561,7 @@ impl fmt::Display for Instruction {
             }
             return write!(f, "{s}");
         }
-        // set(base, idx, val) → a[idx] = val（仅左写形式）
+        
         if e.op == "set" && e.args.len() >= 3 && self.arrow_left {
             let base = e.args[0].to_string();
             let idx = idx_string(&e.args[1]);
@@ -648,7 +569,7 @@ impl fmt::Display for Instruction {
             return write!(f, "{base}[{idx}]{}{val}", self.left_arrow());
         }
         let mut s = e.to_string();
-        // at(base, idx) → base[idx] 或 base.field
+        
         if e.op == "at" && e.args.len() >= 2 {
             if e.args[1].quote == b'"' {
                 s = format!("{}.{}", e.args[0], e.args[1].val);
@@ -666,8 +587,6 @@ impl fmt::Display for Instruction {
         write!(f, "{s}")
     }
 }
-
-// ── 控制流节点 ──────────────────────────────────────────────────────
 
 #[derive(Clone)]
 pub struct IfStmt {
@@ -767,10 +686,7 @@ pub struct ScopeStmt {
     pub comments: Vec<String>,
     pub label: String,
     pub body: Vec<Stmt>,
-    /// 由 lower 合成（if/while/for 展开）还是用户源码里写的具名块。
-    ///
-    /// 决定「块体末尾是否必须有终结符」：合成块的入口是跳转进来的，必须自己
-    /// 跳出去；用户具名块线性展平后，下一条语句就是它的续接，停下即衔接。
+    
     pub synthetic: bool,
 }
 
@@ -784,8 +700,6 @@ impl fmt::Display for ScopeStmt {
     }
 }
 
-// ── File ─────────────────────────────────────────────────────────────
-
 #[derive(Clone, Default)]
 pub struct File {
     pub package: String,
@@ -796,7 +710,6 @@ pub struct File {
     pub init_body: Vec<Stmt>,
 }
 
-/// 包树节点：按 lib 包名分组，format 时重建嵌套 lib 块（保包名，round-trip 不丢）。
 #[derive(Default)]
 struct PkgNode {
     rwirs: Vec<RwirDecl>,
@@ -876,7 +789,7 @@ fn emit_node(sb: &mut String, node: &PkgNode, indent: &str) {
 }
 
 impl File {
-    /// 格式化为规范 kvlang 源码（重建 lib 分组，保留包名，round-trip 语义等价）。
+    
     pub fn format(&self) -> String {
         let mut root = PkgNode::default();
         for d in &self.structs {
@@ -909,7 +822,6 @@ impl File {
     }
 }
 
-/// 缩进格式化语句体（对齐 Go ast.formatBody）。
 fn format_body(sb: &mut String, stmts: &[Stmt], indent: &str) {
     for (i, st) in stmts.iter().enumerate() {
         if i > 0 {
@@ -980,8 +892,6 @@ fn format_body(sb: &mut String, stmts: &[Stmt], indent: &str) {
     }
 }
 
-// ── 工具 ─────────────────────────────────────────────────────────────
-
 fn escape_string(s: &str) -> String {
     let mut b = String::new();
     for c in s.chars() {
@@ -997,7 +907,6 @@ fn escape_string(s: &str) -> String {
     b
 }
 
-/// 把值渲染为 Rust 原始字符串 `r#"..."#`，井号数取最小可行值（保证内容不与闭合定界符冲突）。
 fn raw_string_lit(v: &str) -> String {
     let bytes = v.as_bytes();
     let mut n = 0usize;
@@ -1024,8 +933,6 @@ fn is_operator_char(c: u8) -> bool {
     symbol::scanner_one_char_ops().contains(&c)
 }
 
-/// Render a member-read segment so it round-trips through the parser:
-/// dynamic variable -> `*k`; static string key -> bare ident/number/tuple when single-token, else quoted.
 fn member_seg_text(seg: &Expr) -> String {
     if !seg.is_leaf() {
         return format!("*({seg})");
@@ -1052,7 +959,7 @@ fn is_bare_member_key(v: &str) -> bool {
         return true;
     }
     if c0 == b'[' {
-        // Tuple key: emit bare if composed solely of digits, commas, dots, and minus signs.
+        
         return v.ends_with(']')
             && v[1..v.len() - 1]
                 .bytes()

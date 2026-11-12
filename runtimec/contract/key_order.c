@@ -2,7 +2,6 @@
 
 #include <stdint.h>
 
-/* 坐标段结构判定：`[` … `]`，内部不含方括号，长度 >= 3（至少 `[x]`）。 */
 int runtimec_key_is_coord(const char *name, size_t name_size) {
     if (name == NULL || name_size < 3U) {
         return 0;
@@ -18,8 +17,6 @@ int runtimec_key_is_coord(const char *name, size_t name_size) {
     return 1;
 }
 
-/* 整数坐标段：`[d(,d)*]`，每段非空且全为十进制数字。成功时把各段数值依次写入
- * `output`（最多 `capacity` 段），并返回段数；不可整数解析返回 0（合法空集）。 */
 static size_t parse_integer_coord(const char *name, size_t name_size,
                                   int64_t *output, size_t capacity) {
     size_t count = 0U;
@@ -64,8 +61,6 @@ static size_t parse_integer_coord(const char *name, size_t name_size,
     return count;
 }
 
-/* 坐标段最大维数：`[s0,s1,…]` 的段数上界。超过即按「非整数坐标」处理，
- * 因为整数坐标的维度在 kvlang 里是有限的（数组维数）。 */
 #define RUNTIMEC_KEY_COORD_COMPONENT_LIMIT 8U
 
 int runtimec_key_compare_coord(const char *left, size_t left_size,
@@ -74,7 +69,7 @@ int runtimec_key_compare_coord(const char *left, size_t left_size,
     const int right_is_coord = runtimec_key_is_coord(right, right_size);
 
     if (left_is_coord != right_is_coord) {
-        /* 坐标段恒排在非坐标段之前。 */
+        
         return left_is_coord ? -1 : 1;
     }
     if (!left_is_coord) {
@@ -99,9 +94,6 @@ int runtimec_key_compare_coord(const char *left, size_t left_size,
     const size_t right_count = parse_integer_coord(
         right, right_size, right_values, RUNTIMEC_KEY_COORD_COMPONENT_LIMIT);
 
-    /* **不是「整数优先」**：只有两边都能整数解析才比数值；一边可解析一边不可
-     * （或都不可）一律字典序。这与后端 `kvlangCoordCmp` 的 `na < 0 || nb < 0`
-     * 分支同语义——判据是「比较能不能做成数值比较」，不是「谁是整数」。 */
     if (left_count != 0U && right_count != 0U) {
         const size_t common = left_count < right_count ? left_count : right_count;
         for (size_t index = 0U; index < common; ++index) {
@@ -112,7 +104,7 @@ int runtimec_key_compare_coord(const char *left, size_t left_size,
         if (left_count == right_count) {
             return 0;
         }
-        /* row-major：前缀相同时维数少者在前。 */
+        
         return left_count < right_count ? -1 : 1;
     }
 
@@ -161,9 +153,7 @@ int runtimec_key_compare_directory_entry(const char *left, size_t left_size,
     if (compared != 0) {
         return compared;
     }
-    /* 坐标判等（`[01]` 与 `[1]`、`[1]` 与 `[1]/`）：退回原始名字的字节序。
-     * 后端 `child_cmp` 的 `c ? c : strcmp(x, y)` 就是这一句——少了它，目录项与
-     * 同名的值会彼此相等，排序不稳定，两次列举可能给出不同的第 i 项。 */
+    
     const size_t common = left_size < right_size ? left_size : right_size;
     for (size_t index = 0U; index < common; ++index) {
         const unsigned char a = (unsigned char)left[index];

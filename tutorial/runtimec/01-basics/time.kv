@@ -1,20 +1,4 @@
-// time: 时间与 duration 类型
-//
-// 关于 `delta ms = 0`：该值是**结构必然**——`t0`、`t1` 是相邻两次 `time·now()`，
-// 间隔远小于 1ms，故 `as_millis` 恒为 0。实测连跑 20 次，完整输出 md5 完全相同。
-// 若哪天实测出现 1，那是环境抢占噪声（进程被换出超过 1ms），不是实现变更；
-// 那时应改用例为「不依赖真实时间」，而不是把 1 写进期望。
-// 期望输出:
-//   before
-//   after
-//   t0 < t1: true
-//   t0 > t1: false
-//   delta >= 0 ns: true
-//   delta ms = 0
-//   delta s = 0
-//   t0 + delta == t1: true
-//   1000 ms
-//   1 s = 1000000000 ns
+
 rwfunc test() -> () {
     println("before")
     t0:time = time·now()

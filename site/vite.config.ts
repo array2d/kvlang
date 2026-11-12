@@ -29,7 +29,6 @@ function countFiles(dir: string, ext: string): number {
   return n;
 }
 
-/** tutorial 总数 ≠ 带锚点的用例数：只有含「期望输出」注释的才被 test.py 当作可断言用例。 */
 function countAnchoredTutorials(dir: string): number {
   let n = 0;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -57,7 +56,6 @@ function info(): Record<string, string> {
   return cached;
 }
 
-/** 构建期注入：版本、tag 日期、spec/教程数量。dev 下回退 dev。 */
 function kvInfo(): Plugin {
   return {
     name: "kv-info",

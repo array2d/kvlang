@@ -1,24 +1,4 @@
 #!/usr/bin/env bash
-# #583 验收：JIT 与解释执行一致性（parity）。
-#
-# 同一 case 跑两臂：A = JIT 开（默认），B = RC2_NOJIT=1（纯解释）。
-# 比对 stdout 与退出码；A 臂再跑一次以区分「非确定性输出」和「真实 parity 破坏」。
-# 默认 shm 后端、每个 case 一个独立临时 store。
-#
-# 用法：
-#   scripts/verify-jit-parity.sh                 # tutorial 全量 + benchmark 10 case
-#   scripts/verify-jit-parity.sh --tutorial
-#   scripts/verify-jit-parity.sh --bench
-#   scripts/verify-jit-parity.sh --filter 06-algo/01
-#   scripts/verify-jit-parity.sh --bench --scale all
-#   scripts/verify-jit-parity.sh -v              # 每个 case 都打印一行
-#
-# 环境变量：
-#   KVLANG_BIN         默认 <repo>/bin/byteseek
-#   KVLANG_LAYOUT_BIN  默认 <repo>/bin/kvlanglayout
-#   KV_CASE_TIMEOUT    单次运行超时秒数，默认 180
-#
-# 退出码：0 = 无 parity 破坏（NONDET 不算失败）；1 = 有 FAIL；2 = 环境/用法错误。
 set -uo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -86,7 +66,6 @@ command -v python3 >/dev/null 2>&1 || die "需要 python3（读取 benchmark/run
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/kvlang-parity.XXXXXX")" || die "mktemp 失败"
 trap 'rm -rf "$TMP"' EXIT
 
-# 剔除计时行：这类输出每次运行都不同，天然无法作为 parity 判据。
 normalize() {
 	if [ "$KEEP_TIMING" -eq 1 ]; then
 		cat
@@ -95,7 +74,6 @@ normalize() {
 	fi
 }
 
-# 文件头注释块里出现 // extern 或 // wip → 与 tutorial/test.py 一致，跳过。
 needs_skip() {
 	awk '
 		/^\/\/ extern/ || /^\/\/ wip/ { print "1"; exit }
@@ -107,9 +85,6 @@ has_expects() {
 	grep -q '^// 期望输出' "$1"
 }
 
-# tutorial 单臂运行：boot → layout → 执行入口 test。
-# $1=相对路径 $2=stdout 文件 $3=1 表示 B 臂（RC2_NOJIT=1）
-# 返回程序退出码；boot/layout 失败返回 90/91。
 run_tutorial() {
 	local rel="$1" out="$2" nojit="${3:-0}"
 	local d="$TMP/tut"
@@ -140,7 +115,6 @@ run_tutorial() {
 	return $?
 }
 
-# benchmark 单臂运行：源码替换 __SCALE__ 后直接跑文件模式。
 run_bench() {
 	local case="$1" scale="$2" out="$3" nojit="${4:-0}"
 	local d="$TMP/bench"
@@ -155,7 +129,6 @@ run_bench() {
 	return $?
 }
 
-# 任意 .kv 文件单臂运行（文件模式：byteseek 直接吃源码并自动 layout）。
 run_file() {
 	local path="$1" out="$2" nojit="${3:-0}"
 	local d="$TMP/file"
@@ -171,7 +144,6 @@ run_file() {
 	return $?
 }
 
-# 某 case 的 benchmark 规模列表（取自 benchmark/run.py 的 SWEEP，避免第二份清单漂移）。
 sweep_scales() {
 	python3 - "$ROOT/benchmark/run.py" "$1" <<'PY'
 import importlib.util
@@ -231,7 +203,6 @@ check_case() { # $1=name $2=kind(tutorial|bench) $3=rel $4=scale
 	normalize <"$outA" >"$nA"
 	normalize <"$outB" >"$nB"
 
-	# 90/91 = 本脚本的 boot/layout 失败哨兵，两臂同时失败不能算 PASS。
 	if [ "$rcA" -ge 90 ] || [ "$rcB" -ge 90 ]; then
 		FAIL=$((FAIL + 1))
 		FAILED+=("$name")
@@ -248,7 +219,6 @@ check_case() { # $1=name $2=kind(tutorial|bench) $3=rel $4=scale
 		return
 	fi
 
-	# A 再看一遍：两次 JIT 运行都不同 → 输出本身不确定，parity 无法判定。
 	if [ "$kind" = "tutorial" ]; then
 		run_tutorial "$rel" "$outA2" 0; rcA2=$?
 	elif [ "$kind" = "file" ]; then

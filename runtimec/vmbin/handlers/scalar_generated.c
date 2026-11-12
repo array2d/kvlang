@@ -1,14 +1,3 @@
-/*
- * 组件：vmbin/handlers/scalar_generated（生成物，勿手改）
- * 作用：特化标量 handler——一条特化 opid 一个 inline 逻辑函数 + 一个 thunk。
- * 联系：由 tools/architecture/generate_scalar_handlers.py 从
- *       binrwir/specialization_table.c 生成；条目由 session 装进注册表。
- * 约束：逻辑函数体是一次转换 + 一次运算 + 一次赋值，没有类型判断、没有 status
- *       返回、没有 exit 写入。需要判据的算子不进本文件（分工见生成器头注释）。
- *       thunk 由 `handler_call` 的宏产出——定位、宽度核对、失败出口都在那里，
- *       这里是**同一套样板**的第二份实现会立刻漂移。
- * 统计：1836 个特化 handler，0 条特化行归 scalar.c 的手写特例。
- */
 
 #include "vmbin/handlers/scalar_generated.h"
 
@@ -12482,19 +12471,6 @@ const binrwir_registry_entry_t scalar_generated_entries[] = {
 const size_t scalar_generated_entry_count =
     sizeof(scalar_generated_entries) / sizeof(scalar_generated_entries[0]);
 
-/*
- * ── 测试探针：同一批逻辑函数的可见副本 ────────────────────────────────
- *
- * 逻辑函数是 `static inline`，测试翻译单元看不见，于是「生成的东西算得对不对」
- * 就只能靠条目表的形状来间接猜——那等于没测。第一版测试正是这么写的，用
- * 「把 min 的 `? *a : *b` 换成 `? *b : *a`」做变异，**测试照样全绿**。
- *
- * 所以这里把**同一份模板表达式**再产出一次，只改可见性。不是第二份实现：
- * 两处用的是同一条模板函数，文本由同一次渲染产生；改模板两边一起变。
- *
- * 只导出测试实际调用的那几条，不是全部 1404 个——全导出会让目标文件多出
- * 上千个符号，且没人会去写那么多断言，反而把「导出清单」变成第三处真相。
- */
 void runtimec_scalar_probe_add_int64_int32_int64(const int64_t *a, const int32_t *b, int64_t *c) {
     scalar_generated_add_int64_int32_int64_logic(a, b, c);
 }

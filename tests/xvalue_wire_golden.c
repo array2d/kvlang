@@ -1,12 +1,3 @@
-/*
- * XValue wire 金标准：把「同一批操作」产出的字节逐字节打印出来，供跨仓库比对。
- *
- * 用它验证的是一条 ABI 事实，不是本仓库的实现自证：kvspace（前端）、kvspace-c、
- * kvspace-durable 各自按同一份 head 定义构造同一组值，输出的十六进制行必须完全
- * 相同。比对由同目录的 `compare_wire_golden.sh` 完成——它只比字节，不解释字节。
- *
- * 输出格式：每行 `<case-name> <total-len> <hex>`，顺序固定，便于 diff。
- */
 
 #include <kvspace/kvspace_xvalue.h>
 #include <kvlang/xvalue.h>
@@ -33,7 +24,6 @@ static void emit(const char *name, const uint8_t *wire, uint64_t length) {
     printf("\n");
 }
 
-/* 每个用例：构造 → 打印 → 释放。空值也要打印，空也是有形的字节。 */
 static void emit_none(void) {
     uint8_t *wire = NULL;
     uint64_t length = 0;

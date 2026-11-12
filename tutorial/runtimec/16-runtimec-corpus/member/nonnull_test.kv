@@ -1,24 +1,4 @@
-// 判据：`nonnull` / `nonnull·not` —— 存在性判定对**任意类型**成立。
-// 依据：03-类型系统/03-种类-代码与特殊值.kv「None 判据」（normalize 三条：
-//       body 空 + wire 无 langtype + key 不是目录）。
-//
-// 四组，每条都配对侧：单侧断言会漏「算子整体取反」这类缺陷。
-//   1. 零值 local：x:int64=0 —— 键存在且带 langtype ⇒ 不是 None。
-//   2. （略）「声明未写」在 kvlang 源码层**不可表达**：parser 拒绝「声明了标量
-//      却不给初值」（`parser.rs:3132`「declared scalar … but assigned an array
-//      literal」）。帧准备物化零值的规则因此只能从「声明并写 0」这条间接验，
-//      与第 1 组同形——不单列。
-//   3. 已存在的 key（带类型零值）⇒ 不是 None。缺失 key 判空需 type-from-target，
-//      属另一缺口，不混进本条。
-//   4. 空引用：p:*int64 = None —— 是 None（走 ptreq，不走 nonnull）。
-//
-// 期望输出:
-//   zero eq false
-//   zero neq true
-//   present eq false
-//   present neq true
-//   nullptr eq true
-//   nullptr neq false
+
 rwfunc test() -> () {
 	x:int64 = 0
 	eq0:bool = x == None
@@ -26,10 +6,6 @@ rwfunc test() -> () {
 	ne0:bool = x != None
 	println("zero neq", ne0)
 
-
-	/* 缺失 key 判空：目标是**带声明的**绝对 key（`/never_written:int64`），
-	 * 这样另一侧有具体类型可判；`missing = /x` 这种无声明形态是 type-from-target
-	 * 的另一个缺口，不混进本条。 */
 	/never_written:int64 = 0
 	missing:int64 = /never_written
 	println("present eq", missing == None)

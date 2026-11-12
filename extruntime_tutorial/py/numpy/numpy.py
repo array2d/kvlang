@@ -1,24 +1,3 @@
-#!/usr/bin/env python3
-"""numpy rwirext —— 单文件引擎 + 编排器。
-
-    python numpy.py <file.kv>
-
-依序执行：
-  1. Publish /‥isa control store via `byteseek isa publish`;
-  2. Register numpy·* ops under /lib/numpy·* via kvlangDefRwir and serve vids/<vid> handoffs;
-  3. Lay out .kv into kvspace via kvlanglayout (normalizing legacy numpy.foo syntax);
-  4. Run main via byteseek, handing off numpy·* ops through /lib/<op>/vids/<vid>.
-
-设计要点：
-  · ndarray 不是新类型，就是 [dims]dtype——一维字面量由 kvlang 产生，更高的秩由 numpy
-    算子（reshape/matmul/…）产出并按 [dims]dtype 存回 kvspace。
-  - Uses kvspace v2 single-key wire format (8B head + trailing attr):
-    reads via kvspaceGet + kvspaceGetHead across shm:// and fs://;
-    writes via kvlangXvalueHeadNewTensor / kvlangXvalueHeadNewScalar.
-  - Resolves opcode and operands via kvlangRwirextParams, reading ndarray slots by path first
-    and falling back to kvlangRwirextResolveRead; resolves write slots via kvlangRwirextResolveWrite.
-  - numpy·print writes directly to this process's stdout.
-"""
 
 import ast
 import ctypes
@@ -32,32 +11,22 @@ import threading
 import time
 from pathlib import Path
 
-# 本文件名为 numpy.py，须先把自身所在目录移出 sys.path，才能 import 到真正的 numpy 包。
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path = [p for p in sys.path if os.path.abspath(p or os.getcwd()) != _HERE]
-import numpy as np  # noqa: E402
+import numpy as np
 
-# Shared library lookup (env override -> repo lib/ -> system linker)
 KVLANG = Path(__file__).resolve().parents[3]
 BIN = KVLANG / "bin"
 LIB = KVLANG / "lib"
 
-
 def _argv_option(name):
-    """取 `name=value` 形式的命令行参数，**不走环境变量**（G12：除 KVSPACE 外不新增）。
-
-    为什么不用 `--runtime-lib=`：脚本在模块顶层就要 CDLL 三个库，参数必须在 import
-    时就到位；用 `name=value` 位置形式与 layout 测试里的约定一致。
-    """
     prefix = f"{name}="
     for a in sys.argv[1:]:
         if a.startswith(prefix):
             return a[len(prefix):]
     return None
 
-
 _RUNTIME_LIB_OVERRIDE = _argv_option("runtime-lib")
-
 
 def _find_lib(name, path, *rels):
     cands = ([path] if path else []) + [str(KVLANG / r) for r in rels]
@@ -65,7 +34,6 @@ def _find_lib(name, path, *rels):
         if os.path.exists(c):
             return ctypes.CDLL(c)
     return ctypes.CDLL(name)
-
 
 if os.path.isdir(LIB / "kvspace") and "KVSPACE_BACKEND_PATH" not in os.environ:
     os.environ["KVSPACE_BACKEND_PATH"] = str(LIB / "kvspace")
@@ -76,7 +44,6 @@ _rt = _find_lib("libkvlang_runtime.so", _RUNTIME_LIB_OVERRIDE,
 _lay = _find_lib("libkvlanglayout.so", None,
                  "lib/libkvlanglayout.so", "layout/target/release/libkvlanglayout.so")
 
-
 class kvspace_head_t(ctypes.Structure):
     _fields_ = [("headlen", ctypes.c_uint16), ("ref", ctypes.c_uint8),
                 ("storetype", ctypes.c_uint8), ("body_len", ctypes.c_int32),
@@ -84,15 +51,12 @@ class kvspace_head_t(ctypes.Structure):
                 ("langtype", ctypes.c_uint8 * 256), ("langtype_len", ctypes.c_int32),
                 ("body_offset", ctypes.c_int32), ("body_cap", ctypes.c_uint64)]
 
-
 class kvlang_kindexpr_t(ctypes.Structure):
     _fields_ = [("ref", ctypes.c_int32), ("ndim", ctypes.c_int32),
                 ("dims", ctypes.c_int32 * 8), ("array_len", ctypes.c_int32),
                 ("kind", ctypes.c_uint8 * 64)]
 
-
 def _bind():
-    # kvspace v0.3.23+ ABI (8B head + trailing attr)
     _ks.kvspaceConnect.argtypes = [ctypes.c_char_p]; _ks.kvspaceConnect.restype = ctypes.c_void_p
     _ks.kvspaceClose.argtypes = [ctypes.c_void_p]
     _ks.kvspaceGet.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int,
@@ -130,7 +94,6 @@ def _bind():
                                                ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
                                                ctypes.POINTER(ctypes.c_uint64)]
     _ks.kvlangXvalueHeadNewTensor.restype = ctypes.c_int
-    # rwirext ABI（kvspace 不提供的 runtime 语义）：句柄传扩展自连的 kvspace
     for fn in ("kvlangRwirextParams", "kvlangRwirextResolveRead", "kvlangRwirextResolveReadPath",
                "kvlangRwirextResolveWrite", "kvlangRwirextNextPc"):
         getattr(_rt, fn).restype = ctypes.c_void_p
@@ -149,7 +112,6 @@ def _bind():
     _lay.kvlangKindexprParse.restype = ctypes.c_int
     _lay.kvlangKindexprParse.argtypes = [ctypes.c_char_p, ctypes.POINTER(kvlang_kindexpr_t)]
 
-
 _bind()
 _libc = ctypes.CDLL(None); _libc.free.argtypes = [ctypes.c_void_p]
 
@@ -161,19 +123,16 @@ _NP_KIND = {np.float64: "float64", np.float32: "float32", np.int64: "int64", np.
             np.int16: "int16", np.int8: "int8", np.uint64: "uint64", np.uint32: "uint32",
             np.uint16: "uint16", np.uint8: "uint8", np.bool_: "bool"}
 
-
 def _kind_of(dt):
     for npdt, k in _NP_KIND.items():
         if np.dtype(dt) == np.dtype(npdt):
             return k
     raise ValueError(f"unsupported dtype: {dt}")
 
-
 def _s(p):
     if not p:
         return ""
     v = ctypes.string_at(p).decode(); _libc.free(p); return v
-
 
 def _fmt(a):
     a = np.asarray(a)
@@ -182,18 +141,15 @@ def _fmt(a):
         return repr(float(v)) if isinstance(v, float) else repr(v)
     return "[" + ", ".join(_fmt(x) for x in a) + "]"
 
-
 def _parse(s):
     try:
         return ast.literal_eval(s)
     except (ValueError, SyntaxError):
         return s
 
-
 _shape = lambda x: tuple(int(v) for v in np.asarray(x).ravel())
 _int = lambda x: int(np.asarray(x).ravel()[0])
 
-# ── 五大类算子（nw 恒为 1；numpy.print 单列变参）─────────────────────────
 _CREATION = {
     "zeros":    (1, lambda a: np.zeros(_shape(a[0]))),
     "ones":     (1, lambda a: np.ones(_shape(a[0]))),
@@ -236,7 +192,6 @@ PRINT_OP = "numpy·print"
 SHARED_VIDS = "/vthread/‥vids"
 SHARED_VIDS_TYPE = "[]char/utf32·[]char/utf32"
 
-
 class Engine:
     def __init__(self, dsn):
         self.kv = _ks.kvspaceConnect(dsn.encode())
@@ -252,7 +207,6 @@ class Engine:
         if _ks.kvspaceSetValue(self.kv, key.encode(), ptr, length, err, 256) != 0:
             raise RuntimeError(f"kvspaceSetValue({key}): {err.value.decode('utf-8', 'replace')}")
 
-    # KV helpers for handoff (list vids / read pc / write ‥pc / del vids)
     def kv_get(self, key, resolve=1):
         out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
         if _ks.kvspaceGet(self.kv, key.encode(), resolve, ctypes.byref(out), ctypes.byref(ol)) != 0:
@@ -284,7 +238,6 @@ class Engine:
         out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
         return _ks.kvspaceGet(self.kv, key.encode(), 0, ctypes.byref(out), ctypes.byref(ol)) == 0 and bool(out)
 
-    # Prefix listing: ListLen + per-index ListAt into caller buffer (do not free).
     def kv_list(self, prefix, resolve=1):
         count = ctypes.c_int32()
         if _ks.kvspaceListLen(self.kv, prefix.encode(), 0, resolve, ctypes.byref(count)) != 0 or count.value <= 0:
@@ -302,7 +255,6 @@ class Engine:
         err = ctypes.create_string_buffer(256)
         _ks.kvspaceDel(self.kv, keys, 1, err, 256)
 
-    # Tensor read/write (v2 8B head + attr, compatible with shm:// and fs://)
     def view(self, key):
         h = kvspace_head_t()
         if _ks.kvspaceGetHead(self.kv, key.encode(), ctypes.byref(h)) != 0:
@@ -328,7 +280,7 @@ class Engine:
         return flat.reshape(shape)
 
     def alloc(self, key, arr):
-        arr = np.asarray(arr)                       # 保形（ascontiguousarray 会把 0 维升 1 维）
+        arr = np.asarray(arr)
         shape = arr.shape
         raw = np.ascontiguousarray(arr).tobytes()
         ndim = len(shape)
@@ -352,7 +304,6 @@ class Engine:
         finally:
             _libc.free(ctypes.cast(out, ctypes.c_void_p))
 
-    # Read arg: load ndarray from frame slot path, or fall back to resolve_read for literals.
     def read_arg(self, pc, i):
         path = _s(_rt.kvlangRwirextResolveReadPath(self.kv, pc.encode(), i))
         if path:
@@ -385,7 +336,6 @@ class Engine:
                 finally:
                     _libc.free(ctypes.cast(out, ctypes.c_void_p))
 
-    # Register operator families (*T pointer-slot convention + shared vids queue)
     def register(self):
         def _arr(lst):
             return (ctypes.c_char_p * len(lst))(*[s.encode() for s in lst])
@@ -432,16 +382,14 @@ class Engine:
                     nr, fn = table[op]
                     try:
                         self._handle(op, nr, fn, pc)
-                    except Exception as e:                 # 计算失败也要放行，避免 run 阻塞超时
+                    except Exception as e:
                         print(f"[numpy] {op} @ {pc}: {e}", file=sys.stderr, flush=True)
                     nxt = _s(_rt.kvlangRwirextNextPc(pc.encode()))
                     self.kv_set(f"/vthread/{vid}/‥pc", nxt)
                     self.kv_del(f"/lib/{op}/vids/{vid}")
             time.sleep(0.005)
 
-
 def _normalize_legacy_syntax(src: str) -> str:
-    # Normalize legacy dot member syntax (numpy.foo / demo.main) outside comments and strings.
     out = []
     for line in src.splitlines():
         if line.lstrip().startswith("//"):
@@ -451,7 +399,6 @@ def _normalize_legacy_syntax(src: str) -> str:
         out.append(line)
     return "\n".join(out) + ("\n" if src.endswith("\n") else "")
 
-
 def _env():
     ld = f"{LIB}:{LIB / 'kvspace'}"
     if os.environ.get("LD_LIBRARY_PATH"):
@@ -459,9 +406,7 @@ def _env():
     return {**os.environ, "LD_LIBRARY_PATH": ld,
             "KVSPACE_BACKEND_PATH": os.environ.get("KVSPACE_BACKEND_PATH", str(LIB / "kvspace"))}
 
-
 def _setup_c_runtime_prefix(tmp_dir: Path) -> Path:
-    """Build a private prefix linking byteseek against the C runtime for external handoff."""
     pfx = tmp_dir / "pfx"
     (pfx / "bin").mkdir(parents=True, exist_ok=True)
     (pfx / "lib").mkdir(parents=True, exist_ok=True)
@@ -474,7 +419,6 @@ def _setup_c_runtime_prefix(tmp_dir: Path) -> Path:
     rt_so = Path(_RUNTIME_LIB_OVERRIDE or (LIB / "libkvlang_runtime.so")).resolve()
     os.symlink(rt_so, pfx / "lib" / "libkvlang_runtimec2.so")
     return pfx / "bin" / "byteseek"
-
 
 def _cleanup_dsn(dsn: str):
     if dsn.startswith("shm://"):
@@ -489,7 +433,6 @@ def _cleanup_dsn(dsn: str):
         base = dsn[len("fs://"):]
         shutil.rmtree(base, ignore_errors=True)
         shutil.rmtree(base + ".isa", ignore_errors=True)
-
 
 def run(kvfile, dsn=None):
     kvfile = Path(kvfile).resolve()
@@ -537,7 +480,6 @@ def run(kvfile, dsn=None):
             print(r.stdout, end="", flush=True)
         if r.returncode != 0:
             sys.exit(f"run failed: {r.stderr.strip()}")
-
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

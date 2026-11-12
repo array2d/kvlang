@@ -1,14 +1,9 @@
-//! layout 确定性：同一输入在**不同进程**里多次 layout，/lib 子树必须逐字节一致。
-//!
-//! stable_kinds 的 fixpoint 曾按 HashMap 随机序遍历（每进程哈希种子不同），
-//! 导致同一语料多次 layout 的特化集合不同（特化数在 881/882/907 间波动）。
-//! 单进程内 HashMap 顺序稳定，故必须用子进程复现。
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn seed_builtins(dsn: &str) {
-    // 裸名必须有声明来源：运行时 boot 会发布这些内建的 /lib/<op> def rwir。
+    
     let mut kv = kvlanglayout::Kv::conn(dsn);
     kvlanglayout::init_dirs(&mut kv).unwrap();
     for op in ["println", "print", "cerr"] {
@@ -48,15 +43,6 @@ fn tree(dir: &Path) -> Vec<(String, Vec<u8>)> {
     out
 }
 
-// 已知缺口 + 明确原因：旧判据依赖 **fs 的物理布局**，不是「换个后端」能替换的。
-//
-// `fs://` 下 KV 树就是文件系统目录树，所以 `tree()` 用 `read_dir` 递归比对成立。
-// shm 下 KV 树在 mmap 文件**内部**，文件系统上只有 `store`、`.garb`、`.sbo.data`
-// 这些物理文件——`read_dir` 对它们直接 `NotADirectory`。
-//
-// 要验同样的东西，得改成「用 kvspace API 遍历 KV 空间再比对」，那是换判据，
-// 不在本轮范围。这里显式 `#[ignore]` 而不是留一个「跑起来恒过」的分支：
-// 后者会让 `cargo test` 把它算进 passed，掩盖「这条没验」。
 #[ignore = "待改用 kvspace API 遍历 KV 空间：shm 下 KV 树不在文件系统布局里"]
 #[test]
 fn layout_is_deterministic_across_processes() {

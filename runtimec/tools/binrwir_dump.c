@@ -1,21 +1,3 @@
-/*
- * binrwir-dump：把 kvlang 语料 layout 进**每个文件独立的临时 kvspace**，
- * 逐函数编码成 canonical BinRWIR Program，再把打印文本落到
- * `<output-root>/<相对路径>.binkv`。
- *
- * 为什么每个文件一个 store：语料的函数名会在不同文件之间重名（每个 tutorial
- * 都写 `main`/`test`）。共用一个 store 会让后 layout 的文件覆盖前一个，
- * 于是「dump 出了什么」取决于遍历顺序——那不是一份可复现的产物。
- *
- * 为什么 opid 必须有：这份产物是给人检查**二进制读写码**的。算子名是便利，
- * opid 才是被检查的对象。所以格式化时**不传名字解析器**（它一旦解析成功就
- * 只打名字、丢掉 opid），改为在文本后附一张 `opid -> 算子名` 图例。
- *
- * 用法：
- *   binrwir-dump <corpus-root> <output-root> <layout-library> <kvspace-library>
- *
- * 退出码：全部成功 0；有任一失败 1（失败明细仍完整落盘）。
- */
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -91,7 +73,6 @@ static runtimec_allocator_t dump_allocator(void) {
     return allocator;
 }
 
-/* 拼接路径；截断是错误，不静默返回半截路径。 */
 static bool format_path(char *output, size_t capacity, const char *format, ...) {
     va_list arguments;
     va_start(arguments, format);
@@ -107,7 +88,6 @@ static void copy_text(char *output, size_t capacity, const char *text) {
     (void)snprintf(output, capacity, "%s", text != NULL ? text : "");
 }
 
-/* 只取消息首行：多行消息的后续行是上下文，不是根因。 */
 static void copy_first_line(char *output, size_t capacity,
                             runtimec_string_view_t message) {
     size_t length = 0U;
@@ -171,7 +151,6 @@ static bool make_directory(const char *path) {
     return true;
 }
 
-/* 递归删除一个临时目录里的普通文件；子目录也删。 */
 static void remove_tree(const char *path) {
     DIR *directory = opendir(path);
     if (directory == NULL) {
@@ -204,7 +183,6 @@ static bool ends_with_kv(const char *name) {
     return length > 3U && strcmp(name + length - 3U, ".kv") == 0;
 }
 
-/* 目录条目名是 `/lib/` 下的相对名，目录带尾斜杠；`‥` 开头的是元信息。 */
 static bool function_name_of(const uint8_t *entry, uint32_t entry_size,
                              char *output, size_t capacity) {
     size_t length = entry_size;
@@ -230,13 +208,6 @@ static int compare_names(const void *left, const void *right) {
     return strcmp((const char *)left, (const char *)right);
 }
 
-/*
- * 返回函数名数量；失败返回 -1。
- *
- * 旧实现带 `expand_ext=1`（展开 extindex 叠加层）；新接口没有这个概念，只列
- * 物理子项——本工具读的是 layout 写进 `/lib/` 的真实函数，不依赖叠加层。
- * 顺序由后端给（不排序），本工具只取名字后自己 `qsort`，与列举顺序无关。
- */
 static int list_functions(void *handle, char names[][NAME_CAPACITY]) {
     int64_t count = 0;
     uint32_t max_name_length = 0U;
@@ -249,7 +220,7 @@ static int list_functions(void *handle, char names[][NAME_CAPACITY]) {
     if (count <= 0) {
         return 0;
     }
-    /* 一次分配：`listlen` 的 M 就是最长名字节数。 */
+    
     const uint32_t capacity = (uint32_t)(count * (int64_t)(max_name_length + 1U));
     char *buffer = malloc(capacity != 0U ? capacity : 1U);
     if (buffer == NULL) {
@@ -356,18 +327,11 @@ static bool append_operation_legend(dump_context_t *context,
     return true;
 }
 
-/*
- * 语料里调用的外部能力先声明进 `/lib`，否则 layout 的「未定义裸名」检查会把它们
- * 当成拼错的函数拒掉——那条规则是对的，不能为 dump 放宽。
- *
- * 这里只声明，不实现：编码后它们是 FOREIGN，dump 打印出的 opid 正是 FOREIGN。
- */
 static bool declare_capabilities(dump_context_t *context,
                                  const char *data_source,
                                  const char *work_directory, char *stage,
                                  char *reason) {
-    /* 那个已摘除的输出算子（TASK-044）不再声明；本工具只声明要跑的语料用到的
-     * 那些外部能力。 */
+    
     static const char declarations[] =
         "rwir print(*[]char/utf32 #s...)\n"
         "rwir printf(*[]char/utf32 #s...)\n"
@@ -413,7 +377,6 @@ static bool declare_capabilities(dump_context_t *context,
     return succeeded;
 }
 
-/* 声明的能力没有 `‥ctime`，不是可 dump 的函数；包目录同样被这一条滤掉。 */
 static bool function_has_revision(void *handle, const char *function_path) {
     char key[PATH_CAPACITY];
     if (!format_path(key, sizeof(key), "%s/\xE2\x80\xA5" "ctime",
@@ -428,7 +391,6 @@ static bool function_has_revision(void *handle, const char *function_path) {
     return raw != NULL && raw_size != 0U;
 }
 
-/* 编码并打印一个函数；失败时写 stage/reason。 */
 static bool encode_function(dump_context_t *context,
                             runtimec_kvspace_access_t *services,
                             const char *function_path,
@@ -476,7 +438,7 @@ static bool encode_function(dump_context_t *context,
     };
     const runtimec_string_view_t function_name =
         runtimec_string_view_make(function_path, strlen(function_path));
-    /* 解析器传 NULL：名字一解析成功，格式化就只打名字、不打 opid。 */
+    
     status = binrwir_binfunc_format(program, function_name, NULL, NULL,
                                     binrwir_format_buffer_sink,
                                     &sink_context);
@@ -511,10 +473,6 @@ static bool write_bytes(const char *path, const runtimec_bytes_buffer_t *buffer)
     return written == buffer->size && closed;
 }
 
-/*
- * 处理一个源文件。成功时把内容写进 output_path；失败写 stage/reason 并返回
- * false——但**仍写已得到的部分**由调用方决定，这里只负责报告。
- */
 static bool dump_one_file(dump_context_t *context, const char *source_path,
                           const char *output_path, const char *work_directory,
                           char *stage, char *reason) {
@@ -644,7 +602,6 @@ static bool dump_one_file(dump_context_t *context, const char *source_path,
     return succeeded;
 }
 
-/* 递归遍历语料；相对路径随目录层级传递。 */
 static void dump_directory(dump_context_t *context, const char *corpus_root,
                            const char *output_root, const char *relative,
                            size_t *total, size_t *succeeded,
@@ -726,7 +683,6 @@ static void dump_directory(dump_context_t *context, const char *corpus_root,
     closedir(directory);
 }
 
-/* 把连续的单引号段抹成 `'…'`：局部变量名不同但根因相同，分组要按根因。 */
 static void root_cause_key(const failure_t *item, char *output,
                            size_t capacity) {
     size_t written = 0U;
@@ -785,7 +741,7 @@ static bool write_failures(const char *output_root, const report_t *report,
         fprintf(file, "| `%s` | %s | %s |\n", item->source, item->stage,
                 item->reason);
     }
-    /* 按根因分组：局部名不同、根因相同，逐行看会以为失败很多种。 */
+    
     root_cause_count_t *groups =
         calloc(report->count, sizeof(root_cause_count_t));
     size_t group_count = 0U;
@@ -806,7 +762,7 @@ static bool write_failures(const char *output_root, const report_t *report,
             }
             groups[position].count += 1U;
         }
-        /* 计数降序；同数按文本排序，保证两次运行同一输出。 */
+        
         for (size_t left = 1U; left < group_count; ++left) {
             root_cause_count_t value = groups[left];
             size_t position = left;
@@ -856,8 +812,7 @@ int main(int argument_count, char **arguments) {
         fprintf(stderr, "layout library has no kvlangLayoutFile\n");
         return 2;
     }
-    /* kvspace 是链接期依赖：不再 dlopen、不再解析符号。第 5 个实参保留位置
-     * 但不使用——命令行形态不变，免得脚本与文档同时改。 */
+    
     (void)kvspace_path;
     runtimec_error_t error;
     runtimec_error_reset(&error);

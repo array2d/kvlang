@@ -5,12 +5,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* 固定 head 16 字节 [bodylen:u64@0][attrslen:u16@8][padding:6@10-15]，
-   body 偏移恒 16，attr 区紧随 body 且**无**自带长度前缀（长度只在 head 里）。
-   单 key 整体——无 attr key。head 不含 storetype/ptr/layout/reserved；
-   bodylen 恒为有效长度，容量是存储后端的物理分配属性。tag 2（旧 reallen）
-   已删除，出现即拒绝。 */
-
 static int failures = 0;
 #define CHECK(cond, ...)                                                       \
     do {                                                                       \
@@ -22,7 +16,6 @@ static int failures = 0;
         }                                                                      \
     } while (0)
 
-/* 校验 head、body、langtype、有效长度。lt 是构造后的完整 langtype（含 * / @）。 */
 static int value_ok(const uint8_t *v, uint64_t total, uint64_t body_len,
                     const char *lt) {
     size_t want = strlen(lt);
@@ -209,7 +202,6 @@ static void test_padding_rejected(void) {
     free(buf);
 }
 
-/* tag 2（旧 reallen）已删除：attr 区出现 tag 2 必须拒绝。 */
 static void test_tag_two_rejected(void) {
     const uint8_t body[] = {'a', 'b', 'c'};
     uint8_t *base = NULL;
@@ -231,9 +223,7 @@ static void test_tag_two_rejected(void) {
     kvspaceXvalueHeadSetAttrsLen(&h,
                                  (uint16_t)(kvspaceXvalueHeadAttrsLen(&h) + extra));
     memcpy(wire, &h, sizeof h);
-    /* attr 区起点是 16 + bodylen，不是整条 wire 的长度 base_len。早先这里写成
-     * `wire + base_len`，把 tag 2 记录写到了 wire 末尾之外的位置——旧 Scan 的
-     * 循环条件宽松，恰好没读到那段，测试于是「通过」了但什么也没验到。 */
+    
     uint8_t *a = wire + KVSPACE_XVALUE_HEAD_LEN + kvspaceXvalueHeadLen(&h);
     a[0] = 2;
     a[1] = 8;
@@ -252,15 +242,8 @@ static void test_tag_two_rejected(void) {
     free(base);
 }
 
-/* tag 2 的位置无关：它在目标 tag **之前**或**之后**都必须让 GetAttr 返回 -1。
- *
- * 这条专门钉住一个真实缺陷：早先 GetAttr 命中目标 tag 后就 return，于是
- * 「tag 1 在前、tag 2 在后」的 wire 被当成合法读出来——tag 2 是退役编号，
- * 见到它就说明写读双方理解不一致，整条 wire 都不能采信，与它在哪无关。
- *
- * 只测一个位置不够：缺陷恰恰只在「tag 2 排在目标之后」时出现。 */
 static void test_tag_two_position_independent(void) {
-    /* 手工构造 wire：body 3 字节 + 两条 attr 记录，顺序可调。 */
+    
     const uint8_t lt_data[] = "[]char/utf8";
     const uint16_t lt_len = (uint16_t)(sizeof lt_data - 1);
     const uint16_t lt_record = (uint16_t)(3 + lt_len);

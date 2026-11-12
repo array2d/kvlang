@@ -1,19 +1,6 @@
 #ifndef RUNTIMEC_BINRWIR_JIT_REGISTER_ALLOCATION_H
 #define RUNTIMEC_BINRWIR_JIT_REGISTER_ALLOCATION_H
 
-/*
- * 组件：binrwir_compiler/jit/register_allocation
- * 作用：JIT 独占的物理寄存器与 spill 分配合同。每个临时位置必须精确映射回
- *       一个非零 KVspace V.body 地址及其 RWIR 参数序号。
- * 联系：lowering_plan 创建分配；safepoint 依据分配生成写回表；backend 只能
- *       实现既定位置，不得建立无来源的值缓存。
- * 约束：BinRWIR 与 VMBIN 不得消费本合同。寄存器和 spill 都只是 V.body 的
- *       临时派生状态；只有完整完成 logical instruction 的 dirty state 可进入
- *       commit 表。当前指令的 speculative/partial state 在 guard failure/error
- *       时必须丢弃。恢复时全部丢弃。写别名命中读缓存时必须更新或失效，
- *       禁止保留不可见的旧值。
- */
-
 #include <stddef.h>
 #include <stdint.h>
 

@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-"""Require the dynamic library export set to equal interface/exports.txt."""
 
 from __future__ import annotations
 
@@ -7,7 +5,6 @@ import argparse
 import platform
 import subprocess
 from pathlib import Path
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -44,7 +41,6 @@ def main() -> int:
         return 1
     print(f"check_exports: OK ({len(actual)} symbol(s))")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

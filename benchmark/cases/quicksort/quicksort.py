@@ -4,7 +4,6 @@ import sys
 
 sys.setrecursionlimit(10000)
 
-
 def qsort(a, lo, hi):
     if lo < hi:
         pivot = a[hi]
@@ -17,7 +16,6 @@ def qsort(a, lo, hi):
         p = i + 1
         qsort(a, lo, p - 1)
         qsort(a, p + 1, hi)
-
 
 n = int(os.environ["BENCH_SCALE"])
 arr = []

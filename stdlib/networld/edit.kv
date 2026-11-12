@@ -1,23 +1,6 @@
-// 欢迎加入kvspace世界
-// lib networld/edit —— 文件编辑语义（rwfunc，kv 源码）。
-// 与 networld/fs 的分工：fs 管字节与只读检索（size/read/write/readtext/writetext/match/
-// glob/scan/grep），edit 管「改写」这一层语义——
-//   read    行号窗口视图（给 agent 看，不是全文 dump）
-//   write   覆盖写
-//   replace 单处精确替换：old 必须恰命中 1 处，绝不「尽力而为」地改第一处
-//   multi   事务式多处替换：全部成功才落盘
-//   commit  原子落盘（写 <p>.tmp → fs·rename 覆盖 p → 回读校验）；write/replace/multi 都走它
-// 返回码 code：0 成功 / 1 未找到 / 2 歧义（命中多处）/ 3 文件不可读 / 4 写失败 /
-//   5 回读不一致 / 6 两数组长度不等 / 7 非 UTF-8（拒绝改写二进制文件）。
-// 文案由调用方（harness）决定，本库不出话术。
-// 文本约定同 fs：文件按 UTF-8 解码为 []char/utf32 后操作，落盘再编码回 UTF-8。
 
 lib networld/edit {
-	// read(p, from, lines) -> (view, total, sz)：行号窗口视图。
-	//   从第 from 行（1 起）起取 lines 行，每行前缀 "N: "；
-	//   from < 1 视为 1，lines <= 0 视为到末尾。sz = 字节数（-1 = 不可读）；
-	//   超过 8MB 不返回内容：view 空、total = -1（改用 fs·read 分片读）；
-	//   非 UTF-8 文件同样不返回：view 空、total = -2。
+	
 	rwfunc read(*[]char/utf32 #p, *int64 #from, *int64 #lines) -> (
 	          *[]char/utf32 #view, *int64 #total, *int64 #sz) {
 		networld/fs·readtext(*p) -> (t:[]char/utf32, *sz)
@@ -53,8 +36,6 @@ lib networld/edit {
 		}
 	}
 
-	// commit(p, t) -> code：**原子落盘** —— 写 `<p>.tmp` → rename 覆盖 p → 回读校验。
-	//   4 写失败 / 5 回读不一致 / 0 成功；失败时 p 保持原样（不留半截文件）。
 	rwfunc commit(*[]char/utf32 #p, *[]char/utf32 #t) -> (*int64 #code) {
 		*code = 4
 		string·concat(*p, ".tmp") -> tp:[]char/utf32
@@ -68,16 +49,12 @@ lib networld/edit {
 		}
 	}
 
-	// write(p, t) -> (n, code)：UTF-8 覆盖写（原子：临时文件 + rename）+ 回读校验。
-	//   n = 写入字节数（失败 -1）
 	rwfunc write(*[]char/utf32 #p, *[]char/utf32 #t) -> (*int64 #n, *int64 #code) {
 		*n = 0
 		networld/edit·commit(*p, *t) -> *code
 		if (*code == 0) { string·len(*t) -> *n }
 	}
 
-	// replace(p, old, new, dry) -> (done, hit, code)：单处精确替换。
-	//   dry = 1 只预演（不落盘）；old 命中数必须恰为 1，否则一个字节都不动。
 	rwfunc replace(*[]char/utf32 #p, *[]char/utf32 #old, *[]char/utf32 #new,
 	               *int64 #dry) -> (*int64 #done, *int64 #hit, *int64 #code) {
 		*done = 0
@@ -111,9 +88,6 @@ lib networld/edit {
 		}
 	}
 
-	// multi(p, olds, news, dry) -> (done, bad, code)：事务式多处替换。
-	//   逐条精确替换（每条 old 须恰命中 1 处），全部成功才落盘；
-	//   bad = 失败下标（-1 = 无失败），dry = 1 只预演。
 	rwfunc multi(*[]char/utf32 #p, *'[int64]'[]char/utf32 #olds,
 	             *'[int64]'[]char/utf32 #news, *int64 #dry) -> (
 	             *int64 #done, *int64 #bad, *int64 #code) {

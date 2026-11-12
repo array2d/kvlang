@@ -1,8 +1,4 @@
-// binary trees benchmark — 建满二叉树并遍历计数（内存分配 + 指针/引用）
-// 节点用 L/R 子结点 id 映射表示（id 0 = 空），自顶向下显式栈建树，
-// 再用遍历栈跟随指针逐结点计数。深度 depth 由 __SCALE__ 占位（勿改逻辑）
-// 期望输出（depth=6 时）:
-//   bintree: nodes = 127
+
 rwfunc test() -> () {
 	__SCALE__ -> depth:int64
 	L:'[int64]'int64 = {}

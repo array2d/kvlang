@@ -1,11 +1,5 @@
 #!/usr/bin/env node
-/**
- * 中英内容一致性校验：
- *  1. 两份 JSON 的键路径集合相同（数组按元素 schema 抽样）；
- *  2. 同一数组在两份文件里长度相同；
- *  3. 不可翻译字段（href/code/source/image/arch/name）逐字一致；
- *  4. 可翻译必填字段非空。
- */
+
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,7 +11,7 @@ const data = Object.fromEntries(
 );
 
 const UNTRANSLATABLE = new Set(["href", "code", "source", "image", "arch", "name"]);
-/** 这些链接按语言不同：导航的 Runtimes 入口与语言切换。 */
+
 const LOCALE_AWARE = [/^nav\.items\[\d+\]\.href$/, /^(?:.*\.)?nav\.switch\.href$/];
 const REQUIRED = new Set([
   "title", "label", "lead", "body", "notes", "description",

@@ -1,9 +1,4 @@
-// 判据：{} 的形态由写目标类型决定——Point 是 struct，
-// []char/utf8·int64 是 map。若只看花括号不看上下文，二者会混。
-// 依据：03-类型系统/17-struct.kv、14-map容器.kv。
-// 期望输出:
-//   7
-//   9
+
 struct Point {
 	x:int64=0
 	y:int64=0

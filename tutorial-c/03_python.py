@@ -1,14 +1,9 @@
-#!/usr/bin/env python3
-"""03_python — ctypes 直调 libkvspace（dispatch 前端），shm:// 后端
-head 固定 16 字节 [bodylen:u64@0][attrslen:u16@8][padding:6@10-15]，body 偏移恒 16，
-langtype 在 body 之后的 attr 区。bodylen 恒为有效字节数，容量归存储后端。"""
 
 import ctypes
 import os
 import struct
 import sys
 
-# 库路径走命令行参数：全生态只允许 `KVSPACE` 一个环境变量，路径类输入一律显式给。
 if len(sys.argv) != 2:
     print("usage: 03_python.py <path/to/libkvspace.so>", file=sys.stderr)
     sys.exit(2)
@@ -22,14 +17,7 @@ CCHARPP = ctypes.POINTER(ctypes.c_char_p)
 KVSPACE_XVALUE_HEAD_LEN = 16
 KVLANG_XVALUE_ATTR_TAG_LANGTYPE = 1
 
-
 def xvalue_head_scan(wire):
-    """扫描 16 字节 head + attr 区，返回 langtype_bytes（无记录/坏 wire → b""）。
-
-    与 C 的 `kvspaceXvalueGetAttr` 同语义；Python 侧没有 inline 头可用，
-    这里按线格式直接解，**不复制 C 的结构体字段**（那是第二份字段真相）。
-    wire: [bodylen:u64][attrslen:u16][padding:6][body][attrs]
-    """
     if len(wire) < KVSPACE_XVALUE_HEAD_LEN:
         return b""
     bodylen = int.from_bytes(wire[0:8], "little")
@@ -47,27 +35,22 @@ def xvalue_head_scan(wire):
         if tag == KVLANG_XVALUE_ATTR_TAG_LANGTYPE:
             langtype = bytes(wire[p + 3:p + 3 + rlen])
         elif tag == 2:
-            return b""  # 旧 reallen tag 已删除，出现即拒
+            return b""
         p += 3 + rlen
         left -= 3 + rlen
     return langtype
 
-
 def xvalue_head_effective_len(wire):
-    """有效长度 = bodylen（head 里没有 layout，也没有 tag 2）。"""
     if len(wire) < KVSPACE_XVALUE_HEAD_LEN:
         return None
     return int.from_bytes(wire[0:8], "little")
-
 
 def bind(fn, args, restype):
     fn.argtypes = args
     fn.restype = restype
 
-
 bind(lib.kvspaceConnect, [ctypes.c_char_p], ctypes.c_void_p)
 bind(lib.kvspaceClose, [ctypes.c_void_p], None)
-# 新 ABI 三个动作：resolve 拿 offset / realloc 拿写入位置 / listlen+list 枚举目录。
 bind(lib.kvspaceResolveOffset, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64,
                           U64P, ctypes.c_char_p, ctypes.c_uint32], ctypes.c_int)
 bind(lib.kvspaceRealloc, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_uint64,
@@ -85,15 +68,12 @@ bind(lib.kvspaceListlen, [ctypes.c_void_p, ctypes.c_char_p,
 bind(lib.kvspaceList, [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p,
                        ctypes.c_uint32, U32P, U32P, U64P, ctypes.c_char_p,
                        ctypes.c_uint32], ctypes.c_int)
-# 值区基址：offset 只有加上它才是地址。
 bind(lib.kvspaceXvalueInProcessAddress, [ctypes.c_void_p], U8P)
 
 ERR = ctypes.create_string_buffer(256)
 
-
 def err_text(buf):
     return buf.value.decode(errors="replace")
-
 
 class KV:
     def __init__(self, path):
@@ -123,14 +103,9 @@ class KV:
         self.close()
 
     def _addr(self, offset):
-        # 必须是 base.contents 而不是 base：base 本身是「指向基址的指针变量」，
-        # byref(base, off) 偏移的是那个指针变量的地址（栈上），不是它指向的值区。
-        # 这个错法不会崩在所有平台上——偏移小的时候恰好落进可读写区，读出来是
-        # 垃圾；偏移大就直接段错。用 .contents 才是「基址 + offset」。
         return ctypes.byref(self.base.contents, offset)
 
     def set(self, key, langtype, body):
-        """realloc 出 body+attr 空间，再直接写 base+offset。"""
         lt = langtype.encode() if langtype else b""
         attr_len = 3 + len(lt) if lt else 0
         off = ctypes.c_uint64()
@@ -149,9 +124,6 @@ class KV:
             ctypes.memmove(self._addr(a + 3), lt, len(lt))
 
     def get(self, key):
-        """resolve 拿 offset，在 base+offset 处解 head/body/attr。
-
-        返回 (kind, body)；不存在或 wire 不合法返回 None。"""
         off = ctypes.c_uint64()
         err = ctypes.create_string_buffer(256)
         rc = lib.kvspaceResolveOffset(self.kv, key.encode(), 0, ctypes.byref(off),
@@ -186,7 +158,6 @@ class KV:
         lib.kvspaceMkindex(self.kv, path.encode(), err, 256)
 
     def list(self, prefix):
-        """listlen 给 N/M，list 一次取全部名字（NUL 分隔）。"""
         count = ctypes.c_int64()
         max_name = ctypes.c_uint32()
         err = ctypes.create_string_buffer(256)
@@ -209,7 +180,6 @@ class KV:
             if name:
                 names.append(name.decode())
         return names
-
 
 with KV("/tmp/kvspace_py.shm") as kv:
     kv.mkindex("/py/")

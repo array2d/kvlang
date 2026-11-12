@@ -1,29 +1,3 @@
-#!/usr/bin/env python3
-"""kvlang 跨语言 / 跨后端性能基准。
-
-同一算法四份逻辑等价实现（cases/<name>/<name>.{kv,py,rs,c}）。
-kvlang 是被测对象，分别在三个 kvspace 后端上跑，各占一列：
-    kvlang_shm    —— libkvspace 共享内存（shm://，内存态地板）
-    kvlang_fs     —— kvspace-durable 文件后端（fs://）
-    kvlang_redis  —— kvspace-durable redis 后端（redis://）
-python / rust / c 与后端无关，作原生/脚本基线各一列。
-
-设计目标：跨版本长期可比。
-- 例子规模写死在各实现里，勿随版本改动；每份实现打印 `__bench_input: <规模>`
-  （仅 kvlang 那份被采纳，与语言无关），落 csv 的 input 列。
-- 计时约定稳定：每份实现打印一行 `__bench_ns: <整数纳秒>`，功能输出在前。
-- 每次运行落一个独立快照文件 results/results-<tag>-<UTC 时间戳>.csv，
-  文件名带 kvlang 版本与运行时刻；行内另记 python/rust/c 工具链版本。
-
-用法：
-    python3 benchmark/run.py                 # 全部 case，min of 3，写快照
-    python3 benchmark/run.py -k prime_sieve  # 只跑某 case
-    python3 benchmark/run.py --repeat 1      # 快跑（不取 min）
-    python3 benchmark/run.py --backends shm,fs   # 只跑部分后端
-    python3 benchmark/run.py --no-write      # 只打印不落 csv
-    python3 benchmark/run.py --no-stdlib     # 向 kvlang 追加 --no-stdlib（跳过 stdlib 引导，隔离用户代码）
-    python3 benchmark/run.py --show          # 汇总 results/ 历史，不跑
-"""
 import argparse
 import csv
 import os
@@ -42,18 +16,11 @@ CASES_DIR = ROOT / "cases"
 RESULTS_DIR = ROOT / "results"
 BENCH_RE = re.compile(r"__bench_ns:\s*(\d+)")
 INPUT_RE = re.compile(r"__bench_input:\s*(.+)")
-# 输出算子名由**调用方**告诉驱动（TASK-044 后 runtimec 目录 grep 必须为 0，
-# 驱动不内置任何算子名）。这不是 case 契约的一部分，只是运行器管线的输入。
 OPERATORS = "println,print"
-KV_BACKENDS = ("shm", "fs", "redis")  # kvlang 三后端列顺序
+KV_BACKENDS = ("shm", "fs", "redis")
 NATIVE = ("python", "rust", "c")
 EXT = {"kvlang": ".kv", "python": ".py", "rust": ".rs", "c": ".c"}
 
-# 输入规模阶梯：每个 case 在这一串规模上各跑一遍，逐点落一行 csv。
-# 规模点亦属冻结契约——一经确定勿改，跨版本才可按同一规模对比。
-# scale 传入方式：kvlang 走源码 __SCALE__ 占位替换；python/rust/c 走环境变量 BENCH_SCALE。
-# 上限刻意放低，确保三后端全量约 1 小时内跑完（v0.2.5 每操作一次 KV 往返、常数因子仍大，
-# 后续版本会持续优化、逐步逼近 python，这套快照正是用来逐版本追踪那条加速曲线的）。
 SWEEP = {
     "iops":          [500, 1000, 2000],
     "prime_sieve":   [50, 75, 100],
@@ -66,10 +33,8 @@ SWEEP = {
     "matmul":        [4, 6, 8],
     "k_nucleotide":  [3, 5, 8],
 }
-SCALE_ENV = "BENCH_SCALE"   # python/rust/c 从此环境变量读规模
-SCALE_TOKEN = "__SCALE__"   # kvlang 源码里的规模占位符
-# case 结构版本：历史 CSV 一律视为 1（不回填）；改 case 结构或计时代码路径必须 +1，
-# 只改注释/无关字段不升。跨 harness_rev 只能看趋势，不能做精确回归判定。
+SCALE_ENV = "BENCH_SCALE"
+SCALE_TOKEN = "__SCALE__"
 HARNESS_REV = 2
 FIELDS = ["timestamp", "version", "commit", "cpu", "case", "input", "samples",
           "kvlang_shm_ns", "kvlang_fs_ns", "kvlang_redis_ns",
@@ -77,11 +42,9 @@ FIELDS = ["timestamp", "version", "commit", "cpu", "case", "input", "samples",
           "python_ver", "rust_ver", "c_ver", "native_opt", "valid",
           "harness_rev"]
 
-
 def sh(cmd, timeout=None, env=None):
     return subprocess.run(cmd, capture_output=True, text=True,
                           timeout=timeout, env=env)
-
 
 def git_version():
     v = sh(["git", "-C", str(KVLANG_ROOT), "describe", "--tags", "--always",
@@ -90,23 +53,18 @@ def git_version():
             "HEAD"]).stdout.strip() or "unknown"
     return v, c
 
-
 def git_tag():
     return sh(["git", "-C", str(KVLANG_ROOT), "describe", "--tags",
                "--abbrev=0"]).stdout.strip() or "v0"
 
-
 def tool_versions():
-    """python / rust / c 工具链版本，随 csv 落盘——基线也会随工具升级而变。"""
     py = platform.python_version()
     rm = re.search(r"rustc (\S+)", sh(["rustc", "--version"]).stdout)
     g = sh(["gcc", "--version"]).stdout.splitlines()
     gm = re.search(r"(\d+\.\d+\.\d+)", g[0]) if g else None
     return py, (rm.group(1) if rm else "unknown"), (gm.group(1) if gm else "unknown")
 
-
 def cpu_model():
-    """CPU 型号——跨机对比的前提。"""
     try:
         for ln in Path("/proc/cpuinfo").read_text().splitlines():
             if ln.startswith("model name"):
@@ -115,9 +73,7 @@ def cpu_model():
         pass
     return platform.processor() or "unknown"
 
-
 def parse(out):
-    """(bench_ns|None, input|None, 功能输出) —— 剥掉两种标记行，其余为功能输出。"""
     ns, inp, func = None, None, []
     for ln in out.splitlines():
         m, mi = BENCH_RE.search(ln), INPUT_RE.search(ln)
@@ -129,12 +85,7 @@ def parse(out):
             func.append(ln)
     return ns, inp, "\n".join(func).rstrip()
 
-
-# 禁用 -O2/-O3 的过度优化：那些优化会把无外部副作用的循环闭式折叠/消除
-# （iops 的 a+=1 在 gcc -O2 下 2000 次循环塌成常量，88ns 纯失真），
-# -O1 保留真实工作量又不做激进变换。python 解释执行无编译期优化，不涉及。
 NATIVE_OPT = "gcc -O1 / rustc opt-level=1 / cpython"
-
 
 def compile_native(lang, src, workdir):
     exe = workdir / "bench.out"
@@ -146,7 +97,6 @@ def compile_native(lang, src, workdir):
         raise RuntimeError(f"{lang} 编译失败:\n{cc.stderr}")
     return [str(exe)]
 
-
 def kv_dsn(label, workdir, redis_dsn):
     if label == "shm":
         return f"shm://{workdir}/bench.shm"
@@ -154,9 +104,7 @@ def kv_dsn(label, workdir, redis_dsn):
         return f"fs://{workdir}/bench.fs"
     return redis_dsn
 
-
 def kv_reset(label, workdir, redis_dsn):
-    """每次采样前清空该后端，杜绝残留污染。"""
     if label == "shm":
         Path(f"{workdir}/bench.shm").unlink(missing_ok=True)
     elif label == "fs":
@@ -167,9 +115,7 @@ def kv_reset(label, workdir, redis_dsn):
         sh(["redis-cli", "-h", host or "127.0.0.1", "-p", port or "6379",
             "flushall"], timeout=10)
 
-
 def run_kvlang(case_dir, label, args, workdir, scale):
-    # kvlang 无从脚本读环境变量的 builtin，故按规模把源码里的 __SCALE__ 占位替换后落临时文件再跑。
     text = (case_dir / (case_dir.name + ".kv")).read_text()
     src = workdir / (case_dir.name + ".kv")
     src.write_text(text.replace(SCALE_TOKEN, str(scale)))
@@ -178,8 +124,6 @@ def run_kvlang(case_dir, label, args, workdir, scale):
     def _run():
         kv_reset(label, workdir, args.redis)
         env = {**os.environ, "KVSPACE": dsn}
-        # vthread 的创建与运行分两步：create 只建状态并打印 vid，run 从该 vid
-        # 的持久化 ‥pc 推进。计时段是 run 的 stdout，不含 create 的 vid 行。
         create = [args.kvlang_bin, "create", str(src), f"--operators={OPERATORS}"]
         if args.no_stdlib:
             create.append("--no-stdlib")
@@ -200,9 +144,7 @@ def run_kvlang(case_dir, label, args, workdir, scale):
         return r.stdout
     return _run
 
-
 def run_native(lang, case_dir, workdir, scale):
-    # python/rust/c 源码不含占位符，规模经环境变量 BENCH_SCALE 传入（编译与规模无关，只运行时读取）。
     src = case_dir / (case_dir.name + EXT[lang])
     if lang == "python":
         cmd = [sys.executable, str(src)]
@@ -214,9 +156,7 @@ def run_native(lang, case_dir, workdir, scale):
         return sh(cmd, timeout=300, env=env).stdout
     return _run
 
-
 def sample(runner, repeat, func_sink, key):
-    """返回 (min_ns|None, input|None)。"""
     best, inp = None, None
     for _ in range(repeat):
         ns, i, f = parse(runner())
@@ -226,7 +166,6 @@ def sample(runner, repeat, func_sink, key):
         if ns is not None and (best is None or ns < best):
             best = ns
     return best, inp
-
 
 def bench_case(case_dir, args, scale):
     best, func, case_input = {}, {}, None
@@ -258,15 +197,12 @@ def bench_case(case_dir, args, scale):
                       file=sys.stderr)
                 best[lang] = None
     present = [func[k] for k in func if best.get(k) is not None]
-    # valid 的前提：每个被测后端都必须有 kvlang 数据——kvlang 失败/无 __bench_ns
-    # 不再被 python/rust/c 的一致性掩盖。
     kv_ok = all(best.get(f"kvlang_{l}") is not None for l in args.backends)
     valid = kv_ok and len(present) >= 2 and all(x == present[0] for x in present)
     if not kv_ok:
         print(f"  ! {case_dir.name}: kvlang 无有效数据 → valid=False",
               file=sys.stderr)
     return best, valid, case_input
-
 
 def fmt_ns(ns):
     if ns is None:
@@ -279,20 +215,16 @@ def fmt_ns(ns):
         return f"{ns/1e3:.3f}µs"
     return f"{ns}ns"
 
-
 NS_HDR = ("kv-shm", "kv-fs", "kv-redis", "python", "rust", "c")
 COLS = ("kvlang_shm", "kvlang_fs", "kvlang_redis", "python", "rust", "c")
-
 
 def print_header():
     print(f"{'case':<14}{'input':<14}" + "".join(f"{h:>11}" for h in NS_HDR)
           + "  valid")
 
-
 def print_row(name, inp, best, valid):
     cells = "".join(f"{fmt_ns(best.get(c)):>11}" for c in COLS)
     print(f"{name:<14}{(inp or '-'):<14}{cells}  {valid}")
-
 
 def show_history():
     files = sorted(RESULTS_DIR.glob("results-*.csv"))
@@ -302,7 +234,6 @@ def show_history():
     rows = []
     for fp in files:
         with fp.open() as f:
-            # 只认本脚本产出的快照；带 `#` 元数据头的 release CSV 无 version 列，跳过。
             rows.extend(r for r in csv.DictReader(f) if r.get("version"))
     if not rows:
         print("results/ 快照为空")
@@ -319,7 +250,6 @@ def show_history():
         print(f"{r['version']:<{w}}{r['case']:<14}"
               f"{(r.get('input') or '-'):<{iw}}{cells}  {r.get('valid', '-')}")
 
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-k", "--filter", default="", help="只跑名字含此串的 case")
@@ -328,9 +258,6 @@ def main():
                     help="kvlang 后端子集，逗号分隔（shm,fs,redis）")
     ap.add_argument("--redis", default="redis://127.0.0.1:6379",
                     help="redis 后端 DSN")
-    # 默认用 runtimec 的驱动，不是 byteseek：byteseek 内嵌的是 **runtimec2**
-    # （`libkvlang_runtimec2.so`），那是已冻结的旧运行时；本仓当前主线是
-    # `runtimec/`，`bin/kvlangrun` 才是它的命令行入口。
     ap.add_argument("--kvlang-bin",
                     default=str(Path(__file__).resolve().parent.parent / "bin" / "kvlangrun"))
     ap.add_argument("--no-stdlib", action="store_true",
@@ -397,7 +324,6 @@ def main():
         wr.writeheader()
         wr.writerows(rows)
     print(f"\n→ 写入 {len(rows)} 行到 {out_path.relative_to(KVLANG_ROOT)}")
-
 
 if __name__ == "__main__":
     main()

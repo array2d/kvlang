@@ -1,9 +1,4 @@
-//! Wrapper <-> C constructor round-trip tests.
-//!
-//! 固定 16 字节 head：[bodylen:u64 LE@0][attrslen:u16 LE@8][padding:6@10-15]，body@16，
-//! attr 紧随 body 且没有长度前缀，total = 16 + bodylen + attrslen。
-//! record = [tag:u8][len:u16 LE][data]，tag 1 = langtype；tag 2（旧 reallen）已删除，出现即拒。
-//! 构造走 C 的 kvlangXvalueHeadNew*，读侧用 xvalue::from_wire 本地解析。
+
 use kvspace::xvalue;
 use std::os::raw::c_char;
 extern "C" {
@@ -37,9 +32,7 @@ extern "C" {
     ) -> i32;
     fn free(p: *mut std::ffi::c_void);
 }
-/// C constructor oracle: (ref, body, langtype) -> full wire.
-///
-/// ref 只决定走哪个构造器（NewPtr/NewExt 会补 `*`/`@` 前缀）；head 里没有 ptr 位。
+
 fn c_new(r#ref: u8, body: &[u8], langtype: &str) -> Vec<u8> {
     let lt = std::ffi::CString::new(langtype).unwrap();
     let mut out: *mut u8 = std::ptr::null_mut();
@@ -62,9 +55,7 @@ fn c_new(r#ref: u8, body: &[u8], langtype: &str) -> Vec<u8> {
     unsafe { free(out as *mut std::ffi::c_void) };
     v
 }
-/// 独立 wire 解析器 -> (ref, body, langtype)，并校验 head/attr 自洽。
-///
-/// 只读 head 与 attr 区，不调用 xvalue::from_wire——两边各自独立实现。
+
 fn c_peek(data: &[u8]) -> (u8, Vec<u8>, String) {
     assert!(data.len() >= xvalue::HEAD_LEN, "shorter than one head");
     let mut body_len: u64 = 0;
@@ -124,7 +115,7 @@ fn wrapper_reads_c_peeks() {
         c_peek(&xvalue::float64(1.5)),
         (xvalue::REF_INLINE, 1.5f64.to_le_bytes().to_vec(), none.clone()),
     );
-    let s = "héllo"; // 5 chars, 6 bytes
+    let s = "héllo"; 
     c.eq(
         "str",
         c_peek(&xvalue::string(s)),
@@ -135,7 +126,7 @@ fn wrapper_reads_c_peeks() {
         c_peek(&xvalue::index()),
         (xvalue::REF_INLINE, Vec::new(), none.clone()),
     );
-    // 引用性由构造器补的前缀表达：NewPtr -> `*`，NewExt -> 裸 `@`。
+    
     c.eq(
         "link",
         c_peek(&xvalue::link("/t/x")),
@@ -168,13 +159,13 @@ fn c_new_wrapper_reads() {
         xvalue::from_wire(&enc),
         (xvalue::REF_EXT, &b"s3://b/k"[..]),
     );
-    // 畸形 / 缺 attr -> 空。
+    
     c.eq(
         "garbage",
         xvalue::from_wire(&[0u8, 1, 2, 3]),
         (xvalue::REF_INLINE, &[][..]),
     );
-    // 16 字节 head：bodylen=1、attrslen=0、padding 全零、body=42。
+    
     let mut minimal = vec![1u8, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     minimal.extend_from_slice(&[0u8; 6]);
     minimal.push(42);

@@ -1,4 +1,4 @@
-// Command json rwirext 以独立进程启动 json.to/json.from 外部执行器。
+
 package main
 
 import (

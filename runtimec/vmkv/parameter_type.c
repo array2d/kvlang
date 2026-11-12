@@ -1,8 +1,3 @@
-/*
- * 组件：vmkv/parameter_type 的实现
- * 作用：langtype 文本 → 单值 TypeSet；并集、空、未知种类分别返回明确结果。
- * 约束：不做名称归一化；`known_kind` 之外的基种类一律 UNMAPPED。
- */
 
 #include "vmkv/parameter_type.h"
 
@@ -17,7 +12,6 @@ typedef struct vmkv_parameter_kind_name {
     uint32_t type_set;
 } vmkv_parameter_kind_name_t;
 
-/* 19 位类别表里的基种类；顺序与位号无关，查找不看顺序。 */
 static const vmkv_parameter_kind_name_t vmkv_parameter_kind_names[] = {
     {"int8", VMKV_RWIR_TYPE_SET_INT8},
     {"int16", VMKV_RWIR_TYPE_SET_INT16},
@@ -43,8 +37,6 @@ static bool vmkv_parameter_text_equals(runtimec_string_view_t text,
            (size == 0U || memcmp(text.data, value, size) == 0);
 }
 
-
-/* 基种类 → 标量类别的位；未知返回 0。 */
 static uint32_t vmkv_parameter_scalar_type_set(runtimec_string_view_t base) {
     const size_t count = sizeof(vmkv_parameter_kind_names) /
                          sizeof(vmkv_parameter_kind_names[0]);
@@ -63,10 +55,9 @@ static bool vmkv_parameter_type_set_is_character(uint32_t type_set) {
                         VMKV_RWIR_TYPE_SET_CHARACTER_ASCII)) != 0U;
 }
 
-/* 形状 `[dims]kind`：按基种类归类，字符基优先于数组位。 */
 static vmkv_parameter_type_result_t vmkv_parameter_classify_shape(
     runtimec_string_view_t langtype, uint32_t *output_type_set) {
-    /* 连续形状段 `[a][b]…kind`：每一段都必须闭合，基种类在最后一段之后。 */
+    
     size_t base_offset = 0U;
     while (base_offset < langtype.size && langtype.data[base_offset] == '[') {
         const char *closing = memchr(langtype.data + base_offset, ']',
@@ -81,7 +72,7 @@ static vmkv_parameter_type_result_t vmkv_parameter_classify_shape(
     }
     const runtimec_string_view_t base = runtimec_string_view_make(
         langtype.data + base_offset, langtype.size - base_offset);
-    /* map 形态（首字符 `'`）不是标量基种类：与 `[`/`/`/并集同列，返回 INVALID。 */
+    
     if (base.data[0] == '[' || base.data[0] == '/' || base.data[0] == '\'' ||
         memchr(base.data, VMKV_PARAMETER_TYPE_UNION_SEPARATOR, base.size) !=
             NULL) {
@@ -117,32 +108,12 @@ vmkv_parameter_type_result_t vmkv_parameter_type_classify(
                langtype.size) != NULL) {
         return VMKV_PARAMETER_TYPE_RESULT_UNION;
     }
-    /*
-     * 指针/引用值：首字节 `*` 即指针类别，**不看指向什么**。
-     *
-     * `*T`、`**T`（rwfunc 帧槽形态，见 `04-函数调用.kv` 的参数槽条款）、
-     * `*[dims]T`、指向结构体原型的指针，一律落 `VMKV_RWIR_TYPE_SET_POINTER`。理由：
-     * 特化改选只问「两侧是不是同类指针」（`rwir_alias_table.def` 的
-     * `!=` → `ptreq·not` 记录），指向的类型不影响这次选择；把它拆细等于在
-     * 分类层复制一份类型表。
-     *
-     * 判据是**首字节**而不是 `strip_prefix("*")` 后非空：`**T` 同样要进这一支，
-     * 它的第一个 `*` 之后还是 `*`，任何「剥一层再看」的写法都会把它漏成裸名。
-     */
+    
     if (langtype.data[0] == '*') {
         *output_type_set = VMKV_RWIR_TYPE_SET_POINTER;
         return VMKV_PARAMETER_TYPE_RESULT_SINGLE;
     }
-    /*
-     * **map 类型：首字符是单引号**（issue #631 文法 `'<formatter>'<value>`）。
-     *
-     * 旧判据是「整串含 `·`」（`K·V`），改名后类型串里的 `·` 已彻底消除，
-     * 那个判据恒假 ⇒ map 落不进 `map·new` 的写掩码（bit 15 STRING_KEY_MAP）
-     * ⇒ `code=26 result type is outside the capability mask`。
-     *
-     * 与 layout 的 `kvkind::is_map_langtype` **同一个语义**：只答「是不是 map 形态」，
-     * 不答「合不合法」（合法性由 `contract/langtype` 的 form 校验）。
-     */
+    
     if (langtype.data[0] == '\'') {
         *output_type_set = VMKV_RWIR_TYPE_SET_STRING_KEY_MAP;
         return VMKV_PARAMETER_TYPE_RESULT_SINGLE;
@@ -174,6 +145,6 @@ runtimec_string_view_t vmkv_parameter_type_name(uint32_t type_set) {
                 vmkv_parameter_kind_names[ordinal].text);
         }
     }
-    /* array / structref / pointer 没有单段规范名，由调用方持有原文本。 */
+    
     return runtimec_string_view_make(NULL, 0U);
 }

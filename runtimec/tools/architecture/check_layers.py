@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-"""Enforce the runtimec component graph and its single execution-policy merge."""
 
 from __future__ import annotations
 
@@ -12,7 +10,6 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-
 
 SOURCE_SUFFIXES = {".c", ".h"}
 PRODUCT_DIRECTORIES = (
@@ -72,12 +69,8 @@ INTERNAL_PREFIXES = {
 }
 POLICY_LAYERS = {"binrwir_compiler", "vmbin"}
 EXECUTION_WINDOW_FILES = {"engine/execution_window.c", "engine/execution_window.h"}
-# 所有权不等于分派权：session 是 owner graph 的根，必须持有 host services、vmkv encoder、
-# BinRWIR Compiler 与 compilation repository，所以它引入两个执行层是职责，不是绕过。
-# 真正该防的「谁在选择执行器」由 DISPATCH_OWNER_FILES 那条直接守。
 ENGINE_OWNER_FILES = EXECUTION_WINDOW_FILES | {"engine/session.c", "engine/session.h"}
 DISPATCH_OWNER_FILES = EXECUTION_WINDOW_FILES
-# 每个执行入口的「定义 + 声明」所在模块（不含后缀）；调用只允许执行窗口。
 EXECUTION_ENTRY_POINTS = {
     "vmbin_execute(": "vmbin/interpreter",
     "binrwir_jit_execute(": "binrwir_compiler/jit/executor",
@@ -114,22 +107,16 @@ C_NON_CODE_PATTERN = re.compile(
     r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
     re.DOTALL,
 )
-# 只有 JIT 拥有的存储形态：寄存器文件、寄存器分配、寄存器描述符、spill 槽。
-# 裸 `register` 不算——`register_parameters`（登记参数）是普通动词。
 JIT_EXCLUSIVE_STORAGE_PATTERN = re.compile(
     r"(?:register[ _]?file|register[ _]?allocation|register[ _]?allocator|"
     r"register[ _]?desc(?:riptor)?|virtual[ _]?register|"
     r"spill[ _]?slot|spill[ _]?state|spilled?[ _]?register)",
     re.IGNORECASE,
 )
-# 合同只有**一个定义点**：`contract/kvspace_access.h`。二进制接口版本宏随
-# `contract/host_services.h` 一起删除——那张函数指针表没了，就没有「表版本」这件
-# 事可 pin。判据从「版本一致」换成「唯一锚点存在且被唯一实现在 .c」。
 CONTRACT_HEADER = ("contract", "kvspace_access.h")
 CONTRACT_IMPLEMENTATION = ("contract", "kvspace_access.c")
 BODY_OFFSET_DEFINITION = re.compile(
     r"#define\s+RUNTIMEC_XVALUE_BODY_OFFSET_BYTES\s+(\S+)")
-# 裁决 decision-vmbin-data-path §2：+8 只有一处实现，在合同里。
 CONTRACT_BODY_ADDRESS_FUNCTION = "runtimec_xvalue_body_address("
 CONTRACT_BODY_ADDRESS_DERIVATION = "xvalue_address + RUNTIMEC_XVALUE_BODY_OFFSET_BYTES"
 REQUIRED_BODY_ADDRESS_DERIVATION_TOKENS = (
@@ -143,8 +130,6 @@ REMOVED_VALUE_CACHE_PATTERN = re.compile(
     r"payload_low|payload_high)\b",
     re.IGNORECASE,
 )
-# 部署约束：runtimec 只以共享库形态被嵌入扩展 runtime（如 byteseek），
-# 产品源不得拥有进程入口与进程级 hook。
 PROCESS_ENTRY_PATTERN = re.compile(r"\bint\s+main\s*\(")
 PROCESS_GLOBAL_HOOK_PATTERN = re.compile(
     r"\b(?:atexit|signal|sigaction|pthread_create)\s*\(")
@@ -160,8 +145,6 @@ HARDCODED_XVALUE_BODY_OFFSET_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-
-# 规则是封闭集合：新增判据必须先登记，否则 Finding 构造时立刻失败。
 AUDIT_RULES = (
     "addressed-binrwir-layout",
     "addressed-binrwir-offset",
@@ -200,7 +183,6 @@ AUDIT_RULES = (
 PRECONDITION_RULES = ("missing-runtimec",)
 RULES = AUDIT_RULES + PRECONDITION_RULES
 
-
 @dataclass(frozen=True, order=True)
 class Finding:
     path: str
@@ -215,7 +197,6 @@ class Finding:
     def render(self) -> str:
         return f"{self.path}:{self.line}: [{self.rule}] {self.detail}"
 
-
 def parse_arguments(command_arguments: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -228,19 +209,16 @@ def parse_arguments(command_arguments: list[str]) -> argparse.Namespace:
                         help="prove every rule can fire, using synthetic fixtures")
     return parser.parse_args(command_arguments)
 
-
 def locate_runtimec(source_root: Path) -> tuple[Path, Path]:
     source_root = source_root.resolve()
     return ((source_root.parent, source_root) if source_root.name == "runtimec"
             else (source_root, source_root / "runtimec"))
-
 
 def relative_display(path: Path, repository_root: Path) -> str:
     try:
         return path.resolve().relative_to(repository_root).as_posix()
     except ValueError:
         return path.as_posix()
-
 
 def layer_for_relative(relative: PurePosixPath) -> str | None:
     if not relative.parts:
@@ -250,7 +228,6 @@ def layer_for_relative(relative: PurePosixPath) -> str | None:
     if relative.parts[0] == "generated":
         return "contract"
     return relative.parts[0] if relative.parts[0] in KNOWN_LAYERS else None
-
 
 def inferred_include_layer(token: str) -> str | None:
     parts = tuple(part for part in PurePosixPath(token).parts if part not in {".", ".."})
@@ -264,7 +241,6 @@ def inferred_include_layer(token: str) -> str | None:
         return None
     return parts[0] if parts[0] in INTERNAL_PREFIXES else None
 
-
 def resolve_include(
     token: str, source: Path, runtimec_root: Path, repository_root: Path,
 ) -> Path | None:
@@ -273,26 +249,13 @@ def resolve_include(
         runtimec_root / token,
         runtimec_root / "include" / token,
         *(runtimec_root / directory / token for directory in INTERNAL_PREFIXES),
-        # kvlang 仓**自己**的 include/（`include/kvlang/xvalue.h`、`const.h` 等，
-        # TASK-082 从 kvspace 搬来的语言层头）。不列这一项时 `<kvlang/xvalue.h>`
-        # 解析不到，会退到按 token 前缀猜、猜成 runtimec 的 public 层——实测报
-        # 9 条假的 forbidden-layer-edge。
         repository_root / "include" / token,
         repository_root / token,
-        # kvspace 头只有 kvspace 仓自己的 include/ 一个定义点；kvlang/include 下
-        # 的同名副本早已删除，构建对它还有 FATAL_ERROR 守卫，所以这里不再列它。
         repository_root.parent / "kvspace" / "include" / token,
     ]
     return next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
 
-
 def function_body(code: str, name: str) -> tuple[str, int] | None:
-    """Return the brace-matched body of the definition `name`, and its offset.
-
-    A prototype (`..._;`) before the first `{` means there is no body. Comments and
-    literals are masked first so a brace or a decoy call inside them can neither skew the
-    brace matching nor satisfy a token count; masking an already masked text is a no-op.
-    """
     code = c_code_without_comments_or_literals(code)
     start = code.find(name + "(")
     while start >= 0:
@@ -313,7 +276,6 @@ def function_body(code: str, name: str) -> tuple[str, int] | None:
                 return code[opening:index + 1], opening
     return None
 
-
 def iter_product_sources(runtimec_root: Path):
     for directory_name in PRODUCT_DIRECTORIES:
         directory = runtimec_root / directory_name
@@ -321,7 +283,6 @@ def iter_product_sources(runtimec_root: Path):
             for path in sorted(directory.rglob("*")):
                 if path.is_file() and path.suffix in SOURCE_SUFFIXES:
                     yield path
-
 
 def cmake_target_dependencies(cmake_text: str) -> dict[str, set[str]]:
     dependencies: dict[str, set[str]] = {}
@@ -331,12 +292,10 @@ def cmake_target_dependencies(cmake_text: str) -> dict[str, set[str]]:
         dependencies.setdefault(target, set()).update(tokens)
     return dependencies
 
-
 def c_code_without_comments_or_literals(text: str) -> str:
     return C_NON_CODE_PATTERN.sub(
         lambda match: re.sub(r"[^\n]", " ", match.group(0)), text,
     )
-
 
 def struct_fields(code: str, tag: str, alias: str) -> tuple[str, ...] | None:
     match = re.search(
@@ -352,7 +311,6 @@ def struct_fields(code: str, tag: str, alias: str) -> tuple[str, ...] | None:
         for declaration in match.group(1).split(";")
         if declaration.strip()
     )
-
 
 def audit_addressed_binrwir_model(
     runtimec_root: Path, repository_root: Path,
@@ -473,13 +431,6 @@ def audit_addressed_binrwir_model(
                     display, 1, "addressed-binrwir-offset", assertion,
                 ))
 
-    # 裁决 A.1：参数是引用，不是地址。唯一携带地址的是 STATIC。
-    #
-    # **2026-11-05 语义放宽**：STATIC 的 payload 现在允许 `BINRWIR_BODY_ADDRESS_NONE`
-    # ——写目标的 key 允许在编码期尚不存在（首次写一个绝对 key 是合法常态），地址由
-    # 执行期按符号池里的 key 解析/创建。读目标不存在仍是真实错误，由 vmbin 值访问层
-    # 拒绝；本规则因此不再要求「argument.c 里必须出现零地址比较」，改为要求它仍然
-    # 显式处理 STATIC 分支并清零输出。
     argument_source = binrwir_root / "argument.c"
     instruction_source = binrwir_root / "instruction.c"
     required_source_tokens = {
@@ -487,8 +438,6 @@ def audit_addressed_binrwir_model(
             "BINRWIR_REFERENCE_STATIC",
             "memset(output_argument, 0, sizeof(*output_argument))",
         ),
-        # instruction 不直接判地址，它把每个参数交给 argument_validate；
-        # 这里只要求它确实走了引用校验，不允许自己比较地址字段。
         instruction_source: (
             "binrwir_argument_validate",
         ),
@@ -518,8 +467,6 @@ def audit_addressed_binrwir_model(
     contract_anchor = contract_header
     host_text = contract_header.read_text(encoding="utf-8") \
         if contract_header.is_file() else ""
-    # 锚点必须存在：文件没了，下面每一条偏移判据都会退化成「找不到就跳过」，
-    # 那是最安静的失效方式。这里先把它变成一条显式 finding。
     if not host_text:
         findings.append(Finding(
             relative_display(contract_header, repository_root), 1,
@@ -527,8 +474,6 @@ def audit_addressed_binrwir_model(
             "the contract header is the single anchor for body-offset "
             "arithmetic; it must exist",
         ))
-    # 判据是「偏移等于值头长度」，不是一个会过期的数字：头从 8 长到 16 时，
-    # `== 8U` 会变成假红，而真正的不变量没变。
     offset_definition = BODY_OFFSET_DEFINITION.search(host_text)
     if offset_definition is None or \
             offset_definition.group(1) != "KVSPACE_XVALUE_HEAD_LEN":
@@ -551,11 +496,7 @@ def audit_addressed_binrwir_model(
             code_by_path[path] = c_code_without_comments_or_literals(
                 path.read_text(encoding="utf-8"))
         except (OSError, UnicodeError):
-            # The per-source loop owns the read-error finding for this file.
             continue
-    # 裁决 decision-vmbin-data-path §2：`+8` 的唯一实现在合同里，vmkv 与 vmbin 都调用
-    # `runtimec_xvalue_body_address`。判据按宏的出现位置：任何产品源只要自己写偏移
-    # 算术就是违规，调用函数不算——调用式里根本不出现这个宏。
     contract_implementation = contract_source
     contract_code = code_by_path.get(contract_implementation, "")
     if CONTRACT_BODY_ADDRESS_FUNCTION not in contract_code:
@@ -636,7 +577,6 @@ def audit_addressed_binrwir_model(
                 ))
     return findings
 
-
 def audit_build_graph(
     runtimec_root: Path, repository_root: Path,
 ) -> list[Finding]:
@@ -666,8 +606,6 @@ def audit_build_graph(
                 f"{target} expected {sorted(expected)!r}, found {sorted(actual)!r}",
             ))
 
-    # 判据锚在「谁导出公共符号」而不是库名：引用 exports 映射的那个 target 必须是
-    # SHARED。改名、改 OUTPUT_NAME 都不会让规则失效，只有真的变成静态库才会红。
     library_kinds = {name: kind
                      for name, kind in LIBRARY_DECLARATION_PATTERN.findall(text)}
     exported_targets = {first or second
@@ -687,9 +625,6 @@ def audit_build_graph(
                 f"{kind or 'with an unresolvable kind'}; it must be SHARED",
             ))
 
-    # kvspace 头只有一个定义点：kvspace 仓自己的 include/kvspace/。仓库内任何同名副本
-    # 都是过期拷贝，包含它会让两份头悄悄分叉。CMake 的 FATAL_ERROR 只在 configure 期
-    # 生效（已有 build 目录时新建该目录不会被发现），所以守卫放在每次都会跑的地方。
     stale_copy = repository_root / "include" / "kvspace"
     if stale_copy.exists():
         findings.append(Finding(
@@ -699,7 +634,6 @@ def audit_build_graph(
             "kvspace/include/kvspace/; a copy under include/kvspace/ must not exist",
         ))
     return findings
-
 
 def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], int]:
     findings = audit_build_graph(runtimec_root, repository_root)
@@ -748,10 +682,6 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                         resolved.relative_to(runtimec_root.resolve()).as_posix()
                     )
                 except ValueError:
-                    # 解析到 runtimec 之外（kvlang 仓根的 `include/`、`../kvspace/`）
-                    # 是**外部头**，不参与内部分层约束，直接跳过。判据是**真实文件
-                    # 位置**而不是 token 前缀：按前缀判会把 `<kvlang/xvalue.h>`
-                    # （kvlang 仓提供）误当 runtimec 的 public 头。
                     continue
                 target_layer = layer_for_relative(target_relative)
             else:
@@ -793,8 +723,6 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                 "binrwir_compiler and vmbin",
             ))
 
-        # 直接守分派，而不是拿 include 计数当代理：只有执行窗口能调用执行入口，
-        # 也只有它能在编译器之外引用执行目标类型。
         if relative.as_posix() not in DISPATCH_OWNER_FILES:
             module = relative.as_posix().rsplit(".", 1)[0]
             for entry_point, owner_module in EXECUTION_ENTRY_POINTS.items():
@@ -819,12 +747,6 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
                 ))
     return sorted(set(findings)), scanned
 
-
-# ---------------------------------------------------------------------------------------
-# Self-test. Every rule must be able to fire: a rule with no failing fixture is an
-# unproven rule. Fixtures are synthesized in a temporary tree, so no product source is
-# ever touched and nothing in the working tree is modified.
-# ---------------------------------------------------------------------------------------
 SELFTEST_CMAKE = """\
 cmake_minimum_required(VERSION 3.20)
 project(runtimec_selftest LANGUAGES C)
@@ -916,7 +838,6 @@ static runtimec_status_t window_dispatch(void) {
 }
 """
 
-# session 是 owner graph 的根：同时持有两个执行层是职责，不做分派。
 SELFTEST_SESSION = """\
 #include "binrwir_compiler/compiler.h"
 #include "vmbin/interpreter.h"
@@ -962,7 +883,6 @@ typedef enum binrwir_execution_target_t {
 SELFTEST_CONTRACTS_TEST = """\
 _Static_assert(RUNTIMEC_HOST_SERVICES_BINARY_INTERFACE_VERSION == 4U, "version");
 """
-
 
 def selftest_base_tree() -> dict[str, str]:
     return {
@@ -1015,7 +935,6 @@ def selftest_base_tree() -> dict[str, str]:
         "tests/contracts_test.c": SELFTEST_CONTRACTS_TEST,
     }
 
-
 @dataclass(frozen=True)
 class SelftestCase:
     name: str
@@ -1024,9 +943,7 @@ class SelftestCase:
     write: tuple[tuple[str, object], ...] = ()
     delete: tuple[str, ...] = ()
 
-
 SELFTEST_CASES = (
-    # 基线：一棵干净的树不得报任何规则。每个 fixture 都是它的一次单点变异。
     SelftestCase("baseline"),
     SelftestCase("build-file-missing", ("missing-build-file",),
                  delete=("CMakeLists.txt",)),
@@ -1069,7 +986,6 @@ SELFTEST_CASES = (
                  ("process-global-hook-in-product-source",),
                  write=(("vmbin/value_access.c",
                          SELFTEST_VMBIN_VALUE_ACCESS + "int probe(void) { return atexit(0); }\n"),)),
-    # 正例：进程入口与 hook 归 tests，产品源不受这条规则约束。
     SelftestCase("process-control-in-tests-allowed",
                  forbid=("process-entry-in-product-source",
                          "process-global-hook-in-product-source"),
@@ -1114,17 +1030,14 @@ SELFTEST_CASES = (
                              "    uint32_t code_generation_revision;\n",
                              "    uint32_t code_generation_revision;\n"
                              "    uint32_t optional_flag;\n")),)),
-    # 新增：锚点文件缺失必须报，不许因为「读不到就跳过」而静默。
     SelftestCase("contract-anchor-missing", ("contract-anchor-missing",),
                  delete=("contract/kvspace_access.h",)),
-    # 头从 8 长到 16：偏移定义不改形，规则不得因为数字变了而红。
     SelftestCase("xvalue-body-offset-follows-head-length",
                  forbid=("xvalue-body-address-contract",),
                  write=(("contract/kvspace_access.h",
                          SELFTEST_CONTRACT_HEADER.replace(
                              "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U",
                              "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 16U")),)),
-    # 偏移被写成数字字面量 —— 数字一旦被写死，换头长就没人能证明两者还相等。
     SelftestCase("xvalue-body-offset-numeric-literal",
                  ("xvalue-body-address-contract",),
                  write=(("contract/kvspace_access.h",
@@ -1152,7 +1065,6 @@ SELFTEST_CASES = (
                              "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) {\n",
                              "    if (xvalue_address > UINT64_MAX - "
                              "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) {\n")),)),
-    # 已知陷阱：注释与字面量里的诱饵既不能让定位器认错函数，也不能冒充计数。
     SelftestCase("contract-derivation-comment-decoy",
                  ("contract-body-address-derivation",),
                  write=(("contract/kvspace_access.c",
@@ -1167,7 +1079,6 @@ SELFTEST_CASES = (
                          "    return xvalue_address + "
                          "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES;\n"
                          "}\n"),)),
-    # 正例：注释里有诱饵，但真实实现完整 —— 不得报。
     SelftestCase("contract-derivation-decoy-clean",
                  forbid=("contract-body-address-derivation",),
                  write=(("contract/kvspace_access.c",
@@ -1188,7 +1099,6 @@ SELFTEST_CASES = (
     SelftestCase("removed-resolver-name", ("removed-static-address-resolver",),
                  write=(("contract/status.c",
                          "int resolve_static_value_body_address(void);\n"),)),
-    # kvspace 头只有一个定义点；仓库内的同名副本必须报。
     SelftestCase("stale-kvspace-header-copy", ("stale-kvspace-header-copy",),
                  write=(("../include/kvspace/xvalue_head.h",
                          "#define KVSPACE_XVALUE_HEAD_LEN 16u\n"),)),
@@ -1202,7 +1112,6 @@ SELFTEST_CASES = (
     SelftestCase("forbidden-tree-include", ("forbidden-tree-include",),
                  write=(("engine/execution_window.c",
                          '#include "runtime/legacy.h"\n' + SELFTEST_EXECUTION_WINDOW),)),
-    # kvspace 头只存在于 kvspace 仓自己的 include/；runtimec 源引用它是正常依赖。
     SelftestCase("kvspace-include-resolves", forbid=("unresolved-private-include",),
                  write=(("contract/kvspace_access.h",
                          '#include "kvspace/xvalue_head.h"\n' + SELFTEST_CONTRACT_HEADER),
@@ -1221,7 +1130,6 @@ SELFTEST_CASES = (
                  write=(("engine/compilation_repository.c",
                          '#include "binrwir_compiler/compiler.h"\n'
                          '#include "vmbin/interpreter.h"\n'),)),
-    # 正例：owner 同时持有两个执行层 —— 不得报。
     SelftestCase("policy-merge-owner-allowed", forbid=("policy-merge-outside-owner",),
                  write=(("engine/session.c", SELFTEST_SESSION),)),
     SelftestCase("dispatch-call-outside-window",
@@ -1235,12 +1143,10 @@ SELFTEST_CASES = (
                  ("execution-dispatch-outside-window",),
                  write=(("engine/session.c",
                          "static binrwir_execution_target_t probe;\n"),)),
-    # 正例：分派只在执行窗口。
     SelftestCase("dispatch-in-window-allowed",
                  forbid=("execution-dispatch-outside-window",),
                  write=(("engine/execution_window.c", SELFTEST_EXECUTION_WINDOW),)),
 )
-
 
 def run_selftest() -> int:
     failures: list[str] = []
@@ -1251,7 +1157,6 @@ def run_selftest() -> int:
         for case in SELFTEST_CASES:
             root = workspace / "kvlang"
             runtimec_root = root / "runtimec"
-            # 每个 fixture 从干净的仓库根开始：这条规则看的是 runtimec/ 之外的路径。
             if root.exists():
                 shutil.rmtree(root)
             tree = selftest_base_tree()
@@ -1259,7 +1164,6 @@ def run_selftest() -> int:
                 tree.pop(relative, None)
             tree.update(dict(case.write))
             for relative, content in tree.items():
-                # `../../` 形态用于写出仓库之外的兄弟仓（kvspace）。
                 path = (runtimec_root / relative).resolve()
                 path.parent.mkdir(parents=True, exist_ok=True)
                 if isinstance(content, bytes):
@@ -1279,7 +1183,6 @@ def run_selftest() -> int:
                 failures.append(
                     f"{case.name}: expected no {sorted(leaked)} but the rule fired")
             covered |= set(case.expect)
-    # 前置规则（main 的入口检查）也必须有证据：缺 runtimec 目录必须返回 2。
     with tempfile.TemporaryDirectory(prefix="runtimec-layers-empty-") as empty:
         with contextlib.redirect_stdout(io.StringIO()):
             status = main(["--source-root", empty, "--quiet"])
@@ -1298,7 +1201,6 @@ def run_selftest() -> int:
     print(f"check_layers selftest: OK ({len(SELFTEST_CASES)} fixtures, "
           f"{len(covered)} rule(s) covered)")
     return 0
-
 
 def main(command_arguments: list[str] | None = None) -> int:
     arguments = parse_arguments(command_arguments or sys.argv[1:])
@@ -1321,7 +1223,6 @@ def main(command_arguments: list[str] | None = None) -> int:
     if not arguments.quiet:
         print(f"check_layers: OK ({scanned} file(s) scanned)")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

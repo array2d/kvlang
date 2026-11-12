@@ -1,7 +1,4 @@
-// 欢迎加入kvspace世界
-// kvlang 语法速览 —— 也是 KV 树里的数据，也是 LLM 生成 kvlang 代码时的权威提示。
-// 本文件在 kvlang stdlib，byteseek 启动时 layout&run：顶层写语句包进 kvlang·init，
-// 执行后把整份速览作为字符串落在 /lib/kvlang/kvlangbrief，供 byteseek 的 llm·call 拼接进 system prompt。
+
 lib kvlang {
 	r###"# kvlang 速览（LLM 代码生成版）
 
@@ -28,18 +25,17 @@ lib kvlang {
 ```kv
 rwfunc main() -> () {
     3 + 4 -> s:int64
-    println(s)              // 7
+    println(s)              
 }
 ```
 
 ```kv
 rwfunc main() -> () {
-    // 字符串
+    
     s:[]char/utf32 = "hello"
     string·len(s) -> n:int64
-    println(n)              // 5
+    println(n)              
 
-    // 数组求和
     a:[]int64 = [1,2,3,4]
     0 -> acc:int64
     0 -> i:int64
@@ -48,14 +44,13 @@ rwfunc main() -> () {
         acc + e -> acc
         i + 1 -> i
     }
-    println(acc)            // 10
+    println(acc)            
 
-    // map 读写
     d:'[]char/utf32'int64 = {}
     d·a = 10
     d·b = 20
     d·*"a" -> x:int64
-    println(x)              // 10
+    println(x)              
 }
 ```
 
@@ -65,11 +60,11 @@ rwfunc main() -> () {
 其它：`bool`、`char/utf8` `char/utf32` `char/ascii`、`stringkeymap`、`index`、`struct`、`time`、`time/duration`；不约束用空 kindexp（`name:`）。
 
 ```kv
-float64(3) -> f:float64          // 3.0
-int64(3.9) -> i:int64            // 3（向零截断）
-int64("42") -> n:int64           // 42
-bool(1) -> b:bool                // true
-char/utf32(x) -> s:[]char/utf32  // 字符串编码转换（如 char/utf8 → char/utf32）
+float64(3) -> f:float64          
+int64(3.9) -> i:int64            
+int64("42") -> n:int64           
+bool(1) -> b:bool                
+char/utf32(x) -> s:[]char/utf32  
 ```
 
 `string·formatint(n, base)` / `string·formatuint(n, base)` 整数按进制转字符串；
@@ -89,29 +84,29 @@ char/utf32(x) -> s:[]char/utf32  // 字符串编码转换（如 char/utf8 → ch
 
 ```kv
 s:[]char/utf32 = "hello"
-string·len(s) -> n:int64           // 5
-string·char(s, 1) -> c:[]char/utf32 // "e"（单字符字符串）
-string·ord(s, 0) -> o:int64         // 104（码点）
-string·cmp("a","b") -> c2:int64     // 相等返回 0
-string·find(s, "ll") -> i:int64     // 2；找不到 -1
-string·slice(s, 0, 2) -> p:[]char/utf32 // "he"
-s + "!" -> t:[]char/utf32           // 拼接（同类才可）
-s[1] -> x:[]char/utf32              // "e"；越界返回 ""
-s[1] = "X"                   // 替换单字符，s 变 "hXllo"
+string·len(s) -> n:int64           
+string·char(s, 1) -> c:[]char/utf32 
+string·ord(s, 0) -> o:int64         
+string·cmp("a","b") -> c2:int64     
+string·find(s, "ll") -> i:int64     
+string·slice(s, 0, 2) -> p:[]char/utf32 
+s + "!" -> t:[]char/utf32           
+s[1] -> x:[]char/utf32              
+s[1] = "X"                   
 ```
 
 ## 5. 数组（compact `[..]` 定长同型）
 
 ```kv
 a:[]int64 = [7,2,9,4]
-compactarray·numel(a) -> n:int64        // 4（元素数）
-compactarray·dim(a) -> d:int64          // 1（维数）
-compactarray·shape(a) -> sh:[]int64     // 各轴长度
-compactarray·at(a, 2) -> e:int64        // 9（越界报错）
-tmp:[]int64 = compactarray·copy(a); compactarray·set(tmp, 1, 99) -> tmp  // 值语义先 copy 再同槽 set
-a[0] -> head:int64                      // 7
-compactarray·langtype(a) -> lt:[]char/utf32 // "[4]int64"
-compactarray·bodylen(a) -> bl:int64     // 32（body 字节数）
+compactarray·numel(a) -> n:int64        
+compactarray·dim(a) -> d:int64          
+compactarray·shape(a) -> sh:[]int64     
+compactarray·at(a, 2) -> e:int64        
+tmp:[]int64 = compactarray·copy(a); compactarray·set(tmp, 1, 99) -> tmp  
+a[0] -> head:int64                      
+compactarray·langtype(a) -> lt:[]char/utf32 
+compactarray·bodylen(a) -> bl:int64     
 ```
 
 遍历用 `while + compactarray·numel + compactarray·at`。多维 `[2,3]int64` 也是 compact ndarray。
@@ -121,24 +116,24 @@ compactarray·bodylen(a) -> bl:int64     // 32（body 字节数）
 ## 6. 容器：stringkeymap / map / struct（成员一律用 `·`，绝不用 `[]`）
 
 ```kv
-d:'[]char/utf32'int64 = {}    // 空 stringkeymap 必须标类型
-d·a = 10                      // 静态成员写
+d:'[]char/utf32'int64 = {}    
+d·a = 10                      
 d·b = 20
-d·*"a" -> x:int64             // 读（缺失为 None；读进声明槽前先判存在）
+d·*"a" -> x:int64             
 k:[]char/utf32 = "a"
-d·*k -> v:int64               // 动态键读
-30 -> d·*"c"                  // 动态键写
+d·*k -> v:int64               
+30 -> d·*"c"                  
 
-m:'[]char/utf32'int64 = {}    // stringkeymap
+m:'[]char/utf32'int64 = {}    
 m·k = 5
 
-m2:'[int64]'int64 = {}         // 整型键 map（键落字符串）
+m2:'[int64]'int64 = {}         
 7 -> m2·*0
 
 struct Rec { name:[]char/utf32="" ver:int64=0 }
-r:Rec = {name="kv" ver=1}     // 匿名异构记录必须带类型；复用类型用 struct
+r:Rec = {name="kv" ver=1}     
 r·name -> n:[]char/utf32
-5 -> r·ver                    // struct 成员可写
+5 -> r·ver                    
 ```
 
 命名 struct（需要字段默认值 / 复用类型时）：
@@ -147,7 +142,7 @@ r·name -> n:[]char/utf32
 struct Point { x:int64=0 y:int64=0 }
 rwfunc main() -> () {
     p:Point = {x=3 y=4}
-    println(p·x, p·y)      // 3 4
+    println(p·x, p·y)      
 }
 ```
 
@@ -158,9 +153,9 @@ rwfunc main() -> () {
 ```kv
 if (c) { ... } else if (c2) { ... } else { ... }
 while (c) { ... }
-for (e in arr) { ... }     // 遍历 compact 数组
+for (e in arr) { ... }     
 break / continue
-return                     // 无返回值
+return                     
 ```
 
 map 遍历用 `while + kvspace·listlen + kvspace·listat`（for-in 对 map 不可靠）。
@@ -173,7 +168,7 @@ lib mylib {
 }
 rwfunc main() -> () {
     mylib·add(3,4) -> s:int64
-    println(s)           // 7
+    println(s)           
 }
 ```
 
@@ -260,7 +255,7 @@ networld/fs·write("/tmp/x.txt", compactarray·newreinterpret("hi", "[]uint8")) 
 | 除法 | `a / b` | `a ÷ b` |
 | 整数类型 | `int` | `int64` |
 | 三引号串 | `"""..."""` | `r#"..."#` |
-| 井号注释 | `# x` | `// x` |
+| 井号注释 | `# x` | `
 | 异构记录 | 抄其它语言的写法 | `{k=v}` 或 `struct` |
 | 数组类型 | `a:int64=[..]` | `a:[]int64=[..]` |
 | 写参累加 | 直接 `acc + x -> acc` | 先 `0 -> acc` |

@@ -4,7 +4,6 @@
 
 #include "contract/key_order.h"
 
-/* 名字块的对齐：`char` 块只要能按字节读即可，但分配器要求 2 的幂。 */
 #define RUNTIMEC_KEY_DIRECTORY_NAMES_ALIGNMENT 1U
 #define RUNTIMEC_KEY_DIRECTORY_OFFSETS_ALIGNMENT \
     _Alignof(uint32_t)
@@ -51,7 +50,6 @@ runtimec_status_t runtimec_key_directory_destroy(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-/* 从 `name\0name\0…` 里数项数并切出 offsets。 */
 static uint32_t key_directory_split(runtimec_key_directory_t *directory) {
     uint32_t count = 0U;
     uint32_t at = 0U;
@@ -60,7 +58,7 @@ static uint32_t key_directory_split(runtimec_key_directory_t *directory) {
             directory->offsets[count] = at;
         }
         ++count;
-        /* 跳过这一项的字节与它的 NUL。 */
+        
         while (at < directory->names_length && directory->names[at] != '\0') {
             ++at;
         }
@@ -71,7 +69,6 @@ static uint32_t key_directory_split(runtimec_key_directory_t *directory) {
     return count;
 }
 
-/* 一项的原始名字视图（**含**尾 `/`）：排序用这个，与后端 `child_cmp` 一致。 */
 static void key_directory_entry(const runtimec_key_directory_t *directory,
                                 uint32_t index, const char **output_name,
                                 size_t *output_size) {
@@ -89,8 +86,6 @@ static void key_directory_entry(const runtimec_key_directory_t *directory,
     }
 }
 
-/* 插入排序：目录子项数的量级是「一帧的指令条数 / 一个数组的元素数」，
- * 而名字块本身已在内存里，比较是纯字节操作。比快排少一份递归与临时区。 */
 static void key_directory_sort(runtimec_key_directory_t *directory) {
     for (uint32_t index = 1U; index < directory->count; ++index) {
         const uint32_t current = directory->offsets[index];
@@ -170,7 +165,6 @@ runtimec_status_t runtimec_key_directory_refresh(
     uint32_t count = 0U;
     uint64_t generation = 0U;
 
-    /* 先只探测：拿到长度/个数/generation，未变就立即返回。 */
     runtimec_status_t status = directory->source(
         directory->source_context, key, NULL, 0U, &length, &count, &generation);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -181,11 +175,6 @@ runtimec_status_t runtimec_key_directory_refresh(
         return RUNTIMEC_STATUS_SUCCESS;
     }
 
-    /*
-     * 探测可能只报个数、不报字节数（旧 ABI 的 `ListLen` 只给 N，没有 M）。
-     * 这种情况下按「至少每项 1 字节 + NUL」估一个下界，剩下的交给取回时的
-     * INSUFFICIENT_CAPACITY 重试路径——那条路径按 source 回报的精确长度扩容。
-     */
     uint32_t wanted = length != 0U ? length + 1U : count + 1U;
     if (wanted < 2U) {
         wanted = 2U;
@@ -198,15 +187,10 @@ runtimec_status_t runtimec_key_directory_refresh(
     status = directory->source(directory->source_context, key, names,
                                directory->names_capacity, &length, &count,
                                &generation);
-    /*
-     * 容量不足：source 已把**所需**总长度写进 `length`（新 ABI 的 `kvspaceList`
-     * 与旧 ABI 适配层都遵守这条）。按它扩容再取一次——这是唯一需要重试的分支，
-     * 写成「放弃、等下次 refresh」会让调用方看到一次无谓的失败。
-     */
+    
     if (status == RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY) {
         if (length <= directory->names_capacity) {
-            /* 报的所需长度不比现有容量大，说明不是容量问题而是集合在变：不重试，
-             * 交给下一次 refresh（否则这里会死循环）。 */
+            
             directory->valid = false;
             return status;
         }
@@ -224,7 +208,7 @@ runtimec_status_t runtimec_key_directory_refresh(
         return status;
     }
     if (length >= directory->names_capacity) {
-        /* 取回长度顶到容量：没有空间写结尾 NUL，也无法确定边界。放弃本次。 */
+        
         directory->valid = false;
         return RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY;
     }

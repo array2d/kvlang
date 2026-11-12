@@ -1,21 +1,6 @@
-// Package json 是 rwirext 扩展运行时（json.to/json.from）。经 C runtime 的
-// rwirext_* ABI 取指令语义，经 kvspace 正典 ABI 读写 KV（扩展宿主自连，不经 runtime）。
+
 package json
 
-/*
-// 后端（shm→kvspace-c / redis|fs→kvspace_durable）由 libkvspace dispatch 前端按 DSN 选，
-// 经 CGO_LDFLAGS 注入。
-#cgo CFLAGS: -I${SRCDIR}/../../../include -I${SRCDIR}/../../../runtime/include
-#cgo LDFLAGS: -L${SRCDIR}/../../../lib -L${SRCDIR}/../../../bin -lkvlang_runtimec2 -lkvspace -Wl,-rpath,${SRCDIR}/../../../lib -Wl,-rpath,${SRCDIR}/../../../bin
-#include "kvlang_runtime.h"
-#include <kvspace/kvspace.h>
-#include <kvspace/kvspace_xvalue.h>
-#include <kvlang/xvalue.h>
-#include <kvspace/const.h>
-#include <kvlang/const.h>
-#include <stdint.h>
-#include <stdlib.h>
-*/
 import "C"
 
 import (
@@ -37,15 +22,13 @@ const (
 	refPtr         = C.KVSPACE_REF_PTR
 )
 
-// ── cgo 封装 ────────────────────────────────────────────────────────
-
 func cstr(s string) *C.char { return C.CString(s) }
 
 func gostr(s *C.char) string {
 	if s == nil {
 		return ""
 	}
-	defer C.free(unsafe.Pointer(s)) // rwirext ABI 产出为 malloc，须 free
+	defer C.free(unsafe.Pointer(s)) 
 	return C.GoString(s)
 }
 
@@ -118,11 +101,8 @@ func headOf(data []byte) (C.kvspaceHead_t, bool) {
 	return h, true
 }
 
-// langtypeOf：head 的完整 kindexpr 串（含 [dims] 前缀）。
 func langtypeOf(h *C.kvspaceHead_t) string { return C.GoString(&h.langtype[0]) }
 
-// baseKind：剥去 [dims] 形状前缀后的种类名。`·` 分隔的 map langtype 原样返回（键侧方括号是
-// 键类型，不是形状，见 spec map容器）。
 func baseKind(lt string) string {
 	if strings.Contains(lt, sep) {
 		return lt
@@ -135,14 +115,11 @@ func baseKind(lt string) string {
 	return lt
 }
 
-// isMapLangtype：值容器判定 —— 裸种类名 stringkeymap，或完整 map langtype（含 ·）。
 func isMapLangtype(lt string) bool {
 	k := baseKind(lt)
 	return k == kindMap || strings.Contains(k, sep)
 }
 
-// getXValue：借用读。resolve=1 穿透 link（handoff 队列经 Ptr 统一到首个 op，须穿透）。
-// 返回拷贝，调用方持有；借用指针不得 free。
 func getXValue(c unsafe.Pointer, key string, resolve int) []byte {
 	ck := cstr(key)
 	defer C.free(unsafe.Pointer(ck))
@@ -158,7 +135,6 @@ func headAt(c unsafe.Pointer, key string) (C.kvspaceHead_t, bool) {
 	return headOf(getXValue(c, key, 0))
 }
 
-// get：key 的 body 字节（借用读 → 拷贝）。
 func get(c unsafe.Pointer, key string, resolve int) string {
 	data := getXValue(c, key, resolve)
 	h, ok := headOf(data)
@@ -172,9 +148,6 @@ func get(c unsafe.Pointer, key string, resolve int) string {
 	return string(data[bo : bo+bl])
 }
 
-// writeBody writes (ref, storetype, langtype) + body: tries WriteInPlace when key and shape match,
-// falls back to WriteNewPlace if unavailable (e.g. missing key or -2 on durable),
-// and otherwise uses single-key kvspaceXvalueHeadReserve + kvspaceSetValue.
 func writeBody(c unsafe.Pointer, key string, ref, storetype C.uint8_t, langtype string, body []byte) {
 	ck := cstr(key)
 	defer C.free(unsafe.Pointer(ck))
@@ -226,7 +199,6 @@ func writeBody(c unsafe.Pointer, key string, ref, storetype C.uint8_t, langtype 
 	C.free(unsafe.Pointer(wire))
 }
 
-// setXValue：解 head 取三轴 + body，走写即构造。
 func setXValue(c unsafe.Pointer, key string, xvalue []byte) {
 	h, ok := headOf(xvalue)
 	if !ok {
@@ -240,12 +212,10 @@ func setXValue(c unsafe.Pointer, key string, xvalue []byte) {
 	writeBody(c, key, h.ref, h.storetype, langtypeOf(&h), body)
 }
 
-// setNone stores None (JSON null) with storetype=SHORT, empty langtype, and empty body.
 func setNone(c unsafe.Pointer, key string) {
 	writeBody(c, key, 0, 0, "", nil)
 }
 
-// list：前缀直接子项名（ListLen 定计数 + 逐 idx ListAt 取名，借用缓冲不 free）。
 func list(c unsafe.Pointer, prefix string, resolve int) []string {
 	cp := cstr(prefix)
 	defer C.free(unsafe.Pointer(cp))
@@ -325,9 +295,6 @@ func params(c unsafe.Pointer, pc string) []string {
 	return strings.Split(gostr(C.kvlangRwirextParams(c, cp)), "\n")
 }
 
-// ── XValue 编解码（走权威 codec：DecodeHead 读头 + XvalueEncode/NewChar 编码）──
-
-// parseXValue：解 head 得 kind/body/arrLen。arrLen = ∏物理 dims（标量为 1；容器值 body 空）。
 func parseXValue(data []byte) (kind string, raw []byte, arrLen int) {
 	h, ok := headOf(data)
 	if !ok {
@@ -349,7 +316,6 @@ func parseXValue(data []byte) (kind string, raw []byte, arrLen int) {
 	return kind, raw, arrLen
 }
 
-// encodeXValue encodes a typed XValue via canonical kvspace v2 head constructors.
 func encodeXValue(kind string, raw []byte, dims []int32) []byte {
 	lt := kind
 	if len(dims) > 0 {
@@ -388,11 +354,10 @@ func encodeXValue(kind string, raw []byte, dims []int32) []byte {
 		}
 		return nil
 	}
-	defer C.free(unsafe.Pointer(out)) // codec 产出为前端 malloc
+	defer C.free(unsafe.Pointer(out)) 
 	return C.GoBytes(unsafe.Pointer(out), C.int(ol))
 }
 
-// constructXValue：标量（arrLen==1）或一维数组（arrLen>1 → dims=[arrLen]）。
 func constructXValue(kind string, raw []byte, arrLen int) []byte {
 	if arrLen > 1 {
 		return encodeXValue(kind, raw, []int32{int32(arrLen)})
@@ -400,7 +365,6 @@ func constructXValue(kind string, raw []byte, arrLen int) []byte {
 	return encodeXValue(kind, raw, nil)
 }
 
-// constructChar：字符串走 codec 的 NewChar（显式长度，NUL 安全）。空串亦须给非空指针。
 func constructChar(raw []byte) []byte {
 	n := len(raw)
 	if n == 0 {
@@ -421,8 +385,6 @@ func constructChar(raw []byte) []byte {
 	defer C.free(unsafe.Pointer(out))
 	return C.GoBytes(unsafe.Pointer(out), C.int(ol))
 }
-
-// ── JSON 值 ↔ XValue ───────────────────────────────────────────────────
 
 func readInt(raw []byte) int64 {
 	var v int64
@@ -519,8 +481,6 @@ func float64From(raw []byte) float64 {
 	return math.Float64frombits(binary.LittleEndian.Uint64(raw))
 }
 
-// floatJSON：float 导出保形——数学上为整数的值带小数点（1.0 而非 1），-0.0 保符号，
-// 使二次往返的 kind 不漂移（float64 整数不再被误读成 int64）。
 func floatJSON(f float64) json.Number {
 	if math.IsInf(f, 0) || math.IsNaN(f) {
 		return json.Number(strconv.FormatFloat(f, 'g', -1, 64))
@@ -542,7 +502,7 @@ func jsonToXValue(v interface{}) ([]byte, error) {
 		if i, err := t.Int64(); err == nil {
 			return constructXValue(kindInt64, u64(uint64(i)), 1), nil
 		}
-		// 纯整数文本（无 . e E）但 Int64 失败 → 超 int64，显式拒绝，不静默降 float64。
+		
 		if !strings.ContainsAny(s, ".eE") {
 			return nil, fmt.Errorf("json: integer %s overflows int64", s)
 		}
@@ -572,13 +532,6 @@ func u64bits(f float64) []byte {
 	return u64(bits)
 }
 
-// ── KV 子树 ↔ JSON ─────────────────────────────────────────────────
-// 容器值落裸 base（p，body 空）；成员落 p·<key>（· 成员目录）；memindex p· 由后端按成员自动维护
-// （nv= 值容器写入时建，成员写入时增删），扩展不手写索引。
-// 容器判定与对象/数组分派只看容器值 head：map langtype（或裸种类名 stringkeymap）即容器；
-// 成员名全为坐标段 `[i]` → JSON 数组，否则命名字典 → JSON 对象；空容器按 dims（数组 dims=[n]、
-// 对象无 dims）分派，使空对象 {} 与空数组 [] 往返不混。
-
 var (
 	sep         string
 	runtimeSep  string
@@ -604,10 +557,6 @@ func init() {
 	}
 }
 
-// 常量查询分两层两个入口（TASK-082）：路径分隔符这类**存储**常量在 libkvspace 的
-// kvspaceConstStorage，kind 串这类**语言**常量在 kvlang 的 kvlangConstLanguage。
-// 一个函数返回两种层的东西，等于让调用方猜「这个名字属于哪层」——所以按名字前缀
-// 分派，前缀就是层归属的判据。
 func cconst(name string) string {
 	cn := cstr(name)
 	defer C.free(unsafe.Pointer(cn))
@@ -620,13 +569,10 @@ func cconst(name string) string {
 	if s == nil {
 		return ""
 	}
-	// 两个入口都返回静态字符串，不得 free。
+	
 	return C.GoString(s)
 }
 
-// validateKey：JSON 对象 key 不能含影响 kvspace 存储分隔的字符（spec 成员名字符约束）。
-// 空串、/ · [ ] \n \r \0 U+2025 U+2026 及 ASCII 控制字符一律拒绝（不静默丢键、不转义）。
-// '.' 已释放给小数 key，可作成员名。
 func validateKey(k string) error {
 	if k == "" {
 		return fmt.Errorf("json: empty key rejected")
@@ -640,7 +586,6 @@ func validateKey(k string) error {
 	return nil
 }
 
-// coordIndex：坐标段 `[i]` → i；非单一整数坐标返回 false。
 func coordIndex(name string) (int, bool) {
 	if len(name) < 3 || name[0] != '[' || name[len(name)-1] != ']' {
 		return 0, false
@@ -655,7 +600,7 @@ func coordIndex(name string) (int, bool) {
 func writeValue(c unsafe.Pointer, path string, v interface{}) error {
 	switch t := v.(type) {
 	case nil:
-		setNone(c, path) // None：key 存在、body 空（JSON null）
+		setNone(c, path) 
 	case map[string]any:
 		return writeObj(c, path, t)
 	case []interface{}:
@@ -670,8 +615,6 @@ func writeValue(c unsafe.Pointer, path string, v interface{}) error {
 	return nil
 }
 
-// writeContainer：容器值落裸 base（body 空）。dims 空 = 命名字典（对象）；dims=[n] = 坐标数组。
-// Uses fixed short head; codec sets langtype (bare stringkeymap or [n]stringkeymap).
 func writeContainer(c unsafe.Pointer, path string, dims []int32) {
 	xvalue := encodeXValue(kindMap, nil, dims)
 	h, ok := headOf(xvalue)
@@ -716,7 +659,6 @@ func hasPrefixChildren(c unsafe.Pointer, prefix string) bool {
 	return C.kvspaceListLen(c, cp, 0, 0, &count) == 0 && count > 0
 }
 
-// isContainer reports whether path holds a map container marker or has p· members.
 func isContainer(c unsafe.Pointer, path string) bool {
 	if h, ok := headAt(c, path); ok && h.ref == 0 && isMapLangtype(langtypeOf(&h)) {
 		return true
@@ -724,7 +666,6 @@ func isContainer(c unsafe.Pointer, path string) bool {
 	return hasPrefixChildren(c, path+sep)
 }
 
-// isDir reports whether path/ has hierarchical children.
 func isDir(c unsafe.Pointer, path string) bool {
 	return hasPrefixChildren(c, dirPrefix(path))
 }
@@ -740,12 +681,11 @@ func readValue(c unsafe.Pointer, path string) interface{} {
 	}
 	kind, raw, arrLen := parseXValue(getXValue(c, path, 0))
 	if kind == "" {
-		return nil // None → JSON null
+		return nil 
 	}
 	return xvalueToJSONValue(kind, raw, arrLen)
 }
 
-// readDir：/ 目录树 → JSON object；子名带尾 /（子目录）或 ·（成员目录）先 strip。
 func readDir(c unsafe.Pointer, path string) map[string]any {
 	m := map[string]any{}
 	for _, name := range list(c, dirPrefix(path), 0) {
@@ -755,8 +695,6 @@ func readDir(c unsafe.Pointer, path string) map[string]any {
 	return m
 }
 
-// memberNames：p· 的成员名。尾 `·` 项是成员的 memindex 目录（fs 后端按原始目录项列出），
-// 成员名本身禁 `·`（spec 成员名字符约束），故剥尾 `·` 并按名字去重。
 func memberNames(c unsafe.Pointer, prefix string) []string {
 	var names []string
 	seen := map[string]bool{}
@@ -771,12 +709,11 @@ func memberNames(c unsafe.Pointer, prefix string) []string {
 	return names
 }
 
-// readContainer：p· 成员枚举 → 数组或对象。
 func readContainer(c unsafe.Pointer, path string) interface{} {
 	names := memberNames(c, path+sep)
 	if len(names) == 0 {
 		if h, ok := headAt(c, path); ok && (h.ndim >= 1 || strings.HasPrefix(langtypeOf(&h), "[int64]"+sep)) {
-			return []interface{}{} // Array container marker (dims=[n] or [int64]·).
+			return []interface{}{} 
 		}
 		return map[string]any{}
 	}
@@ -830,7 +767,6 @@ func childPath(path, name string) string {
 	return path + dirSuf + name
 }
 
-// ptrTarget：路径上是 Ptr（ref=1）时取其 body（目标 key），否则原样返回。
 func ptrTarget(c unsafe.Pointer, path string) string {
 	data := getXValue(c, path, 0)
 	h, ok := headOf(data)
@@ -844,7 +780,6 @@ func ptrTarget(c unsafe.Pointer, path string) string {
 	return string(data[bo : bo+bl])
 }
 
-// rootOf resolves read arg idx to a traversable absolute path (literal/Ptr target or frame slot).
 func rootOf(c unsafe.Pointer, pc string, name string, idx int) string {
 	if strings.HasPrefix(name, "/") && !strings.Contains(name, sep+"*") {
 		return ptrTarget(c, name)
@@ -859,7 +794,6 @@ func rootOf(c unsafe.Pointer, pc string, name string, idx int) string {
 	return ptrTarget(c, root)
 }
 
-// write：顶层写入（覆盖语义，root 子树等于 src）。v 可为 map/slice/标量/nil。
 func write(c unsafe.Pointer, root string, v interface{}) error {
 	if root != "" && root != "/" {
 		delTree(c, root)
@@ -878,8 +812,6 @@ func fromJSON(data []byte) (interface{}, error) {
 	}
 	return v, nil
 }
-
-// ── rwir handoff ───────────────────────────────────────────────────
 
 type op struct {
 	name string
@@ -946,7 +878,6 @@ func doFrom(c unsafe.Pointer, pc string, writeNames []string, vid string) {
 	}
 }
 
-// specOf：opcode → 本扩展的 op 签名（非本扩展的 rwir 返回 false）。
 func specOf(name string) (op, bool) {
 	for _, o := range myrwircaps {
 		if o.name == name {
@@ -956,9 +887,6 @@ func specOf(name string) (op, bool) {
 	return op{}, false
 }
 
-// serveOp：认领 handoff 条目（/lib/<op>/vids/<vid>，值为 pc），执行后推进 vthread PC 并删除该
-// 条目（runtime 端 watch 该键直至变 None）。各 rwir 的 vids 队列被 Ptr 统一到最早注册者，故按
-// params 首行的 opcode 分派——他 runtime 的条目一律不认领、不删除。
 func serveOp(c unsafe.Pointer) {
 	claimed := map[string]bool{}
 	for _, o := range myrwircaps {
@@ -969,7 +897,7 @@ func serveOp(c unsafe.Pointer) {
 			claimed[vid] = true
 			pc := get(c, "/lib/"+o.name+"/vids/"+vid, 1)
 			if pc == "" {
-				continue // 已被其它进程认领
+				continue 
 			}
 			ps := params(c, pc)
 			spec, mine := specOf(ps[0])
@@ -997,7 +925,6 @@ func connect(dsn string) unsafe.Pointer {
 
 func disconnect(c unsafe.Pointer) { C.kvspaceClose(c) }
 
-// Serve 常驻循环：注册 + 认领 handoff 条目 + 批量执行 + 交还 PC。
 func Serve(dsn string) {
 	c := connect(dsn)
 	if c == nil {
