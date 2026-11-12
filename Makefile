@@ -63,6 +63,7 @@ artifact: stale-gate
 	cp -P build/artifact-kvspace/libkvspace.* $(LIB)/
 	@echo "== artifact: 构建 layout =="
 	cargo build --release --manifest-path layout/Cargo.toml
+	mkdir -p $(BIN)
 	cp layout/target/release/kvlanglayout $(BIN)/
 	cp layout/target/release/$(LAYOUT_LIB) $(LIB)/
 	@echo "== artifact: 构建 runtimec =="
