@@ -1,3 +1,7 @@
+// 期望输出:
+//   7
+// crash_resume: `a[0] = 7` reads and writes `a`; it anchors at `a = [1, 2, 3]`
+// (CONDITIONALLY_RESUMABLE:2<-0). The absolute-key write is not read, so it does not block.
 
 rwfunc test() -> () {
 	a:[]int64 = [1, 2, 3]
