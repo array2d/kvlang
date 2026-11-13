@@ -608,8 +608,8 @@ static int command_run(const char *vthread_identifier) {
         break;
     case FRAME_DRIVER_OUTCOME_EXECUTE_FAILED:
         fprintf(stderr,
-                "pathlangrun: execute failed status=%d（exit.kind=%u status=%d "
-                "detail=%u pc=%u）%s%s\n",
+                "pathlangrun: execute failed status=%d (exit.kind=%u status=%d "
+                "detail=%u pc=%u)%s%s\n",
                 (int)exit_state.status, (unsigned)exit_state.kind,
                 (int)exit_state.status, (unsigned)exit_state.detail_code,
                 (unsigned)exit_state.logical_program_counter,
@@ -626,8 +626,8 @@ static int command_run(const char *vthread_identifier) {
         break;
     case FRAME_DRIVER_OUTCOME_ERROR:
         fprintf(stderr,
-                "pathlangrun: execution failed at pc=%u detail=%u（调用返回链或"
-                "帧构造出错）\n",
+                "pathlangrun: execution failed at pc=%u detail=%u (call/return "
+                "chain or frame construction error)\n",
                 (unsigned)exit_state.logical_program_counter,
                 (unsigned)exit_state.detail_code);
         result = 1;

@@ -1,7 +1,7 @@
-// 判据：× ÷ 是乘除，≠ ≤ ≥ 是比较；ASCII 的 * 与 / 不是乘除。
-// 若只认 ASCII，第一条会在 `×` 处失败。
-// 依据：01-词法/08-运算符基础.kv。
-// 期望输出:
+// Criterion: `×` and `÷` are multiply and divide, and `≠ ≤ ≥` are comparisons; ASCII `*` and `/` are not arithmetic ops.
+// An ASCII-only lexer/parser would fail on `6 × 7`.
+// Reference: 01-lexical/08-operator-basics.kv.
+// Expected output:
 //   42
 //   5
 //   true

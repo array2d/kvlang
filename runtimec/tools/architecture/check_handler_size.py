@@ -108,13 +108,15 @@ NON_FAMILY_MACROS = frozenset({
 })
 
 REVIEWED_OVERSIZE = {
-    "scalar_handle_debugger": "调试器入口：状态机分支天然多，见 workspace/622 裁定",
+    "scalar_handle_debugger": "debugger entry point: inherently multi-branch state machine (see workspace/622 decision)",
     "runtimec_host_pathspace_watch":
-        "37 行，超过 ABI 适配层的 30：在「取 key / 取期望值 / 调 Watch」之外还多一段"
-        "**超时不是错误**（ABI 返回 0 且 out=NULL 时写参保持原样）——那段是本条独有的返回约定，抽不出来",
+        "37 lines, above the 30-line ABI adapter limit: beyond reading key/expected value and "
+        "calling Watch, **timeout is not an error** (when ABI returns 0 with out=NULL, the "
+        "write operand stays untouched) — a return convention unique to this entry",
     "runtimec_host_pathspace_list_at":
-        "42 行，超过 ABI 适配层的 30：在「取 path / 取下标 / 调 ListAt」之外还多一段"
-        "**写进调用方缓冲**（ABI 是 buffer+capacity 而非返回指针）——缓冲约定是这条独有的",
+        "42 lines, above the 30-line ABI adapter limit: beyond reading path/index and calling "
+        "ListAt, it **writes into a caller buffer** (buffer+capacity ABI rather than returning "
+        "a pointer) — a buffer convention unique to this entry",
 }
 
 def registered_handlers(source_root: Path) -> set[str]:
@@ -222,15 +224,16 @@ def scan_file(path: Path, display: str,
 
     for callee in sorted(shared_callees):
         users = shared_users[callee]
-        note = f"（共享 helper，被 {len(users)} 个 handler 引用，只计一次）"
+        note = f" (shared helper referenced by {len(users)} handlers, counted once)"
         start = definition_starts.get(callee)
         if start is None:
             first_user = sorted(users)[0]
             findings.append((display, callee,
                              line_of(definition_starts.get(first_user, 0)), 0,
                              limit,
-                             note + " 无法度量：定义不在 HANDLER_DEFINITION_PATTERN "
-                             "的返回类型族内（runtimec_status_t / int / void）"))
+                             note + " unmeasurable: definition is outside the "
+                             "HANDLER_DEFINITION_PATTERN return-type set "
+                             "(runtimec_status_t / int / void)"))
             continue
         lines = count_body_lines(code, *definitions[callee])
         if lines > limit and callee not in REVIEWED_OVERSIZE:
@@ -556,7 +559,7 @@ def main(arguments: list[str] | None = None) -> int:
     findings, scanned = audit(source_root)
     for display, name, line_number, lines, limit, note in findings:
         print(f"{display}:{line_number}: {name}: {lines} lines "
-              f"(limit {limit}) — 需人工审查{note}")
+              f"(limit {limit}) — requires manual review{note}")
     if findings or table_problems or family_findings:
         print(f"check_handler_size: FAIL ({len(findings)} function(s) exceed "
               f"limit, {len(table_problems)} entry-table problem(s), "

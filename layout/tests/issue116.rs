@@ -5,7 +5,7 @@ use pathlanglayout::{compile, init_dirs, kvkind, Kv};
 
 fn read_tutorial(path: &str) -> String {
     std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("读不到语料 {path:?}（tutorial 分组可能变了）: {e}"))
+        .unwrap_or_else(|e| panic!("failed to read corpus {path:?} (tutorial layout may have changed): {e}"))
 }
 
 fn body(data: &[u8]) -> &[u8] {
@@ -617,7 +617,7 @@ fn tutorial_control_files_single_plane() {
         let (_store, mut kv) = fresh_kv();
         
         let src = std::fs::read_to_string(file)
-            .unwrap_or_else(|e| panic!("读不到语料 {file:?}（tutorial 分组可能变了）: {e}"));
+            .unwrap_or_else(|e| panic!("failed to read corpus {file:?} (tutorial layout may have changed): {e}"));
         compile(&mut kv, &src).unwrap();
         for fn_ in fns {
             assert_single_plane(&mut kv, fn_);

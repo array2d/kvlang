@@ -89,7 +89,7 @@ pub fn printstack(eng: &Engine, pc: &str, vid: &str) -> String {
         vid.to_string()
     };
     if vid.is_empty() {
-        return "error: printstack 无法确定 vthread（传 vid 或从 vthread 内调用）".to_string();
+        return "error: printstack cannot determine vthread (pass vid or call from inside a vthread)".to_string();
     }
     let mut out = vec![0u8; 262144];
     let mut err = buf();

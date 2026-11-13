@@ -15,14 +15,14 @@ def configure(lib_directory) -> None:
     so = _PATHSPACE_LIB / f"libpathspace{_EXT}"
     if not so.exists():
         raise RuntimeError(
-            f"{so} 不存在。调用 pathspace.configure(lib_directory='/path/to/pathspace/build')")
+            f"{so} does not exist. Call pathspace.configure(lib_directory='/path/to/pathspace/build')")
     _lib = ctypes.CDLL(str(so))
     _bind_all()
 
 def _L():
     if _lib is None:
         raise RuntimeError(
-            "pathspace 未配置：先调用 pathspace.configure(lib_directory='/path/to/pathspace/build')")
+            "pathspace is not configured: call pathspace.configure(lib_directory='/path/to/pathspace/build') first")
     return _lib
 
 _libc = ctypes.CDLL(None)
@@ -169,14 +169,14 @@ def xv_index() -> bytes:
 
 def xv_link(target: str, langtype: str = "") -> bytes:
     if langtype.startswith(("*", "@")):
-        raise ValueError("langtype 已带引用前缀：双重前缀说明两处对格式理解不一致")
+        raise ValueError("langtype already has a reference prefix (* or @)")
     return _build(target.encode(), langtype, prefix="*")
 
 def xv_ext(locator: str, langtype: str = "") -> bytes:
     if not locator:
-        raise ValueError("ext 的 locator 不得为空")
+        raise ValueError("ext locator must not be empty")
     if langtype.startswith(("*", "@")):
-        raise ValueError("langtype 已带引用前缀：双重前缀说明两处对格式理解不一致")
+        raise ValueError("langtype already has a reference prefix (* or @)")
     return _build(locator.encode(), langtype, prefix="@")
 
 class PathSpace:

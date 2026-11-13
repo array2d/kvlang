@@ -113,7 +113,7 @@ def migrate_kv(kv: str) -> tuple[str, list[str], list[str]]:
     for match in SIGNATURE.finditer(kv):
         name, params, returns = match.group(2), match.group(3), match.group(4)
         if already_migrated(params, returns):
-            skipped.append(f"{name}: 已是新形态")
+            skipped.append(f"{name}: already in new syntax")
     if not skipped:
         return migrated, skipped, conflicts
     return _assemble(kv, migrated, skipped), skipped, conflicts
@@ -143,7 +143,7 @@ def _assemble(original: str, migrated: str, skipped: list[str]) -> str:
 
 def convert_source(source: str, path: str) -> tuple[str, list[str], list[str]]:
     if Path(path).name in EXCLUDED_FILES:
-        return source, [f"{Path(path).name}: 整文件排除（语法形态样本）"], []
+        return source, [f"{Path(path).name}: whole file excluded (syntax specimen)"], []
 
     spans = string_spans(source)
     pieces: list[str] = []
@@ -184,7 +184,7 @@ def main() -> int:
         if conflicts:
             failed = True
             for conflict in conflicts:
-                print(f"CONFLICT {path}: {conflict} —— 局部变量与指针形参同名，手工处理",
+                print(f"CONFLICT {path}: {conflict} — local variable collides with pointer parameter; handle manually",
                       file=sys.stderr)
             continue
         for entry in skipped:

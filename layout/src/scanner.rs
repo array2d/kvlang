@@ -468,7 +468,7 @@ pub fn scan_with_diags(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
             if i == start + 1 {
                 diags.push(lex_error(
                     p,
-                    "空注释：`#` 后必须紧跟一个词（如 `#acc`）；`#` 与注释体之间不能有空白",
+                    "empty comment: `#` must be immediately followed by a word (e.g., `#acc`); whitespace after `#` is not allowed",
                 ));
             }
             tokens.push(Token {
@@ -692,12 +692,12 @@ mod tests {
     #[test]
     fn only_c2_b7_is_member_delimiter() {
         
-        assert_eq!(toks("温度°C"), vec!["I:温度°C"]);
+        assert_eq!(toks("Δt°C"), vec!["I:Δt°C"]);
         assert_eq!(toks("µs"), vec!["I:µs"]);
         assert_eq!(toks("a·b"), vec!["I:a", "D:·", "I:b"]);
         assert_eq!(toks("a·*k"), vec!["I:a", "D:·", "I:*", "I:k"]);
         
-        assert!(!has_token_delim("点°"));
+        assert!(!has_token_delim("α°"));
         assert!(has_token_delim("a·b"));
     }
 

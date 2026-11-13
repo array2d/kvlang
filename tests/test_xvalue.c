@@ -284,11 +284,11 @@ static void test_tag_two_position_independent(void) {
                                             PATHLANG_XVALUE_ATTR_TAG_LANGTYPE,
                                             &data, &data_len);
         CHECK(rc == -1,
-              "tag 2 位于 langtype %s 时仍须拒绝（rc=%d）",
-              tag2_first ? "之前" : "之后", rc);
+              "tag 2 placed %s langtype must still be rejected (rc=%d)",
+              tag2_first ? "before" : "after", rc);
         CHECK(data == NULL && data_len == 0,
-              "拒绝时输出必须清零（tag2 在 %s）",
-              tag2_first ? "之前" : "之后");
+              "outputs must be cleared on rejection (tag 2 %s langtype)",
+              tag2_first ? "before" : "after");
         free(wire);
     }
 }

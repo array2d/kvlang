@@ -1,26 +1,28 @@
 /*
- * 组件：specification/rwir_catalog.def
- * 作用：myrwircap 的唯一 capability manifest —— 一行一个语义算子。
- * 联系：surface 名字到本表行的映射在 rwir_alias_table.def；两表都由
- *       tools/architecture/generate_rwir_catalog.py 生成并校验。
- * 约束：rwir 的唯一标识是 operator key 文本；下面的数值 id 只服务 BinRWIR 编码，
- *       是 runtimec 私有的实现细节，不是 rwir 身份。id 与 identifier 显式分配，
- *       不来自数组下标、文件顺序或声明顺序；
- *       读写掩码是 TypeSet 位集，不是占位串，不含 wildcard；未获得矩阵决策的
- *       能力不进入本文件，记录在 rwir_catalog_gaps.md。
- * 掩码位：0 int8，1 int16，2 int32，3 int64，4 uint8，5 uint16，6 uint32，
- *       7 uint64，8 float32，9 float64，10 bool，11 char/utf8，12 char/utf32，
- *       13 char/ascii，14 array，15 stringkeymap，16 structref，17 ext，
- *       18 pointer；19 位以上保留且必须为零。
- * 掩码零：该行不在标量 union 通道。parameterized 行的参数与结果类型由
- *       /lib/<operator> 的 def rwir 槽在安装时声明（唯一签名来源，禁止在本表
- *       复制第二张签名表）；ResultRule IDENTITY 表示结果类型取安装签名，
- *       不是 wildcard。control 行不产生值。
- * 统计：注册表 319 个 surface 名字 → 318 条别名映射；
- *       123 条同名映射，195 条别名；能力行 133 条，待裁 0 条。
+ * Component: specification/rwir_catalog.def
+ * Role: Canonical capability manifest for myrwircap — one row per semantic operator.
+ * Links: Surface-name mappings to rows in this table live in rwir_alias_table.def; both
+ *        tables are generated and verified by tools/architecture/generate_rwir_catalog.py.
+ * Constraints: An rwir operator is uniquely identified by its operator key text; numeric
+ *              ids below serve BinRWIR encoding only and are private runtimec details, not
+ *              rwir identity. Ids and identifiers are assigned explicitly rather than from
+ *              array indices, file order, or declaration order; read/write masks are
+ *              TypeSet bitsets without wildcards or placeholders; capabilities lacking a
+ *              matrix decision stay out of this file and are tracked in rwir_catalog_gaps.md.
+ * Mask bits: 0 int8, 1 int16, 2 int32, 3 int64, 4 uint8, 5 uint16, 6 uint32,
+ *            7 uint64, 8 float32, 9 float64, 10 bool, 11 char/utf8, 12 char/utf32,
+ *            13 char/ascii, 14 array, 15 stringkeymap, 16 structref, 17 ext,
+ *            18 pointer; bits 19 and above are reserved (except bit 19 any_single) and must be zero.
+ * Zero mask: Row is outside the scalar union channel. Parameter and result types for
+ *            parameterized rows are declared at install time by the def rwir slot under
+ *            /lib/<operator> (single signature source; never duplicate a second signature
+ *            table here); ResultRule IDENTITY takes the install signature rather than a
+ *            wildcard. Control rows produce no value.
+ * Stats: 319 registered surface names → 318 alias mappings;
+ *        123 identity mappings, 195 aliases; 133 capability rows, 0 gaps.
  *
- * 已退役（编号永久保留，不复用、不重编号）：
- *   0x0028 OBJECT_LITERAL —— 具名容器字面量统一走 map·new（map/struct/scatterarray 本质是键值组）；obj 为其别名，一并退役
+ * Retired (ids permanently reserved; never reused or renumbered):
+ *   0x0028 OBJECT_LITERAL — named container literals unify on map·new (map/struct/scatterarray are key-value groups); alias obj retired alongside
  */
 #ifndef RUNTIMEC_RWIR_OPERATION
 #error "Define RUNTIMEC_RWIR_OPERATION before including rwir_catalog.def"
@@ -35,7 +37,7 @@
  * ResultRule    : RUNTIMEC_RWIR_RESULT_{NONE,SAME_FIRST,SAME_SECOND,WIDEN,
  *                 WIDEN_INTEGER,BOOLEAN,FLOAT64,TARGET_TYPE,IDENTITY,CHARACTER_UTF8}
  * AliasPolicy   : RUNTIMEC_RWIR_ALIAS_{FORBIDDEN,DECLARED}
- * behavior_decisions: 一个或多个逗号分隔的矩阵决策；第一个是该行的主决策。
+ * behavior_decisions: One or more comma-separated matrix decisions; the first is primary.
  */
 /* behavior-decision: read-write-alias */
 RUNTIMEC_RWIR_OPERATION(RUNTIMEC_RWIR_COPY, "copy", 0x0001,

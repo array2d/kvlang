@@ -7,7 +7,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 include(GNUInstallDirs)
 
-# 共享库
+# Shared library
 add_library(blockalloc SHARED
     src/blockalloc.c
 )
@@ -27,9 +27,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(blockalloc PRIVATE ENABLE_LOG)
 endif()
 
-# 将安装 / 打包 逻辑移至 cmake/packagex.cmake
+# Install / packaging rules live in cmake/packagex.cmake
 include(cmake/packagex.cmake)
 
-# 测试
+# Tests
 enable_testing()
 add_subdirectory(tutorial)

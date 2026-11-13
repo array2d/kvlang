@@ -1,36 +1,28 @@
-// 判据：float32 与 float64 走**同一个**浮点格式化实现，只差宽度。
+// Criterion: `float32` and `float64` share the **same** floating-point formatting rules, differing only in precision width.
 //
-// 如果为第二种宽度另写一份格式化，两侧迟早漂开，而漂开的形态是
-// 「float32 打 12、float64 打 12.0」这种没人会立刻发现的不一致——
-// 所以判据在这里钉的是「两种宽度的输出规则相同」，不是各自的字面值。
+// Maintaining separate formatters per width risks subtle drift (e.g. `float32` printing `12` while
+// `float64` prints `12.0`). Both widths follow identical rules:
+//   integral value -> append `.0` (`12` alone looks like `int64`)
+//   fractional value -> stay compact (`3.14`, not `3.140000`)
 //
-// 补 `.0` 的规则与 float64 完全一样（判据是 kind 是浮点，与宽度无关）：
-//   整数值 → 补 `.0`（`12` 会被误读成 int64）
-//   非整数值 → 保持 `%g` 紧凑（`3.14` 不变成 `3.140000`）
+// `float32` values are constructed via `float32(...)` since float literals default to `float64`.
+// The last three cases test **boundary values**: max finite +/- and min positive subnormal.
 //
-// 构造 float32 值只能经类型构造器 `float32(...)`——pathlang 的浮点字面量默认
-// float64，没有 `var float32 x` 这种声明形式。
+// ── Expected-output changelog (2026-11-05, float formatter rewrite) ──────────
 //
-// 最后三条是**边界值**：最大有限正负值 + 最小次正规数。
+// `3.40282e+38` -> **`3.4028235e+38`**: **shortest round-trip in the `float32` domain**.
+//   Legacy `%g` truncated to 6 significant digits; shortest `float32` round-trip requires 8 digits
+//   (whereas round-tripping in `float64` domain would emit 17 digits of phantom precision).
 //
-// ── 期望值变更记录（2026-11-05，浮点格式化重写）──────────────────────
+// `1.4013e-45` -> **`1e-45`**: shortest representation that rounds back to the same `float32` subnormal.
 //
-// `3.40282e+38` → **`3.4028235e+38`**：**往返域变了**。
-//   旧实现用 `%g` 默认 6 位有效数字，这个值是**截断**的；新实现按 float32 域
-//   做最短往返，8 位才能读回同一个 float32。**值没变，表示变长了**。
-//   若按 double 域做往返会一路加到 17 位（`3.4028234663852886e+38`），
-//   那些尾数在被截断成 float32 后根本不存在——所以域必须按值本身的宽度定。
+// Both exponents (`38` and `-45`) lie outside the fixed-point range `[1e-4, 1e16)`, so they use
+// scientific notation without `.0` suffixing.
 //
-// `1.4013e-45` → **`1e-45`**：同一个原因。旧值是 `%g` 6 位截断，新值是
-//   能读回同一个 float32 的最短表示。**值没变。**
+// Reference: `runtimec_temp_println_render_float` in `runtimec/vmbin/temp_println.c`;
+//            `float_print.kv` covers `float64`.
 //
-// 另：这两条现在都**走指数形态**（十进制指数 38 与 -45 都超出 `[1e-4, 1e16)`
-// 的定点区间），所以不会触发补 `.0`。
-//
-// 依据：runtimec/vmbin/temp_println.c 的 runtimec_temp_println_render_float；
-//       同族的 float_print.kv 覆盖 float64。
-//
-// 期望输出:
+// Expected output:
 //   3.14
 //   12.0
 //   0.5

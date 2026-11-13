@@ -1,7 +1,7 @@
-// 判据：形状 [3]int64 是参数的匹配类型，实参必须是长度 3 的 compact。
-// 若形状被忽略，长度不符的实参也会被接受；这里至少证明长度 3 能匹配。
-// 依据：03-类型系统/07-文法与合法性.kv、09-数组形态.kv。
-// 期望输出:
+// Criterion: shape `[3]int64` participates in parameter type matching; the argument must be a length-3 compact array.
+// Ignoring shape would accept mismatched lengths; here we verify that length 3 matches cleanly.
+// Reference: 03-type-system/07-grammar-and-validity.kv, 09-array-forms.kv.
+// Expected output:
 //   6
 
 rwfunc sum3(*[3]int64 #a) -> (*int64 #r) {

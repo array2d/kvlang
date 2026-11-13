@@ -1,17 +1,17 @@
-// 判据：&x 产 Ptr；*p 是唯一解引用路径，读侧取整值、写侧写穿目标。
-// 若把 *p 当乘号或不做写穿，第二行不会变成 100。
-// 依据：03-类型系统/16-ptr.kv。
+// Criterion: `&x` produces a `Ptr`; `*p` is the sole dereference form, reading the target value
+// on the read side and writing through to the target on the write side.
+// Treating `*p` as multiplication or failing to write through would leave `x` unchanged instead of `100`.
+// Reference: 03-type-system/16-ptr.kv.
 //
-// ── 已知限制（本文件不在语料扫描路径内）──────────────────────────
-// **阻塞于指针表示未接通**：head.ptr 恒 0，layout 不产 ptr=1，编码器拒绝带
-// POINTER 位的能力行（`vmkv encoder: pointer and extension parameters are not
-// representable from RWIR text yet`）。
+// ── Known limitation (excluded from active corpus scan) ──────────────────────
+// **Blocked on pointer representation wiring**: `head.ptr` is still 0, layout does not emit `ptr=1`,
+// and the encoder rejects capability rows with POINTER bits (`vmkv encoder: pointer and extension
+// parameters are not representable from RWIR text yet`).
 //
-// 这不是被测行为回归——判据本身没问题，是底层表示还没落地。**不得**改成
-// 「期望错误」把它固化成负向用例：那等于把限制写成规范。
-// 指针表示落地后把它搬回 `pointer/` 并转正。
+// Do **not** convert this into `// Expected error:` -- encoding an implementation gap as a negative
+// test would enshrine a temporary limitation as normative behavior. Move back to `pointer/` once wired.
 //
-// 期望输出:
+// Expected output:
 //   42
 //   100
 

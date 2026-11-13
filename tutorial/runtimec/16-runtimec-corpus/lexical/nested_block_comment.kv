@@ -1,11 +1,11 @@
-// 判据：块注释可嵌套；内层 */ 不结束外层。
-// 若不嵌套，注释会在「内层 */」处结束，`仍在注释内` 变成代码。
-// 依据：01-词法/03-注释.kv。
-// 期望输出:
+// Criterion: block comments nest; an inner `*/` does not close the outer comment.
+// Without nesting, the comment would end at the inner `*/` and `still_in_comment` would be parsed as code.
+// Reference: 01-lexical/03-comments.kv.
+// Expected output:
 //   7
 
 rwfunc test() -> () {
-	
-	值:int64 = 7
-	println(值)
+	/* outer /* inner */ still_in_comment */
+	val:int64 = 7
+	println(val)
 }

@@ -51,12 +51,12 @@ def locate_registry_source(root: Path) -> Path | None:
     return None
 
 def missing_registry_finding(root: Path) -> Finding:
-    searched = "、".join(REGISTRY_SOURCE_GLOBS)
+    searched = ", ".join(REGISTRY_SOURCE_GLOBS)
     return Finding(
         REGISTRY_SOURCE.as_posix(), 1, "missing-registry-source",
-        f"找不到登记表源（可能又迁移了）：按 {searched} 都没命中。"
-        f"查找方式：`find <repo> -name myrwircaps.c -not -path '*/workspace/*'`；"
-        f"找到后把本文件顶部的 REGISTRY_SOURCE / REGISTRY_SOURCE_GLOBS 指过去。",
+        f"cannot locate registry source (may have moved): none of {searched} matched. "
+        f"Locate it with `find <repo> -name myrwircaps.c -not -path '*/workspace/*'` "
+        f"and update REGISTRY_SOURCE / REGISTRY_SOURCE_GLOBS at the top of this file.",
     )
 
 def preprocess(root: Path, source: Path, pathspace_include: Path | None = None) -> str:
@@ -74,10 +74,10 @@ def preprocess(root: Path, source: Path, pathspace_include: Path | None = None) 
         hint = ""
         if pathspace_include is None:
             hint = (
-                "\n  提示：handler 源要 include <pathspace/pathspace_xvalue.h>，"
-                "该头在兄弟仓。加参数重跑：\n"
+                "\n  hint: handler sources include <pathspace/pathspace_xvalue.h> "
+                "from the pathspace repo. Re-run with:\n"
                 "    python3 runtimec/tools/architecture/check_handler_definitions.py "
-                "--pathspace-include=<pathspace 仓的 include/>"
+                "--pathspace-include=<pathspace include/>"
             )
         raise RuntimeError(
             f"cannot preprocess {source}: "
@@ -93,7 +93,7 @@ def registered_surfaces(root: Path, registry: Path,
         end = text.index("\n};", start)
     except ValueError as error:
         raise RuntimeError(
-            f"{registry}: 找不到 runtimec_myrwircaps[] 表——表名改了就同步改这里"
+            f"{registry}: cannot find runtimec_myrwircaps[] table — update this check if renamed"
         ) from error
     names: list[str] = []
     for literal in re.findall(
@@ -189,11 +189,11 @@ def audit(root: Path,
     if not surfaces:
         return [Finding(REGISTRY_SOURCE.as_posix(), 1,
                         "uncheckable-handler-definition",
-                        "登记表解析出 0 个名字——判据不能对此放行")], 0
+                        "registry parsed 0 names — check must not pass vacuous input")], 0
     if not codes:
         return [Finding(CATALOG_SOURCE.as_posix(), 1,
                         "uncheckable-handler-definition",
-                        f"{CATALOG_SOURCE} 解析出 0 个 opid")], 0
+                        f"{CATALOG_SOURCE} parsed 0 opids")], 0
 
     findings: list[Finding] = []
     checked = 0
@@ -205,8 +205,8 @@ def audit(root: Path,
         if symbol is None:
             findings.append(Finding(
                 REGISTRY_SOURCE.as_posix(), 1, "surface-without-catalog-row",
-                f"{surface!r} 在登记表里，但 {ALIAS_TABLE_SOURCE} 没有它的映射"
-                f"（待裁项见 rwir_catalog_gaps.md）",
+                f"{surface!r} is in the registry, but {ALIAS_TABLE_SOURCE} has no mapping "
+                f"(see rwir_catalog_gaps.md for pending items)",
             ))
             continue
         code = codes[symbol]
@@ -221,9 +221,9 @@ def audit(root: Path,
                 continue
             findings.append(Finding(
                 REGISTRY_SOURCE.as_posix(), 1, "registered-without-handler",
-                f"{surface!r}（opid 0x{code:04X}）声明由本 runtime 兑现，"
-                f"但三条路都没有：不在 binrwir_registry、不是解释器内联分派、"
-                f"也不在特化表里",
+                f"{surface!r} (opid 0x{code:04X}) is declared as implemented by this runtime, "
+                f"but is missing from all three paths: binrwir_registry, inline interpreter "
+                f"dispatch, and the specialization table",
             ))
         checked += 1
     global _INLINED_COUNT, _SPECIALIZED_COUNT
@@ -366,8 +366,8 @@ def main(command_arguments: list[str] | None = None) -> int:
                         help="prove the checker can fail, using synthetic fixtures")
     parser.add_argument(
         "--pathspace-include", type=Path, default=None,
-        help="pathspace 仓的 include/（提供 <pathspace/pathspace_xvalue.h>）；"
-             "预处理 handler 源时必填",
+        help="pathspace repo include/ directory (providing <pathspace/pathspace_xvalue.h>); "
+             "required when preprocessing handler sources",
     )
     arguments = parser.parse_args(command_arguments or sys.argv[1:])
     if arguments.selftest:

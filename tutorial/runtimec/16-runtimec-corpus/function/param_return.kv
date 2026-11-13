@@ -1,7 +1,7 @@
-// 判据：调用没有返回值表达式，输出经写参映射落到调用方 key。
-// 若把 -> 当返回值赋值，v 不会出现在调用方。
-// 依据：04-layout语义/03-函数.kv、05-runtime语义/01-执行模型.kv。
-// 期望输出:
+// Criterion: functions have no return-value expression; outputs land in caller keys via write-parameter mapping.
+// Misinterpreting `->` as return-value assignment would fail to populate `v` in the caller.
+// Reference: 04-layout-semantics/03-functions.kv, 05-runtime-semantics/01-execution-model.kv.
+// Expected output:
 //   42
 
 rwfunc add1(*int64 #x) -> (*int64 #r) {

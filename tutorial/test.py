@@ -67,8 +67,8 @@ def parse_expects(f: Path) -> list[str]:
     with open(f) as fh:
         for line in fh:
             line = line.rstrip("\n")
-            if line.startswith("// 期望输出") or line.startswith("// Expected output"):
-                prefix = "// 期望输出" if line.startswith("// 期望输出") else "// Expected output"
+            if line.startswith("// Expected output"):
+                prefix = "// Expected output"
                 inline = line[len(prefix) :].lstrip()
                 if inline.startswith(":"):
                     inline = inline[1:].strip()
@@ -207,7 +207,7 @@ def run_benchmarks(files: list[Path], errorexit: bool = False) -> int:
         if expects:
             row, error = _benchmark_file(f, expects)
         else:
-            row, error = _invalid_row(f), "missing # 期望输出"
+            row, error = _invalid_row(f), "missing // Expected output"
         rows.append(row)
         rel = str(f.relative_to(ROOT))
         if error:
@@ -269,25 +269,25 @@ def _compare_lines(expects: list[str], actual_stdout: str) -> tuple[bool, str]:
 def main():
     global _C_DSN, _BACKEND_TMP, LAYOUT_BIN, TERM_BIN, CASE_TIMEOUT
     ap = argparse.ArgumentParser(description="tutorial test")
-    ap.add_argument("--filter", default="", help="按路径子串过滤（如 11-string/01 / 08-leetcode/01）")
+    ap.add_argument("--filter", default="", help="filter by path substring (e.g. 11-string/01 or 08-leetcode/01)")
     ap.add_argument("--no-build", action="store_true", help="skip make build")
     ap.add_argument("--errorexit", action="store_true", help="exit on first error")
     ap.add_argument("--bench", action="store_true", help="benchmark matching .kv/.py/.c files")
     ap.add_argument("--pathspace", default="",
-                    help="DSN，必填且只接受 shm://（如 shm:///tmp/kv.shm）；无默认值")
-    ap.add_argument("--layout-bin", default=LAYOUT_BIN, help="pathlanglayout 路径")
-    ap.add_argument("--term-bin", default=TERM_BIN, help="pathseek 路径")
+                    help="DSN, required and must use shm:// (e.g. shm:///tmp/kv.shm); no default")
+    ap.add_argument("--layout-bin", default=LAYOUT_BIN, help="path to pathlanglayout")
+    ap.add_argument("--term-bin", default=TERM_BIN, help="path to pathseek")
     ap.add_argument("--case-timeout", type=int, default=CASE_TIMEOUT,
-                    help=f"单用例运行超时（秒），默认 {CASE_TIMEOUT}")
+                    help=f"per-case timeout in seconds (default: {CASE_TIMEOUT})")
     args = ap.parse_args()
     LAYOUT_BIN, TERM_BIN = args.layout_bin, args.term_bin
     CASE_TIMEOUT = args.case_timeout
     _C_DSN = args.pathspace
     if not _C_DSN:
-        ap.error("缺少 --pathspace=：DSN 必填且只接受 shm://，例如 "
-                 "--pathspace=shm:///tmp/kv.shm（无默认值）")
+        ap.error("missing --pathspace=: DSN is required and must use shm://, e.g. "
+                 "--pathspace=shm:///tmp/kv.shm (no default)")
     if not _C_DSN.startswith("shm://"):
-        ap.error(f"--pathspace 只接受 shm://，收到 {_C_DSN!r}")
+        ap.error(f"--pathspace only accepts shm://, got {_C_DSN!r}")
     _BACKEND_TMP = tempfile.TemporaryDirectory(prefix="pathlang-tut-")
 
     files = [f for f in discover(ROOT / "tutorial")
@@ -389,7 +389,7 @@ class BenchmarkTest(unittest.TestCase):
 
     def write_fixture(self, python_output="answer 42", include_c=True):
         source = self.tutorial / "case.kv"
-        source.write_text("// 期望输出:\n//   answer 42\n", encoding="utf-8")
+        source.write_text("// Expected output:\n//   answer 42\n", encoding="utf-8")
         source.with_suffix(".py").write_text(
             f"print({python_output!r})\n", encoding="utf-8",
         )

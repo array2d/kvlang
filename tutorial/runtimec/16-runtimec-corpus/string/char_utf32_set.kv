@@ -1,14 +1,14 @@
-// 判据：`string·set` 重建后的字节必须服从**写槽声明的 langtype**。
-// 写槽是 `char/utf32`，所以「中」必须写成 4 字节 `2d 4e 00 00`；
-// 若 rebuild 恒写 UTF-8（3 字节），body 长度不是 4 的倍数，
-// println 按 utf32 解会直接判畸形——这条就会红。
-// 依据：five-language-behavior-matrix `string-codepoint-indexing`；
-//       `string_text_encode` 的 utf32 分支。
-// 期望输出:
-//   h中
+// Criterion: bytes rebuilt by `string·set` must follow the **write slot's declared langtype**.
+// The write slot is `char/utf32`, so "α" must be encoded as 4 bytes (`b1 03 00 00`);
+// if rebuild always wrote UTF-8 ("hα" = 3 bytes), the body length would not be a multiple of 4,
+// and println decoding as utf32 would reject it as malformed.
+// Reference: five-language-behavior-matrix `string-codepoint-indexing`;
+//            utf32 branch of `string_text_encode`.
+// Expected output:
+//   hα
 
 rwfunc test() -> () {
 	s:[]char/utf8 = "hi"
-	t:char/utf32 = string·set(s, 1, "中")
+	t:char/utf32 = string·set(s, 1, "α")
 	println(t)
 }

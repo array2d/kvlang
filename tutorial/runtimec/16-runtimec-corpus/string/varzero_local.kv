@@ -1,13 +1,12 @@
-// 判据：**不存在的变长写目标**建成空串后可读，且 `string·len` 为 0。
+// Criterion: initializing a **fresh variable-length target** to `""` materializes a valid empty string
+// whose `string·len` is `0`.
 //
-// 这是「变长零值 = 空 body」这条新语义的钉子：`ensure_zero_value` 以前对变长
-// langtype 一律 UNSUPPORTED（「no fixed zero width」），于是「给一个尚不存在的
-// 变长槽建零值」这条路根本不存在。现在它建成一条 body 长度 0、head 里带
-// langtype 的合法值——`string·len` 读它必须得 0，而不是报错、也不是读到脏字节。
+// Locks down variable-length zero initialization ("empty body + langtype in head"): previously
+// `ensure_zero_value` returned `UNSUPPORTED` ("no fixed zero width") on variable-length langtypes.
+// Now `string·len` must read `0` cleanly without errors or uninitialized bytes.
 //
-// 反向提示：若哪天有人把变长零值改回「拒绝」或改成「按某个定宽猜」，
-// 这条会红（前一种报错，后一种 len 不为 0）。
-// 期望输出:
+// Regression guard: reverting variable-length zero-init to `UNSUPPORTED` or a fixed dummy width turns this red.
+// Expected output:
 //   0
 
 rwfunc test() -> () {

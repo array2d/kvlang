@@ -94,7 +94,7 @@ def compile_native(lang, src, workdir):
     else:
         cc = sh(["gcc", "-O1", "-o", str(exe), str(src)])
     if cc.returncode != 0:
-        raise RuntimeError(f"{lang} 编译失败:\n{cc.stderr}")
+        raise RuntimeError(f"{lang} compilation failed:\n{cc.stderr}")
     return [str(exe)]
 
 def kv_dsn(label, workdir, redis_dsn):
@@ -180,7 +180,7 @@ def bench_case(case_dir, args, scale):
                 if inp is not None:
                     case_input = inp
             except (subprocess.TimeoutExpired, RuntimeError) as e:
-                print(f"  ! pathlang/{label} 失败: {str(e).splitlines()[0]}",
+                print(f"  ! pathlang/{label} failed: {str(e).splitlines()[0]}",
                       file=sys.stderr)
                 best[key] = None
     for lang in NATIVE:
@@ -193,14 +193,14 @@ def bench_case(case_dir, args, scale):
                               args.repeat, func, lang)
                 best[lang] = b
             except (subprocess.TimeoutExpired, RuntimeError) as e:
-                print(f"  ! {lang} 失败: {str(e).splitlines()[0]}",
+                print(f"  ! {lang} failed: {str(e).splitlines()[0]}",
                       file=sys.stderr)
                 best[lang] = None
     present = [func[k] for k in func if best.get(k) is not None]
     kv_ok = all(best.get(f"pathlang_{l}") is not None for l in args.backends)
     valid = kv_ok and len(present) >= 2 and all(x == present[0] for x in present)
     if not kv_ok:
-        print(f"  ! {case_dir.name}: pathlang 无有效数据 → valid=False",
+        print(f"  ! {case_dir.name}: no valid pathlang data -> valid=False",
               file=sys.stderr)
     return best, valid, case_input
 
@@ -229,14 +229,14 @@ def print_row(name, inp, best, valid):
 def show_history():
     files = sorted(RESULTS_DIR.glob("results-*.csv"))
     if not files:
-        print("无历史（results/ 无快照）")
+        print("No history (no snapshots in results/)")
         return
     rows = []
     for fp in files:
         with fp.open() as f:
             rows.extend(r for r in csv.DictReader(f) if r.get("version"))
     if not rows:
-        print("results/ 快照为空")
+        print("Snapshots in results/ are empty")
         return
     w = max(len(r["version"]) for r in rows) + 1
     iw = max([len(r.get("input", "") or "-") for r in rows] + [5]) + 1
@@ -252,19 +252,19 @@ def show_history():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("-k", "--filter", default="", help="只跑名字含此串的 case")
-    ap.add_argument("--repeat", type=int, default=3, help="每列采样次数，取 min")
+    ap.add_argument("-k", "--filter", default="", help="Only run cases matching substring")
+    ap.add_argument("--repeat", type=int, default=3, help="Samples per column (takes min)")
     ap.add_argument("--backends", default="shm,fs,redis",
-                    help="pathlang 后端子集，逗号分隔（shm,fs,redis）")
+                    help="Comma-separated pathlang backends (shm,fs,redis)")
     ap.add_argument("--redis", default="redis://127.0.0.1:6379",
-                    help="redis 后端 DSN")
+                    help="Redis backend DSN")
     ap.add_argument("--pathlang-bin",
                     default=str(Path(__file__).resolve().parent.parent / "bin" / "pathlangrun"))
     ap.add_argument("--no-stdlib", action="store_true",
-                    help="向 pathlang 追加 --no-stdlib（跳过 stdlib 引导，只测用户代码）")
+                    help="Pass --no-stdlib to pathlang (skip stdlib bootstrap, measure user code only)")
     ap.add_argument("--timeout", type=int, default=300)
-    ap.add_argument("--no-write", action="store_true", help="不写快照")
-    ap.add_argument("--show", action="store_true", help="汇总历史后退出")
+    ap.add_argument("--no-write", action="store_true", help="Do not write CSV snapshot")
+    ap.add_argument("--show", action="store_true", help="Print historical results and exit")
     args = ap.parse_args()
 
     if args.show:
@@ -273,7 +273,7 @@ def main():
 
     args.backends = [b for b in args.backends.split(",") if b in KV_BACKENDS]
     if not args.backends:
-        print("无有效后端", file=sys.stderr)
+        print("No valid backends selected", file=sys.stderr)
         sys.exit(1)
 
     version, commit = git_version()
@@ -284,7 +284,7 @@ def main():
     cases = sorted(d for d in CASES_DIR.iterdir()
                    if d.is_dir() and args.filter in d.name)
     if not cases:
-        print("无匹配 case", file=sys.stderr)
+        print("No matching cases", file=sys.stderr)
         sys.exit(1)
 
     print(f"version={version} commit={commit} cpu=[{cpu}] "
@@ -323,7 +323,7 @@ def main():
         wr = csv.DictWriter(f, fieldnames=FIELDS)
         wr.writeheader()
         wr.writerows(rows)
-    print(f"\n→ 写入 {len(rows)} 行到 {out_path.relative_to(PATHLANG_ROOT)}")
+    print(f"\n-> Wrote {len(rows)} rows to {out_path.relative_to(PATHLANG_ROOT)}")
 
 if __name__ == "__main__":
     main()

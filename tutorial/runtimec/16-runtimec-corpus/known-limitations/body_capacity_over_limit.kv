@@ -1,43 +1,39 @@
-// TODO(#待建): over-limit 用例等语料运行器支持「期望运行期失败」。
+// TODO(pending): enable over-limit test once the corpus runner supports "Expected runtime failure".
 //
-// ── 这条要测什么 ──────────────────────────────────────────────────────
+// ── What this case tests ─────────────────────────────────────────────────────
 //
-// `compactarray·new` 的 body 打包缓冲上限是 8192 字节（`CONTAINER_NEW_BODY_CAPACITY`，
-// 见 `vmbin/handlers/container.c` 定义处）。**恰好 1024 个 int64 必须成功**
-// （已由 `array/body_capacity_exact.kv` 钉住），**1025 个必须报 `0x4301`**
-// （`RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER`），不截断、不降级。
+// `compactarray·new` caps its body packing buffer at 8192 bytes (`CONTAINER_NEW_BODY_CAPACITY` in
+// `vmbin/handlers/container.c`). **Exactly 1024 `int64` elements must succeed** (covered by
+// `array/body_capacity_exact.kv`), while **1025 elements must fail with `0x4301`**
+// (`RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER`) without truncation or silent fallback.
 //
-// ── 为什么这条现在写不成 ──────────────────────────────────────────────
+// ── Why this cannot run in the active corpus yet ─────────────────────────────
 //
-// 语料运行器只有三态（pass / fail / blocked）加第四态「期望 layout 错误」
-// （`// 期望错误: <子串>`）。**没有「期望运行期失败」这一态。**
+// The corpus runner currently supports pass / fail / blocked plus `// Expected error: <substring>`
+// for layout errors, **without an "Expected runtime failure" state**.
 //
-// 把 1025 个元素写成正常用例，运行器会把它记成 **fail**——而它其实是**通过**的
-// （实现正确地拒绝了超限输入）。那会给语料留一条永远红、且红得没名分的用例，
-// 而「正确的拒绝」与「程序坏了」在统计上必须能分开。
+// Placing a 1025-element case in the active corpus would record a **fail** even though the runtime
+// rightly rejected the over-limit input. Proper rejections must stay distinguishable from regressions.
 //
-// ── 不要用代理指标顶替 ────────────────────────────────────────────────
+// ── Do not substitute proxy assertions ───────────────────────────────────────
 //
-// **不要**写一条断言 `CONTAINER_NEW_BODY_CAPACITY == 8192` 的测试：那测的是
-// 定义处那个数字，不是「超限会被拒绝」这个行为。判据是**改掉上限，用例结论要
-// 跟着变**——代理指标做不到这一点。
+// Do **not** replace this with a static check asserting `CONTAINER_NEW_BODY_CAPACITY == 8192`:
+// changing the limit must flip the behavioral test outcome, which a literal check does not verify.
 //
-// ── 本文件为什么在 known-limitations/ ─────────────────────────────────
+// ── Why this file lives under `known-limitations/` ───────────────────────────
 //
-// 它不在语料扫描路径内（`known-limitations/` 不被 runner 收集），所以不会
-// 制造假红。等运行器支持「期望运行期失败」，把它搬到 `array/` 并转正。
+// `known-limitations/` is excluded from runner discovery so it does not produce false reds.
+// Move this case to `array/` once `// Expected runtime failure: 0x4301` is supported.
 //
-// 同样处理的还有：`pointer_parameter.kv`、`address_and_deref.kv`、
-// `structref_parameter.kv`。
+// Related staged cases: `pointer_parameter.kv`, `address_and_deref.kv`, `structref_parameter.kv`.
 //
-// ── 转正时这条用例应该长这样 ──────────────────────────────────────────
+// ── Intended form once promoted ──────────────────────────────────────────────
 //
-//   // 期望运行期失败: 0x4301
+//   // Expected runtime failure: 0x4301
 //   rwfunc test() -> () {
-//       vals = [<1025 个 int64>]
+//       vals = [<1025 int64 elements>]
 //       println(compactarray·numel(vals))
 //   }
 //
-// 下面保留一份**不可执行**的占位（1025 个元素的字面量太长，不在此重复），
-// 只有注释——因为本文件不会被 runner 解析。
+// Kept as a comment-only placeholder below (omitting the 1025-element literal).
 

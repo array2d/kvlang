@@ -73,7 +73,7 @@ fn assert_semantic(tag: &str, src: &str) {
         assert!(
             !(KINDS.iter().any(|k| op.starts_with(&format!("{k}·")))
                 && OPS.iter().any(|o| op.ends_with(o))),
-            "{tag}: 出现 typed opcode {op:?}"
+            "{tag}: unexpected typed opcode {op:?}"
         );
         assert!(
             !op.contains('·')
@@ -81,7 +81,7 @@ fn assert_semantic(tag: &str, src: &str) {
                 || op.starts_with("compactarray·")
                 || op.starts_with("scatterarray·")
                 || op.starts_with("pathspace·"),
-            "{tag}: 出现非白名单的带 `·` opcode {op:?}"
+            "{tag}: unexpected non-whitelisted `·` opcode {op:?}"
         );
     }
 }
@@ -117,7 +117,7 @@ fn float_families_emit_semantic_names() {
 #[test]
 fn unary_minus_emits_neg() {
     let ops = opcodes("unary", "f", "rwfunc f(*int64 #a) -> () {\n\t-*a -> w\n}\n");
-    assert!(ops.iter().any(|o| o == "neg"), "一元负号应发 neg：{ops:?}");
+    assert!(ops.iter().any(|o| o == "neg"), "unary minus should emit neg: {ops:?}");
     assert!(!ops.iter().any(|o| o.contains('·')), "{ops:?}");
 }
 
@@ -130,14 +130,14 @@ fn string_plus_emits_concat_and_mixed_is_rejected() {
     );
     assert!(
         ops.iter().any(|o| o == "string·concat"),
-        "字符串 + 应发 string·concat：{ops:?}"
+        "string + should emit string·concat: {ops:?}"
     );
     assert!(!ops.iter().any(|o| o == "add" || o == "+"), "{ops:?}");
 
     let file = temp_file("mixed", "rwfunc f() -> () {\n\ta = \"x\" + 1\n}\n");
     let db = dsn("mixed");
     let out = Command::new(bin()).arg(&file).arg(&db).output().unwrap();
-    assert!(!out.status.success(), "混合字符串与数值必须 layout 失败");
+    assert!(!out.status.success(), "mixing string and numeric operands must fail layout");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("cannot mix string and numeric"),
@@ -166,7 +166,7 @@ fn no_switch_can_bring_typed_names_back() {
             continue;
         }
         let text = slot_text(&mut kv, &format!("/lib/f/{c}"));
-        assert!(!text.contains('·'), "typed opcode 复活：{text:?}");
+        assert!(!text.contains('·'), "typed opcode reappeared: {text:?}");
     }
     drop(kv);
     let _ = std::fs::remove_file(&file);

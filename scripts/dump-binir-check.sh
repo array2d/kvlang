@@ -21,13 +21,13 @@ usage() {
 	cat <<'EOF'
 usage: dump-binir-check.sh [--file FILE.kv] [--scale N] [--require] [--keep]
 
-  --file FILE   要转储的 .kv（默认 benchmark/cases/iops/iops.kv）
-  --scale N     源码内 __SCALE__ 的替换值（默认 200）
-  --require     RC2_DUMP_BINIR 无输出时判失败（默认 SKIP 退出 0）
-  --keep        保留临时目录并打印路径
-  -h, --help    显示本帮助
+  --file FILE   .kv file to dump (default: benchmark/cases/iops/iops.kv)
+  --scale N     Replacement value for __SCALE__ in source (default: 200)
+  --require     Fail when RC2_DUMP_BINIR produces no output (default: SKIP with exit 0)
+  --keep        Keep temporary directory and print its path
+  -h, --help    Show this help
 
-退出码：0 通过/跳过；1 结构不符；2 环境/用法错误。
+Exit codes: 0 passed/skipped; 1 structural mismatch; 2 environment/usage error.
 EOF
 }
 
@@ -43,12 +43,12 @@ while (($#)); do
 	shift
 done
 
-[ -x "$PATHLANG_BIN" ] || die "PATHLANG_BIN 不可执行：$PATHLANG_BIN"
-[ -f "$FILE" ] || die "文件不存在：$FILE"
-[[ "$SCALE" =~ ^[0-9]+$ ]] || die "--scale 需为正整数：$SCALE"
-command -v timeout >/dev/null 2>&1 || die "需要 coreutils timeout"
+[ -x "$PATHLANG_BIN" ] || die "PATHLANG_BIN is not executable: $PATHLANG_BIN"
+[ -f "$FILE" ] || die "file does not exist: $FILE"
+[[ "$SCALE" =~ ^[0-9]+$ ]] || die "--scale must be a non-negative integer: $SCALE"
+command -v timeout >/dev/null 2>&1 || die "coreutils timeout is required"
 
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/pathlang-binir.XXXXXX")" || die "mktemp 失败"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/pathlang-binir.XXXXXX")" || die "mktemp failed"
 cleanup() { [ "$KEEP" -eq 1 ] || rm -rf "$TMP"; }
 trap cleanup EXIT
 
@@ -66,20 +66,20 @@ if [ "$KEEP" -eq 1 ]; then
 	printf 'tmp: %s\n' "$TMP"
 fi
 printf 'file=%s scale=%s exit=%s\n' "$FILE" "$SCALE" "$RC"
-[ "$RC" -eq 0 ] || printf '%s[warn]%s 程序退出码非 0，结构检查继续进行\n' "$YELLOW" "$NC"
+[ "$RC" -eq 0 ] || printf '%s[warn]%s non-zero program exit code; continuing structural check\n' "$YELLOW" "$NC"
 
 DUMP="$TMP/dump.txt"
 if grep -q '^\[binir\]' "$STDERR"; then
 	cp "$STDERR" "$DUMP"
 elif grep -q '^\[binir\]' "$STDOUT"; then
-	printf '%s[warn]%s [binir] 出现在 stdout（规范要求 stderr）\n' "$YELLOW" "$NC"
+	printf '%s[warn]%s [binir] written to stdout (expected stderr)\n' "$YELLOW" "$NC"
 	cp "$STDOUT" "$DUMP"
 else
 	if [ "$REQUIRE" -eq 1 ]; then
-		printf '%s[FAIL]%s RC2_DUMP_BINIR=1 无 [binir] 输出（--require）\n' "$RED" "$NC"
+		printf '%s[FAIL]%s RC2_DUMP_BINIR=1 produced no [binir] output (--require)\n' "$RED" "$NC"
 		exit 1
 	fi
-	printf '%s[SKIP]%s 当前构建未实现 binir dump（RC2_DUMP_BINIR 无输出，coding4 合入后重跑）\n' \
+	printf '%s[SKIP]%s current build does not emit binir dump (no RC2_DUMP_BINIR output)\n' \
 		"$YELLOW" "$NC"
 	exit 0
 fi
@@ -93,12 +93,12 @@ awk '
 function fail(msg) { printf "  FAIL: %s\n", msg; seg_fail = 1; global_fail = 1 }
 function finish() {
 	if (seg == 0) return
-	if (insn == 0) fail("段 " seg " 无指令行")
-	if (!saw_exit) fail("段 " seg " 缺 exit: JIT x / INTERP y")
+	if (insn == 0) fail("segment " seg " has no instruction lines")
+	if (!saw_exit) fail("segment " seg " missing exit: JIT x / INTERP y")
 	if (saw_exit && jit + interp != ninsn)
-		fail("段 " seg " JIT(" jit ") + INTERP(" interp ") != ninsn(" ninsn ")")
-	if (nconst > 0 && constn == 0) fail("段 " seg " nconst=" nconst " 但无 const[] 行")
-	if (nreg > 0 && regn == 0) fail("段 " seg " nreg=" nreg " 但无 reg[] 行")
+		fail("segment " seg " JIT(" jit ") + INTERP(" interp ") != ninsn(" ninsn ")")
+	if (nconst > 0 && constn == 0) fail("segment " seg " nconst=" nconst " but no const[] lines")
+	if (nreg > 0 && regn == 0) fail("segment " seg " nreg=" nreg " but no reg[] lines")
 	if (!seg_fail)
 		printf "  OK: seg %d func=%s insn=%d const=%d reg=%d jit=%d interp=%d\n", \
 			seg, func, insn, constn, regn, jit, interp
@@ -115,7 +115,7 @@ function finish() {
 		else if ($i ~ /^nreg=/) { nreg = $i; sub(/^nreg=/, "", nreg) }
 		else if ($i ~ /^nconst=/) { nconst = $i; sub(/^nconst=/, "", nconst) }
 	}
-	if (ninsn < 0 || nreg < 0 || nconst < 0) fail("段 " seg " 段头缺 ninsn/nreg/nconst 字段")
+	if (ninsn < 0 || nreg < 0 || nconst < 0) fail("segment " seg " header missing ninsn/nreg/nconst fields")
 	have_header = 1
 	next
 }
@@ -136,11 +136,11 @@ function finish() {
 }
 END {
 	finish()
-	if (seg == 0) { printf "  FAIL: 无 [binir] 段头\n"; global_fail = 1 }
-	if (!have_insn) { printf "  FAIL: 无带 [JIT]/[INTERP] 的指令行\n"; global_fail = 1 }
-	if (!have_const) { printf "  FAIL: 无 const[] 行\n"; global_fail = 1 }
-	if (!have_reg) { printf "  FAIL: 无 reg[] 行\n"; global_fail = 1 }
-	if (!have_exit) { printf "  FAIL: 无 exit: JIT x / INTERP y 行\n"; global_fail = 1 }
+	if (seg == 0) { printf "  FAIL: no [binir] segment header\n"; global_fail = 1 }
+	if (!have_insn) { printf "  FAIL: no instruction lines with [JIT]/[INTERP]\n"; global_fail = 1 }
+	if (!have_const) { printf "  FAIL: no const[] lines\n"; global_fail = 1 }
+	if (!have_reg) { printf "  FAIL: no reg[] lines\n"; global_fail = 1 }
+	if (!have_exit) { printf "  FAIL: no exit: JIT x / INTERP y lines\n"; global_fail = 1 }
 	printf "segments=%d instructions=%d\n", seg, insn_total
 	exit (global_fail ? 1 : 0)
 }
@@ -148,8 +148,8 @@ END {
 VERDICT=$?
 
 if [ "$VERDICT" -eq 0 ]; then
-	printf '%s[PASS]%s binir 转储结构完整\n' "$GREEN" "$NC"
+	printf '%s[PASS]%s binir dump structure valid\n' "$GREEN" "$NC"
 	exit 0
 fi
-printf '%s[FAIL]%s binir 转储结构缺项/不一致\n' "$RED" "$NC"
+printf '%s[FAIL]%s binir dump structure incomplete/inconsistent\n' "$RED" "$NC"
 exit 1

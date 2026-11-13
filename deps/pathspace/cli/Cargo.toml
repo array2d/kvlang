@@ -3,7 +3,7 @@ name = "pathspace-cli"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "pathspace 存储层 CLI（libpathspace C ABI；只有 shm://，无运行期 dispatch）"
+description = "pathspace storage-layer CLI (libpathspace C ABI; shm:// only, no runtime dispatch)"
 
 [[bin]]
 name = "pathspace"

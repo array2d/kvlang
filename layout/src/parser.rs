@@ -679,7 +679,7 @@ impl Parser {
         if type_has_any(&raw) {
             self.errors.push(Diagnostic {
                 pos: Pos { line: 0, col: 0 },
-                message: "unknown type \"any\" — `any` 不再是类型名；不约束请写空 kindexp：                          签名槽 `name:`、Ptr 目标 `*`、mapexpr value `[k]·`"
+                message: "unknown type \"any\" — `any` is no longer a type name; for an unconstrained type, write an empty kindexp: signature slot `name:`, Ptr target `*`, or mapexpr value `[k]·`"
                     .to_string(),
                 warn: false,
                 info: false,
@@ -730,7 +730,7 @@ impl Parser {
                         warn: false,
                         info: false,
                         message: format!(
-                            "参数名不带 `$`：`{}` 已废除，写成 `#{}`",
+                            "parameter name must not use `$`: `{}` is obsolete, write `#{}`",
                             t.value,
                             t.value.trim_start_matches('#')
                         ),
@@ -801,8 +801,8 @@ impl Parser {
                         pos: at.pos,
                         warn: false,
                         info: false,
-                        message: "`inplace` 只能修饰 rwfunc 或 rwir 的写参；读参不得标记 \
-                                  ——正确形态是写参列表里的 `inplace T #name`，读参直接写 `T #name`"
+                        message: "`inplace` is only allowed on rwfunc or rwir write params, not read params \
+                                  — write `inplace T #name` in the write param list, and `T #name` for read params"
                             .to_string(),
                         source: String::new(),
                         src_file: String::new(),
@@ -821,7 +821,7 @@ impl Parser {
                     warn: false,
                     info: false,
                     message: format!(
-                        "参数必须声明类型：`{name}` 的类型为空 —— 注释名 `#name` 只是名字，类型要写在前面的类型位置（`*int64 #{name}`）"
+                        "parameter must declare a type: `{name}` has an empty type — `#name` is only a comment name; write the type before it (`*int64 #{name}`)"
                     ),
                     source: String::new(),
                     src_file: String::new(),
@@ -851,7 +851,7 @@ impl Parser {
                     warn: false,
                     info: false,
                     message: format!(
-                        "参数声明必须是 `*T #name` 或 `T #name`；旧写法 `{}:{}` 不再接受",
+                        "parameter declaration must be `*T #name` or `T #name`; legacy `{}:{}` syntax is no longer accepted",
                         start.value, ty
                     ),
                     source: String::new(),
@@ -886,7 +886,7 @@ impl Parser {
                     pos: t.pos,
                     warn: false,
                     info: false,
-                    message: format!("参数必须声明类型：`{name}` 的类型为空"),
+                    message: format!("parameter must declare a type: `{name}` has an empty type"),
                     source: String::new(),
                     src_file: String::new(),
                     src_name: String::new(),
@@ -901,7 +901,7 @@ impl Parser {
                     warn: false,
                     info: false,
                     message: format!(
-                        "`inplace` 写在参数类型之前：`inplace {}`；写在名字之后不再接受",
+                        "`inplace` must precede the parameter type: `inplace {}`; trailing `inplace` after the name is no longer accepted",
                         ty.trim()
                     ),
                     source: String::new(),
@@ -958,10 +958,10 @@ impl Parser {
             warn: false,
             info: false,
             message: format!(
-                "参数声明必须是 `{} #name`{}；类型之后多出的 `{}` 不是注释名",
+                "parameter declaration must be `{} #name`{}; trailing `{}` after the type is not a `#name` comment",
                 ty.trim(),
                 if t.value == "inplace" {
-                    "，且 `inplace` 写在类型之前：`inplace <类型> #name`"
+                    ", with `inplace` before the type (`inplace <type> #name`)"
                 } else {
                     ""
                 },
@@ -984,7 +984,7 @@ impl Parser {
                     warn: false,
                     info: false,
                     message: format!(
-                        "参数 {:?}: `*` 作用于整个类型表达式，不能逐成员写 —— 写 `{}`",
+                        "parameter {:?}: `*` applies to the whole type expression, not per union member — write `{}`",
                         param.name,
                         {
                             let stripped: Vec<&str> = members
@@ -1014,7 +1014,7 @@ impl Parser {
             self.errors.push(Diagnostic {
                 pos: Pos { line: 0, col: 0 },
                 message: format!(
-                    "func {}: param {:?}: 值复制参数只能是字符串、数值或 bool —— 容器请写 `{} #{}`",
+                    "func {}: param {:?}: value-copy parameter must be a string, number, or bool — pass containers as `{} #{}`",
                     sig.name, param.name, pointer_form, param.name
                 ),
                 warn: false,
@@ -1029,7 +1029,7 @@ impl Parser {
                 self.errors.push(Diagnostic {
                     pos: Pos { line: 0, col: 0 },
                     message: format!(
-                        "func {}: return value {:?}: 值容器类型只能按地址传递 —— 写 `{:?}`",
+                        "func {}: return value {:?}: container types must be passed by pointer — write `{:?}`",
                         sig.name,
                         ret.name,
                         ret.ty
@@ -1371,7 +1371,7 @@ impl Parser {
                 self.errors.push(Diagnostic {
                     pos: self.peek().pos,
                     message: "empty kindexp is only allowed in signature slots (`name:`); \
-                              变量标注必须写具体类型"
+                              variable annotations must specify a concrete type"
                         .to_string(),
                     warn: false,
                     info: false,
@@ -1826,9 +1826,9 @@ impl Parser {
                         let coordinate = matches!(self.peek_at(1).kind, Kind::LBrack);
                         let pos = self.peek().pos;
                         let message = if coordinate {
-                            format!("对指针类型的坐标访问必须显式解引用：写 (*{name})·[i]")
+                            format!("coordinate access on pointer requires explicit dereference: write (*{name})·[i]")
                         } else {
-                            format!("对指针类型的成员访问必须显式解引用：写 (*{name})·name")
+                            format!("member access on pointer requires explicit dereference: write (*{name})·name")
                         };
                         self.errors.push(Diagnostic {
                             pos,
@@ -1935,7 +1935,7 @@ impl Parser {
                         pos,
                         warn: false,
                         info: false,
-                        message: format!("对指针类型的坐标访问必须显式解引用：写 (*{name})[i]"),
+                        message: format!("coordinate access on pointer requires explicit dereference: write (*{name})[i]"),
                         source: String::new(),
                         src_file: String::new(),
                         src_name: String::new(),
@@ -1974,14 +1974,14 @@ impl Parser {
                 
                 if e.unary && !e.word.is_empty() {
                     let hint = if e.word == "pointer" {
-                        "（乘号用 ×）"
+                        " (use × for multiplication)"
                     } else {
-                        "（该一元算子不支持中缀）"
+                        " (this unary operator cannot be used infix)"
                     };
                     self.errors.push(Diagnostic {
                         pos: t.pos,
                         warn: false,
-                        message: format!("一元算子 {:?} 出现在操作数之后{hint}", t.value),
+                        message: format!("unary operator {:?} appears after an operand{hint}", t.value),
                         info: false,
                         source: String::new(),
                         src_file: String::new(),
@@ -2234,7 +2234,7 @@ impl Parser {
                     .unwrap_or(Pos { line: 0, col: 0 });
                 self.errors.push(Diagnostic {
                     pos,
-                    message: "return 不接受参数；直接写 return 即可，返回值通过写参零拷贝传递"
+                    message: "return takes no arguments; write bare `return` (outputs are passed zero-copy via write params)"
                         .to_string(),
                     warn: false,
                     info: false,
@@ -2370,7 +2370,7 @@ impl Parser {
         if t.kind == Kind::Ident && t.value == "null" {
             self.errors.push(Diagnostic {
                 pos: t.pos,
-                message: "null 不是合法字面量；空值只有 None".to_string(),
+                message: "`null` is not a valid literal; use `None` for empty references".to_string(),
                 warn: false,
                 info: false,
                 source: String::new(),
@@ -2489,7 +2489,7 @@ impl Parser {
                         pos: base_token.pos,
                         warn: false,
                         info: false,
-                        message: format!("对指针类型的成员访问必须显式解引用：写 `(*{w})·name`"),
+                        message: format!("member access on pointer requires explicit dereference: write `(*{w})·name`"),
                         source: String::new(),
                         src_file: String::new(),
                         src_name: String::new(),
@@ -2594,11 +2594,11 @@ impl Parser {
             return;
         }
         let msg = if arg.quote != 0 {
-            "`*` 解引用要求 Ptr 槽（名字），不能作用于字符串字面量".to_string()
+            "`*` dereference requires a Ptr slot (identifier), not a string literal".to_string()
         } else if self.value_params.contains(&arg.val) {
             
             format!(
-                "值复制参数不可解引用：只读，没有可写的目标（`{}` 是值复制形参）",
+                "cannot dereference value-copy parameter: `{}` is read-only and has no writable target",
                 arg.val
             )
         } else {
@@ -2709,7 +2709,7 @@ impl Parser {
                 pos: self.peek().pos,
                 warn: false,
                 info: false,
-                message: format!("写指针形参必须显式解引用：写 `-> *{name}`"),
+                message: format!("writing to pointer parameter requires explicit dereference: write `-> *{name}`"),
                 source: String::new(),
                 src_file: String::new(),
                 src_name: String::new(),
@@ -2719,7 +2719,7 @@ impl Parser {
             self.errors.push(Diagnostic {
                 pos: self.peek().pos,
                 message:
-                    "`*` 解引用写槽只接名字（如 `*p`）：成员写用 `p·x`，下标写先 `*p` 解引用到变量"
+                    "`*` dereference write slot only takes an identifier (e.g., `*p`); write `(*p)·x` for members or `(*p)[i]` for subscripts"
                         .to_string(),
                 warn: false,
                 info: false,
@@ -2735,7 +2735,7 @@ impl Parser {
             if typ.is_empty() {
                 self.errors.push(Diagnostic {
                     pos: self.peek().pos,
-                    message: "empty kindexp is only allowed in signature slots (`name:`);                               变量/字面量标注必须写具体类型"
+                    message: "empty kindexp is only allowed in signature slots (`name:`); variable and literal annotations must specify a concrete type"
                         .to_string(),
                     warn: false,
                     info: false,
@@ -2859,7 +2859,7 @@ impl Parser {
                         pos: t.pos,
                         warn: false,
                         info: false,
-                        message: format!("对指针类型的成员访问必须显式解引用：写 `(*{w})·name`"),
+                        message: format!("member access on pointer requires explicit dereference: write `(*{w})·name`"),
                         source: String::new(),
                         src_file: String::new(),
                         src_name: String::new(),
@@ -2881,7 +2881,7 @@ impl Parser {
                     if ty.is_empty() {
                         self.errors.push(Diagnostic {
                             pos: Pos { line: 0, col: 0 },
-                            message: "empty kindexp is only allowed in signature slots                                       (`name:`); 成员写槽标注必须写具体类型"
+                            message: "empty kindexp is only allowed in signature slots (`name:`); member write slot annotations must specify a concrete type"
                                 .to_string(),
                             warn: false,
                             info: false,
@@ -2991,7 +2991,7 @@ impl Parser {
                 pos: Pos { line: 0, col: 0 },
                 warn: false,
                 info: false,
-                message: format!("对指针类型的坐标访问必须显式解引用：写 (*{arr})[i]"),
+                message: format!("coordinate access on pointer requires explicit dereference: write (*{arr})[i]"),
                 source: String::new(),
                 src_file: String::new(),
                 src_name: String::new(),
@@ -3212,10 +3212,10 @@ impl Parser {
         self.errors.push(Diagnostic {
             pos,
             message: format!(
-                "{ctx} {name:?}: unknown type {disp:?} — 不是已知种类名，\
-                 pathlang 无 int/uint/float/num/char 家族简写，数字须带位宽\
-                 （int8/int16/int32/int64、uint8/uint16/uint32/uint64、float32/float64），\
-                 字符须带编码（char/utf8、char/utf32、char/ascii）"
+                "{ctx} {name:?}: unknown type {disp:?} — not a known kind; \
+                 pathlang has no int/uint/float/num/char family shorthands: numbers require bit widths \
+                 (int8/int16/int32/int64, uint8/uint16/uint32/uint64, float32/float64) and \
+                 characters require encodings (char/utf8, char/utf32, char/ascii)"
             ),
             warn: false,
             info: false,

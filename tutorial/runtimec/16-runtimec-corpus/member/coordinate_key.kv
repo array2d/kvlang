@@ -1,7 +1,7 @@
-// 判据：a·[i,j] 是标量元组键，不是 compact 数组下标。
-// 若被当成数组下标，a 不是 compact，运行期会报 TypeError。
-// 依据：03-类型系统/15-成员访问.kv、14-map容器.kv。
-// 期望输出:
+// Criterion: `a·[i,j]` is a scalar tuple key, not a compact array subscript.
+// Treating it as an array subscript would fail at runtime with TypeError since `a` is not compact.
+// Reference: 03-type-system/15-member-access.kv, 14-map-containers.kv.
+// Expected output:
 //   7
 
 rwfunc test() -> () {

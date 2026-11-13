@@ -3,7 +3,7 @@ name = "pathlang-layout"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "pathlang 语法检查 + 布局工具（parser/lower/layoutcode），只依赖 pathspace-durable 的 C ABI"
+description = "pathlang syntax checker and layout tool (parser/lower/layoutcode), depending only on the pathspace-durable C ABI"
 
 [lib]
 name = "pathlanglayout"

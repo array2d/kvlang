@@ -77,7 +77,7 @@ rwfunc main() -> () {
     assert_eq!(
         &ops[..3],
         ["65281", "65282", "65283"],
-        "三条输出算子应依次编成 0xFF01/02/03 的十进制，实际 {ops:?}"
+        "the three output operators should encode as decimal 0xFF01/02/03, got {ops:?}"
     );
 }
 
@@ -93,7 +93,7 @@ fn ordinary_ops_keep_their_names() {
         .collect();
     assert!(
         ops.contains(&"add".to_string()),
-        "普通算子应保留名字，实际 {ops:?}"
+        "ordinary operators should keep their names, got {ops:?}"
     );
 }
 
@@ -114,7 +114,7 @@ rwfunc main() -> () {
         .collect();
     assert!(
         ops.contains(&"x·println".to_string()),
-        "带包前缀的名字不该被改写，实际 {ops:?}"
+        "package-prefixed names must not be rewritten, got {ops:?}"
     );
 }
 
@@ -125,7 +125,7 @@ fn opid_table_matches_reserved_region() {
         let id = pathlanglayout::builtin::output_opid(name).unwrap();
         assert!(
             id >= 0xFF00,
-            "{name} 的 opid {id:#06x} 不在保留区 0xFF00–0xFFFF 内"
+            "{name} opid {id:#06x} is outside reserved range 0xFF00–0xFFFF"
         );
     }
     

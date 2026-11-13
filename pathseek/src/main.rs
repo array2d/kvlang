@@ -11,8 +11,8 @@ fn dsn() -> String {
     match std::env::var("PATHSPACE") {
         Ok(v) if !v.is_empty() => v,
         _ => {
-            pathseek::elog!("缺少 PATHSPACE：DSN 必须显式给出（无默认值）。");
-            pathseek::elog!("例：PATHSPACE=shm:///tmp/kv.shm pathseek -c 'print(\"ok\")'");
+            pathseek::elog!("missing PATHSPACE: DSN must be specified explicitly (no default).");
+            pathseek::elog!("example: PATHSPACE=shm:///tmp/kv.shm pathseek -c 'print(\"ok\")'");
             std::process::exit(2);
         }
     }
@@ -36,7 +36,7 @@ fn parse_log_level(args: &[String]) -> LogLevel {
                 "info" => LogLevel::Info,
                 "debug" => LogLevel::Debug,
                 _ => {
-                    pathseek::elog!("--log-level 只接受 warn|info|debug，收到 {v:?}");
+                    pathseek::elog!("--log-level accepts warn|info|debug, got {v:?}");
                     std::process::exit(1);
                 }
             };
@@ -53,7 +53,7 @@ fn log_info(msg: &str) {
 
 fn read_file(path: &str) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|e| {
-        pathseek::elog!("读取 {path} 失败: {e}");
+        pathseek::elog!("failed to read {path}: {e}");
         std::process::exit(1);
     })
 }
@@ -90,7 +90,7 @@ fn main() {
                 )
             };
             if rc != 0 {
-                pathseek::elog!("layout 失败: {}", cbuf(&err));
+                pathseek::elog!("layout failed: {}", cbuf(&err));
                 std::process::exit(1);
             }
             println!("ENTRY={}", cbuf(&entry));
@@ -126,7 +126,7 @@ fn main() {
                 )
             };
             if rc != 0 {
-                pathseek::elog!("format 失败: {}", cbuf(&err));
+                pathseek::elog!("format failed: {}", cbuf(&err));
                 std::process::exit(1);
             }
             print!("{}", cbuf(&out));
@@ -150,7 +150,7 @@ fn main() {
         [cmd, act] if cmd == "isa" && act == "publish" => {
             let rt = unsafe { pathlangRuntimeConnect(cs(&dsn).as_ptr()) };
             if rt.is_null() {
-                pathseek::elog!("pathlangRuntimeConnect 失败: {dsn}");
+                pathseek::elog!("pathlangRuntimeConnect failed: {dsn}");
                 std::process::exit(1);
             }
             let kv = unsafe { pathlangRuntimePathspaceHandle(rt) };
@@ -170,7 +170,7 @@ fn main() {
                 pathlangRuntimeBootstrap(eng.rt, cs(funcname).as_ptr(), null_mut(), 0)
             });
             if vid.is_empty() {
-                pathseek::elog!("create {funcname} 失败");
+                pathseek::elog!("create {funcname} failed");
                 std::process::exit(1);
             }
             println!("{vid}"); 
@@ -196,7 +196,7 @@ fn main() {
             std::process::exit(1);
         }
         _ => {
-            pathseek::elog!("参数不合法");
+            pathseek::elog!("invalid arguments");
             std::process::exit(1);
         }
     }
@@ -218,7 +218,7 @@ fn printlib_file(path: &str, prefix: &str, dsn: &str) {
         )
     };
     if rc != 0 {
-        pathseek::elog!("printlib 失败: {}", cbuf(&err));
+        pathseek::elog!("printlib failed: {}", cbuf(&err));
         std::process::exit(1);
     }
     print!("{}", cbuf(&out));
@@ -237,7 +237,7 @@ fn layout_code_or_die(src: &str, dsn: &str) {
         )
     };
     if rc != 0 {
-        pathseek::elog!("layout 失败: {}", cbuf(&err));
+        pathseek::elog!("layout failed: {}", cbuf(&err));
         std::process::exit(1);
     }
 }
@@ -293,7 +293,7 @@ fn layout_file_or_die(path: &str, dsn: &str) {
         )
     };
     if rc != 0 {
-        pathseek::elog!("layout 失败: {}", cbuf(&err));
+        pathseek::elog!("layout failed: {}", cbuf(&err));
         std::process::exit(1);
     }
 }
@@ -301,7 +301,7 @@ fn layout_file_or_die(path: &str, dsn: &str) {
 fn boot(dsn: &str, no_stdlib: bool) -> Engine {
     let rt = unsafe { pathlangRuntimeConnect(cs(dsn).as_ptr()) };
     if rt.is_null() {
-        pathseek::elog!("pathlangRuntimeConnect 失败: {dsn}");
+        pathseek::elog!("pathlangRuntimeConnect failed: {dsn}");
         std::process::exit(1);
     }
     
@@ -323,7 +323,7 @@ fn boot(dsn: &str, no_stdlib: bool) -> Engine {
 fn drive(eng: &Engine, funcname: &str) {
     let vid = take(unsafe { pathlangRuntimeBootstrap(eng.rt, cs(funcname).as_ptr(), null_mut(), 0) });
     if vid.is_empty() {
-        pathseek::elog!("bootstrap {funcname} 失败");
+        pathseek::elog!("bootstrap {funcname} failed");
         std::process::exit(1);
     }
     log_info(&format!("vthread {vid}")); 

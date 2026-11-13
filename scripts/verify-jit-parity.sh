@@ -26,18 +26,18 @@ usage() {
 	cat <<'EOF'
 usage: verify-jit-parity.sh [--tutorial|--bench|--all] [options]
 
-  --tutorial        只跑 tutorial 全量（有「期望输出」且非 extern/wip 的文件）
-  --bench           只跑 benchmark 10 case
-  --all             两者都跑（默认）
-  --filter PAT      只跑路径/名字含 PAT 的 case
-  --file FILE.kv    只跑指定文件（文件模式，可与 --scale N 配合替换 __SCALE__）
-  --scale MODE      benchmark 规模：largest（默认）| all | 具体数字
-  --keep-timing     保留 __bench_ns/__bench_us 计时行（默认剔除，因其天然随运行变化）
-  --strict          NONDET（输出不确定）也判失败
-  -v, --verbose     每个 case 打印一行状态
-  -h, --help        显示本帮助
+  --tutorial        Run tutorial suite only (non-extern/wip files with Expected output)
+  --bench           Run the 10 benchmark cases only
+  --all             Run both suites (default)
+  --filter PAT      Only run cases whose path/name contains PAT
+  --file FILE.kv    Run specified file(s) only (may combine with --scale N for __SCALE__)
+  --scale MODE      Benchmark scale: largest (default) | all | positive integer
+  --keep-timing     Keep __bench_ns/__bench_us timing lines (stripped by default)
+  --strict          Treat NONDET (non-deterministic output) as failure
+  -v, --verbose     Print status line for every case
+  -h, --help        Show this help
 
-退出码：0 通过；1 有 parity FAIL；2 环境/用法错误。
+Exit codes: 0 passed; 1 parity FAIL; 2 environment/usage error.
 EOF
 }
 
@@ -58,12 +58,12 @@ while (($#)); do
 	shift
 done
 
-[ -x "$PATHLANG_BIN" ] || die "PATHLANG_BIN 不可执行：$PATHLANG_BIN"
-[ -x "$LAYOUT_BIN" ] || die "PATHLANG_LAYOUT_BIN 不可执行：$LAYOUT_BIN"
-command -v timeout >/dev/null 2>&1 || die "需要 coreutils timeout"
-command -v python3 >/dev/null 2>&1 || die "需要 python3（读取 benchmark/run.py 的 SWEEP）"
+[ -x "$PATHLANG_BIN" ] || die "PATHLANG_BIN is not executable: $PATHLANG_BIN"
+[ -x "$LAYOUT_BIN" ] || die "PATHLANG_LAYOUT_BIN is not executable: $LAYOUT_BIN"
+command -v timeout >/dev/null 2>&1 || die "coreutils timeout is required"
+command -v python3 >/dev/null 2>&1 || die "python3 is required (reads SWEEP from benchmark/run.py)"
 
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/pathlang-parity.XXXXXX")" || die "mktemp 失败"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/pathlang-parity.XXXXXX")" || die "mktemp failed"
 trap 'rm -rf "$TMP"' EXIT
 
 normalize() {
@@ -82,7 +82,7 @@ needs_skip() {
 }
 
 has_expects() {
-	grep -q '^// 期望输出' "$1"
+	grep -Eq '^// [Ee]xpected output' "$1"
 }
 
 run_tutorial() {
@@ -167,7 +167,7 @@ scales_for() {
 		;;
 	all) sweep_scales "$case" ;;
 	*)
-		[[ "$SCALE_MODE" =~ ^[0-9]+$ ]] || die "--scale 只接受 largest|all|正整数：$SCALE_MODE"
+		[[ "$SCALE_MODE" =~ ^[0-9]+$ ]] || die "--scale accepts largest|all|<positive integer>: $SCALE_MODE"
 		printf '%s\n' "$SCALE_MODE"
 		;;
 	esac
@@ -206,7 +206,7 @@ check_case() { # $1=name $2=kind(tutorial|bench) $3=rel $4=scale
 	if [ "$rcA" -ge 90 ] || [ "$rcB" -ge 90 ]; then
 		FAIL=$((FAIL + 1))
 		FAILED+=("$name")
-		printf '%s[FAIL]%s %s（boot/layout 失败：A=%s B=%s）\n' \
+		printf '%s[FAIL]%s %s (boot/layout failed: A=%s B=%s)\n' \
 			"$RED" "$NC" "$name" "$rcA" "$rcB"
 		[ "$rcA" -ge 90 ] && sed -n '1,3p' "$outA" | sed 's/^/  A: /'
 		[ "$rcB" -ge 90 ] && sed -n '1,3p' "$outB" | sed 's/^/  B: /'
@@ -229,7 +229,7 @@ check_case() { # $1=name $2=kind(tutorial|bench) $3=rel $4=scale
 	normalize <"$outA2" >"$nA2"
 	if [ "$rcA" -ne "$rcA2" ] || ! cmp -s "$nA" "$nA2"; then
 		NONDET=$((NONDET + 1))
-		printf '%s[NONDET]%s %s（JIT 两次运行输出不同，无法判定）\n' "$YELLOW" "$NC" "$name"
+		printf '%s[NONDET]%s %s (two JIT runs differed; non-deterministic)\n' "$YELLOW" "$NC" "$name"
 		return
 	fi
 

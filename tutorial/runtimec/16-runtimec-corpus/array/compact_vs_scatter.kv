@@ -1,8 +1,8 @@
-// 判据：[] 是 compact（单 XValue、连续打包），{} 是散 key。
-// 两者的元素访问语法也不同：compact 用 a[i]，散 key 用 a·[i]。
-// 若把 {} 也当 compact，scatter·[1] 会报 TypeError。
-// 依据：03-类型系统/09-数组形态.kv、10-compact形态.kv。
-// 期望输出:
+// Criterion: `[]` is compact (single contiguous XValue), whereas `{}` is scatter-keyed.
+// Element access syntax differs accordingly: `a[i]` for compact, `a·[i]` for scatter.
+// Treating `{}` as compact would raise a TypeError on `scatter·[1]`.
+// Reference: 03-type-system/09-array-forms.kv, 10-compact-form.kv.
+// Expected output:
 //   20
 //   20
 

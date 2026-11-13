@@ -1053,12 +1053,12 @@ fn build_body(insts: &[RawInst], labels: &[(i32, String)]) -> Vec<Stmt> {
     for (bi, (start, label)) in labels.iter().enumerate() {
         assert!(
             (1..=total).contains(start),
-            "label {label:?} 的 irseq {start} 超出指令范围 1..={total}"
+            "label {label:?} irseq {start} is out of instruction range 1..={total}"
         );
         if let Some((next, _)) = labels.get(bi + 1) {
             assert!(
                 start < next,
-                "label {label:?} 的 irseq {start} 不小于其后 label 的 {next}（倒序或重复）"
+                "label {label:?} irseq {start} is not less than following label irseq {next} (out of order or duplicate)"
             );
         }
     }
@@ -1066,7 +1066,7 @@ fn build_body(insts: &[RawInst], labels: &[(i32, String)]) -> Vec<Stmt> {
     let inst_stmt = |i: i32| {
         assert!(
             (1..=total).contains(&i),
-            "指令下标 {i} 超出范围 1..={total}"
+            "instruction index {i} is out of range 1..={total}"
         );
         Stmt::Instruction(build_inst(&insts[i as usize - 1], &by_irseq))
     };
@@ -2018,7 +2018,7 @@ fn write_linear_inst(
         if opcode == "==" || opcode == "!=" {
             let other = reads
                 .get(if index == 0 { 1 } else { 0 })
-                .ok_or_else(|| format!("{opcode}: None 比较缺少另一侧操作数"))?;
+                .ok_or_else(|| format!("{opcode}: None comparison is missing the other operand"))?;
             let other_type = read_slot_type(
                 other,
                 param_langtype,
@@ -2031,13 +2031,13 @@ fn write_linear_inst(
             );
             if other_type.is_empty() {
                 return Err(format!(
-                    "{opcode}: 无法判定空引用比较的类型——另一侧 `{other}` 没有具体类型"
+                    "{opcode}: cannot determine type for None comparison — the other operand `{other}` has no concrete type"
                 ));
             }
             
             if !lower::is_none_comparable(&other_type) {
                 return Err(format!(
-                    "{opcode}: 无法与 None 比较——另一侧 `{other}` 的类型 `{other_type}` 不在判空能力面内"
+                    "{opcode}: cannot compare with None — operand `{other}` of type `{other_type}` does not support None comparison"
                 ));
             }
         }
@@ -2203,7 +2203,7 @@ fn check_call_names(
 }
 
 fn undefined_call(op: &str) -> String {
-    format!("未定义函数 {op}：未给出被调函数的完整路径（写 `包名·函数名` 或 `/lib/包名·函数名`）")
+    format!("undefined function {op}: missing full callee path (write `pkg·fn` or `/lib/pkg·fn`)")
 }
 
 fn is_operator_word(op: &str) -> bool {
@@ -2411,12 +2411,12 @@ fn clip(s: String) -> String {
 fn pc_of(kv: &mut Kv, key: &str) -> Result<(i32, i32), String> {
     let d = kv.get_one(key);
     if d.is_empty() {
-        return Err(format!("{key}: pc 缺失"));
+        return Err(format!("{key}: missing pc"));
     }
     let body = crate::ffi::xh_body_slice(&d);
     if body.len() != 8 {
         return Err(format!(
-            "{key}: pc body 应为 8 字节（[2]int32），实际 {}",
+            "{key}: pc body must be 8 bytes ([2]int32), got {}",
             body.len()
         ));
     }
@@ -2588,7 +2588,7 @@ mod tests {
         
         if crate::ffi::try_connect(&dsn_nested).is_none() {
             eprintln!(
-                "SKIP: 后端不可用（{}）——本期 libpathspace 只服务 shm://，这是能力边界不是回归",
+                "SKIP: backend unavailable ({}) — libpathspace currently serves only shm:// (capability boundary, not a regression)",
                 dsn_nested
             );
             return;
@@ -2627,7 +2627,7 @@ mod tests {
                 &kv.langtype_of("/lib/a/b·f/[0,0]")
             ),
             "rwfunc",
-            "b·f 应保留"
+            "b·f should be preserved"
         );
         assert_eq!(
             kvkind::kind(
@@ -2661,7 +2661,7 @@ mod tests {
         
         if crate::ffi::try_connect(&dsn_call_kind).is_none() {
             eprintln!(
-                "SKIP: 后端不可用（{}）——本期 libpathspace 只服务 shm://，这是能力边界不是回归",
+                "SKIP: backend unavailable ({}) — libpathspace currently serves only shm:// (capability boundary, not a regression)",
                 dsn_call_kind
             );
             return;
@@ -2747,7 +2747,7 @@ mod tests {
         
         if crate::ffi::try_connect(&dsn_struct).is_none() {
             eprintln!(
-                "SKIP: 后端不可用（{}）——本期 libpathspace 只服务 shm://，这是能力边界不是回归",
+                "SKIP: backend unavailable ({}) — libpathspace currently serves only shm:// (capability boundary, not a regression)",
                 dsn_struct
             );
             return;
@@ -2793,7 +2793,7 @@ mod tests {
         
         if crate::ffi::try_connect(&dsn_dot).is_none() {
             eprintln!(
-                "SKIP: 后端不可用（{}）——本期 libpathspace 只服务 shm://，这是能力边界不是回归",
+                "SKIP: backend unavailable ({}) — libpathspace currently serves only shm:// (capability boundary, not a regression)",
                 dsn_dot
             );
             return;
@@ -2821,19 +2821,19 @@ mod tests {
         );
         assert!(
             kvkind::value_string(&kv.get_one("/lib/t·main/[1,0]")).contains("foo.bar"),
-            "'.' 应作普通字符保留在 opcode 内（单一 token foo.bar）"
+            "'.' should remain an ordinary character inside the opcode (single token foo.bar)"
         );
         assert!(
             !kv.get_one("/lib/t·main/[2,0]").is_empty(),
-            "[2,0] 应有指令：坐标不得空缺"
+            "[2,0] must hold an instruction: coordinates must be contiguous"
         );
         assert!(
             kvkind::value_string(&kv.get_one("/lib/t·main/[3,0]")).contains("return"),
-            "[3,0] 应为 terminate 追加的 return（连续无空缺）"
+            "[3,0] should be the trailing return appended by terminate (contiguous, no gaps)"
         );
         assert!(
             kv.get_one("/lib/t·main/[4,0]").is_empty(),
-            "[4,0] 应为帧末尾（连续无空缺）"
+            "[4,0] should be past the end of the frame (contiguous, no gaps)"
         );
     }
 
@@ -2879,7 +2879,7 @@ mod tests {
         
         if crate::ffi::try_connect(&dsn).is_none() {
             eprintln!(
-                "SKIP: 后端不可用（{}）——本期 libpathspace 只服务 shm://，这是能力边界不是回归",
+                "SKIP: backend unavailable ({}) — libpathspace currently serves only shm:// (capability boundary, not a regression)",
                 dsn
             );
             return;
@@ -2907,11 +2907,11 @@ mod tests {
             last_opcode = opcode;
             ordinal += 1;
         }
-        assert!(last_opcode.contains("return"), "函数级隐式 return 必须保留");
+        assert!(last_opcode.contains("return"), "function-level implicit return must be preserved");
         assert_eq!(
             returns.len(),
             1,
-            "具名块不应额外产生 return；实际 return 出现在 irseq {returns:?}"
+            "named blocks must not emit extra returns; saw return at irseq {returns:?}"
         );
     }
 

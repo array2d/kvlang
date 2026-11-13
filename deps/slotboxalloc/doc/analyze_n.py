@@ -100,7 +100,7 @@ def analyze(N, mem_bytes, label):
     return {
         "N": N,
         "N_bits": int(math.log2(N)) if N & (N-1) == 0 else f"~{math.log2(N):.1f}",
-        "L0": "8B (无slot)",
+        "L0": "8B (no slot)",
         "L1_slot": "8B",
         "L1_box": fmt_bytes(N * 8),
         "L2_slot": fmt_bytes(8 * N),
@@ -149,10 +149,10 @@ def main():
         results.append(row)
 
     header = (
-        f"{'N':<5} {'1G深':<5} {'32G深':<5} "
-        f"{'位图':<6} {'小obj层':<8} {'小降(1G)':<8} {'小降(32G)':<8} "
-        f"{'小alloc':<8} {'小free':<7} {'小GC':<8} "
-        f"{'大降(1G)':<8} {'大降(32G)':<8} {'大GC':<8} "
+        f"{'N':<5} {'1G_d':<5} {'32G_d':<5} "
+        f"{'bmapB':<6} {'smLvls':<8} {'smD(1G)':<8} {'smD(32G)':<8} "
+        f"{'smAlloc':<8} {'smFree':<7} {'smGC':<8} "
+        f"{'lgD(1G)':<8} {'lgD(32G)':<8} {'lgGC':<8} "
         f"{'boxH(B)':<8} {'boxH+GC':<8}"
     )
     print(header)
@@ -171,18 +171,18 @@ def main():
         )
         print(line)
 
-    print(f"\n列说明:")
-    print(f"  N        = 每 box 的 slot 数")
-    print(f"  1G深/32G深 = 总层数 (L0..L_max)")
-    print(f"  位图      = freebitmap 字节数")
-    print(f"  小obj层   = 8-256B 对象覆盖的 level 范围")
-    print(f"  小降(1G/32G) = 小对象从 root 下降到目标层的步数")
-    print(f"  小alloc   = 下降 + freebitmap 扫描 (典型操作数)")
-    print(f"  小free    = 下降 + bitmap 标记 (典型操作数)")
-    print(f"  小GC/大GC = 该范围内最坏 GC 数据搬运量")
-    print(f"  大降(1G/32G) = 大对象(1-100MB)下降步数")
-    print(f"  boxH(B)   = box_head_t 大小 (无 GC 字段)")
-    print(f"  boxH+GC   = box_head_t 大小 (含 v2p+p2v)")
+    print(f"\nColumn legend:")
+    print(f"  N           = slots per box")
+    print(f"  1G_d/32G_d  = total tree depth (L0..L_max)")
+    print(f"  bmapB       = freebitmap size in bytes")
+    print(f"  smLvls      = level range covered by 8-256B small objects")
+    print(f"  smD(1G/32G) = descent steps from root to target level for small objects")
+    print(f"  smAlloc     = descent + freebitmap scan (typical ops)")
+    print(f"  smFree      = descent + bitmap mark (typical ops)")
+    print(f"  smGC/lgGC   = worst-case GC data movement in range")
+    print(f"  lgD(1G/32G) = descent steps for large objects (1-100MB)")
+    print(f"  boxH(B)     = box_head_t size (without GC fields)")
+    print(f"  boxH+GC     = box_head_t size (with v2p+p2v)")
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     csv_path = os.path.join(script_dir, "n_analysis.csv")
@@ -209,7 +209,7 @@ def main():
         writer.writeheader()
         for r in results:
             writer.writerow(r)
-    print(f"\nCSV 已保存: {csv_path}")
+    print(f"\nCSV saved: {csv_path}")
 
 if __name__ == "__main__":
     main()

@@ -25,17 +25,17 @@ SONAME_FILE="$LIB_DIR/libpathspace.so.1.0.0"
 
 if ! ls "$LIB_DIR"/libpathspace.so* >/dev/null 2>&1 &&
    ls "$RELEASE_DIR"/lib/pathspace/libpathspace.so* >/dev/null 2>&1; then
-    bad "$RELEASE_DIR 不是发布包布局（库在 lib/pathspace/ 子目录里，不在 lib/ 平铺）"
-    say "      这看起来是 **cmake --install 的前缀目录**，不是 release tarball 解包后的目录。"
-    say "      本检查器只验发布包布局：lib/libpathspace.so* + include/pathspace/。"
-    say "      要验安装布局，先把它摊平再跑："
+    bad "$RELEASE_DIR is not in release-tarball layout (libraries found in lib/pathspace/ instead of flat lib/)"
+    say "      This looks like a cmake --install prefix rather than an unpacked release tarball."
+    say "      This checker expects: lib/libpathspace.so* + include/pathspace/."
+    say "      To check an installed prefix, flatten it first:"
     say "        cp -P '$RELEASE_DIR/lib/pathspace/libpathspace.so'* '$RELEASE_DIR/lib/'"
     exit 2
 fi
 
 failures=0
 
-say "── 1. lib/ 文件集合 ──"
+say "-- 1. lib/ file set --"
 if [ ! -d "$LIB_DIR" ]; then
     bad "missing directory: $LIB_DIR"
     failures=$((failures + 1))
@@ -50,29 +50,29 @@ else
         printf '%s\n' "${expected[@]}" | grep -qx -- "$f" || extra+=("$f")
     done
     if [ ${#missing[@]} -eq 0 ] && [ ${#extra[@]} -eq 0 ]; then
-        ok "lib/ 恰好 3 个：${expected[*]}"
+        ok "lib/ contains exact 3 files: ${expected[*]}"
     else
-        bad "lib/ 文件集合不符（期望 3 个）"
-        [ ${#missing[@]} -gt 0 ] && say "      缺少（${#missing[@]}）：${missing[*]}"
-        [ ${#extra[@]} -gt 0 ]   && say "      多出（${#extra[@]}）：${extra[*]}"
+        bad "lib/ file set mismatch (expected 3 files)"
+        [ ${#missing[@]} -gt 0 ] && say "      missing (${#missing[@]}): ${missing[*]}"
+        [ ${#extra[@]} -gt 0 ]   && say "      extra (${#extra[@]}): ${extra[*]}"
         failures=$((failures + 1))
     fi
 fi
 
 say ""
-say "── 2. 导出符号集合 ──"
+say "-- 2. Exported symbol set --"
 SOURCE_TABLE="$(dirname "$0")/test_export_surface.c"
 if [ ! -f "$SOURCE_TABLE" ]; then
-    bad "找不到清单来源：$SOURCE_TABLE"
+    bad "symbol table source not found: $SOURCE_TABLE"
     failures=$((failures + 1))
     SOURCE_TABLE=""
 fi
 
 if [ ! -f "$SONAME_FILE" ]; then
-    bad "找不到 $SONAME_FILE"
+    bad "not found: $SONAME_FILE"
     failures=$((failures + 1))
 elif [ -z "$SOURCE_TABLE" ]; then
-    : # 上面已计失败
+    : # already counted above
 else
     mapfile -t expected_syms < <(
         grep -oE '\(const void \*\)&pathspace[A-Za-z0-9_]+' "$SOURCE_TABLE" |
@@ -84,7 +84,7 @@ else
     )
 
     if [ ${#expected_syms[@]} -eq 0 ]; then
-        bad "从 $SOURCE_TABLE 没解析出任何符号（格式变了？）"
+        bad "no symbols parsed from $SOURCE_TABLE (format changed?)"
         failures=$((failures + 1))
     else
         missing_syms=(); extra_syms=()
@@ -99,23 +99,23 @@ else
 
         if [ ${#missing_syms[@]} -eq 0 ] && [ ${#extra_syms[@]} -eq 0 ] &&
            [ ${#actual_syms[@]} -eq 16 ]; then
-            ok "导出 T 符号恰好 16 个，与 test_export_surface.c 的表逐个同名"
+            ok "exported T symbols match exact 16 entries in test_export_surface.c"
         else
-            bad "导出符号集合不符（实际 ${#actual_syms[@]} 个，期望 16）"
-            [ ${#missing_syms[@]} -gt 0 ] && say "      库里缺少（${#missing_syms[@]}）：${missing_syms[*]}"
-            [ ${#extra_syms[@]} -gt 0 ]   && say "      库里多出（${#extra_syms[@]}）：${extra_syms[*]}"
+            bad "exported symbol set mismatch (actual ${#actual_syms[@]}, expected 16)"
+            [ ${#missing_syms[@]} -gt 0 ] && say "      missing (${#missing_syms[@]}): ${missing_syms[*]}"
+            [ ${#extra_syms[@]} -gt 0 ]   && say "      extra (${#extra_syms[@]}): ${extra_syms[*]}"
             failures=$((failures + 1))
         fi
     fi
 
     say ""
-    say "── 3. 内部符号泄漏 ──"
+    say "-- 3. Internal symbol leakage --"
     leak_count=$(nm -D --defined-only "$SONAME_FILE" 2>/dev/null |
                  awk '$2=="T"{print $3}' | grep -c '^pathspaceShm')
     if [ "$leak_count" -eq 0 ]; then
-        ok "pathspaceShm* 泄漏 0"
+        ok "pathspaceShm* leaked symbols: 0"
     else
-        bad "pathspaceShm* 泄漏 $leak_count 个（内部符号不得导出）"
+        bad "pathspaceShm* leaked $leak_count internal symbols"
         nm -D --defined-only "$SONAME_FILE" 2>/dev/null |
             awk '$2=="T"{print $3}' | grep '^pathspaceShm' | sed 's/^/      /'
         failures=$((failures + 1))
@@ -123,7 +123,7 @@ else
 fi
 
 say ""
-say "── 4. 头文件 ──"
+say "-- 4. Header files --"
 if [ ! -d "$INC_DIR" ]; then
     bad "missing directory: $INC_DIR"
     failures=$((failures + 1))
@@ -138,11 +138,11 @@ else
         printf '%s\n' "${expected_heads[@]}" | grep -qx -- "$f" || hextra+=("$f")
     done
     if [ ${#hmissing[@]} -eq 0 ] && [ ${#hextra[@]} -eq 0 ]; then
-        ok "include/pathspace/ 恰好 3 个头：${expected_heads[*]}"
+        ok "include/pathspace/ contains exact 3 headers: ${expected_heads[*]}"
     else
-        bad "include/pathspace/ 头文件集合不符"
-        [ ${#hmissing[@]} -gt 0 ] && say "      缺少：${hmissing[*]}"
-        [ ${#hextra[@]} -gt 0 ]   && say "      多出：${hextra[*]}"
+        bad "include/pathspace/ header set mismatch"
+        [ ${#hmissing[@]} -gt 0 ] && say "      missing: ${hmissing[*]}"
+        [ ${#hextra[@]} -gt 0 ]   && say "      extra: ${hextra[*]}"
         failures=$((failures + 1))
     fi
 
@@ -152,9 +152,9 @@ int main(void) { return 0; }
 PROBE
     if cc -std=c11 -Wall -Wextra -Werror -fsyntax-only \
           -I "$RELEASE_DIR/include" "$probe" 2>/tmp/release_abi_probe.err; then
-        ok "三头齐 include 编译通过"
+        ok "header syntax probe compiled cleanly"
     else
-        bad "三头齐 include 编译失败"
+        bad "header syntax probe failed to compile"
         sed 's/^/      /' /tmp/release_abi_probe.err | head -10
         failures=$((failures + 1))
     fi
@@ -183,16 +183,16 @@ PROBE
                     -o "$decl_obj" 2>/dev/null &&
                cc "$decl_obj" -o /dev/null -L "$LIB_DIR" -lpathspace \
                     -Wl,-rpath,"$LIB_DIR" 2>/tmp/release_abi_link.err; then
-                ok "头里声明的函数全部能在 .so 里链接到"
+                ok "all functions declared in headers resolve in .so"
             else
-                bad "头里有声明、库里链接不到（能编过、一链接就失败）"
+                bad "functions declared in headers missing from .so at link time"
                 grep -oE "undefined reference to \`[^']+'" /tmp/release_abi_link.err |
                     sort -u | sed 's/^/      /' | head -10
                 failures=$((failures + 1))
             fi
             rm -f "$decl_obj" /tmp/release_abi_link.err
         else
-            bad "按头文件声明构造的探针无法编译"
+            bad "declaration probe failed to compile"
             sed 's/^/      /' /tmp/release_abi_decl.err | head -10
             failures=$((failures + 1))
         fi
@@ -202,8 +202,8 @@ fi
 
 say ""
 if [ "$failures" -eq 0 ]; then
-    printf "${GREEN}══ release ABI 检查通过 ══${NC}\n"
+    printf "${GREEN}== release ABI check passed ==${NC}\n"
     exit 0
 fi
-printf "${RED}══ release ABI 检查失败：%d 组 ══${NC}\n" "$failures"
+printf "${RED}== release ABI check failed: %d group(s) ==${NC}\n" "$failures"
 exit 1

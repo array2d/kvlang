@@ -359,14 +359,14 @@ SELFTEST_CASES = (
                                "}\n", ()),
     ("debug-marker", 'static const char *message = "DBG reject";\n',
      ("debug-marker-in-product-source",)),
-    ("todo-in-comment-is-fine", "/* TODO: 稍后处理 */\nstatic int probe(void) { return 0; }\n",
+    ("todo-in-comment-is-fine", "/* TODO: handle later */\nstatic int probe(void) { return 0; }\n",
      ()),
     ("todo-in-comment-across-includes-is-fine",
      '#include "contract/status.h"\n'
      '#include "pathspace/pathspace.h"\n'
      "\n"
      "/*\n"
-     " * 待补（后续独立能力）：动态 key 的引用解析。TODO 记在这里。\n"
+     " * Deferred (future standalone capability): reference resolution for dynamic keys. TODO noted here.\n"
      " */\n"
      "static int probe(void) { return 0; }\n",
      ()),

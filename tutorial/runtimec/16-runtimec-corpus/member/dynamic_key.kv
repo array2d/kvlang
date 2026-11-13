@@ -1,10 +1,10 @@
-// 判据：a·*b 先求值 b，再把其值当键；a·b 直接用字面名 b 当键。
-// 若 * 被忽略，写入会落在键 "k" 而不是 "a"，后两行都会错。
-// 依据：03-类型系统/15-成员访问.kv。
+// Criterion: `a·*b` evaluates `b` first and uses its value as the key; `a·b` uses the literal name `b`.
+// Ignoring `*` would write under key `"k"` instead of `"a"`, breaking both outputs.
+// Reference: 03-type-system/15-member-access.kv.
 //
-// 本条只验**动态键**。非指针判空（`m·k == None`）是另一个独立缺口，
-// 拆到 dynamic_key_none.kv：两件事混在一条里，谁修好了都看不出来。
-// 期望输出:
+// Tests **dynamic key access** in isolation. Non-pointer `None` comparison (`m·k == None`) is covered
+// separately so two independent features are not conflated in one test.
+// Expected output:
 //   10
 //   10
 

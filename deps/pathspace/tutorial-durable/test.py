@@ -74,9 +74,7 @@ def test_script(script):
     return False
 
 CHILD = r'''
-# 只用新 ABI 读一笔，判断上一进程的写是否已落地。
-# 写入由 CLI 做（durable 没有进程内值区，realloc 拿不到 offset，写路径只存在于
-# shm）；本探针要验的是「落盘时机」，读得到即说明写已可见。
+# Read one entry via the storage ABI to verify whether the prior process flushed its writes.
 import ctypes, sys
 lib = ctypes.CDLL(sys.argv[1])
 lib.pathspaceConnect.restype = ctypes.c_void_p
@@ -105,7 +103,7 @@ def redis_reachable(dsn):
 
 def test_exit_flush():
     if not Path(FRONTEND_SO).exists():
-        print(f'FAIL  exit-flush (缺前端 {FRONTEND_SO})')
+        print(f'FAIL  exit-flush (missing frontend {FRONTEND_SO})')
         return False
     env = os.environ.copy()
     pfx = f'/flushprobe-{os.getpid()}'
@@ -136,7 +134,7 @@ def test_exit_flush():
             if seen and len(kept) == len(keys):
                 print(f'PASS  exit-flush {label}')
             else:
-                print(f'FAIL  exit-flush {label} (next-op-visible={seen}, 落地 {len(kept)}/{len(keys)})')
+                print(f'FAIL  exit-flush {label} (next-op-visible={seen}, flushed {len(kept)}/{len(keys)})')
                 if child.stderr:
                     print(f'  child stderr: {child.stderr.strip()}')
                 if got.stderr:

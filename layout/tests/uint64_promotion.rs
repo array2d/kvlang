@@ -130,29 +130,29 @@ fn literal_and_result_slots_use_promoted_kind() {
     for op in &opcodes {
         assert!(
             !op.contains('·'),
-            "typed opcode 不应出现：{op:?}（全部：{opcodes:?}）"
+            "typed opcode must not appear: {op:?} (all: {opcodes:?})"
         );
     }
     
     assert!(
         !literal_kinds.iter().any(|(k, _)| k == "int64"),
-        "不得有 int64 落槽的字面量：{literal_kinds:?}"
+        "no literal slot may be lowered as int64: {literal_kinds:?}"
     );
     let mut values: Vec<u64> = literal_kinds.iter().map(|(_, v)| *v).collect();
     values.sort_unstable();
     assert_eq!(
         values,
         vec![1, 1, 1, 2, u64::MAX],
-        "字面量槽的编码值不对：{literal_kinds:?}"
+        "unexpected encoded values in literal slots: {literal_kinds:?}"
     );
     assert!(
         literal_kinds.iter().all(|(k, _)| k == "uint64"),
-        "全部字面量都应为 uint64：{literal_kinds:?}"
+        "all literals must be uint64: {literal_kinds:?}"
     );
     
     assert!(
         write_kinds.iter().any(|t| t == "uint64"),
-        "max 的写槽应推断为 uint64：{write_kinds:?}"
+        "max write slot should be inferred as uint64: {write_kinds:?}"
     );
 }
 
@@ -232,18 +232,18 @@ fn uint64_comparison_and_max_yield_unsigned_values() {
 
     assert!(
         stdout.contains("gt true"),
-        "uint64 > 1 必须为 true（有符号比较会得 false）：\n{stdout}"
+        "uint64 > 1 must be true (signed comparison would yield false):\n{stdout}"
     );
     assert!(
         stdout.contains("max 18446744073709551615"),
-        "max(uint64, 1) 必须取 uint64 侧：\n{stdout}"
+        "max(uint64, 1) must select the uint64 side:\n{stdout}"
     );
     assert!(
         stdout.contains("div 9223372036854775807"),
-        "uint64 ÷ 2 必须是无符号除：\n{stdout}"
+        "uint64 ÷ 2 must use unsigned division:\n{stdout}"
     );
     assert!(
         !stdout.contains("-1"),
-        "动态写槽不得被推断成 int64（会打出 -1）：\n{stdout}"
+        "dynamic write slot must not be inferred as int64 (which would print -1):\n{stdout}"
     );
 }

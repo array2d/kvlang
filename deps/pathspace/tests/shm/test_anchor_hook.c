@@ -56,7 +56,7 @@ int main(void) {
     int64_t anchor = 0;
     rc = pathspaceShmTestAnchorOf(kv, "/d/", &anchor);
     CHECK(rc == PATHSPACE_OK, "anchor_of /d/ rc=%d", rc);
-    CHECK(anchor > 0, "anchor 必须是正的 key 区偏移，实际 %lld",
+    CHECK(anchor > 0, "anchor must be a positive key-region offset, got %lld",
           (long long)anchor);
 
     uint64_t child_off = 0;
@@ -64,26 +64,25 @@ int main(void) {
     rc = pathspaceResolveOffset(h, "/d/x", (uint64_t)anchor, &child_off, err,
                         sizeof err);
     CHECK(rc == PATHSPACE_OK,
-          "用钩子给的 anchor 解析 /d/x 必须成功（rc=%d err=%s）—— "
-          "否则这个 anchor 就不是可用锚点",
+          "resolving /d/x via hook anchor must succeed (rc=%d err=%s)",
           rc, err);
     CHECK(child_off == off,
-          "经 anchor 解析出的偏移应与 Realloc 返回的一致：%llu vs %llu",
+          "offset resolved via anchor must match Realloc offset: %llu vs %llu",
           (unsigned long long)child_off, (unsigned long long)off);
 
     int64_t untouched = -12345;
     rc = pathspaceShmTestAnchorOf(kv, "/no-such-parent/", &untouched);
     CHECK(rc == PATHSPACE_MISSING,
-          "不存在的父节点必须 MISSING（rc=%d，期望 %d）", rc, PATHSPACE_MISSING);
-    CHECK(untouched == -12345, "失败时不得写 out_anchor，实际 %lld",
+          "nonexistent parent node must return MISSING (rc=%d, expected %d)", rc, PATHSPACE_MISSING);
+    CHECK(untouched == -12345, "out_anchor must not be modified on failure, got %lld",
           (long long)untouched);
 
     CHECK(pathspaceShmTestAnchorOf(NULL, "/d/", &anchor) == PATHSPACE_INVALID,
-          "NULL kv 必须 INVALID");
+          "NULL kv must return INVALID");
     CHECK(pathspaceShmTestAnchorOf(kv, NULL, &anchor) == PATHSPACE_INVALID,
-          "NULL key 必须 INVALID");
+          "NULL key must return INVALID");
     CHECK(pathspaceShmTestAnchorOf(kv, "/d/", NULL) == PATHSPACE_INVALID,
-          "NULL out 必须 INVALID");
+          "NULL out must return INVALID");
 
     pathspaceClose(h);
     

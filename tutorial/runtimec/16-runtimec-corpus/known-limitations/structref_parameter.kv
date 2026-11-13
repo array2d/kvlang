@@ -1,18 +1,16 @@
-// 判据：structref 用原型路径 /lib/Point 标注；容器只能按地址传，写 `**`。
-// 若把 /lib/Point 当普通种类名，签名匹配会失败。
-// 迁自旧形态 `p:*/lib/Point`：值类型 `*/lib/Point` 再叠传递方式 `*` → `**/lib/Point`。
-// 依据：03-类型系统/17-struct.kv、07-文法与合法性.kv、05-runtime语义/04-函数调用.kv。
+// Criterion: a structref is annotated with its prototype path `/lib/Point`; containers are passed by
+// address, written `**/lib/Point` (value type `*/lib/Point` plus `*` parameter slot convention).
+// Treating `/lib/Point` as a plain kind name would fail signature matching.
+// Reference: 03-type-system/17-struct.kv, 07-grammar-and-validity.kv, 05-runtime-semantics/04-function-calls.kv.
 //
-// ── 已知限制（本文件不在语料扫描路径内）──────────────────────────
-// **阻塞于指针表示未接通**：head.ptr 恒 0，layout 不产 ptr=1，编码器拒绝带
-// POINTER 位的能力行（`vmkv encoder: pointer and extension parameters are not
-// representable from RWIR text yet`）。
+// ── Known limitation (excluded from active corpus scan) ──────────────────────
+// **Blocked on pointer representation wiring**: `head.ptr` is still 0, layout does not emit `ptr=1`,
+// and the encoder rejects capability rows with POINTER bits (`vmkv encoder: pointer and extension
+// parameters are not representable from RWIR text yet`).
 //
-// 这不是被测行为回归——判据本身没问题，是底层表示还没落地。**不得**改成
-// 「期望错误」把它固化成负向用例：那等于把限制写成规范。
-// 指针表示落地后把它搬回 `types/` 并转正。
+// Do **not** convert this into `// Expected error:`. Move back to `types/` once pointer wiring lands.
 //
-// 期望输出:
+// Expected output:
 //   3
 
 struct Point {

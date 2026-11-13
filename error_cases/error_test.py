@@ -89,8 +89,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="pathlang error_cases verification")
     ap.add_argument("--pathspace", default=None,
                     help="Backend DSN prefix (e.g. shm:// or fs://)")
-    ap.add_argument("--layout-bin", default=LAYOUT_BIN, help="pathlanglayout 路径")
-    ap.add_argument("--term-bin", default=TERM_BIN, help="pathseek 路径")
+    ap.add_argument("--layout-bin", default=LAYOUT_BIN, help="path to pathlanglayout")
+    ap.add_argument("--term-bin", default=TERM_BIN, help="path to pathseek")
     args = ap.parse_args()
     LAYOUT_BIN, TERM_BIN = args.layout_bin, args.term_bin
     if args.pathspace:

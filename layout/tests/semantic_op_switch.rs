@@ -72,7 +72,7 @@ fn emits_semantic_names_only() {
     let src = "rwfunc t() -> (*int64 #r) {\n    acc = 0\n    acc = acc + 1\n    acc -> *r\n}\n";
     let (opcode, _) = dump_ops("sem", src);
     assert_eq!(opcode, "add");
-    assert!(!opcode.contains('·'), "typed opcode 不应再出现：{opcode}");
+    assert!(!opcode.contains('·'), "typed opcode must no longer appear: {opcode}");
 }
 
 #[test]

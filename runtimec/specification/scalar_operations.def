@@ -1,12 +1,12 @@
 /*
- * 组件：specification/scalar_operations.def
- * 作用：已裁决语义规则到标量 execution family 的唯一派生映射输入。
- * 联系：本映射只能引用 rwir_catalog.def 中已经拥有稳定 identifier 与 canonical
- *       BinRWIR operation 的记录；BinRWIR Compiler 由此生成 execution plan，
- *       vmbin 与 binrwir_compiler 内部 JIT 消费同一个 compilation 合同。
- * 约束：不得在此文件发明语言行为；five-language-behavior-matrix.md 是唯一
- *       行为事实源。每条记录前必须写 behavior-decision 标记；当前 scaffold
- *       不定义标量操作记录。
+ * Component: specification/scalar_operations.def
+ * Role: Sole derived mapping input from decided semantic rules to the scalar execution family.
+ * Links: Entries may reference only rwir_catalog.def records with stable identifiers and
+ *        canonical BinRWIR operations; BinRWIR Compiler derives execution plans from this
+ *        table, and vmbin and the internal JIT consume the same compilation contract.
+ * Constraints: Do not invent language behavior here; five-language-behavior-matrix.md is
+ *              the single source of truth. Every record must carry a behavior-decision
+ *              annotation; the current scaffold defines no scalar operation records.
  */
 #ifndef RUNTIMEC_SCALAR_OPERATION
 #error "Define RUNTIMEC_SCALAR_OPERATION before including scalar_operations.def"

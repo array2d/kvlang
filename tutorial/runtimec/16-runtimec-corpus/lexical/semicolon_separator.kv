@@ -1,7 +1,7 @@
-// 判据：`;` 与换行等价，连续分隔折叠为一个 Newline。
-// 若 `;` 不算语句分隔，三句会被解析成一条表达式。
-// 依据：01-词法/01-源码结构.kv。
-// 期望输出:
+// Criterion: `;` is equivalent to a newline, and consecutive separators collapse into a single `Newline`.
+// Without `;` as a statement separator, three statements on one line would parse as a single malformed expression.
+// Reference: 01-lexical/01-source-structure.kv.
+// Expected output:
 //   3
 //   7
 

@@ -73,11 +73,11 @@ fn cast_plus_literal_adapts_to_unsigned() {
         let os = ops(&mut kv, "f");
         assert!(
             os.iter().any(|o| o == "add"),
-            "应发语义算子 add：{os:?} src={src}"
+            "should emit semantic operator add: {os:?} src={src}"
         );
         assert!(
             literal_kinds(&mut kv, "f").contains(&"uint64".to_string()),
-            "字面量操作数应按 uint64 落槽：src={src}"
+            "literal operand should be lowered as uint64: src={src}"
         );
     }
 }
@@ -88,7 +88,7 @@ fn write_slot_kind_matches_specialized_op() {
     compile(&mut kv, "rwfunc f() -> () {\n    uint64(5) + 1 -> r\n}\n").unwrap();
     
     let k = write_kind(&mut kv, "/lib/f/[2,1]");
-    assert_eq!(k, "uint64", "写槽 kind 应为 uint64，实际 {k}");
+    assert_eq!(k, "uint64", "write slot kind should be uint64, got {k}");
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn uint8_literal_boundary_fits_and_overflows() {
     .unwrap();
     assert!(
         literal_kinds(&mut kv, "f").contains(&"uint8".to_string()),
-        "255 应按 uint8 落槽"
+        "255 should be lowered as uint8"
     );
 
     let (_store, mut kv) = fresh_kv("overflow");
@@ -112,7 +112,7 @@ fn uint8_literal_boundary_fits_and_overflows() {
     .unwrap();
     assert!(
         !literal_kinds(&mut kv, "f").contains(&"uint8".to_string()),
-        "256 超出 uint8，不得适配"
+        "256 overflows uint8 and must not be adapted"
     );
 }
 
@@ -126,7 +126,7 @@ fn float_still_wins_over_literal_adaptation() {
     .unwrap();
     assert!(
         literal_kinds(&mut kv, "f").contains(&"float64".to_string()),
-        "浮点在场应提升为 float64"
+        "presence of float should promote to float64"
     );
 }
 
@@ -139,7 +139,7 @@ fn two_unsigned_widths_still_widen() {
     )
     .unwrap();
     let os = ops(&mut kv, "f");
-    assert!(os.iter().any(|o| o == "add"), "应发语义算子 add：{os:?}");
+    assert!(os.iter().any(|o| o == "add"), "should emit semantic operator add: {os:?}");
 }
 
 #[test]
@@ -153,15 +153,15 @@ fn confirmed_mixed_signs_stay_untyped() {
     let os = ops(&mut kv, "f");
     assert!(
         os.iter().any(|o| o == "add" || o == "+"),
-        "应发通用算子（add/+）：{os:?}"
+        "should emit generic operator (add/+): {os:?}"
     );
     assert!(
         !os.iter().any(|o| o.contains('·')),
-        "不得发 typed opcode：{os:?}"
+        "must not emit typed opcode: {os:?}"
     );
     assert!(
         !literal_kinds(&mut kv, "f").contains(&"uint64".to_string()),
-        "符号冲突时不得把字面量适配成无符号"
+        "must not adapt literal to unsigned on signedness conflict"
     );
 }
 
@@ -175,7 +175,7 @@ fn comparison_with_literal_adapts_but_negative_does_not() {
     .unwrap();
     assert!(
         literal_kinds(&mut kv, "f").contains(&"uint64".to_string()),
-        "u == 1 应适配 uint64"
+        "u == 1 should adapt to uint64"
     );
 
     let (_store, mut kv) = fresh_kv("cmpneg");
@@ -186,6 +186,6 @@ fn comparison_with_literal_adapts_but_negative_does_not() {
     .unwrap();
     assert!(
         !literal_kinds(&mut kv, "f").contains(&"uint64".to_string()),
-        "-1 不能适配 uint64，应保持通用比较"
+        "-1 cannot adapt to uint64 and should keep generic comparison"
     );
 }

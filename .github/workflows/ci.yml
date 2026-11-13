@@ -8,7 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 工具链
+      - name: Toolchain
         run: |
           set -euo pipefail
           cmake --version | head -1
@@ -16,10 +16,10 @@ jobs:
           gcc --version | head -1
           python3 --version
 
-      - name: 构建全部产物
+      - name: Build all artifacts
         run: make artifact
 
-      - name: 产物清单
+      - name: Verify artifacts
         run: |
           set -euo pipefail
           test -x bin/pathlangrun
@@ -34,10 +34,10 @@ jobs:
       - name: runtimec ctest
         run: ctest --test-dir build/artifact-runtimec --output-on-failure
 
-      - name: benchmark（shm，10 个 case）
+      - name: Benchmark (shm, 10 cases)
         run: python3 benchmark/run.py --backends shm --repeat 1 --no-write | tee /tmp/bench.txt
 
-      - name: 全部 case valid
+      - name: Verify all cases valid
         run: |
           set -euo pipefail
           n=$(grep -cE 'True$' /tmp/bench.txt || true)

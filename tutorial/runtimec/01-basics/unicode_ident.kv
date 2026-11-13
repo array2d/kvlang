@@ -1,0 +1,29 @@
+
+lib Δ/γ {
+	rwfunc Σ(*int64 #α, *int64 #β) -> (*int64 #δ) {
+		*α + *β -> *δ
+	}
+}
+
+lib αβ {
+	lib γδ {
+		rwfunc λ() -> () { println("nested λ") }
+	}
+}
+
+struct ΔΣ {
+	α:float64=0.0
+	β:float64=0.0
+}
+
+rwfunc test() -> () {
+	Δ/γ·Σ(3, 4) -> δ1:int64
+	println("Σ =", δ1)
+	/lib/Δ/γ·Σ(10, 20) -> δ2:int64
+	println("Σ =", δ2)
+	/lib/αβ/γδ·λ()
+	λ0:ΔΣ = {α=3.0 β=4.0}
+	λ0·α -> x:float64
+	λ0·β -> y:float64
+	println("ΔΣ =", x, y)
+}

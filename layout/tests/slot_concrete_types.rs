@@ -110,7 +110,7 @@ fn narrowing_never_invents_a_kind_outside_the_union() {
     let ty = read_slot_type(&mut kv, "/lib/p·f/[3,-1]");
     assert!(
         ty == "int8|int16" || ty == "int8",
-        "只允许并集成员，实际 {ty:?}"
+        "only union members are allowed, got {ty:?}"
     );
-    assert!(!ty.contains("int64"), "不得把并集外的 int64 写上去：{ty:?}");
+    assert!(!ty.contains("int64"), "must not write non-member int64 onto slot: {ty:?}");
 }

@@ -76,13 +76,13 @@ static void expect_slot(void *kv, const char *key, const char *want, int *line) 
     uint64_t total = read_wire(kv, key, wire, sizeof wire);
     *line = __LINE__;
     if (total == 0) {
-        CHECK(0, "%s: 读不到（resolve 失败或后端非映射）", key);
+        CHECK(0, "%s: unreadable (resolve failed or backend is not memory-mapped)", key);
         return;
     }
     const uint8_t *body = NULL;
     uint64_t body_len = body_of(wire, total, &body);
     if (body_len != strlen(want) || (body_len && memcmp(body, want, body_len) != 0)) {
-        CHECK(0, "%s: body 应为 \"%s\"，实际 %.*s（%llu 字节）", key, want,
+        CHECK(0, "%s: body should be \"%s\", got %.*s (%llu bytes)", key, want,
               (int)body_len, body ? (const char *)body : "", (unsigned long long)body_len);
     }
 }
@@ -94,17 +94,17 @@ int main(int argc, char **argv) {
     }
     void *layout_dl = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
     if (!layout_dl) {
-        fprintf(stderr, "dlopen layout 失败: %s\n", dlerror());
+        fprintf(stderr, "dlopen layout failed: %s\n", dlerror());
         return 2;
     }
     define_rwir = (define_rwir_fn)dlsym(layout_dl, "pathlangLayoutDefineRwir");
     if (!define_rwir) {
-        fprintf(stderr, "layout 未导出 pathlangLayoutDefineRwir\n");
+        fprintf(stderr, "layout does not export pathlangLayoutDefineRwir\n");
         return 2;
     }
     void *kv_dl = dlopen(argv[2], RTLD_NOW | RTLD_LOCAL);
     if (!kv_dl) {
-        fprintf(stderr, "dlopen pathspace 失败: %s\n", dlerror());
+        fprintf(stderr, "dlopen pathspace failed: %s\n", dlerror());
         return 2;
     }
     kv_connect = (connect_fn)dlsym(kv_dl, "pathspaceConnect");
@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
     kv_resolve = (resolve_fn)dlsym(kv_dl, "pathspaceResolveOffset");
     kv_inproc = (inproc_fn)dlsym(kv_dl, "pathspaceXvalueInProcessAddress");
     if (!kv_connect || !kv_close || !kv_resolve || !kv_inproc) {
-        fprintf(stderr, "pathspace 缺少所需符号\n");
+        fprintf(stderr, "pathspace is missing required symbols\n");
         return 2;
     }
 
@@ -124,11 +124,11 @@ int main(int argc, char **argv) {
     const char *writes1[] = {"int64"};
     memset(err, 0, sizeof err);
     CHECK(define_rwir(dsn, "t·f", reads1, 1, writes1, 1, NULL, 0, err, sizeof err) == 0,
-          "基本声明应成功: %s", err);
+          "basic declaration should succeed: %s", err);
 
     {
         void *kv = kv_connect(dsn);
-        CHECK(kv != NULL, "connect 失败");
+        CHECK(kv != NULL, "connect failed");
         if (kv) {
             int line = 0;
             expect_slot(kv, "/lib/t·f/[0,-1]", "int64", &line);
@@ -142,12 +142,12 @@ int main(int argc, char **argv) {
         if (kv) {
             uint8_t wire[512];
             uint64_t total = read_wire(kv, "/lib/t·f", wire, sizeof wire);
-            CHECK(total != 0, "/lib/t·f 路由头读不到");
+            CHECK(total != 0, "failed to read /lib/t·f routing header");
             if (total) {
                 const uint8_t *body = NULL;
                 uint64_t bl = body_of(wire, total, &body);
                 
-                CHECK(bl > 0, "/lib/t·f 路由头 body 不该为空");
+                CHECK(bl > 0, "/lib/t·f routing header body must not be empty");
             }
             kv_close(kv);
         }
@@ -155,23 +155,23 @@ int main(int argc, char **argv) {
 
     memset(err, 0, sizeof err);
     CHECK(define_rwir(dsn, "", reads1, 1, writes1, 1, NULL, 0, err, sizeof err) == -1,
-          "空 opcode 应返回 -1");
-    CHECK(err[0] != '\0', "空 opcode 应写 err");
+          "empty opcode should return -1");
+    CHECK(err[0] != '\0', "empty opcode should populate err");
 
     memset(err, 0, sizeof err);
     CHECK(define_rwir(dsn, "t/bad", reads1, 1, writes1, 1, NULL, 0, err, sizeof err) == -1,
-          "opcode 含 '/' 应返回 -1（err=%s）", err);
-    CHECK(err[0] != '\0', "opcode 含 '/' 应写 err");
+          "opcode containing '/' should return -1 (err=%s)", err);
+    CHECK(err[0] != '\0', "opcode containing '/' should populate err");
 
     memset(err, 0, sizeof err);
     CHECK(define_rwir(dsn, "t·null", NULL, 2, writes1, 1, NULL, 0, err, sizeof err) == -1,
-          "read_count=2 但数组为 NULL 应返回 -1（err=%s）", err);
+          "read_count=2 with NULL array should return -1 (err=%s)", err);
 
     const char *reads_v2[] = {"[]char/utf8"};
     const char *writes_v2[] = {"int64"};
     memset(err, 0, sizeof err);
     CHECK(define_rwir(dsn, "t·f", reads_v2, 1, writes_v2, 1, NULL, 0, err, sizeof err) == 0,
-          "重复声明应幂等成功: %s", err);
+          "redeclaration should succeed idempotently: %s", err);
     {
         void *kv = kv_connect(dsn);
         if (kv) {
@@ -185,7 +185,7 @@ int main(int argc, char **argv) {
     const uint8_t bitmap3[1] = {1};
     memset(err, 0, sizeof err);
     CHECK(define_rwir(dsn, "t·ip", reads1, 1, writes3, 1, bitmap3, 0, err, sizeof err) == 0,
-          "带 inplace 的声明应成功: %s", err);
+          "declaration with inplace should succeed: %s", err);
     {
         void *kv = kv_connect(dsn);
         if (kv) {
@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
     const char *reads_multi[] = {"int64", "[]char/utf8"};
     memset(err, 0, sizeof err);
     CHECK(define_rwir(dsn, "t·va", reads_multi, 2, writes1, 1, NULL, 1, err, sizeof err) == 0,
-          "变参声明应成功: %s", err);
+          "variadic declaration should succeed: %s", err);
     {
         void *kv = kv_connect(dsn);
         if (kv) {
@@ -213,7 +213,7 @@ int main(int argc, char **argv) {
 
     memset(err, 0, sizeof err);
     CHECK(define_rwir(dsn, "t·vb", NULL, 0, NULL, 0, NULL, 1, err, sizeof err) == -1,
-          "无读参却声明变参应返回 -1（err=%s）", err);
+          "variadic declaration with zero read params should return -1 (err=%s)", err);
 
     char path[256];
     snprintf(path, sizeof path, "/tmp/pathlang_layout_defrwir_%ld.shm", (long)getpid());

@@ -357,9 +357,9 @@ static void t_direct_children(const char *db) {
   const char *unmarked[] = {"a", "ab"};
   expect_children(kv, "/case/", false, unmarked, 2);
 
-  CHECK(set_int32(kv, "/中文/子项·属性/值", 6) == 0, "UTF-8 child");
-  const char *chinese[] = {"子项"};
-  expect_children(kv, "/中文/", false, chinese, 1);
+  CHECK(set_int32(kv, "/αβγ/δεζ·ηθι/€", 6) == 0, "UTF-8 child");
+  const char *utf8_child[] = {"δεζ"};
+  expect_children(kv, "/αβγ/", false, utf8_child, 1);
 
   CHECK(set_int32(kv, "/coords/[10]/x", 10) == 0, "coord 10");
   CHECK(set_int32(kv, "/coords/[2]/x", 2) == 0, "coord 2");
@@ -392,11 +392,11 @@ static void t_direct_children(const char *db) {
     int32_t n = 0;
     REQUIRE(pathspaceShmList(kv, "/local/", true, 0, &names, &n) == 0,
             "list /local/ ext");
-    CHECK(n == 2, "/local/ ext 只有 a 与 z 两项（a 的两个形态合成一项），实得 %d",
+    CHECK(n == 2, "/local/ ext should merge both forms of a into one entry (a + z), got %d",
           n);
     
-    CHECK(list_has(names, n, "a/"), "跨段冲突应保留目录形态 a/");
-    CHECK(!list_has(names, n, "a"), "跨段冲突不应同时留下值形态 a");
+    CHECK(list_has(names, n, "a/"), "cross-layer conflict must keep directory form a/");
+    CHECK(!list_has(names, n, "a"), "cross-layer conflict must not also keep value form a");
     list_free(names, n);
   }
   const char *local[] = {"a"};

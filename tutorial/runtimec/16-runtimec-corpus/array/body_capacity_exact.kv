@@ -1,19 +1,18 @@
-// `compactarray·new` 的 body 打包缓冲**恰好上限**：1024 个 int64 = 8192 字节。
+// `compactarray·new` body packing buffer **exact upper bound**: 1024 `int64` elements = 8192 bytes.
 //
-// 判据是**行为**：这条必须 executed 且输出 1024。装置就是产品自己的
-// layout → 执行链路，不是另搭一个——所以它不会假绿。
+// Behavioral criterion: this test must execute end-to-end and print `1024` through the real
+// layout -> execution pipeline.
 //
-// 与 `CONTAINER_NEW_BODY_CAPACITY` 的 8192 是同一条事实：那条常量改小，这条会红。
-// 超限那一半（1025 个元素必须报 0x4301）**本轮没有语料用例**：
-//   TODO(#待建): over-limit 用例等语料运行器支持「期望运行期失败」。
-// 语料运行器目前只有 pass / fail / blocked 加「期望 layout 错误」，超限那条会被
-// 记成 fail——而它其实是正确的拒绝，那会让语料留一条永远红且红得没名分的用例。
-// **不要**用「常量等于 8192」的断言顶替它：那是代理指标，测的是常量字面值，
-// 不是行为。
+// Coupled to `CONTAINER_NEW_BODY_CAPACITY` (8192): shrinking that constant turns this test red.
+// The over-limit counterpart (1025 elements must fail with `0x4301`) has no active corpus case yet:
+//   TODO(pending): add over-limit case once the corpus runner supports "Expected runtime failure".
+// Currently the runner only tracks pass / fail / blocked plus "Expected error" (layout error), so a
+// runtime rejection would be misreported as `fail`. Do **not** substitute a static assertion that the
+// constant equals 8192 -- test behavior, not constant literals.
 //
-// 下面这行字面量由脚本生成（1024 个元素）。手改请保持元素个数——它就是要压在上限上。
+// The 1024-element literal below is generated; keep the exact element count if editing by hand.
 //
-// 期望输出:
+// Expected output:
 //   1024
 
 rwfunc test() -> () {

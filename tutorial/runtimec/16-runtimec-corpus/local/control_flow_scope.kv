@@ -1,7 +1,8 @@
-// 判据：layout 把块体展平进单一线性 irseq，不建 scope 子目录；
-// if 块内声明的局部在块外仍是同一帧槽。若按块作用域处理，y 读不到。
-// 依据：04-layout语义/05-控制流.kv、02-pathspace模型/10-系统变量.kv。
-// 期望输出:
+// Criterion: layout flattens block bodies into a single linear irseq without scope subdirectories;
+// a local declared inside an `if` block lives in the same frame slot outside the block.
+// With lexical block scoping, `y` would be unreadable after the `if`.
+// Reference: 04-layout-semantics/05-control-flow.kv, 02-pathspace-model/10-system-vars.kv.
+// Expected output:
 //   7
 
 rwfunc test() -> () {

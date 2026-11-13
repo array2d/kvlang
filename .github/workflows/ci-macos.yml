@@ -8,7 +8,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 工具链
+      - name: Toolchain
         run: |
           set -euo pipefail
           cmake --version | head -1
@@ -16,7 +16,7 @@ jobs:
           clang --version | head -1
           python3 --version
 
-      - name: 构建全部产物
+      - name: Build all artifacts
         run: make artifact
 
       - name: runtimec ctest

@@ -58,12 +58,12 @@ func genScalar(r *rand.Rand) interface{} {
 }
 
 func genString(r *rand.Rand) string {
-	pool := []string{"", "a", "hello", "中文", "emoji🚀", "line\nbreak", "quote\"x", "back\\slash", "tab\tx", "0"}
+	pool := []string{"", "a", "hello", "αβγ", "emoji🚀", "line\nbreak", "quote\"x", "back\\slash", "tab\tx", "0"}
 	return pool[r.Intn(len(pool))]
 }
 
 func genKey(r *rand.Rand) string {
-	pool := []string{"a", "b", "c", "name", "x1", "_under", "k-2", "中文键"}
+	pool := []string{"a", "b", "c", "name", "x1", "_under", "k-2", "clé_αβ"}
 	return pool[r.Intn(len(pool))]
 }
 

@@ -1,7 +1,7 @@
-// 判据：a·b 是静态字符串键成员；读写同一 key。
-// 若 `·` 被当成路径子键或动态键，p·x 读不到 3。
-// 依据：03-类型系统/15-成员访问.kv、17-struct.kv。
-// 期望输出:
+// Criterion: `a·b` accesses a static string-keyed member, reading and writing the same key.
+// Treating `·` as a path subkey or dynamic key would fail to read `3` from `p·x`.
+// Reference: 03-type-system/15-member-access.kv, 17-struct.kv.
+// Expected output:
 //   3
 //   4
 //   5

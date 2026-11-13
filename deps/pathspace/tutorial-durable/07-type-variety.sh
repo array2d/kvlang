@@ -25,7 +25,7 @@ $KV get /t/yes /t/no
 echo "=== string ==="
 $KV set /t/empty string:
 $KV set /t/space "string:hello world"
-$KV set /t/unicode string:你好
+$KV set /t/unicode string:αβγ
 $KV get /t/empty /t/space /t/unicode
 
 echo "=== nil ==="

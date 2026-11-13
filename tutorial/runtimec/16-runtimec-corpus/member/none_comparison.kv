@@ -1,17 +1,17 @@
-// 判据：非指针类型也能判空——`None` 在 pathspace 即「无值」，与值的类型无关。
-// 依据：03-类型系统/03-种类-代码与特殊值.kv「None 判据」。
+// Criterion: non-pointer types can also be compared against `None` -- `None` in pathspace means
+// "no value", independent of the slot's type.
+// Reference: 03-type-system/03-kinds-codes-and-special-values.kv ("None criterion").
 //
-// 本条只验**非指针类型判空**这一个能力，与「动态键」无关——所以文件名是
-// `none_comparison`（原名 `dynamic_key_none` 在图上看像覆盖了动态键，实际没有）。
+// Isolates **non-pointer `None` comparison** (hence `none_comparison`, renamed from `dynamic_key_none`
+// which did not actually exercise dynamic keys).
 //
-// 载体是**已存在的绝对 key**：值在，判空为 false。四组反向对照（零值 / 缺失 /
-// 空引用 / 配对侧）在 member/nonnull_test.kv 里。
+// Uses an **existing absolute key**: value is present, so `== None` is `false`. The four paired cases
+// (zero local / present key / null pointer / `!=` counterparts) are in `member/nonnull_test.kv`.
 //
-// **动态键载体待 #634**：`m·*k` 那条路径尚未打通（`0x4107` VALUE_ACCESS），届时
-// 若要把「动态成员键判空」也纳入覆盖，应新增用例或以 `m·*k` 形态迁回，而不是
-// 让本文件同时承担两件事——两件独立的缺口混在一条里，谁修好了都看不出来。
+// **Dynamic-key carrier pending #634**: once `m·*k` (`0x4107` VALUE_ACCESS) lands, add a dedicated
+// dynamic-member `None` test rather than mixing two independent features here.
 //
-// 期望输出:
+// Expected output:
 //   false
 //   true
 

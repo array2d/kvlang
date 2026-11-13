@@ -1,7 +1,7 @@
-// 判据：递归调用 + 局部 + return 闭环；fib(10) 需要完整调用栈。
-// 若 call 不建被调帧或局部不物化，第一条 fib 调用就 blocked 或失败。
-// 依据：04-layout语义/03-函数.kv、05-runtime语义/01-执行模型.kv。
-// 期望输出:
+// Criterion: recursive calls + local slots + return form a complete call stack (`fib(10)`).
+// Failing to allocate callee frames or materialize locals per frame would block or corrupt recursion.
+// Reference: 04-layout-semantics/03-functions.kv, 05-runtime-semantics/01-execution-model.kv.
+// Expected output:
 //   55
 
 rwfunc fib(*int64 #n) -> (*int64 #r) {

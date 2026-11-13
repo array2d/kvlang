@@ -421,13 +421,13 @@ fn check_subscript_expr(
             if let Some(t) = tm.get(&base.val) {
                 let msg = if is_container_type(t) {
                     Some(format!(
-                        "`[]` 下标不能用于容器 `{}`（类型 {}）；容器成员访问用 `{}·key`，`[]` 仅限 compact array",
+                        "cannot apply `[]` subscript to container `{}` (type {}); use `{}·key` for container member access (`[]` is only for compact arrays)",
                         base.val, t, base.val
                     ))
                 } else if t.starts_with('*') {
                     
                     Some(format!(
-                        "`[]` 下标不能用于指针 `{}`（类型 {}）；先解引用 `*{}` 再下标",
+                        "cannot apply `[]` subscript to pointer `{}` (type {}); dereference `*{}` before subscripting",
                         base.val, t, base.val
                     ))
                 } else {
@@ -2003,7 +2003,7 @@ fn infer_op_type(
                     None => {
                         
                         *output_type_failure = Some(format!(
-                            "成员读 `{first}` 的类型推不出：基座 `{base}` 的类型 `{base_type}` 无法沿 `{tail}` 逐段下钻"
+                            "cannot infer type of member read `{first}`: base `{base}` of type `{base_type}` cannot drill down along `{tail}`"
                         ));
                         String::new()
                     }
@@ -2055,12 +2055,12 @@ fn infer_op_type(
                     None => {
                         
                         *output_type_failure = Some(format!(
-                            "concat 的结果类型无法确定：操作数编码 {} 没有共同编码",
+                            "cannot determine result type of concat: operand encodings {} have no common encoding",
                             operand_types
                                 .iter()
                                 .map(|t| format!("`{t}`"))
                                 .collect::<Vec<_>>()
-                                .join(" 与 ")
+                                .join(" and ")
                         ));
                         String::new()
                     }
@@ -3687,7 +3687,7 @@ fn expr_result_type(
             
             if known.len() < e.args.len() {
                 *output_type_failure = Some(format!(
-                    "concat 的结果类型无法确定：{} 个操作数里只有 {} 个有静态类型",
+                    "cannot determine result type of concat: out of {} operands, only {} have static types",
                     e.args.len(),
                     known.len()
                 ));
@@ -3697,12 +3697,12 @@ fn expr_result_type(
                 Some(t) => t,
                 None => {
                     *output_type_failure = Some(format!(
-                        "concat 的结果类型无法确定：操作数编码 {} 没有共同编码",
+                        "cannot determine result type of concat: operand encodings {} have no common encoding",
                         known
                             .iter()
                             .map(|t| format!("`{t}`"))
                             .collect::<Vec<_>>()
-                            .join(" 与 ")
+                            .join(" and ")
                     ));
                     String::new()
                 }
@@ -4018,13 +4018,13 @@ fn concat_conflict_message(e: &Expr, tm: &HashMap<String, String>) -> String {
         })
         .collect();
     format!(
-        "concat 的结果类型无法确定：操作数编码 {} 没有共同编码",
+        "cannot determine result type of concat: operand encodings {} have no common encoding",
         operand_types
             .iter()
             .filter(|t| !t.is_empty())
             .map(|t| format!("`{t}`"))
             .collect::<Vec<_>>()
-            .join(" 与 ")
+            .join(" and ")
     )
 }
 
@@ -4064,13 +4064,13 @@ fn check_declared_write_slots(
         let hint = if inferred.is_empty() {
             String::new()
         } else {
-            format!("（当前推断为 {inferred}）")
+            format!(" (inferred as {inferred})")
         };
         diags.push(Diagnostic {
             pos: s.pos,
             warn: false,
             info: false,
-            message: format!("变量 '{w}' 未声明类型；请写成 '{w}:T'{hint}"),
+            message: format!("variable '{w}' has no declared type; write '{w}:T'{hint}"),
             source: String::new(),
             src_file: String::new(),
             src_name: String::new(),
@@ -4128,7 +4128,7 @@ fn walk_inst(
             .collect();
         if known.len() < e.args.len() {
             type_failure = Some(format!(
-                "concat 的结果类型无法确定：{} 个操作数里只有 {} 个有静态类型——推不出类型的操作数不参与编码收敛",
+                "cannot determine result type of concat: out of {} operands, only {} have static types — operands without inferred types cannot participate in encoding convergence",
                 e.args.len(),
                 known.len()
             ));
@@ -4138,7 +4138,7 @@ fn walk_inst(
     }
     if let Some(message) = type_failure {
         let slot = s.writes.first().cloned().unwrap_or_default();
-        push_write_diag(diags, format!("{message}（槽 `{slot}`）"));
+        push_write_diag(diags, format!("{message} (slot `{slot}`)"));
     }
     for (j, w) in s.writes.iter().enumerate() {
         if w.is_empty() {
@@ -4325,12 +4325,12 @@ pub fn check_inplace_unit(
                 }
                 let (read, written, _) = judge(fi, name, &credited);
                 let message = if !read {
-                    format!("inplace 写参 `{name}` 在函数体内从未被读；`inplace` 要求「同一指令内既读又写」")
+                    format!("inplace write param `{name}` is never read in the function body; `inplace` requires reading and writing in the same instruction")
                 } else if !written {
-                    format!("inplace 写参 `{name}` 在函数体内从未被写；`inplace` 要求「同一指令内既读又写」")
+                    format!("inplace write param `{name}` is never written in the function body; `inplace` requires reading and writing in the same instruction")
                 } else {
                     format!(
-                        "inplace 写参 `{name}` 只是「先读后写」或「先写后读」，没有**同一条指令**同时读写它——那不是 inplace，请去掉修饰符"
+                        "inplace write param `{name}` is read and written in separate instructions, and no single instruction both reads and writes it — drop `inplace`"
                     )
                 };
                 push_write_diag(&mut diags, message);
@@ -4640,19 +4640,19 @@ fn check_resolve_write_slot(
     let is_path_text =
         !super::kvkind::is_map_langtype(deref_value_type(&base_type)) && is_string_kind(&base_type);
     let base_kind = if base_type.is_empty() {
-        "未知"
+        "unknown"
     } else if is_path_text {
-        "字符串（父路径文本）"
+        "string (parent path text)"
     } else {
-        "非容器"
+        "non-container"
     };
     diags.push(Diagnostic {
         pos: Pos { line: 0, col: 0 },
         warn: false,
         info: false,
         message: format!(
-            "pathspace/key·deref（由 `{display}` 展开）：写槽 {:?} 需要显式类型注解\
-             （如 `{}:T = …`）——base {base:?} 的形态是{base_kind}，成员类型无法静态得出",
+            "pathspace/key·deref (expanded from `{display}`): write slot {:?} requires an explicit type annotation \
+             (e.g., `{}:T = …`) — base {base:?} is {base_kind}, so the member type cannot be determined statically",
             display, write_name
         ),
         source: String::new(),
@@ -4755,7 +4755,7 @@ fn check_implicit_deref_member(
         warn: false,
         info: false,
         message: format!(
-            "对指针类型的成员访问必须显式解引用：写 `(*{})·name`",
+            "member access on pointer requires explicit dereference: write `(*{})·name`",
             base.val
         ),
         source: String::new(),

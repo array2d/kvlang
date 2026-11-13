@@ -1,8 +1,8 @@
-// 判据：嵌套 lib 的 pkg 以 / 累积，函数名以 · 附在末段；
-// 调用名给出 /lib 之后的完整 key：outer/inner·add1。
-// 若只取末段 lib 名，调用会找不到 /lib/outer/inner·add1。
-// 依据：04-layout语义/11-lib与rwir数据.kv。
-// 期望输出:
+// Criterion: nested `lib` blocks accumulate package segments with `/`, and function names attach to the leaf via `·`;
+// calls omit `/lib` and write `outer/inner·add1`.
+// Keeping only the innermost `lib` name would fail to resolve `/lib/outer/inner·add1`.
+// Reference: 04-layout-semantics/11-lib-and-rwir-data.kv.
+// Expected output:
 //   42
 
 lib outer {

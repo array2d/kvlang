@@ -1,13 +1,13 @@
-// `string·concat` 的**恰好上限**：16 × 64 = 1024 码点，必须成功。
+// `string·concat` **exact upper bound**: 16 × 64 = 1024 codepoints must succeed.
 //
-// 与 `body_capacity_exact.kv`（容器那条）同一个形态：容量是**行为**判据，
-// 改小 `STRING_TEXT_CODEPOINT_CAPACITY` 这条会红。
+// Mirrors `array/body_capacity_exact.kv`: capacity is verified behaviorally so shrinking
+// `STRING_TEXT_CODEPOINT_CAPACITY` turns this test red.
 //
-// 超限那一半（1025 码点必须报 0x4A0B）**本轮没有语料用例**：
-//   TODO(#待建): over-limit 用例等语料运行器支持「期望运行期失败」。
-// 同 `known-limitations/body_capacity_over_limit.kv` 的理由。
+// Over-limit counterpart (1025 codepoints must fail with `0x4A0B`) is deferred:
+//   TODO(pending): add over-limit case once the corpus runner supports "Expected runtime failure"
+//   (see `known-limitations/body_capacity_over_limit.kv`).
 //
-// 期望输出:
+// Expected output:
 //   len = 1024
 
 rwfunc test() -> () {

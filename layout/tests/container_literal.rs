@@ -49,14 +49,14 @@ fn body<'a>(wire: &'a [u8]) -> &'a [u8] {
 
 fn opcode(kv: &mut Kv, dir: &str, instruction: usize) -> String {
     let wire = kv.get_one(&format!("{dir}/[{instruction},0]"));
-    assert!(!wire.is_empty(), "{dir}/[{instruction},0] 不存在");
+    assert!(!wire.is_empty(), "{dir}/[{instruction},0] does not exist");
     let body = body(&wire);
     String::from_utf8_lossy(&body[5..]).into_owned()
 }
 
 fn write_type(kv: &mut Kv, dir: &str, instruction: usize) -> String {
     let wire = kv.get_one(&format!("{dir}/[{instruction},1]"));
-    assert!(!wire.is_empty(), "{dir}/[{instruction},1] 不存在");
+    assert!(!wire.is_empty(), "{dir}/[{instruction},1] does not exist");
     let body = body(&wire);
     let text = String::from_utf8_lossy(&body[5..]).into_owned();
     text.rsplit_once('\0')
@@ -86,11 +86,11 @@ fn empty_map_literal_is_map_new_with_annotated_type() {
     let dir_key = "/lib/p·f";
     assert_eq!(opcode(&mut kv, dir_key, 1), "map·new");
     let (nr, nw) = declared(&mut kv, dir_key, 1);
-    assert_eq!((nr, nw), (0, 1), "空 map 是零读参、一写参");
+    assert_eq!((nr, nw), (0, 1), "empty map takes zero read args and one write arg");
     assert_eq!(
         write_type(&mut kv, dir_key, 1),
         "'[int64]'[]char/utf8",
-        "写槽类型必须来自声明处标注"
+        "write slot type must come from the declaration annotation"
     );
 }
 
@@ -126,11 +126,11 @@ fn unannotated_container_literal_is_rejected() {
         "lib p {\n\trwfunc f() -> () {\n\t\tm = {}\n\t}\n}\n",
     );
     let out = out.unwrap();
-    assert!(!out.status.success(), "无标注的容器字面量必须报错");
+    assert!(!out.status.success(), "unannotated container literal must be rejected");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("needs a map langtype"),
-        "错误消息要指认缺类型，实际：{stderr}"
+        "error message must report missing type, got: {stderr}"
     );
 }
 
@@ -158,7 +158,7 @@ fn no_literal_form_emits_obj() {
             assert_ne!(
                 opcode(&mut kv, "/lib/p·f", instruction),
                 "obj",
-                "{tag}: 第 {instruction} 条指令仍在发 obj"
+                "{tag}: instruction {instruction} still emits obj"
             );
             instruction += 1;
         }
@@ -174,7 +174,7 @@ fn signature_declaration_supplies_the_map_type() {
     let out = out.unwrap();
     assert!(
         out.status.success(),
-        "具名 map 字面量是规格允许的：{}",
+        "keyed map literal is allowed by spec: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let mut kv = connect(&dir);

@@ -43,7 +43,7 @@ fn tree(dir: &Path) -> Vec<(String, Vec<u8>)> {
     out
 }
 
-#[ignore = "待改用 pathspace API 遍历 KV 空间：shm 下 KV 树不在文件系统布局里"]
+#[ignore = "pending migration to pathspace API traversal: shm KV tree is not on the filesystem"]
 #[test]
 fn layout_is_deterministic_across_processes() {
     let bin = env!("CARGO_BIN_EXE_pathlanglayout");
@@ -65,7 +65,7 @@ fn layout_is_deterministic_across_processes() {
         let _ = std::fs::remove_dir_all(&db);
         match &first {
             None => first = Some(t),
-            Some(f) => assert_eq!(f, &t, "第 {run} 次 layout 与第 0 次不一致"),
+            Some(f) => assert_eq!(f, &t, "layout run {run} differs from run 0"),
         }
     }
 }

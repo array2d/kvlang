@@ -199,7 +199,7 @@ int pathlangXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
     *output_wire_length = 0;
     const uint64_t record_length = 3U + (uint64_t)strlen(langtype);
 #if defined(LEGACY_EIGHT_BYTE_HEAD)
-    /* 旧 8 字节头：[len:u48][storetype][ptr][body][attr_len:u16][records] */
+    /* Old 8-byte head: [len:u48][storetype][ptr][body][attr_len:u16][records] */
     const uint64_t total = 8U + data_length + 2U + record_length;
     uint8_t *wire = calloc(1, (size_t)total);
     if (wire == NULL) {
@@ -223,7 +223,7 @@ int pathlangXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
 #else
     /* [bodylen:u64][attrslen:u16][padding:6][body][records] */
 #ifdef LEGACY_CAPACITY_FORM
-    /* 上一代：bodylen 记容量，有效长度在 tag 2。 */
+    /* Previous layout: bodylen stored capacity, effective length lived in tag 2. */
     const uint64_t extra = 11U;
     const uint64_t body_field = 80U;
 #else
@@ -240,7 +240,7 @@ int pathlangXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
     memcpy(wire + 8, &attrs_length, 2);
     memset(wire + 10, 0, 6);
 #ifdef LEGACY_LAYOUT_BYTE
-    /* 上一代头：offset 12 是 layout 而不是 padding 的一部分。 */
+    /* Previous head: offset 12 held `layout` rather than padding. */
     wire[12] = 1U;
 #endif
     if (data_length != 0U) {
@@ -252,7 +252,7 @@ int pathlangXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
     attrs[2] = (uint8_t)((strlen(langtype) >> 8) & 0xFFu);
     memcpy(attrs + 3, langtype, strlen(langtype));
     if (extra != 0U) {
-        /* 上一代：attr 尾部一条 tag 2 reallen。 */
+        /* Previous layout: trailing tag 2 reallen attribute. */
         uint8_t *reallen = attrs + record_length;
         reallen[0] = 2;
         reallen[1] = 8;
@@ -269,7 +269,7 @@ int pathlangXvalueHeadNewSlack(const uint8_t *data, uint64_t data_length,
 }
 """
 
-STUB_BACKEND = """/* 最小后端 */
+STUB_BACKEND = """/* Minimal stub backend */
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -373,7 +373,7 @@ int pathspaceWriteNewPlace(void *h, const char *key, uint8_t ref, uint8_t storet
     return 0;
 }
 
-/* 返回整条 wire（含 head）：探针按字节判布局，与真前端同一条判据。 */
+/* Return the full wire (including head): the probe classifies byte layout using the same criterion as the real frontend. */
 int pathspaceGet(void *h, const char *key, int resolve, uint8_t **out,
                uint32_t *out_len) {
     (void)h; (void)key; (void)resolve;

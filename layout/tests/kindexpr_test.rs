@@ -76,12 +76,12 @@ fn reject_any_annotation_on_literal() {
     let msgs = errors(src);
     assert!(
         msgs.iter().any(|m| m.contains("unknown type \"any\"")),
-        "x:any 应报 unknown type，got {msgs:?}"
+        "x:any should report unknown type, got {msgs:?}"
     );
     assert!(
         msgs.iter()
             .any(|m| m.contains("empty kindexp is only allowed in signature slots")),
-        "x:any 不得按空 kindexp 放行，got {msgs:?}"
+        "x:any must not be accepted as an empty kindexp, got {msgs:?}"
     );
 }
 

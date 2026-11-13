@@ -741,17 +741,18 @@ def validate(rows: list[Row], opcodes: list[str], aliases: list[tuple[str, str]]
 def render_signature_table(rows: list[Row]) -> str:
     declared = [row for row in rows if row.read_langtypes or row.write_langtypes]
     lines = [
-        "// 组件：specification/native_rwir_decls.kv",
-        "// 作用：native rwir 的签名声明，供 layout 在**构建期**编进二进制。",
-        "// 联系：真源是 specification/myrwircaps.c 的名字表 + five-language-behavior-matrix.md",
-        "//       的裁决；二者生成 rwir_catalog.def 的能力行，再由能力行生成本文件。",
-        "//       改签名要改真源，不改任何一份产物。本文件由",
-        "//       tools/architecture/generate_rwir_catalog.py 生成并由同一脚本校验。",
-        "// 约束：不让 layout 运行期访问 pathspace 读 /lib/<op>；也不在 layout 里手写第二份。",
-        "// 语法：与 rwfunc 同形的 rwir 声明，只差函数体——兑现方是 runtime。",
-        "//       每个参数/返回值必须带类型；裸 `#name`、`$name` 与旧写法 `name:` 都被拒绝。",
-        f"// 统计：{len(declared)} 条声明"
-        "（其余行的签名由 TypeSet 位或安装签名给出）。",
+        "// Component: specification/native_rwir_decls.kv",
+        "// Role: Signature declarations for native rwir operators, embedded into layout at **build time**.",
+        "// Links: Sources of truth are the name table in specification/myrwircaps.c and decisions in",
+        "//        five-language-behavior-matrix.md, which generate capability rows in rwir_catalog.def",
+        "//        and in turn generate this file. Edit the sources of truth rather than generated outputs.",
+        "//        Generated and verified by tools/architecture/generate_rwir_catalog.py.",
+        "// Constraints: Layout must neither read /lib/<op> from pathspace at runtime nor maintain a",
+        "//              hand-written duplicate.",
+        "// Syntax: rwir declarations matching rwfunc header syntax without a body (fulfilled by runtime).",
+        "//         Every parameter and return value must carry a type; bare `#name`, `$name`, and `name:` are rejected.",
+        f"// Stats: {len(declared)} declarations"
+        " (remaining rows get signatures from TypeSet bits or install signatures).",
         "",
     ]
     for row in declared:
@@ -814,14 +815,15 @@ def read_back_signature_table(text: str) -> list[tuple[str, list[str], list[str]
 def retirement_lines() -> list[str]:
     if not RETIRED_ROWS:
         return []
-    lines = [" *", " * 已退役（编号永久保留，不复用、不重编号）："]
+    lines = [" *", " * Retired (ids permanently reserved; never reused or renumbered):"]
     for identifier, operator, opid, *aliases in RETIRED_ROWS:
-        detail = (f" *   {operator!r} 为 {identifier} 的规范名，"
+        detail = (f" *   {operator!r} is the canonical name for {identifier}, "
                   f"~0x{opid:04X}")
-        line = (f" *   0x{opid:04X} {identifier} —— 具名容器字面量统一走 map·new"
-                f"（map/struct/scatterarray 本质是键值组）")
+        del detail
+        line = (f" *   0x{opid:04X} {identifier} — named container literals unify on map·new"
+                f" (map/struct/scatterarray are key-value groups)")
         if aliases:
-            line += f"；{('、'.join(aliases))} 为其别名，一并退役"
+            line += f"; alias {', '.join(aliases)} retired alongside"
         lines.append(line)
     return lines
 
@@ -831,26 +833,28 @@ def render_catalog(rows: list[Row], aliases: list[tuple[str, str]],
     alias_count = len(aliases) - len(identity_names & {name for name, _ in aliases})
     lines = [
         "/*",
-        " * 组件：specification/rwir_catalog.def",
-        " * 作用：myrwircap 的唯一 capability manifest —— 一行一个语义算子。",
-        " * 联系：surface 名字到本表行的映射在 rwir_alias_table.def；两表都由",
-        " *       tools/architecture/generate_rwir_catalog.py 生成并校验。",
-        " * 约束：rwir 的唯一标识是 operator key 文本；下面的数值 id 只服务 BinRWIR 编码，",
-        " *       是 runtimec 私有的实现细节，不是 rwir 身份。id 与 identifier 显式分配，",
-        " *       不来自数组下标、文件顺序或声明顺序；",
-        " *       读写掩码是 TypeSet 位集，不是占位串，不含 wildcard；未获得矩阵决策的",
-        " *       能力不进入本文件，记录在 rwir_catalog_gaps.md。",
-        " * 掩码位：0 int8，1 int16，2 int32，3 int64，4 uint8，5 uint16，6 uint32，",
-        " *       7 uint64，8 float32，9 float64，10 bool，11 char/utf8，12 char/utf32，",
-        " *       13 char/ascii，14 array，15 stringkeymap，16 structref，17 ext，",
-        " *       18 pointer；19 位以上保留且必须为零。",
-        " * 掩码零：该行不在标量 union 通道。parameterized 行的参数与结果类型由",
-        " *       /lib/<operator> 的 def rwir 槽在安装时声明（唯一签名来源，禁止在本表",
-        " *       复制第二张签名表）；ResultRule IDENTITY 表示结果类型取安装签名，",
-        " *       不是 wildcard。control 行不产生值。",
-        f" * 统计：注册表 {len(opcodes)} 个 surface 名字 → {len(aliases)} 条别名映射；",
-        f" *       {len(identity_names & {name for name, _ in aliases})} 条同名映射，"
-        f"{alias_count} 条别名；能力行 {len(rows)} 条，待裁 {len(gaps)} 条。",
+        " * Component: specification/rwir_catalog.def",
+        " * Role: Canonical capability manifest for myrwircap — one row per semantic operator.",
+        " * Links: Surface-name mappings to rows in this table live in rwir_alias_table.def; both",
+        " *        tables are generated and verified by tools/architecture/generate_rwir_catalog.py.",
+        " * Constraints: An rwir operator is uniquely identified by its operator key text; numeric",
+        " *              ids below serve BinRWIR encoding only and are private runtimec details, not",
+        " *              rwir identity. Ids and identifiers are assigned explicitly rather than from",
+        " *              array indices, file order, or declaration order; read/write masks are",
+        " *              TypeSet bitsets without wildcards or placeholders; capabilities lacking a",
+        " *              matrix decision stay out of this file and are tracked in rwir_catalog_gaps.md.",
+        " * Mask bits: 0 int8, 1 int16, 2 int32, 3 int64, 4 uint8, 5 uint16, 6 uint32,",
+        " *            7 uint64, 8 float32, 9 float64, 10 bool, 11 char/utf8, 12 char/utf32,",
+        " *            13 char/ascii, 14 array, 15 stringkeymap, 16 structref, 17 ext,",
+        " *            18 pointer; bits 19 and above are reserved (except bit 19 any_single) and must be zero.",
+        " * Zero mask: Row is outside the scalar union channel. Parameter and result types for",
+        " *            parameterized rows are declared at install time by the def rwir slot under",
+        " *            /lib/<operator> (single signature source; never duplicate a second signature",
+        " *            table here); ResultRule IDENTITY takes the install signature rather than a",
+        " *            wildcard. Control rows produce no value.",
+        f" * Stats: {len(opcodes)} registered surface names → {len(aliases)} alias mappings;",
+        f" *        {len(identity_names & {name for name, _ in aliases})} identity mappings, "
+        f"{alias_count} aliases; {len(rows)} capability rows, {len(gaps)} gaps.",
     ] + retirement_lines() + [
         " */",
         "#ifndef RUNTIMEC_RWIR_OPERATION",
@@ -866,7 +870,7 @@ def render_catalog(rows: list[Row], aliases: list[tuple[str, str]],
         " * ResultRule    : RUNTIMEC_RWIR_RESULT_{NONE,SAME_FIRST,SAME_SECOND,WIDEN,",
         " *                 WIDEN_INTEGER,BOOLEAN,FLOAT64,TARGET_TYPE,IDENTITY,CHARACTER_UTF8}",
         " * AliasPolicy   : RUNTIMEC_RWIR_ALIAS_{FORBIDDEN,DECLARED}",
-        " * behavior_decisions: 一个或多个逗号分隔的矩阵决策；第一个是该行的主决策。",
+        " * behavior_decisions: One or more comma-separated matrix decisions; the first is primary.",
         " */",
     ]
     for row in rows:
@@ -902,14 +906,16 @@ def render_catalog(rows: list[Row], aliases: list[tuple[str, str]],
 def render_alias_table(aliases: list[tuple[str, str]], opcodes: list[str]) -> str:
     lines = [
         "/*",
-        " * 组件：specification/rwir_alias_table.def",
-        " * 作用：surface 名字 -> capability row 的唯一映射（数据，不是能力行）。",
-        " * 约束：每个注册名恰好一条记录；名字相同不代表语义相同，语义只由 rwir_catalog.def",
-        " *       的行定义。rwir_catalog.def 是唯一签名来源，本表不携带类型。",
-        " * 特化：RUNTIMEC_RWIR_SPECIALIZATION 声明编译器按操作数静态类型改选的行；",
-        " *       invert 为真时结果取反（`!=` 的字符/指针/布尔比较）。",
-        f" * 统计：{len(opcodes)} 个注册 surface 名字，{len(aliases)} 条别名映射，"
-        f"{len(SPECIALIZATIONS)} 条特化。",
+        " * Component: specification/rwir_alias_table.def",
+        " * Role: Canonical mapping from surface name -> capability row (data, not capability rows).",
+        " * Constraints: Exactly one record per registered name; identical names do not imply identical",
+        " *              semantics, which are defined solely by rows in rwir_catalog.def.",
+        " *              rwir_catalog.def is the single signature source; this table carries no types.",
+        " * Specializations: RUNTIMEC_RWIR_SPECIALIZATION declares rows reselected by the compiler",
+        " *                  based on static operand types; invert negates the result (`!=` on",
+        " *                  character/pointer/boolean comparisons).",
+        f" * Stats: {len(opcodes)} registered surface names, {len(aliases)} alias mappings, "
+        f"{len(SPECIALIZATIONS)} specializations.",
         " */",
         "#ifndef RUNTIMEC_RWIR_ALIAS",
         '#error "Define RUNTIMEC_RWIR_ALIAS before including rwir_alias_table.def"',
@@ -1051,16 +1057,16 @@ def build_specializations(rows: list[Row]) -> list[tuple[Row, tuple[str, ...], i
 def render_operation_identifiers(rows: list[Row], retired: tuple) -> str:
     lines = [
         "/*",
-        " * 组件：binrwir/operation_identifiers",
-        " * 作用：能力行的 opid 常量，供 `binrwir` 与 `vmbin` 共同 include。",
-        " * 联系：真源是 `specification/rwir_catalog.def`；本文件由",
-        " *       tools/architecture/generate_rwir_catalog.py 生成并由同一脚本校验。",
-        " * 约束：**只含常量**，不含类型、不含表。改 opid 要改真源，不改本文件。",
+        " * Component: binrwir/operation_identifiers",
+        " * Role: Capability-row opid constants shared by `binrwir` and `vmbin`.",
+        " * Links: Source of truth is `specification/rwir_catalog.def`; generated and verified",
+        " *        by tools/architecture/generate_rwir_catalog.py.",
+        " * Constraints: **Constants only**, no types or tables. Edit the source of truth, not this file.",
         " *",
-        " * 为什么需要它：`vmbin` 与 `vmkv` 是同层兄弟，`vmbin` 不得链 `vmkv`，",
-        " * 于是 handler 无法向 manifest 询问自己的 opid。在此之前的两个选择——",
-        " * 在 handler 里写裸十六进制（与 catalog 漂开且无处对账）、让 vmbin 链 vmkv",
-        " * （分层倒置）——都不可接受。",
+        " * Rationale: `vmbin` and `vmkv` are sibling layers and `vmbin` must not link `vmkv`,",
+        " * so handlers cannot query the manifest for their opids. Both alternatives — bare",
+        " * hex literals in handlers (unreconciled drift) or linking `vmbin` to `vmkv` (layer",
+        " * inversion) — are unacceptable.",
         " */",
         "",
         "#ifndef BINRWIR_OPERATION_IDENTIFIERS_H",
@@ -1079,7 +1085,7 @@ def render_operation_identifiers(rows: list[Row], retired: tuple) -> str:
             f"UINT16_C(0x{row.opid:04X})")
     for identifier, operator, opid, note in retired:
         lines.append(
-            f"/* 已退役：{operator} — {note}。编号永久保留，不复用。 */")
+            f"/* Retired: {operator} — {note}. Permanently reserved, never reused. */")
         lines.append(
             f"#define BINRWIR_OPERATION_IDENTIFIER_{operation_suffix(identifier)} "
             f"UINT16_C(0x{opid:04X})")
@@ -1088,17 +1094,17 @@ def render_operation_identifiers(rows: list[Row], retired: tuple) -> str:
     lines += [
         "",
         "/*",
-        " * ── 特化 opid（0x8000–0xFEFF）───────────────────────────────────────────",
+        " * ── Specialized opids (0x8000–0xFEFF) ────────────────────────────────────",
         " *",
-        " * 一个算子按操作数的具体类型组合拆成多条，每条一个 opid。展开规则只有一条：",
-        " *   读掩码全笛卡尔积 → constraint 过滤 → result_rule 定结果。",
+        " * Each operator expands into one opid per concrete operand-type tuple:",
+        " *   Cartesian product of read masks -> filter by constraint -> result_rule.",
         " *",
-        " * 分配：0x8000 + 序号，序号来自按 (base opid, 元组串) 排序后的列表。",
-        " * 顺序必须稳定——Program 是地址化的、要跨进程一致。",
+        " * Assignment: 0x8000 + ordinal in the list sorted by (base opid, tuple string).",
+        " * Ordering must remain stable across processes.",
         " *",
-        " * 元组串 = 读参按声明序在前、写参在后，**同型也写全**。写全是唯一性前提：",
-        " * 省略重复项会让 `add_int64` 与 `add_int64_int64_int64` 指同一条。",
-        f" * 统计：{len(specializations)} 条。",
+        " * Tuple string = read parameters in declaration order followed by write parameters,",
+        " * **spelled out in full even when identical** so unary and binary forms stay distinct.",
+        f" * Stats: {len(specializations)} entries.",
         " */",
         f"#define BINRWIR_SPECIALIZED_COUNT UINT16_C({len(specializations)})",
         f"#define BINRWIR_SPECIALIZED_BASE UINT16_C(0x8000)",
@@ -1111,16 +1117,14 @@ def render_operation_identifiers(rows: list[Row], retired: tuple) -> str:
     lines += [
         "",
         "/*",
-        " * 查找表：特化轮次用 `(base opid, 元组串)` 查目标 opid。",
+        " * Lookup table: specialization pass maps `(base opid, tuple string)` to target opid.",
         " *",
-        " * 表与上面那批常量**同源同批生成**，条数必须相等——`--check` 逐项比对。",
-        " * 表放在头文件里而不是 .c：`binrwir` 与 `vmbin` 都要读它，而 `vmbin` 不得",
-        " * 链 `vmkv`；生成物多一份就多一处对账。",
+        " * Generated from the same source as the constants above; `--check` verifies parity.",
+        " * Declared here so both `binrwir` and `vmbin` can read it without `vmbin` linking `vmkv`.",
         " */",
         "typedef struct binrwir_specialization {",
-        "    /* 用 uint16_t 而不是 binrwir_operation_identifier_t：后者定义在",
-        "     * binrwir/instruction.h，本头若 include 它就成环（instruction.h 将来",
-        "     * 可能反过来要这张表）。opid 是 16 位是 wire 事实，这里照写即可。 */",
+        "    /* Uses uint16_t rather than binrwir_operation_identifier_t to avoid an include",
+        "     * cycle with binrwir/instruction.h; 16-bit opids are a wire-format invariant. */",
         "    uint16_t base_operation_identifier;",
         "    const char *operand_types;",
         "    uint16_t specialized_operation_identifier;",
@@ -1129,7 +1133,7 @@ def render_operation_identifiers(rows: list[Row], retired: tuple) -> str:
         "#define BINRWIR_SPECIALIZATION_TABLE_COUNT "
         f"UINT16_C({len(specializations)})",
         "",
-        "/* 定义在 binrwir/specialization_table.c：头里只放声明与计数。 */",
+        "/* Defined in binrwir/specialization_table.c; header holds only declaration and count. */",
         "extern const binrwir_specialization_t "
         "binrwir_specializations[BINRWIR_SPECIALIZATION_TABLE_COUNT];",
         "",
@@ -1146,17 +1150,16 @@ def render_specialization_table(rows: list[Row]) -> str:
     specializations = build_specializations(rows)
     lines = [
         "/*",
-        " * 组件：binrwir/specialization_table（生成物，勿手改）",
-        " * 作用：特化查找表的唯一定义。常量与计数在 operation_identifiers.h。",
-        " * 约束：由 tools/architecture/generate_rwir_catalog.py 生成并校验；",
-        " *       条数必须等于 BINRWIR_SPECIALIZATION_TABLE_COUNT。",
-        " * 缺行处置：`binrwir_binfunc_specialize` 查不到本表的 (base opid, 元组串)",
-        " *       时**整份 Program 拒绝**，error.code = 3（NO_SPECIALIZATION_ROW）。",
-        " *       补行要改上游：specification/rwir_catalog.def 的能力行掩码，再由本",
-        " *       脚本重新生成——**不要手改本文件，也不要给 handler 加回落**。",
-        " *       error.code = 1 是另一种成因（操作数取不到 langtype / 元组超缓冲），",
-        " *       那要去修 layout 或 vmkv，与本表无关。",
-        f" * 统计：{len(specializations)} 行。",
+        " * Component: binrwir/specialization_table (generated; do not edit by hand)",
+        " * Role: Sole definition of the specialization lookup table. Constants live in operation_identifiers.h.",
+        " * Constraints: Generated and verified by tools/architecture/generate_rwir_catalog.py;",
+        " *              row count must equal BINRWIR_SPECIALIZATION_TABLE_COUNT.",
+        " * Missing rows: `binrwir_binfunc_specialize` **rejects the entire Program** with",
+        " *               error.code = 3 (NO_SPECIALIZATION_ROW) when (base opid, tuple string)",
+        " *               is absent. Add masks in specification/rwir_catalog.def and regenerate",
+        " *               rather than editing this file by hand. error.code = 1 indicates missing",
+        " *               operand langtype or buffer overflow in layout/vmkv, unrelated to this table.",
+        f" * Stats: {len(specializations)} rows.",
         " */",
         "",
         '#include "binrwir/operation_identifiers.h"',
@@ -1176,19 +1179,19 @@ def render_specialization_table(rows: list[Row]) -> str:
 def render_gaps(gaps: list[tuple[str, str]], opcodes: list[str],
                 rows: list[Row]) -> str:
     lines = [
-        "# rwir_catalog 缺口清单",
+        "# rwir_catalog Gap List",
         "",
-        "本文件列出 `specification/myrwircaps.c` 中已注册、但无法收敛到一条已裁决",
-        "capability row 的 surface 名字。它们**不**进入 `rwir_alias_table.def`：",
-        "补齐决策前不允许进入 canonical BinRWIR。",
+        "Surface names registered in `specification/myrwircaps.c` that do not yet map to",
+        "a decided capability row. They are **excluded** from `rwir_alias_table.def` and",
+        "cannot enter canonical BinRWIR until decided.",
         "",
-        f"注册表 surface 名字：{len(opcodes)}；能力行：{len(rows)}；待裁：{len(gaps)}。",
+        f"Registered surface names: {len(opcodes)}; capability rows: {len(rows)}; gaps: {len(gaps)}.",
         "",
-        "| surface name | 缺什么 |",
+        "| surface name | missing |",
         "|---|---|",
     ]
     if not gaps:
-        lines.append("| — | 无 |")
+        lines.append("| — | none |")
     for opcode, reason in gaps:
         lines.append(f"| `{opcode}` | {reason} |")
     lines.append("")

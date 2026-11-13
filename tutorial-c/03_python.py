@@ -185,7 +185,7 @@ with KV("/tmp/pathspace_py.shm") as kv:
     kv.mkindex("/py/")
 
     kv.set("/py/a", "int64", struct.pack("<q", 42))
-    kv.set("/py/b", "char/utf8", "你好".encode())
+    kv.set("/py/b", "char/utf8", "hello αβ".encode())
 
     for k in ["/py/a", "/py/b"]:
         got = kv.get(k)

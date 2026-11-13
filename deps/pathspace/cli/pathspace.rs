@@ -75,7 +75,7 @@ fn default_dsn() -> String {
     match env::var("PATHSPACE") {
         Ok(value) if !value.is_empty() => value,
         _ => fatalf(
-            "未设置 PATHSPACE。本 CLI 只接受 shm://，例如：\n  \
+            "PATHSPACE is not set. This CLI only accepts shm://, e.g.:\n  \
              PATHSPACE=shm:///tmp/pathspace.shm pathspace list /",
         ),
     }
@@ -91,7 +91,7 @@ fn fail_op(err: &[u8; 256], op: &str) -> ! {
     if n > 0 {
         fatalf(&String::from_utf8_lossy(&err[..n]));
     }
-    fatalf(&format!("{}: failed（后端未填错误详情）", op));
+    fatalf(&format!("{}: failed (no backend error detail)", op));
 }
 
 fn data_base(kv: *mut c_void) -> *mut u8 {
@@ -263,35 +263,34 @@ fn parse_walk_args(tail: &[String]) -> String {
 }
 
 fn print_help() {
-    println!("usage: pathspace <subcommand> [args]   (存储地址由 env PATHSPACE 给出，形如 shm:///path)");
+    println!("usage: pathspace <subcommand> [args]   (store DSN via env PATHSPACE, e.g. shm:///path)");
     println!();
-    println!("存储子命令（只处理 key 与原始字节，不解释值的内容）:");
-    println!("  head <key>...           打印原始 head：bodylen/attrslen/total/padding");
-    println!("  attr <key>...           逐条打印 attr 记录：tag/len/data(hex)");
-    println!("  del <key>...            删除键");
-    println!("  deltree <prefix>        删除整棵子树（含根）");
-    println!("  cp <src> <dst>          拷贝单键");
-    println!("  cpdir <src> <dst>       递归拷贝子树");
-    println!("  mkindex <path>          创建目录（index）");
-    println!("  list|ls <prefix>        列子键（后端顺序，不排序）");
-    println!("  tree <prefix>           树状遍历（后端顺序，不排序）");
-    println!("  clear                   清空 pathspace（等价 deltree /，不可恢复）");
+    println!("Storage subcommands (key and raw byte operations only, no value type decoding):");
+    println!("  head <key>...           print raw head: bodylen/attrslen/total/padding");
+    println!("  attr <key>...           print attr records: tag/len/data(hex)");
+    println!("  del <key>...            delete keys");
+    println!("  deltree <prefix>        delete entire subtree (including root)");
+    println!("  cp <src> <dst>          copy a single key");
+    println!("  cpdir <src> <dst>       recursively copy a subtree");
+    println!("  mkindex <path>          create a directory (index)");
+    println!("  list|ls <prefix>        list child keys (backend order, unsorted)");
+    println!("  tree <prefix>           print subtree hierarchy (backend order, unsorted)");
+    println!("  clear                   clear entire pathspace (equivalent to deltree /, irreversible)");
     println!("  help                    print this help");
     println!();
-    println!("读写值（get/set 与 kind 解释）在 pathlang 的 CLI：`pathlang get|set|list --kind`。");
-    println!("本 CLI 不解析 langtype——那是语言层的事，存储层不认识「类型」。");
+    println!("Typed get/set/list live in pathlang's CLI (`pathlang get|set|list --kind`).");
+    println!("This CLI operates strictly at the storage byte layer without interpreting langtype.");
     println!();
-    println!("存储地址: 只接受 shm://。其它 scheme 在 connect 时就返回 NULL、CLI 立即退出——");
-    println!("          不是「连上之后才发现不支持」。没有运行期 dispatch，后端由链接期决定。");
-    println!("          没有默认值：未设 PATHSPACE 直接报错退出，不会替你落一个存储文件。");
+    println!("DSN: accepts shm:// only; other schemes return NULL on connect and exit immediately.");
+    println!("     No default DSN: exits with an error when PATHSPACE is unset.");
 }
 
 fn main() {
     let rest: Vec<String> = env::args().skip(1).collect();
     let dsn = default_dsn();
     if rest.is_empty() {
-        eprintln!("usage: pathspace <subcommand> [args]   (存储地址由 env PATHSPACE 给出，只接受 shm://)");
-        eprintln!("       pathspace help  查看子命令清单");
+        eprintln!("usage: pathspace <subcommand> [args]   (store DSN via env PATHSPACE, shm:// only)");
+        eprintln!("       pathspace help  to list subcommands");
         exit(1);
     }
     let sub = rest[0].clone();
@@ -305,8 +304,8 @@ fn main() {
         
         fatalf(&format!(
             "connect failed: {dsn}\n  \
-             本 CLI 只接受 shm://（例如 shm:///tmp/pathspace.shm），其它 scheme 一律 NULL；\n  \
-             若已是 shm://，检查该路径可写、父目录存在。"
+             This CLI only accepts shm:// (e.g. shm:///tmp/pathspace.shm); other schemes return NULL.\n  \
+             If already using shm://, verify the path is writable and its parent directory exists."
         ));
     }
 
@@ -422,7 +421,7 @@ fn main() {
                 .first()
                 .unwrap_or_else(|| fatalf("usage: pathspace mkindex <path>"));
             if tail.len() > 1 {
-                fatalf("mkindex 不再接受 capacity（新 ABI 无该参数）");
+                fatalf("mkindex no longer accepts a capacity argument");
             }
             
             let p = dir_form(p);
@@ -434,7 +433,7 @@ fn main() {
         }
         "clear" => {
             
-            eprintln!("warning: clear 删除整个 pathspace（等价 deltree /），不可恢复");
+            eprintln!("warning: clear deletes the entire pathspace (equivalent to deltree /), irreversible");
             let mut err = [0u8; 256];
             let rc = unsafe { pathspaceDeltree(kv, cs("/"), err.as_mut_ptr() as *mut c_char, 256) };
             if rc != 0 {

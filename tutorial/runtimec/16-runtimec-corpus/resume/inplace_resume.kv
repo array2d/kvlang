@@ -1,15 +1,15 @@
-// 特殊用例：inplace 写 `x = x + 1`。
+// Special case: inplace write `x = x + 1`.
 //
-// crash / stop 落在**这条指令内部**（写已落、pc 未提交）时，正确恢复要求
-// 上溯到最近的非 inplace 祖先（P2c）：先恢复 `x = 1`，再重放这条，得到 x = 2。
-// 当前实现直接从 `‥pc` 重放该步，x 被加两次（x = 3）。
+// When a crash/stop occurs **mid-instruction** (write persisted, `‥pc` not yet advanced),
+// proper recovery must walk back to the nearest non-inplace ancestor (P2c): restore `x = 1`,
+// then replay `x = x + 1` to get `x = 2`. Replaying directly from `‥pc` increments `x` twice (`x = 3`).
 //
-// 驱动：布局本文件进 pathspace，跑一遍得到 /resume/y = 2；把 `‥pc` 拨回
-// `x = x + 1` 的 s0=2（x 仍是 2），再从 s0=2 恢复。
-// 正确值 2；当前实现得到 3。
+// Driver: lay out this file into pathspace, run once to get `/resume/y = 2`; rewind `‥pc` to
+// `s0=2` of `x = x + 1` (while `x` is still 2), and resume from `s0=2`.
+// Correct value: 2; naive replay produces 3.
 //
-// 干净跑通（不模拟恢复）：
-// 期望输出:
+// Clean run (without simulated crash):
+// Expected output:
 //   2
 
 rwfunc inplace_resume() -> () {

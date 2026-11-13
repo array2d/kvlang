@@ -8,7 +8,7 @@ dist/
 .pytest_cache/
 
 # ── Lean ─────────────────────────────────────────────
-# Lean 的构建缓存（类比 target/），不进库；每次 build 都会重写。
+# Lean build cache (like target/), untracked; rewritten on every build.
 .lake/
 
 # ── Go ───────────────────────────────────────────────
@@ -25,11 +25,11 @@ go.work.sum
 /build/
 build/
 
-# ctest 运行产物。它**不是** build/ 的子目录——由「在该目录直接跑 ctest」产生，
-# 与 build/ 无关，所以 build/ 的忽略盖不住它。
+# ctest output directory. Not under build/ -- created when running ctest
+# directly in a source directory, so build/ rules do not cover it.
 #
-# **无前导斜杠**：`/Testing/` 只匹配仓库根，`layout/Testing/` 会漏（实测过）。
-# 无斜杠的模式在任意层级生效，这才是要的——任何目录下跑 ctest 都不该进库。
+# No leading slash: `/Testing/` only matches the repo root and misses
+# `layout/Testing/`. Unanchored `Testing/` matches at any depth.
 Testing/
 
 # ── Rust ─────────────────────────────────────────────
@@ -73,44 +73,44 @@ tutorial/test_failures.csv
 
 /bin/
 
-# ── layout dump 产物（审查 lower 后的 pathspace code）──
+# ── Layout dump artifacts (lowered pathspace code inspection) ──
 *.kv.dump
 pathlanglayout
 
-# ── 本地 claude 说明（不入库）──
+# ── Local Claude notes (untracked) ──
 /.claude/
 /claude.md
 
-# ── pathspace shm 测试误落仓库根（相对路径 DSN）──
+# ── Stray pathspace shm test files at repo root (relative DSN) ──
 silent*
 dumptest*
 d[0-9][0-9][0-9][0-9][0-9][0-9][0-9]
 
-# 五语言对齐 reference 材料（本地查阅用，不入库）
+# Cross-language reference material (local only, untracked)
 stdlib/pathlang/reference/
 
-# tutorial shm 测试产物（相对路径 DSN）
+# Tutorial shm test artifacts (relative DSN)
 kvtut*
 
-# tutorial bench 空产物
+# Empty tutorial benchmark artifact
 /tutorial/benchmark.csv
 
-# pathseek 测试 shm 产物
+# pathseek shm test artifacts
 pathlangtest*
 
-# shm 测试残留（相对路径 DSN 标记 + slotboxalloc 后端文件）
+# Residual shm test files (relative DSN markers + slotboxalloc backend files)
 /tut
 /wptest
 *.sbo.data
 *.sbo.head
 
-# CodeGraph 索引（本地知识图，不入库）
+# CodeGraph index (local knowledge graph, untracked)
 .codegraph/
 
-# isadbg 调试 dump（本地生成，不入库）
+# isadbg debug dumps (locally generated, untracked)
 isadbg*
 
-# 调试 probe 产物（本地生成）
+# Debug probe artifacts (locally generated)
 *.garb
 *.gen
 bsProbe*
@@ -124,19 +124,19 @@ testA.*
 rp
 rp.*
 
-# 外部依赖拷贝 / 构建产物（不入库；头来自源仓 deps/，.so 由 make artifact 生成）
+# Vendored headers / build artifacts (untracked; headers from deps/, .so built by make artifact)
 /include/pathspace/
 /include/blockalloc/
 /include/slotboxalloc/
 /lib/*.so*
 /lib/pathspace/
-# 例外要压在全局 *.a / *.so 之后才生效，故在文件末尾再声明一次。
+# Negation rules must appear after global *.a / *.so rules to take effect.
 
-# 架构图（本地生成可视化，不入库）
+# Architecture diagrams (locally generated, untracked)
 docs/diagrams/
 
-# Mermaid 生成脚本（本地工具，不入库）
+# Mermaid generation script (local tool, untracked)
 docs/pathlang_dataflow_mermaid.py
 
-# Rust 绑定的链接路径配置（调用方本地生成，不入库）
+# Rust binding link-path config (generated locally by caller, untracked)
 bindings/rust/.cargo/config.toml

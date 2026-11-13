@@ -727,15 +727,15 @@ static bool write_failures(const char *output_root, const report_t *report,
     if (file == NULL) {
         return false;
     }
-    fprintf(file, "# binrwir-dump 失败清单\n\n");
-    fprintf(file, "共 %zu：成功 %zu / 失败 %zu\n\n", total, succeeded,
+    fprintf(file, "# binrwir-dump Failure Report\n\n");
+    fprintf(file, "Total %zu: %zu succeeded / %zu failed\n\n", total, succeeded,
             total - succeeded);
     if (report->count == 0U) {
-        fprintf(file, "无失败。\n");
+        fprintf(file, "No failures.\n");
         fclose(file);
         return true;
     }
-    fprintf(file, "| 文件 | 阶段 | 首行原因 |\n|---|---|---|\n");
+    fprintf(file, "| File | Stage | First-line reason |\n|---|---|---|\n");
     for (size_t index = 0U; index < report->count; ++index) {
         const failure_t *item = &report->items[index];
         fprintf(file, "| `%s` | %s | %s |\n", item->source, item->stage,
@@ -775,7 +775,7 @@ static bool write_failures(const char *output_root, const report_t *report,
             }
             groups[position] = value;
         }
-        fprintf(file, "\n## 按根因分组\n\n| 条数 | 根因 |\n|---|---|\n");
+        fprintf(file, "\n## Grouped by Root Cause\n\n| Count | Root cause |\n|---|---|\n");
         for (size_t index = 0U; index < group_count; ++index) {
             fprintf(file, "| %zu | %s |\n", groups[index].count,
                     groups[index].key);
@@ -826,7 +826,7 @@ int main(int argument_count, char **arguments) {
     dump_directory(&context, corpus_root, output_root, "", &total, &succeeded,
                    &report);
     const bool written = write_failures(output_root, &report, total, succeeded);
-    printf("共 %zu：成功 %zu / 失败 %zu\n", total, succeeded,
+    printf("Total %zu: %zu succeeded / %zu failed\n", total, succeeded,
            total - succeeded);
     if (!written) {
         fprintf(stderr, "cannot write FAILURES.md under %s\n", output_root);

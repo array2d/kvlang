@@ -404,7 +404,7 @@ fn fmt_g(mag: f64, prec: usize, upper: bool, alt: bool) -> String {
 
 thread_local! {
     static EDITOR: RefCell<rustyline::DefaultEditor> =
-        RefCell::new(rustyline::DefaultEditor::new().expect("初始化 line editor 失败"));
+        RefCell::new(rustyline::DefaultEditor::new().expect("failed to initialize line editor"));
 }
 
 pub fn input(eng: &Engine, pc: &str) -> KvResult {
@@ -430,7 +430,7 @@ fn rl_readline(prompt: &str) -> String {
             Err(rustyline::error::ReadlineError::Interrupted) => "exit".into(),
             Err(rustyline::error::ReadlineError::Eof) => "exit".into(),
             Err(err) => {
-                eprintln!("输入错误: {err}");
+                eprintln!("input error: {err}");
                 "exit".into()
             }
         }

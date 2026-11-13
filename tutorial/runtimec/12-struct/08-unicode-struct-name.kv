@@ -1,0 +1,21 @@
+
+struct Δ {
+	x:int64=0
+	y:int64=0
+}
+rwfunc Σ(*Δ #p) -> (*int64 #s) {
+	(*p)·x + (*p)·y -> *s
+}
+rwfunc λ(*int64 #a, *int64 #b) -> (*Δ #r) {
+	*a -> (*r)·x
+	*b -> (*r)·y
+}
+rwfunc test() -> () {
+	a:Δ = {x=3 y=4}
+	Σ(a) -> s:int64
+	println(s)
+	r0:Δ = {}
+	λ(1, 2) -> r0
+	Σ(r0) -> s2:int64
+	println(s2)
+}

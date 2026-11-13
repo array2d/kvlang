@@ -31,7 +31,7 @@ fn unquoted_path_write_is_kept() {
     let (_store, mut kv) = fresh_kv("unquoted");
     compile(&mut kv, "rwfunc f() -> () {\n    42 -> /tmp/pathlit/a\n}\n").unwrap();
     let text = slot_text(&mut kv, "/lib/f/[1,1]");
-    assert!(text.starts_with("/tmp/pathlit/a"), "写槽应是路径：{text:?}");
+    assert!(text.starts_with("/tmp/pathlit/a"), "write slot should be a path: {text:?}");
 }
 
 #[test]
@@ -53,11 +53,11 @@ fn quoted_path_in_write_slot_is_rejected() {
         .arg(&dsn)
         .output()
         .expect("run pathlanglayout");
-    assert!(!out.status.success(), "引号路径写槽应被拒绝");
+    assert!(!out.status.success(), "quoted path write slot must be rejected");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("string \"/tmp/pathlit/a\" is not a path; absolute paths must be unquoted"),
-        "诊断文本不符：{err}"
+        "unexpected diagnostic text: {err}"
     );
     let _ = std::fs::remove_file(&file);
     pathlanglayout::ffi::remove_test_store(&dsn);
@@ -74,7 +74,7 @@ fn quoted_member_base_is_still_allowed() {
     let text = slot_text(&mut kv, "/lib/f/[1,1]");
     assert!(
         text.starts_with("/tmp/pathlit·*i"),
-        "引号 base 成员写应保留路径形态：{text:?}"
+        "member write on quoted base should preserve path form: {text:?}"
     );
 }
 
@@ -91,7 +91,7 @@ fn quoted_string_read_is_a_string_value() {
     let lt = kv.langtype_of(key);
     assert!(
         kvkind::kind(&v, &lt).starts_with("char/"),
-        "引号读应是字符值，kind={}",
+        "quoted read should be a character value, kind={}",
         kvkind::kind(&v, &lt)
     );
 }
@@ -108,7 +108,7 @@ fn single_quoted_is_a_bare_literal_path() {
     let text = slot_text(&mut kv, "/lib/f/[1,1]");
     assert!(
         text.starts_with("/tmp/pathlit/b"),
-        "单引号路径写槽：{text:?}"
+        "single-quoted path write slot: {text:?}"
     );
 }
 
@@ -137,11 +137,11 @@ fn raw_quoted_path_in_write_slot_is_rejected() {
         .arg(&dsn)
         .output()
         .expect("run pathlanglayout");
-    assert!(!out.status.success(), "原始串写槽应被拒绝");
+    assert!(!out.status.success(), "raw string write slot must be rejected");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
         err.contains("string \"/tmp/pathlit/c\" is not a path; absolute paths must be unquoted"),
-        "原始串诊断文本不符：{err}"
+        "unexpected raw-string diagnostic text: {err}"
     );
     let _ = std::fs::remove_file(&file);
     pathlanglayout::ffi::remove_test_store(&dsn);
@@ -159,6 +159,6 @@ fn unquoted_path_member_base_is_allowed() {
     let text = slot_text(&mut kv, "/lib/f/[1,1]");
     assert!(
         text.starts_with("/tmp/pathlit·*i"),
-        "无引号路径 base 成员写：{text:?}"
+        "member write on unquoted path base: {text:?}"
     );
 }

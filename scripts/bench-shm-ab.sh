@@ -27,21 +27,21 @@ usage() {
 	cat <<'EOF'
 usage: bench-shm-ab.sh [options]
 
-  --a-bin PATH     A 臂可执行（默认 $PATHLANG_BIN 或 <repo>/bin/pathseek）
-  --a-lib DIR      A 臂库目录（默认 <repo>/lib）
-  --a-env 'K=V ..' A 臂额外环境变量
-  --b-bin PATH     B 臂可执行（给此项或 --b-env 才启用 B）
-  --b-lib DIR      B 臂库目录（默认 <repo>/lib）
-  --b-env 'K=V ..' B 臂额外环境变量（如 RC2_NOJIT=1）
-  --repeat N       每点采样次数，取 min（默认 3）
-  --scale MODE     largest（默认）| all | 具体数字
-  -k, --filter P   只跑名字含 P 的 case
-  --csv FILE       另存原始数据 CSV
-  -v, --verbose    打印每臂每次运行结果
-  -h, --help       显示本帮助
+  --a-bin PATH     Arm A executable (default: $PATHLANG_BIN or <repo>/bin/pathseek)
+  --a-lib DIR      Arm A library directory (default: <repo>/lib)
+  --a-env 'K=V ..' Extra env vars for arm A
+  --b-bin PATH     Arm B executable (enables arm B when set or with --b-env)
+  --b-lib DIR      Arm B library directory (default: <repo>/lib)
+  --b-env 'K=V ..' Extra env vars for arm B (e.g. RC2_NOJIT=1)
+  --repeat N       Samples per point, taking min (default: 3)
+  --scale MODE     largest (default) | all | positive integer
+  -k, --filter P   Only run cases matching substring P
+  --csv FILE       Also write raw results to CSV
+  -v, --verbose    Print per-run timing for each arm
+  -h, --help       Show this help
 
-比值列均以 C 为 1：A kv/C、B kv/C；B/A 为两臂耗时之比（<1 表示 B 更快）。
-退出码：0 成功；1 有失败/功能不一致；2 环境或用法错误。
+Ratios use C=1 as baseline: A kv/C, B kv/C; B/A is arm B over arm A (<1 means B is faster).
+Exit codes: 0 success; 1 failure or output mismatch; 2 environment or usage error.
 EOF
 }
 
@@ -64,22 +64,22 @@ while (($#)); do
 	shift
 done
 
-[[ "$REPEAT" =~ ^[1-9][0-9]*$ ]] || die "--repeat 需为正整数：$REPEAT"
-[ -x "$A_BIN" ] || die "A 臂不可执行：$A_BIN"
-[ -d "$A_LIB" ] || die "A 臂库目录不存在：$A_LIB"
-command -v gcc >/dev/null 2>&1 || die "需要 gcc 编译 C 基线"
-command -v timeout >/dev/null 2>&1 || die "需要 coreutils timeout"
-command -v python3 >/dev/null 2>&1 || die "需要 python3（读取 benchmark/run.py 的 SWEEP）"
+[[ "$REPEAT" =~ ^[1-9][0-9]*$ ]] || die "--repeat must be a positive integer: $REPEAT"
+[ -x "$A_BIN" ] || die "arm A binary is not executable: $A_BIN"
+[ -d "$A_LIB" ] || die "arm A library directory does not exist: $A_LIB"
+command -v gcc >/dev/null 2>&1 || die "gcc is required to build C baselines"
+command -v timeout >/dev/null 2>&1 || die "coreutils timeout is required"
+command -v python3 >/dev/null 2>&1 || die "python3 is required (reads SWEEP from benchmark/run.py)"
 
 B_ON=0
 if [ -n "$B_BIN" ] || [ -n "$B_ENV" ]; then
 	B_ON=1
 	[ -n "$B_BIN" ] || B_BIN="$A_BIN"
-	[ -x "$B_BIN" ] || die "B 臂不可执行：$B_BIN"
-	[ -d "$B_LIB" ] || die "B 臂库目录不存在：$B_LIB"
+	[ -x "$B_BIN" ] || die "arm B binary is not executable: $B_BIN"
+	[ -d "$B_LIB" ] || die "arm B library directory does not exist: $B_LIB"
 fi
 
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/pathlang-bench-ab.XXXXXX")" || die "mktemp 失败"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/pathlang-bench-ab.XXXXXX")" || die "mktemp failed"
 trap 'rm -rf "$TMP"' EXIT
 
 stage_arm() { # $1=dir $2=bin $3=lib
@@ -120,7 +120,7 @@ scales_for() {
 		;;
 	all) sweep_scales "$case" ;;
 	*)
-		[[ "$SCALE_MODE" =~ ^[0-9]+$ ]] || die "--scale 只接受 largest|all|正整数：$SCALE_MODE"
+		[[ "$SCALE_MODE" =~ ^[0-9]+$ ]] || die "--scale accepts largest|all|<positive integer>: $SCALE_MODE"
 		printf '%s\n' "$SCALE_MODE"
 		;;
 	esac
@@ -187,9 +187,9 @@ printf '# A: bin=%s lib=%s env=%s\n' "$A_BIN" "$A_LIB" "${A_ENV:-(none)}"
 if [ "$B_ON" -eq 1 ]; then
 	printf '# B: bin=%s lib=%s env=%s\n' "$B_BIN" "$B_LIB" "${B_ENV:-(none)}"
 else
-	printf '# B: (未启用，仅 A vs C)\n'
+	printf '# B: (disabled, A vs C only)\n'
 fi
-printf '# 比值以 C=1：A kv/C、B kv/C、B/A（<1 = B 更快）\n'
+printf '# Ratios relative to C=1: A kv/C, B kv/C, B/A (<1 = B faster)\n'
 
 if [ -n "$CSV" ]; then
 	printf 'case,input,A_ns,B_ns,C_ns,A_over_C,B_over_C,B_over_A,valid,harness_rev\n' >"$CSV"
@@ -207,7 +207,7 @@ for cdir in ./benchmark/cases/*/; do
 
 	native="$TMP/native-$name"
 	if ! gcc -O1 -o "$native" "$cdir/$name.c" 2>"$TMP/gcc-$name.err"; then
-		printf '%s[FAIL]%s %s: C 基线编译失败\n' "$RED" "$NC" "$name"
+		printf '%s[FAIL]%s %s: C baseline build failed\n' "$RED" "$NC" "$name"
 		BAD=$((BAD + 1))
 		continue
 	fi
@@ -238,7 +238,7 @@ for cdir in ./benchmark/cases/*/; do
 			if [ -n "$ns" ] && { [ -z "$c_best" ] || [ "$ns" -lt "$c_best" ]; }; then c_best="$ns"; fi
 		done
 		if [ "$c_rc" -ne 0 ]; then
-			printf '%s[FAIL]%s %s %s: C 基线运行失败 rc=%s\n' "$RED" "$NC" "$name" "$inp" "$c_rc"
+			printf '%s[FAIL]%s %s %s: C baseline run failed rc=%s\n' "$RED" "$NC" "$name" "$inp" "$c_rc"
 			BAD=$((BAD + 1))
 			continue
 		fi

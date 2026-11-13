@@ -2,7 +2,7 @@
 set -eu
 
 REPO=pathlang/pathlang
-PATHSPACE_BACKEND_DIR=pathspace   # 后端与 dispatch 前端同放 <prefix>/lib/pathspace
+PATHSPACE_BACKEND_DIR=pathspace   # Backends live alongside dispatch frontend in <prefix>/lib/pathspace
 
 os=$(uname -s)
 arch=$(uname -m)
@@ -10,7 +10,7 @@ case "$os-$arch" in
   Linux-x86_64) plat=linux-x86_64 ;;
   Darwin-arm64) plat=darwin-arm64 ;;
   *)
-    echo "pathlang: 不支持的平台 $os-$arch（已发布 linux-x86_64 / darwin-arm64）" >&2
+    echo "pathlang: unsupported platform $os-$arch (published: linux-x86_64, darwin-arm64)" >&2
     exit 1
     ;;
 esac
@@ -27,7 +27,7 @@ tag="${VERSION:-}"
 if [ -z "$tag" ]; then
   tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
         | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-  [ -n "$tag" ] || { echo "pathlang: 无法获取最新版本号" >&2; exit 1; }
+  [ -n "$tag" ] || { echo "pathlang: failed to fetch latest release version" >&2; exit 1; }
 fi
 
 base="${BASE_URL:-https://github.com/$REPO/releases/download/$tag}"
@@ -40,7 +40,7 @@ esac
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-echo "pathlang $tag ($plat) → $PREFIX"
+echo "pathlang $tag ($plat) -> $PREFIX"
 curl -fsSL "$base/$tarball" -o "$tmp/$tarball"
 
 if curl -fsSL "$base/$sums" -o "$tmp/$sums" 2>/dev/null; then
@@ -51,20 +51,20 @@ if curl -fsSL "$base/$sums" -o "$tmp/$sums" 2>/dev/null; then
     else
       got=$(shasum -a 256 "$tmp/$tarball" | cut -d' ' -f1)
     fi
-    [ "$want" = "$got" ] || { echo "pathlang: 校验失败（sha256 不匹配）" >&2; exit 1; }
-    echo "  ✓ sha256 校验通过"
+    [ "$want" = "$got" ] || { echo "pathlang: checksum verification failed (sha256 mismatch)" >&2; exit 1; }
+    echo "  [ok] sha256 verified"
   fi
 fi
 
 tar xzf "$tmp/$tarball" -C "$tmp"
 root="$tmp/pathlang-abi-$tag-$plat"
-[ -d "$root" ] || { echo "pathlang: 包结构异常" >&2; exit 1; }
+[ -d "$root" ] || { echo "pathlang: unexpected archive layout" >&2; exit 1; }
 
 $SUDO mkdir -p "$PREFIX/lib" "$PREFIX/lib/$PATHSPACE_BACKEND_DIR" "$PREFIX/bin" "$PREFIX/include"
 
 if [ -d "$root/lib" ]; then
   for f in "$root/lib"/*.so* "$root/lib"/*.dylib; do
-    [ -e "$f" ] && $SUDO cp -P "$f" "$PREFIX/lib/"     # -P 保符号链接原样
+    [ -e "$f" ] && $SUDO cp -P "$f" "$PREFIX/lib/"     # -P preserves symlinks
   done
   if [ -d "$root/lib/$PATHSPACE_BACKEND_DIR" ]; then
     for f in "$root/lib/$PATHSPACE_BACKEND_DIR"/*.so* "$root/lib/$PATHSPACE_BACKEND_DIR"/*.dylib; do
@@ -86,17 +86,17 @@ if [ -d "$root/include" ]; then
 fi
 
 echo
-echo "✅ pathlang $tag 已安装到 $PREFIX"
+echo "Installed pathlang $tag to $PREFIX"
 echo "   CLI      : $PREFIX/bin/{pathseek,pathlanglayout,pathspace}"
-echo "   库       : $PREFIX/lib/  +  $PREFIX/lib/$PATHSPACE_BACKEND_DIR/"
-echo "   头       : $PREFIX/include/{pathlang,pathspace,...}"
+echo "   Libs     : $PREFIX/lib/  +  $PREFIX/lib/$PATHSPACE_BACKEND_DIR/"
+echo "   Headers  : $PREFIX/include/{pathlang,pathspace,...}"
 echo
-echo "试用（后端由 PATHSPACE DSN 选择）："
+echo "Quick start (backend selected via PATHSPACE DSN):"
 echo "  PATHSPACE=shm:///tmp/pathlang.shm $PREFIX/bin/pathseek -c 'println(\"hello\")'"
 case "$plat" in
   darwin-*)
     echo
-    echo "注意：macOS 无 ldconfig，若 CLI 或扩展找不到库，请设："
+    echo "Note: macOS has no ldconfig; if libraries are not found, set:"
     echo "  DYLD_FALLBACK_LIBRARY_PATH=$PREFIX/lib:$PREFIX/lib/$PATHSPACE_BACKEND_DIR"
     ;;
 esac

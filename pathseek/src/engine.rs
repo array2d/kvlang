@@ -362,7 +362,7 @@ impl Engine {
         match self.layout_src_try(src) {
             Ok(v) => v,
             Err(e) => {
-                crate::elog!("layout {name} 失败: {e}");
+                crate::elog!("layout {name} failed: {e}");
                 Vec::new()
             }
         }
@@ -421,7 +421,7 @@ impl Engine {
             }
         }
         for (name, e) in last_errs {
-            crate::elog!("layout {name} 失败: {e}");
+            crate::elog!("layout {name} failed: {e}");
         }
         inits
     }

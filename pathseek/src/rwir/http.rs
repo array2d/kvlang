@@ -48,7 +48,7 @@ fn request(method: &str, header: &str, url: &str, body: &str) -> String {
             let code = r.status();
             let text = r.into_string().unwrap_or_default();
             if text.trim().is_empty() {
-                format!("(空响应, status={code})")
+                format!("(empty response, status={code})")
             } else {
                 text
             }
@@ -61,7 +61,7 @@ fn request(method: &str, header: &str, url: &str, body: &str) -> String {
                 format!("(HTTP {code}) {text}")
             }
         }
-        Err(ureq::Error::Transport(t)) => format!("http 失败: {t}"),
+        Err(ureq::Error::Transport(t)) => format!("http failed: {t}"),
     }
 }
 

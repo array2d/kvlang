@@ -20,8 +20,8 @@ target_compile_definitions(slotboxalloc PRIVATE
     $<$<CONFIG:Debug>:ENABLE_LOG>
 )
 
-# 依赖 blockalloc 走 header-only（src/slotboxalloc.c 里 #define *_IMPLEMENTATION），
-# 故不链接它的 .so；头的搜索路径由系统 include 提供。
+# Uses blockalloc header-only (#define *_IMPLEMENTATION in src/slotboxalloc.c);
+# no shared library link needed, resolved via include paths.
 
 enable_testing()
 add_subdirectory(tutorial)

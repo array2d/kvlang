@@ -1,10 +1,10 @@
-// 判据：/ 开头的裸路径是绝对路径字面量，可直接读写 pathspace；
-// ·[i] 是坐标段，不是表达式下标。
-// 若把路径当字符串或把 ·[0] 当数组下标，读写会落到别的 key。
-// 依据：01-词法/05-绝对路径字面量.kv、02-pathspace模型/05-键系统与数组访问.kv。
-// 按用户规则：绝对 key 的存在性是运行时前提，不是静态保证——指令不创造 key，
-// 本用例显式声明 `path_scalar:int64` 来满足这个前提。
-// 期望输出:
+// Criterion: a bare path starting with `/` is an absolute path literal that directly reads/writes pathspace;
+// `·[i]` is a coordinate segment, not an expression subscript.
+// Treating the path as a string or `·[0]` as an array subscript would land on a different key.
+// Reference: 01-lexical/05-absolute-path-literals.kv, 02-pathspace-model/05-keys-and-array-access.kv.
+// Per language rules: existence of an absolute key is a runtime precondition rather than a static guarantee --
+// instructions do not implicitly create keys, so this test explicitly declares `path_scalar:int64`.
+// Expected output:
 //   42
 //   7
 

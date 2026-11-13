@@ -45,7 +45,7 @@ def convert_signature_item(item: str) -> str:
     if "$" in item:
         return original.lstrip()
     if not ty:
-        raise ValueError(f"参数/返回值 {name!r} 没有类型：现行 spec 禁止空 kindexpr，需人工处理")
+        raise ValueError(f"parameter/return {name!r} has no type: empty kindexpr is forbidden by spec; handle manually")
     if ty.startswith("*"):
         return f"*{ty} ${name}"
     if ty.startswith("@"):
@@ -151,7 +151,7 @@ def convert_text(text: str) -> tuple[str, list[str]]:
             collisions = find_local_collisions(masked, pointer_names)
             if collisions:
                 conflicts.append(
-                    f"{fname}: {', '.join(sorted(collisions))} —— 局部变量与指针形参同名，手工处理"
+                    f"{fname}: {', '.join(sorted(collisions))} — local variable collides with pointer parameter; handle manually"
                 )
                 out.append(body)
             else:

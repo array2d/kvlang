@@ -18,7 +18,7 @@ $KV list /m· --kind --showext=false
 echo "=== get ==="
 $KV get '/m·[1,2]' '/m·[9,9]'
 
-echo "=== 命名成员 vs 坐标成员 ==="
+echo "=== named members vs coordinate members ==="
 $KV set /h 'map:[]char/utf8·int64'   # declare container (memhead) explicitly
 $KV set /h·x 'int:1'
 $KV set '/h·[0]' 'int:2'

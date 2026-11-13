@@ -77,7 +77,7 @@ fn count_slots(kv: &mut Kv, dir: &str, instruction: usize) -> (usize, usize) {
 
 fn declared_counts(kv: &mut Kv, dir: &str, instruction: usize) -> (usize, usize) {
     let wire = kv.get_one(&format!("{dir}/[{instruction},0]"));
-    assert!(wire.len() >= 21, "{dir}/[{instruction},0] 缺计数头");
+    assert!(wire.len() >= 21, "{dir}/[{instruction},0] missing slot-count header");
     let body = &wire[16..];
     let nr = u16::from_le_bytes([body[0], body[1]]) as usize;
     let nw = u16::from_le_bytes([body[2], body[3]]) as usize;
@@ -95,7 +95,7 @@ fn assert_counts_match(kv: &mut Kv, dir: &str, tag: &str) {
         assert_eq!(
             (reads, writes),
             (nr, nw),
-            "{tag}: {dir}/[{instruction},0] 声明 nr={nr} nw={nw}，实际读槽 {reads} 个 / 写槽 {writes} 个"
+            "{tag}: {dir}/[{instruction},0] declared nr={nr} nw={nw}, got {reads} read slots / {writes} write slots"
         );
         instruction += 1;
     }
@@ -152,7 +152,7 @@ fn the_check_detects_a_mismatch_when_one_is_introduced() {
     assert_eq!(count_slots(&mut kv, "/lib/p·f", 1), (5, 1));
 }
 
-#[ignore = "依赖 bin/pathseek，等 TASK-035"]
+#[ignore = "depends on bin/pathseek, pending TASK-035"]
 #[test]
 fn every_tutorial_instruction_has_matching_slot_counts() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -163,7 +163,7 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
     
     assert!(
         runtime.exists(),
-        "缺 {}：无法 boot /‥isa；请先构建 pathseek",
+        "missing {}: cannot boot /‥isa; build pathseek first",
         runtime.display()
     );
 
@@ -180,7 +180,7 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
         }
     }
     files.sort();
-    assert!(!files.is_empty(), "tutorial 下没有找到 .kv");
+    assert!(!files.is_empty(), "no .kv files found under tutorial");
 
     let snapshot = temp_dir("corpus-worktree");
     let mut materialized = Vec::new();
@@ -210,11 +210,11 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
             let first = reason.lines().next().unwrap_or("(no stderr)");
             eprintln!(
                 "SKIP every_tutorial_instruction_has_matching_slot_counts: \
-                 pathseek: 依赖未就绪 — {first}"
+                 pathseek: dependency not ready — {first}"
             );
-            eprintln!("  依赖名: pathseek → lib/libpathlang_runtimec2.so");
-            eprintln!("  原因: relink to runtimec pending (tier A/B/C)");
-            eprintln!("  跳过 1（依赖未就绪）");
+            eprintln!("  dependency: pathseek → lib/libpathlang_runtimec2.so");
+            eprintln!("  reason: relink to runtimec pending (tier A/B/C)");
+            eprintln!("  skipped 1 (dependency not ready)");
             return;
         }
     }
@@ -229,7 +229,7 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
             .unwrap();
         assert!(
             boot.status.success(),
-            "{}: boot 失败 {}",
+            "{}: boot failed {}",
             file.display(),
             String::from_utf8_lossy(&boot.stderr)
         );
@@ -244,8 +244,8 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
             let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
             
             assert!(
-                stderr.contains("未定义函数"),
-                "{}: layout 失败且不是缺能力：{stderr}",
+                stderr.contains("undefined function"),
+                "{}: layout failed for a reason other than missing capability: {stderr}",
                 file.display()
             );
             skipped.push(file.display().to_string());
@@ -262,9 +262,9 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
         let _ = std::fs::remove_dir_all(root.join(format!("case{index}")));
     }
     
-    assert!(checked > 0, "tutorial 一个函数目录都没扫到");
+    assert!(checked > 0, "no function directories scanned across tutorial");
     eprintln!(
-        "扫描 {checked} 个函数目录；{} 个用例缺能力跳过：{skipped:?}",
+        "scanned {checked} function directories; skipped {} cases due to missing capability: {skipped:?}",
         skipped.len()
     );
 }
@@ -290,7 +290,7 @@ fn numeric_op_after_member_read_is_a_known_gap() {
         "rwfunc f() -> () {\n\toperand:int64 = 5\n\tq:int64 = operand % 2\n}\n",
     );
     let op_a = slot_text(&mut kv_a, "/lib/f", 2, 0);
-    assert_eq!(op_a, "mod", "A 形态：算子应已归一成 mod（实测 {op_a:?}）");
+    assert_eq!(op_a, "mod", "form A: operator should be normalized to mod (got {op_a:?})");
 
     let (_dir_b, mut kv_b) = compile(
         "numop-b",
@@ -299,7 +299,7 @@ fn numeric_op_after_member_read_is_a_known_gap() {
     );
     let op_b = slot_text(&mut kv_b, "/lib/f", 3, 0);
     
-    assert_eq!(op_b, "mod", "B 形态：算子已归一成 mod（实测 {op_b:?}）");
+    assert_eq!(op_b, "mod", "form B: operator should be normalized to mod (got {op_b:?})");
 }
 
 fn slot_text(kv: &mut Kv, dir: &str, instruction: usize, column: i32) -> String {

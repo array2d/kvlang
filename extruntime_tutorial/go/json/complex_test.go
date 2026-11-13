@@ -128,7 +128,7 @@ func TestStringEdges(t *testing.T) {
 	cases := []struct{ name, in string }{
 		{"empty", `{"v":""}`},
 		{"ascii", `{"v":"hello world"}`},
-		{"cjk", `{"v":"中文日本語한국어"}`},
+		{"multibyte", `{"v":"αβγδεζηθ"}`},
 		{"emoji", `{"v":"🚀🎉👨‍👩‍👧‍👦"}`},
 		{"surrogate-pair", `{"v":"😀"}`},
 		{"escapes", `{"v":"tab\there\nnewline\r\"quote\"\\backslash"}`},
@@ -160,7 +160,7 @@ func TestKeyEdges(t *testing.T) {
 		name, in string
 		wantRej  bool
 	}{
-		{"unicode-key", `{"中文键":1}`, false},
+		{"unicode-key", `{"clé_αβ":1}`, false},
 		{"emoji-key", `{"🔑":1}`, false},
 		{"dot-key", `{"a.b.c":1}`, false},
 		{"decimal-key", `{"3.14":1}`, false},
@@ -231,11 +231,11 @@ func TestNullPositions(t *testing.T) {
 	}
 }
 
-const geoJSON = `{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[116.3,39.9],[116.4,39.9],[116.4,40.0],[116.3,39.9]]]},"properties":{"name":"区域A","area":12.5,"tags":["park","urban"],"meta":null}},{"type":"Feature","geometry":{"type":"Point","coordinates":[121.47,31.23]},"properties":{"name":"点B","area":0,"tags":[],"meta":{"src":"gps","acc":0.001}}}]}`
+const geoJSON = `{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[116.3,39.9],[116.4,39.9],[116.4,40.0],[116.3,39.9]]]},"properties":{"name":"Zone A","area":12.5,"tags":["park","urban"],"meta":null}},{"type":"Feature","geometry":{"type":"Point","coordinates":[121.47,31.23]},"properties":{"name":"Point B","area":0,"tags":[],"meta":{"src":"gps","acc":0.001}}}]}`
 
 const pkgJSON = `{"name":"@scope/pkg","version":"1.2.3-beta.1","private":false,"scripts":{"build":"tsc -p .","test":"jest --coverage"},"dependencies":{"react":"^18.2.0","lodash":"~4.17.21"},"devDependencies":{"typescript":"5.0.0"},"exports":{".":{"import":"./dist/index.mjs","require":"./dist/index.cjs"}},"files":["dist","README.md"],"engines":{"node":">=18"},"keywords":[]}`
 
-const apiJSON = `{"code":0,"msg":"ok","data":{"total":2,"page":1,"items":[{"id":1001,"name":"张三","score":95.5,"tags":["vip","new"],"profile":{"age":28,"addr":{"city":"北京","zip":"100000"},"phone":null}},{"id":1002,"name":"李四","score":88,"tags":[],"profile":{"age":31,"addr":{"city":"上海","zip":"200000"},"phone":"138-0000-0000"}}],"cursor":null},"ts":1735689600000}`
+const apiJSON = `{"code":0,"msg":"ok","data":{"total":2,"page":1,"items":[{"id":1001,"name":"Alice","score":95.5,"tags":["vip","new"],"profile":{"age":28,"addr":{"city":"Boston","zip":"100000"},"phone":null}},{"id":1002,"name":"Bob","score":88,"tags":[],"profile":{"age":31,"addr":{"city":"Seattle","zip":"200000"},"phone":"138-0000-0000"}}],"cursor":null},"ts":1735689600000}`
 
 const configJSON = `{"server":{"host":"0.0.0.0","port":8080,"tls":{"enabled":true,"cert":"/etc/ssl/cert.pem","ciphers":["TLS_AES_128_GCM_SHA256","TLS_AES_256_GCM_SHA384"]}},"logging":{"level":"info","outputs":[{"type":"file","path":"/var/log/app.log","rotate":{"size":"100MB","keep":7}},{"type":"stdout"}]},"features":{"a":true,"b":false,"c":null},"limits":{"rps":1000,"burst":2000,"timeout":30.5}}`
 

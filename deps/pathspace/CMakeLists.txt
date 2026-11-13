@@ -7,44 +7,27 @@ set(CMAKE_C_EXTENSIONS ON)
 
 include(GNUInstallDirs)
 
-# 默认 prefix=/usr；库装 <prefix>/lib/pathspace，与历史安装布局一致（已装的消费者不用改链接路径）。
+# Default prefix=/usr; libraries install to <prefix>/lib/pathspace to preserve consumer link paths.
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX "/usr" CACHE PATH "" FORCE)
 endif()
 
-# pathspace 就是标准实现本身：没有 adapter/dispatch 层，也不 dlopen 任何后端。
-# 单库直接包含 shm 引擎 + 字节层（head/attr）+ 存储常量。
-# 语言层（构造器、langtype、坐标比较）不在本仓，见 <pathlang/xvalue.h>。
+# Unified pathspace library: built-in shm engine + XValue byte layer (head/attr) + storage constants.
+# Language-layer constructors, langtype, and coordinate comparison live in <pathlang/xvalue.h>.
 add_library(pathspace SHARED
     src/shm/pathspace.c
     src/xvalue_head.c
     src/const.c)
 target_include_directories(pathspace PRIVATE src/shm)
 
-# ── header-only ABI 依赖 ────────────────────────────────────────────
-# src/shm/pathspace.c 直接 include 两个头（`#define *_IMPLEMENTATION` 后把实现体编进
-# 本 TU）。从前 CMakeLists 一个字没提它们，全靠 `/usr/include` 隐式命中——于是换 pod
-# 之后得到的是 `fatal error: blockalloc/blockalloc.h: No such file or directory`，
-# 报错里看不出缺哪个仓、哪个版本、怎么修。
-#
-# **版本不写在这里**：pin 的唯一事实源是 `ci/deps.sh` 的两行。CMake 里再写一份就是
-# 第二个真相，下次升级必漏一个。
-#
-# 候选按优先级：
-#
-#   1. <本文件>/../<name>/include   同树 deps/ 布局（论文 artifact 的自包含形态）
-#   2. /usr/local/include           ci/deps.sh 的目标（macOS 也是这里）
-#   3. /usr/include                 ci/deps.sh 的目标（Linux）
-#
-# 第 1 条只在 deps/ 目录树内成立：pathspace 位于 deps/pathspace，兄弟即 deps/blockalloc。
-# 独立检出 pathspace（无 deps/ 兄弟）时该路径不存在，find_path 自动落到 2、3，
-# 与原始行为一致。
-#
-# 需要指定别的目录时用 `-DPATHSPACE_<name>_INCLUDE_DIRECTORY=<dir>` 显式覆盖——
-# 显式优先于全部候选，且命中结果会打印在配置日志里（见下方 message(STATUS)）。
-#
-# `NO_DEFAULT_PATH` 是必须的：不加的话 find_path 还会去编译器默认目录里扫，命中一个
-# 同名但版本不符的目录时，症状是链接期或运行期才炸，而不是配置期点名。
+# -- Header-only ABI dependencies --------------------------------------------
+# src/shm/pathspace.c includes blockalloc and slotboxalloc headers with
+# `#define *_IMPLEMENTATION`. Search order:
+#   1. <this-dir>/../<name>/include   in-tree deps/ layout (self-contained artifact)
+#   2. /usr/local/include             ci/deps.sh target on macOS / local installs
+#   3. /usr/include                   ci/deps.sh target on Linux
+# Override explicitly with -DPATHSPACE_<name>_INCLUDE_DIRECTORY=<dir>.
+# NO_DEFAULT_PATH prevents falling back to unpinned compiler default paths.
 foreach(header IN ITEMS blockalloc/blockalloc.h slotboxalloc/slotboxobj.h)
     string(REGEX REPLACE "/[^/]+$" "" header_directory "${header}")
     set(pin_candidates
@@ -56,8 +39,7 @@ foreach(header IN ITEMS blockalloc/blockalloc.h slotboxalloc/slotboxobj.h)
         PATHS ${pin_candidates}
         NO_DEFAULT_PATH)
     if(NOT PATHSPACE_${header_directory}_INCLUDE_DIRECTORY)
-        # 候选逐行列出。写成 `${pin_candidates}` 会被 CMake 用 `;` 拼成一行
-        # （`/usr/local/include;/usr/include`），一眼看不出是几个目录。
+        # List candidates one per line instead of a semicolon-joined CMake list.
         set(candidate_lines "")
         set(candidate_index 1)
         foreach(candidate IN LISTS pin_candidates)
@@ -65,51 +47,39 @@ foreach(header IN ITEMS blockalloc/blockalloc.h slotboxalloc/slotboxobj.h)
             math(EXPR candidate_index "${candidate_index} + 1")
         endforeach()
         message(FATAL_ERROR
-            "找不到 <${header}>。\n"
-            "  候选目录（均未命中，按优先级）：\n"
+            "Cannot find <${header}>.\n"
+            "  Candidate directories checked (in priority order):\n"
             "${candidate_lines}"
-            "  修复（二选一）：\n"
-            "    1. 跑 ./ci/deps.sh —— 版本 pin 在它里面（本文件不重复写版本号）；\n"
-            "    2. 用 -DPATHSPACE_${header_directory}_INCLUDE_DIRECTORY=<包含 ${header_directory}/ 的目录> 显式指定。")
+            "  To fix (choose one):\n"
+            "    1. Run ./ci/deps.sh (versions pinned in deps.json);\n"
+            "    2. Pass -DPATHSPACE_${header_directory}_INCLUDE_DIRECTORY=<dir containing ${header_directory}/>.")
     endif()
-    message(STATUS "pathspace: <${header}> → ${PATHSPACE_${header_directory}_INCLUDE_DIRECTORY}")
+    message(STATUS "pathspace: <${header}> -> ${PATHSPACE_${header_directory}_INCLUDE_DIRECTORY}")
     target_include_directories(pathspace PRIVATE
         "${PATHSPACE_${header_directory}_INCLUDE_DIRECTORY}")
 endforeach()
 
-# **pathspace 不依赖 pathlang**——这条是分层的方向，不是偏好：语言层依赖存储层，
-# 反过来不行。测试造值也不借用语言层的构造器：它们用 `tests/shm/test_wire.h` 里
-# 那几个本地拼 wire 的 inline（格式知识重复，由同一组测试矩阵约束，含与 pathlang
-# 金标准的逐字节比对）。共享符号会把两个仓编译期绑死，那是更贵的耦合。
+# pathspace does not depend on pathlang (the language layer depends on storage, never the reverse).
+# Tests construct wire values locally via tests/shm/test_wire.h inline helpers.
 
 include(CTest)
 if(BUILD_TESTING)
-    # XValue 构造器与 codec 的测试随实现迁往 pathlang（`pathlang/xvalue/tests/`）。
-    # pathspace 侧只保留字节层与存储契约的测试。
-
-    # 存储契约 smoke：单库就是标准实现，直接链接即可，不再有「真/假后端」之分，
-    # 也就不再需要独立构建目录与 dlopen 搜索路径。
+    # XValue byte-layer and storage contract tests (language-layer codec tests live in pathlang/xvalue/tests/).
     add_executable(test_storage_shm tests/test_storage_shm.c)
     target_include_directories(test_storage_shm PRIVATE include)
     target_link_libraries(test_storage_shm PRIVATE pathspace)
     add_test(NAME storage_shm_contract COMMAND test_storage_shm)
 endif()
 
-# shm 后端测试（原 pathspace-c/tests，已迁入 tests/shm/）。
-# 统一 `shm_` 前缀：与前端测试有同名文件（xvalue_head、xvalue_wire_golden），
-# 不前缀会在 ctest 里出现两个同名项，红的时候分不清是哪一个。
+# shm backend tests (prefixed with `shm_` to avoid target/test name collisions).
 if(BUILD_TESTING)
-    # 枚举 (ctest 名|源文件)：CMake 的 `;` 是列表分隔符，写进字符串会在
-    # `foreach(IN LISTS)` 里被拆成两个元素（实测每个 pair 跑了两遍，第二次
-    # 名字变成 "test_xxx" 就撞了前端 target）。故用 `|` 作内部分隔符。
+    # Encode pairs as "ctest_name|source_stem" (`|` avoids CMake `;` list splitting).
     set(PATHSPACE_SHM_TEST_PAIRS
         "art_scan|test_art_scan"
         "art_alignment|test_art_alignment"
         "anchor_hook|test_anchor_hook"
         "shm_split|test_shm_split"
         "storage_abi|test_storage_abi"
-        # xvalue_head / new_wire_shm / xvalue_wire_golden 造的是语言层 wire，
-        # 随构造器一起迁往 pathlang（`pathlang/xvalue/tests/`）。
         )
     foreach(pair IN LISTS PATHSPACE_SHM_TEST_PAIRS)
         string(FIND "${pair}" "|" pair_sep)
@@ -119,29 +89,21 @@ if(BUILD_TESTING)
         add_executable(shm_${shm_name} tests/shm/${shm_source}.c)
         target_include_directories(shm_${shm_name} PRIVATE
             src/shm include)
-        # 测试要调 P2_TEST_HOOKS 里的内部钩子（TestAnchorOf/ArtAlignCheck/
-        # TestSetFormatVersion）。宏必须与库一致，否则头里的声明被 #ifdef 挡掉，
-        # 调用方靠隐式声明链接成功——正是 -Werror=implicit-function-declaration
-        # 要抓的那类缺口。
+        # Enable internal test hooks (TestAnchorOf / ArtAlignCheck / TestSetFormatVersion)
+        # matching the library's P2_TEST_HOOKS build definition.
         target_compile_definitions(shm_${shm_name} PRIVATE P2_TEST_HOOKS)
         target_link_libraries(shm_${shm_name} PRIVATE pathspace)
         add_test(NAME shm_${shm_name} COMMAND shm_${shm_name})
     endforeach()
 
-    # 导出面链接测试：逐个引用全部 16 个导出符号，缺一个即链接失败。
-    #
-    # 为什么单独一条：头文件声明与 .so 导出**各说各话**时，编译期与运行期都不会报错
-    # ——`const.h` 曾声明 `pathspaceConst` 而实现/导出叫 `pathspaceConstStorage`，
-    # 用头文件写代码的人「能编过、一链接就找不到符号」，而当时 tests/cli 里零覆盖。
-    # 取地址是唯一在「不运行」的情况下就能挡住这类缺陷的形态：漏掉的符号没人调用，
-    # 运行期测试永远不会红。
+    # Export-surface link test: references all 16 public symbols so any missing export fails at link time.
     add_executable(test_export_surface tests/test_export_surface.c)
     target_include_directories(test_export_surface PRIVATE include)
     target_link_libraries(test_export_surface PRIVATE pathspace)
     add_test(NAME export_surface COMMAND test_export_surface)
 endif()
 
-# 前端 SONAME：libpathspace.so.1
+# Frontend SONAME: libpathspace.so.1
 set_target_properties(pathspace PROPERTIES
     VERSION 1.0.0
     SOVERSION 1
@@ -153,17 +115,12 @@ target_include_directories(pathspace
         $<INSTALL_INTERFACE:include>
 )
 
-# 活跃句柄表（退出兜底落盘）用 pthread 互斥。单库后没有 dlopen/dlsym，不再链 libdl。
+# Active handle table (atexit flush) uses pthread mutexes.
 find_package(Threads REQUIRED)
 target_link_libraries(pathspace PRIVATE Threads::Threads)
 
-# 生产库只导出公开头声明的符号；内部实现（pathspaceShm*、测试钩子）不是 API。
-# 测试构建需要直接链接内部函数，故保持默认可见。
-# 这条随原 pathspace-c target 一起在单库合并时丢失过一次——缺它的后果是 58 个
-# 符号全部导出，其中 27 个 pathspaceShm* 内部实现泄漏到公开面。
-# C_VISIBILITY_PRESET 在部分 CMake 版本/生成器上不会落到 C 的编译命令行
-# （实测 flags.make 里没有 -fvisibility=hidden），故两个都设——属性管预期，
-# 编译选项管实际。缺了它 27 个 pathspaceShm* 会全部泄漏到公开面。
+# Export only public API symbols in non-test builds; keep default visibility when BUILD_TESTING=ON
+# so unit tests can link internal pathspaceShm* helpers directly.
 if(NOT BUILD_TESTING)
     set_target_properties(pathspace PROPERTIES C_VISIBILITY_PRESET hidden)
     target_compile_options(pathspace PRIVATE -fvisibility=hidden)
@@ -171,17 +128,12 @@ endif()
 
 target_compile_definitions(pathspace PRIVATE _GNU_SOURCE)
 
-# 测试构建启用内部观测/注入钩子（生产库不含）：pathspaceShmTestAnchorOf、
-# pathspaceShmArtAlignCheck、pathspaceShmTestSetFormatVersion。
+# Enable internal observation/injection hooks only in test builds.
 if(BUILD_TESTING)
     target_compile_definitions(pathspace PRIVATE P2_TEST_HOOKS)
 endif()
 
-# 门禁：隐式函数声明一律当错误。
-#
-# 它抓的是「实现导出了、头里没声明」这类缺口——C 的老默认（隐式返回 int）
-# 会把 `pathspaceNewInt64(...)` 的返回值当 int，指针被截断，崩在别处。
-# 改成硬错误后，每个未声明的调用都在**编译期**点名。
+# Reject implicit function declarations at compile time.
 target_compile_options(pathspace PRIVATE -Werror=implicit-function-declaration)
 
 install(TARGETS pathspace
@@ -192,18 +144,16 @@ install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION ${CMAKE_INSTA
 configure_file(pathspace.pc.in ${CMAKE_CURRENT_BINARY_DIR}/pathspace.pc @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/pathspace.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 
-# ── CLI（cli/ 独立 Cargo 项目）──────────────────────────────────────
-# 走本仓 dispatch 前端的 C ABI，故须在 pathspace 目标之后构建；
-# 安装到 <prefix>/bin（prefix 默认 /usr → /usr/bin，与 pathlang 的 CLI 一致）。
+# -- CLI (standalone Cargo project in cli/) ----------------------------------
+# Uses libpathspace C ABI and installs to <prefix>/bin.
 # Embed relative RUNPATH entries:
 #   $ORIGIN/../lib                      -- release tarball (bin/ + lib/)
 #   $ORIGIN/../<libdir>/pathspace         -- cmake --install (<prefix>/<libdir>/pathspace)
 # Use @loader_path on macOS; escape $ as $$ for CMake.
 # release.yml packages this binary directly without rebuilding.
 #
-# CLI 只做**存储**子命令（del/deltree/cp/cpdir/mkindex/clear/list/tree/head/attr），
-# 因此只链 libpathspace，**不依赖 pathlang**。语言层命令（get/set/list --kind/tree --kind）
-# 在 pathlang 仓自己的 CLI 里，那个 CLI 才同时链 libpathspace + libpathlang_xvalue。
+# Storage-only subcommands (del/deltree/cp/cpdir/mkindex/clear/list/tree/head/attr);
+# links only libpathspace with no dependency on pathlang.
 find_program(CARGO_EXECUTABLE cargo)
 if(CARGO_EXECUTABLE)
   set(PATHSPACE_CLI_BIN "${CMAKE_CURRENT_SOURCE_DIR}/cli/target/release/pathspace")
@@ -219,8 +169,8 @@ if(CARGO_EXECUTABLE)
             --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/cli/Cargo.toml"
     BYPRODUCTS "${PATHSPACE_CLI_BIN}"
     DEPENDS pathspace
-    COMMENT "构建 pathspace CLI（cli/）")
+    COMMENT "Building pathspace CLI (cli/)")
   install(PROGRAMS "${PATHSPACE_CLI_BIN}" DESTINATION ${CMAKE_INSTALL_BINDIR})
 else()
-  message(STATUS "未找到 cargo，跳过 pathspace CLI（cli/）")
+  message(STATUS "cargo not found; skipping pathspace CLI (cli/)")
 endif()

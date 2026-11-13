@@ -2,7 +2,7 @@
 name = "pathseek"
 version = "0.1.0"
 edition = "2021"
-description = "功能完整的 pathlang runtime：模式2 主导执行 + 纯净 rwir stdlib（term/json/http/pathlanglayout/networld）"
+description = "Full-featured pathlang runtime with in-process rwir stdlib (term/json/http/pathlanglayout/networld)"
 
 [lib]
 name = "pathseek"

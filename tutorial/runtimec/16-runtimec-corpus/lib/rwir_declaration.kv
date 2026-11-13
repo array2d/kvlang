@@ -1,7 +1,7 @@
-// 判据：rwir 声明与 rwfunc 同形，只差函数体；兑现方是 runtime。
-// 若把无 body 的 rwir 当成语法错误，layout 会直接拒绝本文件。
-// 依据：runtimec/specification/native_rwir_decls.kv 的语法说明。
-// 期望输出:
+// Criterion: an `rwir` declaration shares the signature form of `rwfunc` without a body; the runtime provides the implementation.
+// Treating a bodyless `rwir` as a syntax error would cause layout to reject this file.
+// Reference: syntax notes in `runtimec/specification/native_rwir_decls.kv`.
+// Expected output:
 //   1
 
 rwir demo·echo(*int64 #x) -> (*int64 #r)

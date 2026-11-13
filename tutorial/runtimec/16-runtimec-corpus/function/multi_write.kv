@@ -1,7 +1,7 @@
-// 判据：一个调用可同时映射多个写参；左右按位置一一配对。
-// 若只支持单写参，第二条写映射 q,r 会丢。
-// 依据：04-layout语义/01-指令架构.kv（多赋值）、03-函数.kv。
-// 期望输出:
+// Criterion: a single call can map multiple write parameters positionally (`q`, `r`).
+// Supporting only a single write parameter would drop the second output binding.
+// Reference: 04-layout-semantics/01-instruction-architecture.kv (multi-assignment), 03-functions.kv.
+// Expected output:
 //   3 2
 
 rwfunc divmod(*int64 #n, *int64 #d) -> (*int64 #q, *int64 #r) {

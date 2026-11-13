@@ -55,21 +55,21 @@ typedef enum case_outcome {
 
 static const char *case_outcome_name(case_outcome_t outcome) {
     switch (outcome) {
-    case CASE_OUTCOME_UNRECORDED: return "未记账";
+    case CASE_OUTCOME_UNRECORDED: return "unrecorded";
     case CASE_OUTCOME_EXECUTED: return "executed";
     case CASE_OUTCOME_BLOCKED: return "blocked";
-    case CASE_OUTCOME_EXPECTED_FAILED: return "预期失败";
-    case CASE_OUTCOME_ENCODE_FAILED: return "编译期失败";
-    case CASE_OUTCOME_WINDOW_FAILED: return "窗口期失败";
-    case CASE_OUTCOME_EXECUTION_FAILED: return "执行期失败";
-    case CASE_OUTCOME_EXPECTATION_WRONG: return "期望不符";
-    case CASE_OUTCOME_INCOMPLETE: return "用例不完整";
-    case CASE_OUTCOME_UNOBSERVED: return "未观测到";
-    case CASE_OUTCOME_MISSING_EXPECTATION: return "缺期望头";
-    case CASE_OUTCOME_NOT_A_CASE: return "非用例(无 test 入口)";
+    case CASE_OUTCOME_EXPECTED_FAILED: return "expected-failure";
+    case CASE_OUTCOME_ENCODE_FAILED: return "encode-failed";
+    case CASE_OUTCOME_WINDOW_FAILED: return "window-failed";
+    case CASE_OUTCOME_EXECUTION_FAILED: return "execution-failed";
+    case CASE_OUTCOME_EXPECTATION_WRONG: return "expectation-mismatch";
+    case CASE_OUTCOME_INCOMPLETE: return "incomplete-case";
+    case CASE_OUTCOME_UNOBSERVED: return "unobserved";
+    case CASE_OUTCOME_MISSING_EXPECTATION: return "missing-expectation";
+    case CASE_OUTCOME_NOT_A_CASE: return "not-a-case(no test entry)";
     case CASE_OUTCOME_COUNT: break;
     }
-    return "非法归属";
+    return "invalid-outcome";
 }
 
 static bool case_outcome_is_failure(case_outcome_t outcome) {
@@ -132,7 +132,7 @@ static void record_outcome(case_outcome_record_t *records, size_t index,
     }
     if (records[index].outcome != CASE_OUTCOME_UNRECORDED) {
         fprintf(stderr,
-                "runner 缺陷：%s 被记了两遍归属（先 %s，又 %s）\n", path,
+                "runner bug: %s recorded twice (first %s, then %s)\n", path,
                 case_outcome_name(records[index].outcome),
                 case_outcome_name(outcome));
         return;
@@ -655,7 +655,7 @@ static void parse_expectations(const char *path, expectation_t *out) {
             *newline = '\0';
         }
         
-        if (strstr(line, "期望阻塞") != NULL) {
+        if (strstr(line, "Expected block") != NULL) {
             char *colon = strchr(line, ':');
             if (colon != NULL) {
                 char *text = colon + 1;
@@ -667,7 +667,7 @@ static void parse_expectations(const char *path, expectation_t *out) {
                 continue;
             }
         }
-        if (strstr(line, "期望错误") != NULL) {
+        if (strstr(line, "Expected error") != NULL) {
             char *colon = strchr(line, ':');
             if (colon != NULL) {
                 char *text = colon + 1;
@@ -679,16 +679,10 @@ static void parse_expectations(const char *path, expectation_t *out) {
                 continue;
             }
         }
-        if (strstr(line, "期望输出") != NULL ||
-            strstr(line, "Expected output") != NULL) {
-            
-            const char *prefix_end = strstr(line, "期望输出");
-            size_t prefix_size = strlen("期望输出");
-            if (prefix_end == NULL) {
-                prefix_end = strstr(line, "Expected output");
-                prefix_size = strlen("Expected output");
-            }
-            const char *inline_text = prefix_end + prefix_size;
+        const char *expected_output_marker = strstr(line, "Expected output");
+        if (expected_output_marker != NULL) {
+            const char *inline_text =
+                expected_output_marker + strlen("Expected output");
             while (*inline_text == ' ') {
                 inline_text += 1;
             }
@@ -740,7 +734,7 @@ static void parse_expectations(const char *path, expectation_t *out) {
 }
 
 static void first_error_line(const char *text, char *output, size_t capacity) {
-    static const char empty[] = "(空)";
+    static const char empty[] = "(empty)";
 
     if (text == NULL || text[0] == '\0') {
         snprintf(output, capacity, "%s", empty);
@@ -889,28 +883,28 @@ static compare_result_t compare_output(const expectation_t *expectation,
     
     if (actual_count == 0U && expectation->count != 0U) {
         fprintf(stderr,
-                "FAIL %s: 未观测到任何输出（期望 %zu 行）——"
-                "查链路，不是查实现\n",
+                "FAIL %s: no output observed (expected %zu line(s)) — "
+                "check the output pipeline, not operator logic\n",
                 case_path, expectation->count);
         return COMPARE_UNOBSERVED;
     }
     if (actual_count != expectation->count) {
         
         fprintf(stderr,
-                "FAIL %s: 行数不等（实际 %zu / 期望 %zu）\n",
+                "FAIL %s: line count mismatch (actual %zu / expected %zu)\n",
                 case_path, actual_count, expectation->count);
         for (size_t i = 0U; i < actual_count && i < 4U; ++i) {
-            fprintf(stderr, "  实际[%zu]: %s\n", i, actual_lines[i]);
+            fprintf(stderr, "  actual[%zu]: %s\n", i, actual_lines[i]);
         }
         for (size_t i = 0U; i < expectation->count && i < 4U; ++i) {
-            fprintf(stderr, "  期望[%zu]: %s\n", i, expectation->lines[i]);
+            fprintf(stderr, "  expected[%zu]: %s\n", i, expectation->lines[i]);
         }
         return actual_count > expectation->count ? COMPARE_INCOMPLETE
                                                  : COMPARE_EXPECTATION_WRONG;
     }
     for (size_t i = 0U; i < expectation->count; ++i) {
         if (strcmp(expectation->lines[i], actual_lines[i]) != 0) {
-            fprintf(stderr, "FAIL %s: 第 %zu 行不同\n  期望: %s\n  实际: %s\n",
+            fprintf(stderr, "FAIL %s: line %zu differs\n  expected: %s\n  actual: %s\n",
                     case_path, i + 1U, expectation->lines[i], actual_lines[i]);
             return COMPARE_EXPECTATION_WRONG;
         }
@@ -975,7 +969,7 @@ int main(int argument_count, char **arguments) {
         const bool expects_layout_failure = expectation.expected_error[0] != '\0';
         
         if (!case_store_open(&environment, (unsigned)index)) {
-            fprintf(stderr, "FAIL %s: 无法建立 per-case store\n",
+            fprintf(stderr, "FAIL %s: cannot open per-case store\n",
                     cases.paths[index]);
             close_case(g_outcomes, index, cases.paths[index], &counts,
                        CASE_OUTCOME_WINDOW_FAILED);
@@ -984,7 +978,8 @@ int main(int argument_count, char **arguments) {
         }
         
         if (!declare_external_capabilities(&environment)) {
-            fprintf(stderr, "FAIL %s: 无法声明外部能力\n", cases.paths[index]);
+            fprintf(stderr, "FAIL %s: cannot declare external capabilities\n",
+                    cases.paths[index]);
             close_case(g_outcomes, index, cases.paths[index], &counts,
                        CASE_OUTCOME_WINDOW_FAILED);
             (void)case_store_close(&environment);
@@ -995,8 +990,9 @@ int main(int argument_count, char **arguments) {
             expectation.expected_error[0] != '\0' &&
             expectation.count != 0U) {
             fprintf(stderr,
-                    "FAIL %s: `期望输出` 与 `期望错误` 互斥——一条用例只能是正向"
-                    "或负向\n",
+                    "FAIL %s: `Expected output` and `Expected error` are "
+                    "mutually exclusive — a case must be either positive or "
+                    "negative\n",
                     cases.paths[index]);
             close_case(g_outcomes, index, cases.paths[index], &counts,
                        CASE_OUTCOME_INCOMPLETE);
@@ -1029,7 +1025,8 @@ int main(int argument_count, char **arguments) {
         }
         if (!expects_layout_failure && expectation.count == 0U) {
             
-            fprintf(stderr, "FAIL %s: 缺 `// 期望输出:` 头\n", cases.paths[index]);
+            fprintf(stderr, "FAIL %s: missing `// Expected output:` header\n",
+                    cases.paths[index]);
             missing_expectation += 1U;
             close_case(g_outcomes, index, cases.paths[index], &counts,
                        CASE_OUTCOME_MISSING_EXPECTATION);
@@ -1039,7 +1036,8 @@ int main(int argument_count, char **arguments) {
         
         if (expectation.overflow) {
             fprintf(stderr,
-                    "FAIL %s: 期望输出超过 runner 容量 %u 行\n", cases.paths[index],
+                    "FAIL %s: expected output exceeds runner capacity (%u lines)\n",
+                    cases.paths[index],
                     (unsigned)KVRUN_EXPECTATION_LINE_CAPACITY);
             close_case(g_outcomes, index, cases.paths[index], &counts,
                        CASE_OUTCOME_INCOMPLETE);
@@ -1048,7 +1046,8 @@ int main(int argument_count, char **arguments) {
         }
         if (expectation.line_overflow) {
             fprintf(stderr,
-                    "FAIL %s: 期望输出第 %zu 行超过 runner 单行容量 %u 字节\n",
+                    "FAIL %s: expected output line %zu exceeds runner line "
+                    "capacity (%u bytes)\n",
                     cases.paths[index], expectation.line_overflow_index + 1U,
                     (unsigned)KVRUN_EXPECTATION_LINE_SIZE);
             close_case(g_outcomes, index, cases.paths[index], &counts,
@@ -1080,7 +1079,8 @@ int main(int argument_count, char **arguments) {
         if (expects_layout_failure) {
             
             if (layout_result == 0) {
-                fprintf(stderr, "FAIL %s: 预期 layout 失败，但它通过了\n",
+                fprintf(stderr,
+                        "FAIL %s: expected layout failure, but layout succeeded\n",
                         cases.paths[index]);
                 close_case(g_outcomes, index, cases.paths[index], &counts,
                            CASE_OUTCOME_ENCODE_FAILED);
@@ -1093,11 +1093,12 @@ int main(int argument_count, char **arguments) {
                 char stderr_line[512];
                 first_error_line(captured, stderr_line, sizeof(stderr_line));
                 fprintf(stderr,
-                        "FAIL %s: layout 失败了，但错误不含 %s\n  实际 stderr 首行：%s\n"
-                        "  实际 ABI 串：%s\n",
+                        "FAIL %s: layout failed, but error does not contain %s\n"
+                        "  actual stderr first line: %s\n"
+                        "  actual ABI text: %s\n",
                         cases.paths[index], expectation.expected_error,
                         stderr_line,
-                        error_text[0] != '\0' ? error_text : "(空)");
+                        error_text[0] != '\0' ? error_text : "(empty)");
                 close_case(g_outcomes, index, cases.paths[index], &counts,
                            CASE_OUTCOME_ENCODE_FAILED);
                 (void)case_store_close(&environment);
@@ -1142,7 +1143,8 @@ int main(int argument_count, char **arguments) {
             
             char stderr_line[512];
             first_error_line(captured, stderr_line, sizeof(stderr_line));
-            fprintf(stderr, "FAIL %s: layout failed: %s\n  实际 stderr 首行：%s\n",
+            fprintf(stderr,
+                    "FAIL %s: layout failed: %s\n  actual stderr first line: %s\n",
                     cases.paths[index], error_text, stderr_line);
             close_case(g_outcomes, index, cases.paths[index], &counts,
                        CASE_OUTCOME_ENCODE_FAILED);
@@ -1323,8 +1325,8 @@ int main(int argument_count, char **arguments) {
             if (frame_outcome == FRAME_OUTCOME_EXECUTE_FAILED) {
                 
                 fprintf(stderr,
-                        "FAIL %s: execute failed status=%d"
-                        "（exit.kind=%u status=%d detail=%u pc=%u）\n",
+                        "FAIL %s: execute failed status=%d "
+                        "(exit.kind=%u status=%d detail=%u pc=%u)\n",
                         cases.paths[index], (int)frame_exit.status,
                         frame_exit.kind, (int)frame_exit.status,
                         frame_exit.detail_code,
@@ -1381,8 +1383,8 @@ int main(int argument_count, char **arguments) {
                 char stderr_line[512];
                 first_error_line(captured, stderr_line, sizeof(stderr_line));
                 fprintf(stderr,
-                        "FAIL %s: 执行报错 status=%d detail=%u pc=%u\n"
-                        "  stderr：%s\n",
+                        "FAIL %s: execution error status=%d detail=%u pc=%u\n"
+                        "  stderr: %s\n",
                         cases.paths[index],
                         (int)frame_exit.status,
                         frame_exit.detail_code,
@@ -1422,8 +1424,8 @@ int main(int argument_count, char **arguments) {
                                 (unsigned)program_view.instruction_count;
                         }
                         fprintf(stderr,
-                                "  停止位置 %s：exit.kind=%u status=%d "
-                                "detail=%u pc=%d 指令总数=%u\n",
+                                "  stopped at %s: exit.kind=%u status=%d "
+                                "detail=%u pc=%d instructions=%u\n",
                                 cases.paths[index], exit_information->kind,
                                 (int)exit_information->status,
                                 exit_information->detail_code,
@@ -1452,15 +1454,15 @@ int main(int argument_count, char **arguments) {
                 matches = false;
             }
             if (list_each) {
-                printf("  归属  %-24s %s\n", case_outcome_name(outcome),
+                printf("  outcome  %-24s %s\n", case_outcome_name(outcome),
                        cases.paths[index]);
             }
         }
         if (!matches) {
-            fprintf(stderr, "每条用例的最终归属（未记账项）：\n");
+            fprintf(stderr, "Final outcome per case (unrecorded entries):\n");
             for (size_t index = 0U; index < cases.count; ++index) {
                 if (g_outcomes[index].outcome == CASE_OUTCOME_UNRECORDED) {
-                    fprintf(stderr, "  未记账  %s\n", cases.paths[index]);
+                    fprintf(stderr, "  unrecorded  %s\n", cases.paths[index]);
                 }
             }
         }
@@ -1479,30 +1481,31 @@ int main(int argument_count, char **arguments) {
         const size_t accounted = bucketed + not_a_case;
         if (accounted != cases.count) {
             fprintf(stderr,
-                    "ASSIGNMENT GAP: 各桶之和 %zu != 用例总数 %zu"
-                    "（executed %zu + blocked %zu + fail %zu + 预期失败 %zu"
-                    " + 非用例 %zu）\n",
+                    "ASSIGNMENT GAP: bucket sum %zu != total cases %zu "
+                    "(executed %zu + blocked %zu + fail %zu + "
+                    "expected-failure %zu + not-a-case %zu)\n",
                     accounted, cases.count, counts.executed, counts.blocked,
                     counts.failed, counts.expected_failed, not_a_case);
         }
-        printf("归属核对：各桶之和 %zu / 用例总数 %zu"
-               "（其中非用例 %zu：无 test 入口或无期望头）——%s\n",
+        printf("Outcome audit: bucket sum %zu / total cases %zu "
+               "(including %zu non-cases: no test entry or expectation header) — %s\n",
                accounted, cases.count, not_a_case,
-               accounted == cases.count ? "齐" : "**不齐**");
+               accounted == cases.count ? "matched" : "**MISMATCH**");
     }
     
-    printf("用例 %zu：executed %zu / blocked %zu / fail %zu / pass(仅编码) %zu\n",
+    printf("Cases %zu: executed %zu / blocked %zu / fail %zu / pass(encode-only) %zu\n",
            cases.count, counts.executed, counts.blocked, counts.failed,
            counts.passed - counts.expected_failed - counts.executed);
     
-    printf("  细分：未观测到 %zu、执行期失败 %zu、编译期失败 %zu、"
-           "期望不符 %zu、用例不完整 %zu、其中预期失败 %zu\n",
+    printf("  breakdown: unobserved %zu, execution-failed %zu, encode-failed %zu, "
+           "expectation-mismatch %zu, incomplete-case %zu, expected-failure %zu\n",
            counts.unobserved, counts.execution_failed, counts.encode_failed,
            counts.expectation_wrong, counts.incomplete, counts.expected_failed);
     
     if (counts.unobserved != 0U) {
-        printf("  注：`未观测到` = 期望有内容但实际零行输出 —— 查**链路**"
-               "（算子没执行到/输出没接上），不是查实现。\n");
+        printf("  note: `unobserved` = expected output lines but observed zero — "
+               "check the **pipeline** (operator not reached or output not wired), "
+               "not operator logic.\n");
     }
     
     {
@@ -1516,10 +1519,11 @@ int main(int argument_count, char **arguments) {
                "(failed %zu, classified %zu)\n",
                counts.failed - classified, counts.failed, classified);
     }
-    printf("通过 executed %zu / 总数 %zu 条用例\n", counts.executed, cases.count);
+    printf("Passed: executed %zu / total %zu cases\n", counts.executed, cases.count);
     
-    printf("  按阶段：编译期失败 %zu、窗口期失败 %zu、执行期失败 %zu、未观测到 %zu、"
-           "期望不符 %zu、用例不完整 %zu、仅编码通过 %zu、预期失败 %zu\n",
+    printf("  by stage: encode-failed %zu, window-failed %zu, execution-failed %zu, "
+           "unobserved %zu, expectation-mismatch %zu, incomplete-case %zu, "
+           "encode-only %zu, expected-failure %zu\n",
            counts.encode_failed, counts.window_failed, counts.execution_failed,
            counts.unobserved,
            counts.expectation_wrong, counts.incomplete,
@@ -1527,18 +1531,18 @@ int main(int argument_count, char **arguments) {
            counts.expected_failed);
     if (g_blocked_count > 0U) {
         
-        printf("blocked 明细（文件 + source pc + 算子名）：\n");
+        printf("blocked details (file + source pc + operator):\n");
         for (size_t index = 0U; index < g_blocked_count; ++index) {
             printf("  blocked  %s  pc=%u  op=%s\n", g_blocked[index].file,
                    g_blocked[index].pc, g_blocked[index].operation);
         }
     }
-    printf("注：`executed` = 真跑且输出逐行相同；`pass(仅编码)` = 只证明编得过，"
-           "**不表示输出对**。\n");
-    printf("注：`blocked` 是**有名字的能力缺口**，不是失败、也不是跳过——"
-           "明细见上，退出码不受它影响。\n");
-    printf("注：`其中预期失败` = layout 按文件头 `// 期望错误:` 被正确拒绝的条数，"
-           "与「编得过」不是同一类。\n");
+    printf("note: `executed` = ran to completion with line-for-line matching output; "
+           "`pass(encode-only)` = encoded only, **output not verified**.\n");
+    printf("note: `blocked` = **named capability gap**, neither failure nor skip — "
+           "see details above; exit code is unaffected.\n");
+    printf("note: `expected-failure` = cases rightly rejected by layout per "
+           "`// Expected error:`, distinct from encode-only passes.\n");
     (void)layout_ok;
 
     if (environment_close(&environment) != RUNTIMEC_STATUS_SUCCESS) {
@@ -1550,8 +1554,8 @@ int main(int argument_count, char **arguments) {
     }
     if (counts.executed == 0U) {
         fprintf(stderr,
-                "SKIP: executed=0 —— 本次没有任何用例真跑到结束并比对输出"
-                "（blocked %zu、仅编码 %zu）\n",
+                "SKIP: executed=0 — no cases ran to completion with verified output "
+                "(blocked %zu, encode-only %zu)\n",
                 counts.blocked, counts.passed - counts.expected_failed);
         return SKIP_RETURN_CODE;
     }

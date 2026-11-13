@@ -1,41 +1,42 @@
-# 组件：tests
-# 作用：runtimec 的单元测试一键注册。**测试文件与它的注册必须同批提交**——只有
-#       .c 没有 add_test 时，`ctest` 报 `No tests were found!!!` 且**退出码 0**，
-#       CI 因此恒绿而一个测试都没跑过（这是真实发生过的假绿，见 TASK-086）。
-# 联系：由上一级 CMakeLists.txt 的 `add_subdirectory(tests)` 引入；依赖各组件
-#       target，不依赖任何测试框架（纯 C11 + main 返回码）。
+# Component: tests
+# Role: Single-place registration for runtimec unit tests. **Every test file must be
+#       committed together with its registration**: leaving a `.c` file without `add_test`
+#       causes `ctest` to print `No tests were found!!!` and **exit 0**, producing a false
+#       green in CI (see TASK-086).
+# Links: Included via `add_subdirectory(tests)` from the parent CMakeLists.txt; depends on
+#        component targets with no external test framework (plain C11 + main exit code).
 #
-# 约定：每个测试是一个可执行文件，`main` 返回非零即失败。不用 gtest/catch2——
-# 引入框架会让「注册」这一步多一层，而这一步已经出过问题。
+# Convention: Each test is a standalone executable where a nonzero `main` return fails.
+# Avoid gtest/catch2 so test registration does not gain an extra layer.
 
-# 键比较器与排序缓存：纯内存，不需要后端。
+# Key comparator and sorted cache: pure in-memory, no backend needed.
 add_executable(key_order_test key_order_test.c)
 target_link_libraries(key_order_test PRIVATE runtimec_contract)
 
-# Ptr 前缀解析：用假 reader，不需要后端。
+# Pointer prefix resolution: uses a fake reader, no backend needed.
 add_executable(key_resolution_test key_resolution_test.c)
 target_link_libraries(key_resolution_test PRIVATE runtimec_contract)
 
-# 扩展算子注册：走公共接口 create，需要 engine 全链。
+# Extension operator registration: exercises public create, requires the full engine chain.
 add_executable(extension_registration_test extension_registration_test.c)
 target_link_libraries(extension_registration_test PRIVATE
     runtimec_interface runtimec_contract runtimec_binrwir runtimec_vmbin
     runtimec_vmkv runtimec_binrwir_compiler runtimec_engine)
 
-# 目录枚举的前置失败路径：被测函数在 vmbin。
+# Pre-failure path for directory enumeration: target under test lives in vmbin.
 add_executable(directory_walk_open_failure_test directory_walk_open_failure_test.c)
 target_link_libraries(directory_walk_open_failure_test PRIVATE
     runtimec_vmbin runtimec_contract runtimec_binrwir)
 
-# 错误状态与错误文本的优先级（TASK-071）：公共入口的失败路径。
+# Error status and message precedence (TASK-071): failure paths at public entry points.
 add_executable(error_status_priority_test error_status_priority_test.c)
 target_link_libraries(error_status_priority_test PRIVATE
     runtimec_interface runtimec_contract runtimec_binrwir runtimec_vmbin
     runtimec_vmkv runtimec_binrwir_compiler runtimec_engine)
 
-# 扩展读参的文本语义（TASK-070）：走 interface 的读参入口，需要 engine 全链。
+# Text semantics for extension argument reads (TASK-070): exercises interface readers, requires full engine chain.
 add_executable(argument_text_wire_test argument_text_wire_test.c)
-# 造 wire 要用语言层构造器（`pathlangXvalueHeadNew*`），其头在 pathlang/include。
+# Wire construction uses language-layer constructors (`pathlangXvalueHeadNew*`) under pathlang/include.
 target_include_directories(argument_text_wire_test PRIVATE
     "${PATHLANG_INCLUDE_DIRECTORY}")
 target_link_libraries(argument_text_wire_test PRIVATE

@@ -26,37 +26,37 @@ static void test_resolve_realloc(void *kv) {
     uint64_t first = 0, again = 0, grown = 0;
 
     uint8_t *base = pathspaceXvalueInProcessAddress(kv);
-    CHECK(base != NULL, "shm 后端必须提供非 NULL 的 pathspaceXvalueInProcessAddress");
+    CHECK(base != NULL, "shm backend must return non-NULL pathspaceXvalueInProcessAddress");
 
     clear_err();
     CHECK(pathspaceRealloc(kv, "/ct/a", 8, 0, &first, err, sizeof err) == PATHSPACE_OK,
-          "realloc 创建失败: %s", err);
+          "realloc create failed: %s", err);
 
     if (base) {
         uint64_t probe = 0x0123456789ABCDEFULL;
         memcpy(base + first, &probe, sizeof probe);
         uint64_t back = 0;
         memcpy(&back, base + first, sizeof back);
-        CHECK(back == probe, "base+offset 写读回的字节不对");
+        CHECK(back == probe, "bytes read back from base+offset did not match");
     }
 
     clear_err();
     CHECK(pathspaceResolveOffset(kv, "/ct/a", 0, &again, err, sizeof err) == PATHSPACE_OK,
-          "resolve 已存在的 key 失败: %s", err);
+          "resolve existing key failed: %s", err);
     CHECK(again == first,
-          "resolve 的 offset(%llu) 与 realloc 返回(%llu) 不一致",
+          "resolved offset (%llu) does not match realloc offset (%llu)",
           (unsigned long long)again, (unsigned long long)first);
 
     clear_err();
     int rc = pathspaceResolveOffset(kv, "/ct/never", 0, &again, err, sizeof err);
     CHECK(rc == PATHSPACE_MISSING,
-          "resolve 不存在的 key 应返回 MISSING，实得 %d (%s)", rc, err);
+          "resolve missing key expected MISSING, got %d (%s)", rc, err);
 
     clear_err();
     CHECK(pathspaceRealloc(kv, "/ct/a", 8, 0, &grown, err, sizeof err) == PATHSPACE_OK,
-          "同尺寸 realloc 失败: %s", err);
+          "same-size realloc failed: %s", err);
     CHECK(grown == first,
-          "同尺寸 realloc 不该搬移：offset 从 %llu 变成 %llu",
+          "same-size realloc must not relocate: offset changed from %llu to %llu",
           (unsigned long long)first, (unsigned long long)grown);
 }
 
@@ -65,30 +65,30 @@ static void test_makeindex_free(void *kv) {
 
     clear_err();
     CHECK(pathspaceMkindex(kv, "/idx/", err, sizeof err) == PATHSPACE_OK,
-          "makeindex 失败: %s", err);
+          "makeindex failed: %s", err);
     
     clear_err();
     CHECK(pathspaceMkindex(kv, "/idx/", err, sizeof err) == PATHSPACE_OK,
-          "makeindex 第二次应幂等成功: %s", err);
+          "second makeindex should succeed idempotently: %s", err);
 
     clear_err();
     CHECK(pathspaceFree(kv, "/idx/", err, sizeof err) == PATHSPACE_OK,
-          "free 空索引失败: %s", err);
+          "free empty index failed: %s", err);
 
     clear_err();
     CHECK(pathspaceMkindex(kv, "/idx2/", err, sizeof err) == PATHSPACE_OK,
-          "makeindex /idx2/ 失败: %s", err);
+          "makeindex /idx2/ failed: %s", err);
     clear_err();
     CHECK(pathspaceRealloc(kv, "/idx2/member", 4, 0, &off, err, sizeof err) ==
               PATHSPACE_OK,
-          "在 /idx2/ 下建成员失败: %s", err);
+          "create member under /idx2/ failed: %s", err);
     clear_err();
     CHECK(pathspaceFree(kv, "/idx2/", err, sizeof err) == PATHSPACE_HAS_CHILDREN,
-          "free 非空索引应返回 HAS_CHILDREN");
+          "free non-empty index must return HAS_CHILDREN");
     clear_err();
     CHECK(pathspaceResolveOffset(kv, "/idx2/member", 0, &off, err, sizeof err) ==
               PATHSPACE_OK,
-          "free 非空索引失败后，成员不该消失: %s", err);
+          "member must remain intact after failed free on non-empty index: %s", err);
 }
 
 static void test_list(void *kv) {
@@ -97,13 +97,13 @@ static void test_list(void *kv) {
     uint32_t max_name = 0;
 
     CHECK(pathspaceMkindex(kv, "/ls/", err, sizeof err) == PATHSPACE_OK,
-          "makeindex /ls/ 失败: %s", err);
+          "makeindex /ls/ failed: %s", err);
 
     clear_err();
     CHECK(pathspaceListlen(kv, "/ls/", &count, &max_name, err, sizeof err) ==
               PATHSPACE_OK,
-          "listlen 空索引失败: %s", err);
-    CHECK(count == 0 && max_name == 0, "空索引 N/M 应为 0/0，实得 %lld/%u",
+          "listlen empty index failed: %s", err);
+    CHECK(count == 0 && max_name == 0, "empty index N/M expected 0/0, got %lld/%u",
           (long long)count, max_name);
 
     const char *names[] = {"aa", "bbb", "c"};
@@ -112,25 +112,25 @@ static void test_list(void *kv) {
         snprintf(key, sizeof key, "/ls/%s", names[i]);
         clear_err();
         CHECK(pathspaceRealloc(kv, key, 1, 0, &off, err, sizeof err) == PATHSPACE_OK,
-              "建成员 %s 失败: %s", key, err);
+              "create member %s failed: %s", key, err);
     }
 
     clear_err();
     CHECK(pathspaceListlen(kv, "/ls/", &count, &max_name, err, sizeof err) ==
               PATHSPACE_OK,
-          "listlen 失败: %s", err);
-    CHECK(count == 3, "N 应为 3，实得 %lld", (long long)count);
+          "listlen failed: %s", err);
+    CHECK(count == 3, "expected N=3, got %lld", (long long)count);
     
-    CHECK(max_name == 3, "M 应为最长子项字节数 3，实得 %u", max_name);
+    CHECK(max_name == 3, "expected M=3 (longest child name bytes), got %u", max_name);
 
     uint32_t length = 0, listed = 0;
     uint64_t generation = 0;
     clear_err();
     CHECK(pathspaceList(kv, "/ls/", NULL, 0, &length, &listed, &generation, err,
                       sizeof err) == PATHSPACE_OK,
-          "list(NULL 只探测) 失败: %s", err);
+          "list(NULL probe) failed: %s", err);
     CHECK(length == 9 && listed == 3,
-          "list 探测应得 length=9 count=3，实得 %u/%u", length, listed);
+          "list probe expected length=9 count=3, got %u/%u", length, listed);
 
     char buf[32];
     uint32_t length2 = 0, listed2 = 0;
@@ -138,52 +138,52 @@ static void test_list(void *kv) {
     clear_err();
     CHECK(pathspaceList(kv, "/ls/", buf, sizeof buf, &length2, &listed2,
                       &generation2, err, sizeof err) == PATHSPACE_OK,
-          "list 复制失败: %s", err);
+          "list copy failed: %s", err);
     CHECK(length2 == 9 && listed2 == 3,
-          "list 复制应得 length=9 count=3，实得 %u/%u", length2, listed2);
+          "list copy expected length=9 count=3, got %u/%u", length2, listed2);
     CHECK(memcmp(buf, "aa\0bbb\0c\0", 9) == 0,
-          "list 输出的 NUL 分隔串不对（前 9 字节）");
+          "list NUL-separated output mismatch (first 9 bytes)");
 
     uint32_t short_len = 0, short_count = 0;
     uint64_t short_gen = 0;
     clear_err();
     CHECK(pathspaceList(kv, "/ls/", buf, 4, &short_len, &short_count, &short_gen,
                       err, sizeof err) == PATHSPACE_CAPACITY,
-          "容量不足应返回 CAPACITY");
+          "insufficient capacity must return CAPACITY");
     CHECK(short_len == 9 && short_count == 3,
-          "容量不足仍须回报所需 length=9 count=3，实得 %u/%u", short_len,
+          "insufficient capacity must still report required length=9 count=3, got %u/%u", short_len,
           short_count);
 
     uint64_t gen_before = 0, gen_add = 0, gen_modify = 0;
     clear_err();
     CHECK(pathspaceList(kv, "/ls/", NULL, 0, &length, &listed, &gen_before, err,
                       sizeof err) == PATHSPACE_OK,
-          "取 generation 基线失败: %s", err);
+          "read baseline generation failed: %s", err);
     char key[64];
     snprintf(key, sizeof key, "/ls/%s", "dddd");
     CHECK(pathspaceRealloc(kv, key, 1, 0, &off, err, sizeof err) == PATHSPACE_OK,
-          "新增成员失败: %s", err);
+          "add member failed: %s", err);
     clear_err();
     CHECK(pathspaceList(kv, "/ls/", NULL, 0, &length, &listed, &gen_add, err,
                       sizeof err) == PATHSPACE_OK,
-          "取新增后 generation 失败: %s", err);
-    CHECK(gen_add != gen_before, "新增成员后 generation 应前进，仍是 %llu",
+          "read generation after add failed: %s", err);
+    CHECK(gen_add != gen_before, "generation must advance after adding member, still %llu",
           (unsigned long long)gen_add);
 
     CHECK(pathspaceRealloc(kv, key, 2, 0, &off, err, sizeof err) == PATHSPACE_OK,
-          "改成员内容失败: %s", err);
+          "update member value failed: %s", err);
     clear_err();
     CHECK(pathspaceList(kv, "/ls/", NULL, 0, &length, &listed, &gen_modify, err,
                       sizeof err) == PATHSPACE_OK,
-          "取值修改后 generation 失败: %s", err);
+          "read generation after value update failed: %s", err);
     CHECK(gen_modify == gen_add,
-          "只改值不该推进 generation，从 %llu 变成 %llu",
+          "value-only update must not advance generation, changed from %llu to %llu",
           (unsigned long long)gen_add, (unsigned long long)gen_modify);
 
     clear_err();
     CHECK(pathspaceListlen(kv, "/ct/a", &count, &max_name, err, sizeof err) ==
               PATHSPACE_NOT_INDEX,
-          "对非索引 listlen 应返回 NOT_INDEX");
+          "listlen on non-index must return NOT_INDEX");
 }
 
 static void test_existence_three_states(void *kv) {
@@ -197,92 +197,92 @@ static void test_existence_three_states(void *kv) {
     clear_err();
     CHECK(pathspaceListlen(kv, "/never/", &count, &max_name, err, sizeof err) ==
               PATHSPACE_MISSING,
-          "从没建过的 /never/ 应返回 MISSING，而非 OK/0/0");
+          "nonexistent /never/ must return MISSING, not OK/0/0");
     clear_err();
     CHECK(pathspaceListlen(kv, "/never", &count, &max_name, err, sizeof err) ==
               PATHSPACE_MISSING,
-          "从没建过的 /never 应返回 MISSING");
+          "nonexistent /never must return MISSING");
     clear_err();
     CHECK(pathspaceList(kv, "/never/", names, sizeof names, &length, &listed,
                       &generation, err, sizeof err) == PATHSPACE_MISSING,
-          "从没建过的 /never/ 上 list 应返回 MISSING");
+          "list on nonexistent /never/ must return MISSING");
     clear_err();
     CHECK(pathspaceList(kv, "/never", names, sizeof names, &length, &listed,
                       &generation, err, sizeof err) == PATHSPACE_MISSING,
-          "从没建过的 /never 上 list 应返回 MISSING");
+          "list on nonexistent /never must return MISSING");
 
     clear_err();
     CHECK(pathspaceRealloc(kv, "/plain", 4, 0, &off, err, sizeof err) == PATHSPACE_OK,
-          "建普通值 /plain 失败: %s", err);
+          "create plain value /plain failed: %s", err);
     clear_err();
     CHECK(pathspaceListlen(kv, "/plain", &count, &max_name, err, sizeof err) ==
               PATHSPACE_NOT_INDEX,
-          "已存在的普通值 /plain 应返回 NOT_INDEX");
+          "existing plain value /plain must return NOT_INDEX");
     clear_err();
     CHECK(pathspaceList(kv, "/plain", names, sizeof names, &length, &listed,
                       &generation, err, sizeof err) == PATHSPACE_NOT_INDEX,
-          "已存在的普通值 /plain 上 list 应返回 NOT_INDEX");
+          "list on existing plain value /plain must return NOT_INDEX");
 
     clear_err();
     CHECK(pathspaceMkindex(kv, "/empty/", err, sizeof err) == PATHSPACE_OK,
-          "建空索引 /empty/ 失败: %s", err);
+          "create empty index /empty/ failed: %s", err);
     clear_err();
     CHECK(pathspaceListlen(kv, "/empty/", &count, &max_name, err, sizeof err) ==
               PATHSPACE_OK,
-          "已存在的空索引应返回 OK: %s", err);
+          "existing empty index must return OK: %s", err);
     CHECK(count == 0 && max_name == 0,
-          "已存在的空索引 N/M 应为 0/0，实得 %lld/%u", (long long)count,
+          "existing empty index expected N/M=0/0, got %lld/%u", (long long)count,
           max_name);
     clear_err();
     CHECK(pathspaceList(kv, "/empty/", names, sizeof names, &length, &listed,
                       &generation, err, sizeof err) == PATHSPACE_OK,
-          "已存在的空索引上 list 应返回 OK: %s", err);
+          "list on existing empty index must return OK: %s", err);
     CHECK(length == 0 && listed == 0,
-          "已存在的空索引 list 应得 len=0 count=0，实得 %u/%u", length, listed);
+          "list on existing empty index expected len=0 count=0, got %u/%u", length, listed);
 
     clear_err();
     CHECK(pathspaceMkindex(kv, "/full/", err, sizeof err) == PATHSPACE_OK,
-          "建 /full/ 失败: %s", err);
+          "create /full/ failed: %s", err);
     clear_err();
     CHECK(pathspaceRealloc(kv, "/full/ab", 1, 0, &off, err, sizeof err) == PATHSPACE_OK,
-          "建 /full/ab 失败: %s", err);
+          "create /full/ab failed: %s", err);
     clear_err();
     CHECK(pathspaceListlen(kv, "/full/", &count, &max_name, err, sizeof err) ==
               PATHSPACE_OK,
-          "非空索引应返回 OK: %s", err);
+          "non-empty index must return OK: %s", err);
     CHECK(count == 1 && max_name == 2,
-          "非空索引应得 N=1 M=2，实得 %lld/%u", (long long)count, max_name);
+          "non-empty index expected N=1 M=2, got %lld/%u", (long long)count, max_name);
 
     clear_err();
     CHECK(pathspaceMkindex(kv, "/desc/child/", err, sizeof err) == PATHSPACE_OK,
-          "建 /desc/child/ 失败: %s", err);
+          "create /desc/child/ failed: %s", err);
     clear_err();
     CHECK(pathspaceListlen(kv, "/desc/", &count, &max_name, err, sizeof err) ==
               PATHSPACE_OK,
-          "有后代但无根值的 /desc/ 应返回 OK（index 形态可由后代产生）: %s",
+          "/desc/ with descendants and no root value must return OK: %s",
           err);
     
     CHECK(count == 1 && max_name == 6,
-          "有后代无根值应得 N=1 M=6，实得 %lld/%u", (long long)count, max_name);
+          "descendant-only index expected N=1 M=6, got %lld/%u", (long long)count, max_name);
     clear_err();
     CHECK(pathspaceListlen(kv, "/desc", &count, &max_name, err, sizeof err) ==
               PATHSPACE_MISSING,
-          "非索引形态 /desc 自己没有根值 → MISSING（「有后代即存在」只管 index 形态）");
+          "value-form /desc without root value must return MISSING");
 
     clear_err();
     CHECK(pathspaceRealloc(kv, "/only/x", 4, 0, &off, err, sizeof err) == PATHSPACE_OK,
-          "建 /only/x 失败: %s", err);
+          "create /only/x failed: %s", err);
     clear_err();
     CHECK(pathspaceListlen(kv, "/only", &count, &max_name, err, sizeof err) ==
               PATHSPACE_MISSING,
-          "只有后代的 /only（无根值）应返回 MISSING");
+          "/only with descendants only (no root value) must return MISSING");
     clear_err();
     CHECK(pathspaceRealloc(kv, "/only", 4, 0, &off, err, sizeof err) == PATHSPACE_OK,
-          "给 /only 补根值失败: %s", err);
+          "populate root value /only failed: %s", err);
     clear_err();
     CHECK(pathspaceListlen(kv, "/only", &count, &max_name, err, sizeof err) ==
               PATHSPACE_NOT_INDEX,
-          "补上根值后 /only 应翻转为 NOT_INDEX（存在但不是索引）");
+          "once root value is set, /only must return NOT_INDEX");
 }
 
 static void test_copy_and_delete(void *kv) {
@@ -291,44 +291,44 @@ static void test_copy_and_delete(void *kv) {
     uint32_t max_for_root = 0;
 
     CHECK(pathspaceRealloc(kv, "/cp/src", 4, 0, &off, err, sizeof err) == PATHSPACE_OK,
-          "建 /cp/src 失败: %s", err);
+          "create /cp/src failed: %s", err);
     clear_err();
     CHECK(pathspaceCp(kv, "/cp/src", "/cp/dst", err, sizeof err) == PATHSPACE_OK,
-          "pathspaceCp 失败: %s", err);
+          "pathspaceCp failed: %s", err);
     clear_err();
     CHECK(pathspaceResolveOffset(kv, "/cp/dst", 0, &off, err, sizeof err) == PATHSPACE_OK,
-          "cp 之后目标不存在: %s", err);
+          "destination missing after cp: %s", err);
 
     CHECK(pathspaceMkindex(kv, "/cd/src/", err, sizeof err) == PATHSPACE_OK,
-          "建 /cd/src/ 失败: %s", err);
+          "create /cd/src/ failed: %s", err);
     CHECK(pathspaceRealloc(kv, "/cd/src/m", 2, 0, &off, err, sizeof err) == PATHSPACE_OK,
-          "建 /cd/src/m 失败: %s", err);
+          "create /cd/src/m failed: %s", err);
     clear_err();
     CHECK(pathspaceCpdir(kv, "/cd/src/", "/cd/dst/", err, sizeof err) == PATHSPACE_OK,
-          "pathspaceCpdir 失败: %s", err);
+          "pathspaceCpdir failed: %s", err);
     clear_err();
     CHECK(pathspaceResolveOffset(kv, "/cd/dst/m", 0, &off, err, sizeof err) == PATHSPACE_OK,
-          "cpdir 之后子项不存在: %s", err);
+          "child missing after cpdir: %s", err);
 
     clear_err();
     CHECK(pathspaceDeltree(kv, "/cd/src/", err, sizeof err) == PATHSPACE_OK,
-          "pathspaceDeltree 失败: %s", err);
+          "pathspaceDeltree failed: %s", err);
     clear_err();
     CHECK(pathspaceResolveOffset(kv, "/cd/src/m", 0, &off, err, sizeof err) ==
               PATHSPACE_MISSING,
-          "deltree 之后子项仍可 resolve");
+          "child still resolvable after deltree");
     clear_err();
     CHECK(pathspaceListlen(kv, "/cd/src/", &count_for_root, &max_for_root, err,
                          sizeof err) == PATHSPACE_MISSING,
-          "deltree 之后根索引仍存在（应为连根删）");
+          "root index still exists after deltree");
 
     clear_err();
     CHECK(pathspaceDeltree(kv, "/cd/src/", err, sizeof err) == PATHSPACE_OK,
-          "deltree 不存在的 key 应视为成功");
+          "deltree on nonexistent key must succeed idempotently");
     
     clear_err();
     CHECK(pathspaceResolveOffset(kv, "/cd/dst/m", 0, &off, err, sizeof err) == PATHSPACE_OK,
-          "deltree 连带删掉了兄弟子树 /cd/dst/");
+          "deltree deleted sibling subtree /cd/dst/");
 }
 
 int main(void) {
@@ -339,7 +339,7 @@ int main(void) {
 
     void *kv = pathspaceConnect(dsn);
     if (!kv) {
-        fprintf(stderr, "connect %s failed（后端是否已导出新符号？）\n", dsn);
+        fprintf(stderr, "connect %s failed (does backend export the storage ABI?)\n", dsn);
         return 2;
     }
 

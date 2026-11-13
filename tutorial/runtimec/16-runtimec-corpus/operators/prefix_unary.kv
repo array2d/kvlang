@@ -1,7 +1,7 @@
-// 判据：一元前缀 + - ! √ 高于全部中缀；√(144) 得 float64。
-// 若 √ 未登记为一元前缀，会被当成标识符或未知运算符。
-// 依据：01-词法/08-运算符基础.kv、09-逻辑位运算与优先级.kv。
-// 期望输出:
+// Criterion: prefix unary `+ - ! √` bind tighter than all infix operators; `√(144)` yields `float64`.
+// If `√` were not registered as a prefix unary operator, it would fail as an identifier or unknown operator.
+// Reference: 01-lexical/08-operator-basics.kv, 09-logical-bitwise-and-precedence.kv.
+// Expected output:
 //   -5
 //   5
 //   12.0

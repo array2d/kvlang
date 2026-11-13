@@ -470,7 +470,7 @@ fn variadic_parameter_accepts_any_arity() {
 fn variadic_parameter_still_checks_type() {
     let bad = "rwfunc f(*[]char/utf32 #s...) -> () {\n}\nrwfunc g() -> () {\n\tf(1, 2)\n}\n";
     
-    assert!(vet(bad).is_err(), "变参位把 int64 当字符串收了");
+    assert!(vet(bad).is_err(), "variadic parameter erroneously accepted int64 as string");
 
     let ok =
         "rwfunc f(*[]char/utf32 #s...) -> () {\n}\nrwfunc g() -> () {\n\tf(\"a\", \"b\", \"c\")\n}\n";
@@ -482,6 +482,6 @@ fn variadic_marker_must_be_last() {
     let src = "rwfunc f(*int64... #a, *int64 #b) -> () {\n}\n";
     assert!(
         !errors(src).is_empty(),
-        "非末位的 `...` 应被拒绝，实际无诊断"
+        "non-trailing `...` must be rejected, got no diagnostics"
     );
 }

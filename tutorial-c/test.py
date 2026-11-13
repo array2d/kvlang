@@ -89,13 +89,13 @@ def test_rust():
 if __name__ == "__main__":
     import argparse
 
-    ap = argparse.ArgumentParser(description="tutorial-c：存储 ABI + 语言层的多语言直调")
+    ap = argparse.ArgumentParser(description="tutorial-c: direct multi-language calls over the storage ABI and language layer")
     ap.add_argument("--pathspace-include", required=True,
-                    help="pathspace 仓的 include/（提供 <pathspace/*.h>）")
+                    help="pathspace include/ directory (providing <pathspace/*.h>)")
     ap.add_argument("--pathspace-lib", required=True,
-                    help="内含 libpathspace 的目录")
+                    help="directory containing libpathspace")
     ap.add_argument("--xvalue-lib", default=XVALUE_LIB,
-                    help="libpathlang_xvalue.a 路径（默认本仓 lib/）")
+                    help="path to libpathlang_xvalue.a (defaults to repo lib/)")
     args = ap.parse_args()
     PATHSPACE_INCLUDE = args.pathspace_include
     LIB = args.pathspace_lib

@@ -27,8 +27,8 @@ fn same_package_bare_call_is_rejected() {
         "lib p {\n    rwfunc helper_int(*int64 #x) -> (*int64 #r) { *x -> *r }\n    rwfunc caller() -> (*int64 #r) { helper_int(1) -> *r }\n}\n",
     )
     .unwrap_err();
-    assert!(err.contains("未定义函数 helper_int"), "{err}");
-    assert!(err.contains("未给出被调函数的完整路径"), "{err}");
+    assert!(err.contains("undefined function helper_int"), "{err}");
+    assert!(err.contains("missing full callee path"), "{err}");
 }
 
 #[test]
@@ -87,6 +87,6 @@ fn unknown_bare_call_is_rejected() {
     
     let (_store, mut kv) = fresh_kv("unknown");
     let err = compile(&mut kv, "rwfunc t() -> () {\n    debugger()\n}\n").unwrap_err();
-    assert!(err.contains("未定义函数 debugger"), "{err}");
-    assert!(err.contains("未给出被调函数的完整路径"), "{err}");
+    assert!(err.contains("undefined function debugger"), "{err}");
+    assert!(err.contains("missing full callee path"), "{err}");
 }

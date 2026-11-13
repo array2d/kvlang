@@ -45,9 +45,9 @@ fn require_dsn(arg: Option<&str>) -> String {
     match arg {
         Some(v) if !v.is_empty() => v.to_string(),
         _ => {
-            eprintln!("缺少 DSN：pathlanglayout 只接受 shm://，且必须显式给出（无默认值）。");
-            eprintln!("例：pathlanglayout hello.kv shm:///tmp/kv.shm");
-            eprintln!("    pathlanglayout printlib hello.kv /lib shm:///tmp/kv.shm");
+            eprintln!("missing DSN: pathlanglayout only accepts shm://, and it must be given explicitly (no default).");
+            eprintln!("example: pathlanglayout hello.kv shm:///tmp/kv.shm");
+            eprintln!("         pathlanglayout printlib hello.kv /lib shm:///tmp/kv.shm");
             std::process::exit(2);
         }
     }
@@ -95,7 +95,7 @@ fn main() {
         match format(&src) {
             Ok(s) => print!("{s}"),
             Err(e) => {
-                eprintln!("format 失败: {e}");
+                eprintln!("format failed: {e}");
                 std::process::exit(1);
             }
         }

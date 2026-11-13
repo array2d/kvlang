@@ -38,7 +38,7 @@ rwfunc add_to(*int64 #n, int64 #d) -> (inplace *int64 #acc) {
 ";
     assert!(
         passes(src),
-        "同指令读写的 inplace 应当通过；诊断={:?}",
+        "same-instruction read/write inplace should pass; diagnostic={:?}",
         diagnostic(src)
     );
 }
@@ -52,10 +52,10 @@ rwfunc only_write(*int64 #a) -> (inplace *int64 #acc) {
 }
 ";
     let message = diagnostic(src);
-    assert!(!message.is_empty(), "只写不读的 inplace 必须被拒");
+    assert!(!message.is_empty(), "write-only inplace must be rejected");
     assert!(
-        message.contains("从未被读"),
-        "诊断应指名第 1 条（从未被读），实际={message:?}"
+        message.contains("is never read"),
+        "diagnostic should report rule 1 (never read), got={message:?}"
     );
 }
 
@@ -69,10 +69,10 @@ rwfunc only_read(*int64 #a) -> (inplace *int64 #acc) {
 }
 ";
     let message = diagnostic(src);
-    assert!(!message.is_empty(), "只读不写的 inplace 必须被拒");
+    assert!(!message.is_empty(), "read-only inplace must be rejected");
     assert!(
-        message.contains("从未被写"),
-        "诊断应指名第 2 条（从未被写），实际={message:?}"
+        message.contains("is never written"),
+        "diagnostic should report rule 2 (never written), got={message:?}"
     );
 }
 
@@ -89,11 +89,11 @@ rwfunc read_then_overwrite(*int64 #a) -> (inplace *int64 #acc) {
     let message = diagnostic(src);
     assert!(
         !message.is_empty(),
-        "`*p -> x; 5 -> *p` 不是 inplace，必须被拒"
+        "`*p -> x; 5 -> *p` is not inplace and must be rejected"
     );
     assert!(
-        message.contains("没有**同一条指令**同时读写它"),
-        "诊断应指名第 3 条（无同指令读写），实际={message:?}"
+        message.contains("no single instruction both reads and writes it"),
+        "diagnostic should report rule 3 (no single-instruction read/write), got={message:?}"
     );
 }
 
@@ -106,7 +106,7 @@ rwfunc bad(inplace *int64 #a) -> (*int64 #acc) {
 }
 ";
     
-    assert!(!passes(src), "读参上的 inplace 必须被拒");
+    assert!(!passes(src), "inplace on a read param must be rejected");
 }
 
 #[test]
@@ -122,11 +122,11 @@ rwfunc two(*int64 #d) -> (inplace *int64 #a, inplace *int64 #b) {
     let message = diagnostic(src);
     assert!(
         !message.is_empty(),
-        "第二个 inplace 参数不满足第 3 条，必须报"
+        "second inplace parameter violates rule 3 and must be rejected"
     );
     assert!(
         message.contains("`b`"),
-        "诊断应指向不满足的那个参数 `b`，实际={message:?}"
+        "diagnostic should name offending parameter `b`, got={message:?}"
     );
 }
 
@@ -141,7 +141,7 @@ fn without_inplace_modifier_the_same_bodies_are_accepted() {
         let src = format!("rwfunc f(*int64 #a) -> (*int64 #acc) {{\n\t{body}}}\n");
         assert!(
             passes(&src),
-            "没有 inplace 修饰符时该函数体应当通过；诊断={:?}",
+            "body without inplace modifier should pass; diagnostic={:?}",
             diagnostic(&src)
         );
     }
@@ -167,7 +167,7 @@ fn rwir_decl_supports_inplace_on_write_parameter_and_rejects_on_read() {
         "inplace on an rwir read param must be rejected"
     );
     assert!(
-        diagnostic(invalid).contains("rwfunc 或 rwir 的写参"),
+        diagnostic(invalid).contains("rwfunc or rwir write params"),
         "diagnostic must name rwfunc or rwir write params, got={:?}",
         diagnostic(invalid)
     );
@@ -452,7 +452,7 @@ fn inplace_recursion_does_not_justify_itself() {
     ] {
         let src = format!("rwfunc f(int64 #n) -> (inplace *int64 #acc) {{\n{body}}}\n");
         assert!(
-            diagnostic(&src).contains("从未被读"),
+            diagnostic(&src).contains("is never read"),
             "recursion must not credit itself: {src}"
         );
     }
@@ -479,7 +479,7 @@ fn inplace_reads_ignore_literals_member_keys_and_shadowing() {
         "rwfunc f(int64 #d) -> (inplace *int64 #acc) {\n\tprintln(\"acc\") -> *acc\n}\n",
         "struct S {\n\tacc:int64=0\n}\nrwfunc f(*/lib/S #q) -> (inplace *int64 #acc) {\n\t(*q)·acc -> *acc\n}\n",
     ] {
-        assert!(diagnostic(src).contains("从未被读"), "must be rejected as never read: {src}");
+        assert!(diagnostic(src).contains("is never read"), "must be rejected as never read: {src}");
     }
     let shadow = "rwfunc f(*[]int64 #d) -> (inplace *int64 #acc) {\n\t0 -> *acc\n\tfor (acc in *d) {\n\t\tacc + 1 -> *acc\n\t}\n}\n";
     assert!(
@@ -542,7 +542,7 @@ fn inplace_credit_uses_last_duplicate_definition() {
         "rwfunc f(*int64 #d) -> (inplace *int64 #r) {\n\tg(*d) -> *r\n}\n",
     );
     assert!(
-        diagnostic(rwfunc).contains("从未被读"),
+        diagnostic(rwfunc).contains("is never read"),
         "{}",
         diagnostic(rwfunc)
     );
@@ -552,7 +552,7 @@ fn inplace_credit_uses_last_duplicate_definition() {
         "rwfunc f(*int64 #d) -> (inplace *int64 #r) {\n\tn(*d) -> *r\n}\n",
     );
     assert!(
-        diagnostic(rwir).contains("从未被读"),
+        diagnostic(rwir).contains("is never read"),
         "{}",
         diagnostic(rwir)
     );
@@ -561,5 +561,5 @@ fn inplace_credit_uses_last_duplicate_definition() {
 #[test]
 fn inplace_operator_word_rwir_decl_gets_no_credit() {
     let src = "rwir add(*int64 #a, *int64 #b) -> (inplace *int64 #acc)\nrwfunc f(int64 #x) -> (inplace *int64 #r) {\n\tadd(x, 1) -> *r\n}\n";
-    assert!(diagnostic(src).contains("从未被读"), "{}", diagnostic(src));
+    assert!(diagnostic(src).contains("is never read"), "{}", diagnostic(src));
 }

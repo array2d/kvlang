@@ -1,7 +1,7 @@
-// 判据：r"…" 零转义；r#"…"# 的内容可含双引号。
-// 若按普通转义串处理，第一行会把 \n 变成换行。
-// 依据：01-词法/07-字符串与空值布尔字面量.kv。
-// 期望输出:
+// Criterion: `r"…"` performs zero escape processing; `r#"…"#` may contain unescaped double quotes.
+// Treating raw strings as escaped strings would turn `\n` into a newline on the first line.
+// Reference: 01-lexical/07-string-null-bool-literals.kv.
+// Expected output:
 //   raw\nliteral
 //   he said "hi"
 

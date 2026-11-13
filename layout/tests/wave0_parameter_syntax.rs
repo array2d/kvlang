@@ -47,15 +47,15 @@ fn check(tag: &str, src: &str) -> (bool, String) {
 
 fn assert_ok(tag: &str, src: &str) {
     let (ok, text) = check(tag, src);
-    assert!(ok, "{tag} 应通过，实际诊断：\n{text}");
+    assert!(ok, "{tag} should pass, got diagnostics:\n{text}");
 }
 
 fn assert_err(tag: &str, src: &str, expected: &str) {
     let (ok, text) = check(tag, src);
-    assert!(!ok, "{tag} 应被拒绝，却通过了");
+    assert!(!ok, "{tag} should be rejected, but passed");
     assert!(
         text.contains(expected),
-        "{tag} 的错误文本要含 {expected:?}，实际：\n{text}"
+        "{tag} error text must contain {expected:?}, got:\n{text}"
     );
 }
 
@@ -65,7 +65,7 @@ fn implicit_deref_on_member_access_is_rejected() {
         "implicit-member",
         "struct Point {\n\tx:int64=0\n\ty:int64=0\n}\n\
          rwfunc read(*Point #p) -> (int64 #r) {\n\tp·x -> r\n}\n",
-        "对指针类型的成员访问必须显式解引用",
+        "member access on pointer requires explicit dereference",
     );
 }
 
@@ -74,7 +74,7 @@ fn implicit_deref_on_coordinate_access_is_rejected() {
     assert_err(
         "implicit-coord",
         "rwfunc first(*int64·int64 #p) -> (int64 #r) {\n\tp·[1] -> r\n}\n",
-        "对指针类型的坐标访问必须显式解引用",
+        "coordinate access on pointer requires explicit dereference",
     );
 }
 
@@ -83,7 +83,7 @@ fn old_parameter_syntax_is_rejected() {
     assert_err(
         "oldsyntax",
         "rwfunc add_one(n:int64) -> (r:int64) {\n\tn + 1 -> r\n}\n",
-        "参数声明必须是 `*T #name` 或 `T #name`",
+        "parameter declaration must be `*T #name` or `T #name`",
     );
 }
 
@@ -92,7 +92,7 @@ fn value_copy_of_container_requires_pointer_form() {
     assert_err(
         "valuecopy-container",
         "rwfunc take(int64·int64 #p) -> (int64 #r) {\n\t1 -> r\n}\n",
-        "值复制参数只能是字符串、数值或 bool",
+        "value-copy parameter must be a string, number, or bool",
     );
 }
 
@@ -101,7 +101,7 @@ fn bare_write_to_pointer_parameter_is_rejected() {
     assert_err(
         "bare-write",
         "rwfunc f(*[]int64 #arr) -> (*[]int64 #acc) {\n\tscatterarray·append(*arr, 1) -> acc\n}\n",
-        "写指针形参必须显式解引用",
+        "writing to pointer parameter requires explicit dereference",
     );
 }
 
@@ -118,7 +118,7 @@ fn untyped_value_copy_parameter_is_rejected() {
     assert_err(
         "untyped-value-copy",
         "rwfunc f(#a) -> () {\n\t1 -> x\n}\n",
-        "参数必须声明类型",
+        "parameter must declare a type",
     );
 }
 
@@ -140,7 +140,7 @@ fn inplace_after_the_name_is_rejected() {
     assert_err(
         "inplace-after-name",
         "rwfunc f(*int64 #n) -> (*int64 #r inplace) {\n\t*r = *r + *n\n}\n",
-        "`inplace` 写在参数类型之前",
+        "`inplace` must precede the parameter type",
     );
 }
 
@@ -149,7 +149,7 @@ fn dereferencing_value_copy_parameter_is_rejected() {
     assert_err(
         "deref-value-copy",
         "rwfunc f(int64 #a) -> () {\n\tsub(*a) -> x\n}\n",
-        "值复制参数不可解引用",
+        "cannot dereference value-copy parameter",
     );
 }
 
@@ -159,7 +159,7 @@ fn unconstrained_pointer_parameter_is_rejected() {
     assert_err(
         "empty-kindexpr-ptr",
         "rwfunc f(* #a) -> () {\n\t*a + 1 -> x\n}\n",
-        "参数必须声明类型",
+        "parameter must declare a type",
     );
 }
 
@@ -168,7 +168,7 @@ fn implicit_deref_on_write_param_member_is_rejected() {
     assert_err(
         "implicit-write-member",
         "struct N {\n\tval:int64=0\n}\nrwfunc f() -> (*N #r) {\n\tr·val = 5\n}\n",
-        "对指针类型的成员访问必须显式解引用",
+        "member access on pointer requires explicit dereference",
     );
 }
 
@@ -194,7 +194,7 @@ fn per_member_pointer_union_is_rejected() {
     assert_err(
         "union-per-member",
         "rwfunc f(*int64|*float64 #x) -> (int64 #r) {\n\t1 -> r\n}\n",
-        "`*` 作用于整个类型表达式",
+        "`*` applies to the whole type expression",
     );
 }
 
@@ -219,7 +219,7 @@ fn implicit_deref_subscript_write_is_rejected() {
     assert_err(
         "implicit-sub-write",
         "rwfunc t(*int64 #i) -> (*[]char/utf32 #r) {\n\tr[*i] = 72\n}\n",
-        "对指针类型的坐标访问必须显式解引用",
+        "coordinate access on pointer requires explicit dereference",
     );
 }
 
@@ -244,8 +244,8 @@ fn single_pointer_write_param_rejects_address() {
 fn empty_comment_after_hash_is_rejected() {
     assert_err(
         "empty-comment",
-        "rwfunc f(*int64 #x) -> (*int64 #R) {\n\t*x + 1 -> *R   # 这行是注释，不该变成指令\n}\n",
-        "空注释",
+        "rwfunc f(*int64 #x) -> (*int64 #R) {\n\t*x + 1 -> *R   # trailing comment, must not become an instruction\n}\n",
+        "empty comment",
     );
 }
 
