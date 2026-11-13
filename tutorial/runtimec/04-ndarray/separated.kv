@@ -2,8 +2,8 @@
 rwfunc test() -> () {
 	a:[]int64 = [10, 20, 30]       
 	b:'[int64]'int64 = scatterarray·newscatter(a)          
-	kvspace·listlen(b) -> n1:int64
-	println("kvspace·listlen(b) =", n1)
+	pathspace·listlen(b) -> n1:int64
+	println("pathspace·listlen(b) =", n1)
 	println("b[0] =", b·[0])       
 	println("b[2] =", b·[2])
 	c:[]int64 = scatterarray·newcompact(b)          

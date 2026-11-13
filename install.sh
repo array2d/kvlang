@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-REPO=kvlang/kvlang
-KVSPACE_BACKEND_DIR=kvspace   # 后端与 dispatch 前端同放 <prefix>/lib/kvspace
+REPO=pathlang/pathlang
+PATHSPACE_BACKEND_DIR=pathspace   # 后端与 dispatch 前端同放 <prefix>/lib/pathspace
 
 os=$(uname -s)
 arch=$(uname -m)
@@ -10,7 +10,7 @@ case "$os-$arch" in
   Linux-x86_64) plat=linux-x86_64 ;;
   Darwin-arm64) plat=darwin-arm64 ;;
   *)
-    echo "kvlang: 不支持的平台 $os-$arch（已发布 linux-x86_64 / darwin-arm64）" >&2
+    echo "pathlang: 不支持的平台 $os-$arch（已发布 linux-x86_64 / darwin-arm64）" >&2
     exit 1
     ;;
 esac
@@ -27,11 +27,11 @@ tag="${VERSION:-}"
 if [ -z "$tag" ]; then
   tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
         | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-  [ -n "$tag" ] || { echo "kvlang: 无法获取最新版本号" >&2; exit 1; }
+  [ -n "$tag" ] || { echo "pathlang: 无法获取最新版本号" >&2; exit 1; }
 fi
 
 base="${BASE_URL:-https://github.com/$REPO/releases/download/$tag}"
-tarball="kvlang-abi-$tag-$plat.tar.gz"
+tarball="pathlang-abi-$tag-$plat.tar.gz"
 case "$plat" in
   linux-*)  sums=SHA256SUMS-linux ;;
   darwin-*) sums=SHA256SUMS-macos ;;
@@ -40,7 +40,7 @@ esac
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
-echo "kvlang $tag ($plat) → $PREFIX"
+echo "pathlang $tag ($plat) → $PREFIX"
 curl -fsSL "$base/$tarball" -o "$tmp/$tarball"
 
 if curl -fsSL "$base/$sums" -o "$tmp/$sums" 2>/dev/null; then
@@ -51,24 +51,24 @@ if curl -fsSL "$base/$sums" -o "$tmp/$sums" 2>/dev/null; then
     else
       got=$(shasum -a 256 "$tmp/$tarball" | cut -d' ' -f1)
     fi
-    [ "$want" = "$got" ] || { echo "kvlang: 校验失败（sha256 不匹配）" >&2; exit 1; }
+    [ "$want" = "$got" ] || { echo "pathlang: 校验失败（sha256 不匹配）" >&2; exit 1; }
     echo "  ✓ sha256 校验通过"
   fi
 fi
 
 tar xzf "$tmp/$tarball" -C "$tmp"
-root="$tmp/kvlang-abi-$tag-$plat"
-[ -d "$root" ] || { echo "kvlang: 包结构异常" >&2; exit 1; }
+root="$tmp/pathlang-abi-$tag-$plat"
+[ -d "$root" ] || { echo "pathlang: 包结构异常" >&2; exit 1; }
 
-$SUDO mkdir -p "$PREFIX/lib" "$PREFIX/lib/$KVSPACE_BACKEND_DIR" "$PREFIX/bin" "$PREFIX/include"
+$SUDO mkdir -p "$PREFIX/lib" "$PREFIX/lib/$PATHSPACE_BACKEND_DIR" "$PREFIX/bin" "$PREFIX/include"
 
 if [ -d "$root/lib" ]; then
   for f in "$root/lib"/*.so* "$root/lib"/*.dylib; do
     [ -e "$f" ] && $SUDO cp -P "$f" "$PREFIX/lib/"     # -P 保符号链接原样
   done
-  if [ -d "$root/lib/$KVSPACE_BACKEND_DIR" ]; then
-    for f in "$root/lib/$KVSPACE_BACKEND_DIR"/*.so* "$root/lib/$KVSPACE_BACKEND_DIR"/*.dylib; do
-      [ -e "$f" ] && $SUDO cp -P "$f" "$PREFIX/lib/$KVSPACE_BACKEND_DIR/"
+  if [ -d "$root/lib/$PATHSPACE_BACKEND_DIR" ]; then
+    for f in "$root/lib/$PATHSPACE_BACKEND_DIR"/*.so* "$root/lib/$PATHSPACE_BACKEND_DIR"/*.dylib; do
+      [ -e "$f" ] && $SUDO cp -P "$f" "$PREFIX/lib/$PATHSPACE_BACKEND_DIR/"
     done
   fi
 fi
@@ -86,17 +86,17 @@ if [ -d "$root/include" ]; then
 fi
 
 echo
-echo "✅ kvlang $tag 已安装到 $PREFIX"
-echo "   CLI      : $PREFIX/bin/{byteseek,kvlanglayout,kvspace}"
-echo "   库       : $PREFIX/lib/  +  $PREFIX/lib/$KVSPACE_BACKEND_DIR/"
-echo "   头       : $PREFIX/include/{kvlang,kvspace,...}"
+echo "✅ pathlang $tag 已安装到 $PREFIX"
+echo "   CLI      : $PREFIX/bin/{pathseek,pathlanglayout,pathspace}"
+echo "   库       : $PREFIX/lib/  +  $PREFIX/lib/$PATHSPACE_BACKEND_DIR/"
+echo "   头       : $PREFIX/include/{pathlang,pathspace,...}"
 echo
-echo "试用（后端由 KVSPACE DSN 选择）："
-echo "  KVSPACE=shm:///tmp/kvlang.shm $PREFIX/bin/byteseek -c 'println(\"hello\")'"
+echo "试用（后端由 PATHSPACE DSN 选择）："
+echo "  PATHSPACE=shm:///tmp/pathlang.shm $PREFIX/bin/pathseek -c 'println(\"hello\")'"
 case "$plat" in
   darwin-*)
     echo
     echo "注意：macOS 无 ldconfig，若 CLI 或扩展找不到库，请设："
-    echo "  DYLD_FALLBACK_LIBRARY_PATH=$PREFIX/lib:$PREFIX/lib/$KVSPACE_BACKEND_DIR"
+    echo "  DYLD_FALLBACK_LIBRARY_PATH=$PREFIX/lib:$PREFIX/lib/$PATHSPACE_BACKEND_DIR"
     ;;
 esac

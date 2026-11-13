@@ -1,5 +1,5 @@
 
-use kvlanglayout::{init_dirs, kvkind, Kv};
+use pathlanglayout::{init_dirs, kvkind, Kv};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -18,7 +18,7 @@ impl TempDir {
 }
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_kvlanglayout")
+    env!("CARGO_BIN_EXE_pathlanglayout")
 }
 
 fn repo_root() -> PathBuf {
@@ -35,7 +35,7 @@ fn test_arg(name: &str) -> Option<String> {
 
 fn temp_dir(tag: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!(
-        "kvlanglayout_uint64_{}_{}",
+        "pathlanglayout_uint64_{}_{}",
         tag,
         std::process::id()
     ));
@@ -162,9 +162,9 @@ fn uint64_comparison_and_max_yield_unsigned_values() {
     
     let term = test_arg("term-bin")
         .map(PathBuf::from)
-        .unwrap_or_else(|| root.join("bin/byteseek"));
+        .unwrap_or_else(|| root.join("bin/pathseek"));
     if !term.is_file() {
-        eprintln!("skip: {} not built; run `make byteseek`", term.display());
+        eprintln!("skip: {} not built; run `make pathseek`", term.display());
         return;
     }
     let dir = temp_dir("exec");
@@ -175,11 +175,11 @@ fn uint64_comparison_and_max_yield_unsigned_values() {
     let lib = format!(
         "{}:{}:{}",
         root.join("lib").display(),
-        root.join("lib/kvspace").display(),
+        root.join("lib/pathspace").display(),
         root.join("bin").display()
     );
     let vars = [
-        env("KVSPACE", &dsn),
+        env("PATHSPACE", &dsn),
         env("LD_LIBRARY_PATH", &lib),
         env("DYLD_FALLBACK_LIBRARY_PATH", &lib),
     ];

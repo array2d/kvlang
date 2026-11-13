@@ -1,0 +1,18 @@
+
+lib pl_probe {
+	rwfunc add(*int64 #a, *int64 #b) -> (*int64 #c) {
+		*a + *b -> *c
+	}
+}
+
+rwfunc test() -> () {
+	pathlang·printlib("/lib/pl_probe") -> before:[]char/utf32
+	string·contains(before, "rwfunc add") -> h1:bool
+	println("before-has-fn=", h1)
+	pathspace·del("/lib/pl_probe·add.src") -> _
+	pathlang·printlib("/lib/pl_probe") -> after:[]char/utf32
+	string·contains(after, "rwfunc add") -> h2:bool
+	println("after-has-fn=", h2)
+	string·cmp(before, after) -> same:int64
+	println("stable=", same)
+}

@@ -40,7 +40,7 @@ vmbin_execute(const binrwir_binfunc_t *program,
               const binrwir_execution_plan_t *execution_plan,
               binrwir_binvthread_frame_t *frame,
               const binrwir_registry_t *builtin_registry,
-              void *kvspace_handle,
+              void *pathspace_handle,
               vmbin_profile_t *profile,
               binrwir_execution_exit_t *output_exit);
 

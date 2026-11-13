@@ -1,0 +1,13 @@
+
+rwfunc test() -> () {
+	pathspace·deltree("/mtest")
+	1 -> /mtest/a
+	2 -> /mtest/b
+	3 -> /mtest/b/sub
+	4 -> /mtest/c
+	n:int64 = pathspace·count("/mtest/")
+	println("count:", n)
+	ms:'[int64]'[]char/utf32 = {}
+	pathspace·members("/mtest/") -> (ms, cnt:int64)
+	println("members:", cnt)
+}

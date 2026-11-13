@@ -39,7 +39,7 @@
 
 struct runtimec_session_t {
     
-    runtimec_kvspace_access_t *kvspace_access;
+    runtimec_pathspace_access_t *pathspace_access;
     runtimec_session_options_t options;
     vmkv_encoder_t *vmkv_encoder;
     binrwir_compiler_t *binrwir_compiler;
@@ -49,7 +49,7 @@ struct runtimec_session_t {
     
     uint64_t checkpoint_sequence;
     
-    void *kvspace_handle;
+    void *pathspace_handle;
     
     runtimec_frame_state_table_t frames;
 };
@@ -85,14 +85,14 @@ static runtimec_status_t runtimec_session_forward(
 }
 
 runtimec_status_t runtimec_session_create(
-    runtimec_kvspace_access_t *kvspace_access,
+    runtimec_pathspace_access_t *pathspace_access,
     const runtimec_session_options_t *options,
     runtimec_session_t **output_session, runtimec_error_t *error) {
     runtimec_error_reset(error);
     if (output_session != NULL) {
         *output_session = NULL;
     }
-    if (kvspace_access == NULL || options == NULL ||
+    if (pathspace_access == NULL || options == NULL ||
         options->structure_size != sizeof(*options) ||
         !runtimec_allocator_is_valid(&options->allocator) ||
         options->compilation_cache_capacity == 0U ||
@@ -111,10 +111,10 @@ runtimec_status_t runtimec_session_create(
                                      "session allocation failed");
     }
     memset(session, 0, sizeof(*session));
-    session->kvspace_access = kvspace_access;
+    session->pathspace_access = pathspace_access;
     session->options = *options;
     
-    session->kvspace_handle = options->kvspace_handle;
+    session->pathspace_handle = options->pathspace_handle;
     
     runtimec_frame_state_table_initialize(&session->frames, allocator);
 
@@ -377,29 +377,29 @@ runtimec_status_t runtimec_session_destroy(runtimec_session_t *session) {
                                          _Alignof(runtimec_session_t));
 }
 
-runtimec_status_t runtimec_session_get_kvspace_access(
+runtimec_status_t runtimec_session_get_pathspace_access(
     runtimec_session_t *session,
-    runtimec_kvspace_access_t **output_kvspace_access) {
-    if (output_kvspace_access != NULL) {
-        *output_kvspace_access = NULL;
+    runtimec_pathspace_access_t **output_pathspace_access) {
+    if (output_pathspace_access != NULL) {
+        *output_pathspace_access = NULL;
     }
-    if (session == NULL || output_kvspace_access == NULL) {
+    if (session == NULL || output_pathspace_access == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    *output_kvspace_access = session->kvspace_access;
+    *output_pathspace_access = session->pathspace_access;
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-runtimec_status_t runtimec_session_get_kvspace_handle(
-    runtimec_session_t *session, void **output_kvspace_handle) {
-    if (output_kvspace_handle != NULL) {
-        *output_kvspace_handle = NULL;
+runtimec_status_t runtimec_session_get_pathspace_handle(
+    runtimec_session_t *session, void **output_pathspace_handle) {
+    if (output_pathspace_handle != NULL) {
+        *output_pathspace_handle = NULL;
     }
-    if (session == NULL || output_kvspace_handle == NULL) {
+    if (session == NULL || output_pathspace_handle == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
     
-    *output_kvspace_handle = session->kvspace_handle;
+    *output_pathspace_handle = session->pathspace_handle;
     return RUNTIMEC_STATUS_SUCCESS;
 }
 

@@ -45,7 +45,7 @@ bench/iops/.run/
 .idea/
 .vscode/*
 !.vscode/settings.json
-!.vscode/kvlang.tmLanguage.json
+!.vscode/pathlang.tmLanguage.json
 *.swp
 *.swo
 *~
@@ -61,7 +61,7 @@ appendonly.aof
 # ── Project-specific ─────────────────────────────────
 /tmp/
 /post/
-/kvlang
+/pathlang
 /json
 workspace/
 
@@ -73,21 +73,21 @@ tutorial/test_failures.csv
 
 /bin/
 
-# ── layout dump 产物（审查 lower 后的 kvspace code）──
+# ── layout dump 产物（审查 lower 后的 pathspace code）──
 *.kv.dump
-kvlanglayout
+pathlanglayout
 
 # ── 本地 claude 说明（不入库）──
 /.claude/
 /claude.md
 
-# ── kvspace shm 测试误落仓库根（相对路径 DSN）──
+# ── pathspace shm 测试误落仓库根（相对路径 DSN）──
 silent*
 dumptest*
 d[0-9][0-9][0-9][0-9][0-9][0-9][0-9]
 
 # 五语言对齐 reference 材料（本地查阅用，不入库）
-stdlib/kvlang/reference/
+stdlib/pathlang/reference/
 
 # tutorial shm 测试产物（相对路径 DSN）
 kvtut*
@@ -95,10 +95,10 @@ kvtut*
 # tutorial bench 空产物
 /tutorial/benchmark.csv
 
-# byteseek 测试 shm 产物
-kvlangtest*
+# pathseek 测试 shm 产物
+pathlangtest*
 
-# shm 测试残留（相对路径 DSN 标记 + slotsboxmalloc 后端文件）
+# shm 测试残留（相对路径 DSN 标记 + slotboxalloc 后端文件）
 /tut
 /wptest
 *.sbo.data
@@ -125,18 +125,18 @@ rp
 rp.*
 
 # 外部依赖拷贝 / 构建产物（不入库；头来自源仓 deps/，.so 由 make artifact 生成）
-/include/kvspace/
-/include/blockmalloc/
-/include/slotsboxmalloc/
+/include/pathspace/
+/include/blockalloc/
+/include/slotboxalloc/
 /lib/*.so*
-/lib/kvspace/
+/lib/pathspace/
 # 例外要压在全局 *.a / *.so 之后才生效，故在文件末尾再声明一次。
 
 # 架构图（本地生成可视化，不入库）
 docs/diagrams/
 
 # Mermaid 生成脚本（本地工具，不入库）
-docs/kvlang_dataflow_mermaid.py
+docs/pathlang_dataflow_mermaid.py
 
 # Rust 绑定的链接路径配置（调用方本地生成，不入库）
 bindings/rust/.cargo/config.toml

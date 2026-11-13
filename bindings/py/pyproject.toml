@@ -3,9 +3,9 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kvspace"
+name = "pathspace"
 version = "0.1.0"
-description = "Python ctypes wrapper for libkvspace.so (public 12-symbol storage ABI)"
+description = "Python ctypes wrapper for libpathspace.so (public 12-symbol storage ABI)"
 requires-python = ">=3.9"
 
 [tool.setuptools.packages.find]

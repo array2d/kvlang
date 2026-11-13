@@ -1,15 +1,15 @@
 
-use kvlanglayout::{compile, init_dirs, Kv};
+use pathlanglayout::{compile, init_dirs, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_kvlanglayout")
+    env!("CARGO_BIN_EXE_pathlanglayout")
 }
 
 fn temp_file(tag: &str, src: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
-        "kvlanglayout_unionmsg_{}_{}.kv",
+        "pathlanglayout_unionmsg_{}_{}.kv",
         tag,
         std::process::id()
     ));
@@ -20,21 +20,21 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
 }
 
 fn dsn(tag: &str) -> String {
-    kvlanglayout::ffi::test_dsn(&format!("unionmsg_{tag}"))
+    pathlanglayout::ffi::test_dsn(&format!("unionmsg_{tag}"))
 }
 
 struct TempStore(String);
 
 impl Drop for TempStore {
     fn drop(&mut self) {
-        kvlanglayout::ffi::remove_test_store(&self.0);
+        pathlanglayout::ffi::remove_test_store(&self.0);
     }
 }
 
 fn fresh_kv(tag: &str) -> (TempStore, Kv) {
-    let dsn = kvlanglayout::ffi::test_dsn(&format!("union_{tag}"));
+    let dsn = pathlanglayout::ffi::test_dsn(&format!("union_{tag}"));
     let store = TempStore(dsn.clone());
-    kvlanglayout::ffi::remove_test_store(&dsn);
+    pathlanglayout::ffi::remove_test_store(&dsn);
 
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
@@ -116,5 +116,5 @@ fn union_mismatch_reports_both_sides() {
         "stderr: {err}"
     );
     let _ = std::fs::remove_file(&file);
-    kvlanglayout::ffi::remove_test_store(&db);
+    pathlanglayout::ffi::remove_test_store(&db);
 }

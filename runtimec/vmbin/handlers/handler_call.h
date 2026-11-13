@@ -11,17 +11,17 @@
 #define VMBIN_HANDLER_MAX_INDEX_COUNT 8
 
 #define RUNTIMEC_CONTAINER_DIMENSION_UNBOUNDED INT64_C(-1)
-#include <kvspace/kvspace_xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
 
 #include "contract/diagnostic_band.h"
-#include "contract/kvspace_interface.h"
+#include "contract/pathspace_interface.h"
 #include "binrwir/binvthread_frame.h"
 #include "binrwir/instruction.h"
 #include "contract/error.h"
 #include "contract/status.h"
 #include "contract/view.h"
-#include <kvlang/xvalue.h>
-#include <kvspace/kvspace_xvalue.h>
+#include <pathlang/xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
 #include "vmbin/frame_target_key.h"
 #include "vmbin/value_access.h"
 
@@ -157,7 +157,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
     }
     memcpy(langtype_buffer, declared.data, declared.size);
     langtype_buffer[declared.size] = '\0';
-    if (kvlangXvalueHeadNewSlack(bytes, (uint64_t)length,
+    if (pathlangXvalueHeadNewSlack(bytes, (uint64_t)length,
                                   langtype_buffer, &wire, &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
@@ -171,7 +171,7 @@ static inline runtimec_status_t vmbin_handler_write_new_value(
         sizeof(key_buffer), &error);
     if (status == RUNTIMEC_STATUS_SUCCESS) {
         message[0] = '\0';
-        if (!runtimec_kvspace_write_wire(frame->kvspace_handle, key_buffer, wire,
+        if (!runtimec_pathspace_write_wire(frame->pathspace_handle, key_buffer, wire,
                                          (uint32_t)wire_size, message,
                                          sizeof(message))) {
             status = RUNTIMEC_STATUS_ERROR;
@@ -775,7 +775,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
         const binrwir_instruction_view_t *instruction,                             \
         binrwir_execution_exit_t *output_exit) {                                   \
         if (instruction->write_arguments.count != 1U ||                            \
-            frame->kvspace_handle == NULL) {                                       \
+            frame->pathspace_handle == NULL) {                                       \
             vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,               \
                                VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY,                \
                                instruction->source_logical_program_counter);       \
@@ -816,7 +816,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
         binrwir_execution_exit_t *output_exit) {                                   \
         if (instruction->read_arguments.count < 2U ||                              \
             instruction->write_arguments.count != 1U ||                            \
-            frame->kvspace_handle == NULL) {                                       \
+            frame->pathspace_handle == NULL) {                                       \
             vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,               \
                                VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY,                \
                                instruction->source_logical_program_counter);       \
@@ -837,7 +837,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
         binrwir_execution_exit_t *output_exit) {                                   \
         if (instruction->read_arguments.count < 2U ||                              \
             instruction->write_arguments.count != 1U ||                            \
-            frame->kvspace_handle == NULL) {                                       \
+            frame->pathspace_handle == NULL) {                                       \
             vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,               \
                                VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY,                \
                                instruction->source_logical_program_counter);       \
@@ -858,7 +858,7 @@ static inline runtimec_status_t vmbin_handler_prepare_indices(
         binrwir_execution_exit_t *output_exit) {                                   \
         if (instruction->read_arguments.count != 1U ||                             \
             instruction->write_arguments.count != 1U ||                            \
-            frame->kvspace_handle == NULL) {                                       \
+            frame->pathspace_handle == NULL) {                                       \
             vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,               \
                                VMBIN_HANDLER_CALL_DIAG_WRONG_ARITY,                \
                                instruction->source_logical_program_counter);       \

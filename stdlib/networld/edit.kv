@@ -22,7 +22,7 @@ lib networld/edit {
 				if (*lines > 0 && lo + *lines - 1 < *total) { hi = lo + *lines - 1 }
 				i:int64 = lo
 				while (i <= hi) {
-					kvspace·listat(parts, i - 1) -> kk:char/utf8
+					pathspace·listat(parts, i - 1) -> kk:char/utf8
 					parts·*kk -> ln:[]char/utf32
 					string·formatint(i, 10) -> no:char/utf32
 					string·concat(*view, no) -> *view
@@ -91,8 +91,8 @@ lib networld/edit {
 	rwfunc multi(*[]char/utf32 #p, *'[int64]'[]char/utf32 #olds,
 	             *'[int64]'[]char/utf32 #news, *int64 #dry) -> (
 	             *int64 #done, *int64 #bad, *int64 #code) {
-		kvspace·listlen(*olds) -> cnt:int64
-		kvspace·listlen(*news) -> m:int64
+		pathspace·listlen(*olds) -> cnt:int64
+		pathspace·listlen(*news) -> m:int64
 		*done = 0
 		*bad = -1
 		networld/fs·isutf8(*p) -> u8ok:bool
@@ -109,8 +109,8 @@ lib networld/edit {
 				*code = 0
 				i:int64 = 0
 				while (i < cnt) {
-					kvspace·listat(*olds, i) -> ko:char/utf8
-					kvspace·listat(*news, i) -> kn:char/utf8
+					pathspace·listat(*olds, i) -> ko:char/utf8
+					pathspace·listat(*news, i) -> kn:char/utf8
 					(*olds)·*ko -> o:[]char/utf32
 					(*news)·*kn -> w:[]char/utf32
 					string·count(t, o) -> c:int64

@@ -1,0 +1,19 @@
+{
+  "name": "pathlang",
+  "displayName": "pathlang",
+  "version": "0.1.0",
+  "engines": { "vscode": "*" },
+  "contributes": {
+    "languages": [{
+      "id": "pathlang",
+      "aliases": ["pathlang", "kv"],
+      "extensions": [".kv", ".kv.dump"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "pathlang",
+      "scopeName": "source.pathlang",
+      "path": "./syntaxes/pathlang.tmLanguage.json"
+    }]
+  }
+}

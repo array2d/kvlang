@@ -13,7 +13,7 @@ static int writer(const char *path, int64_t seed) {
     int errors = 0;
     void *kv = kv_open_shm(path);
     if (!kv) { printf("FAIL: writer open\n"); return 1; }
-    kvspaceMkindex(kv, "/mp/", NULL, 0);
+    pathspaceMkindex(kv, "/mp/", NULL, 0);
 
     printf("[writer] round 1: write %d ints\n", N_KEYS);
     for (int i = 0; i < N_KEYS; i++) {
@@ -50,7 +50,7 @@ static int writer(const char *path, int64_t seed) {
     }
 
     printf("[writer] done, errors=%d\n", errors);
-    kvspaceClose(kv);
+    pathspaceClose(kv);
     return errors;
 }
 
@@ -111,13 +111,13 @@ static int reader(const char *path, int64_t seed) {
     }
     printf("[reader]   big values found: %d/20\n", big_ok);
 
-    kvspaceClose(kv);
+    pathspaceClose(kv);
     printf("[reader] done, errors=%d\n", errors);
     return errors;
 }
 
 int main(int argc, char **argv) {
-    const char *path = argc > 1 ? argv[1] : "/tmp/kvspace_mp.shm";
+    const char *path = argc > 1 ? argv[1] : "/tmp/pathspace_mp.shm";
     int64_t seed = (int64_t)time(NULL);
 
     unlink(path);

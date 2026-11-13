@@ -1,7 +1,7 @@
 
 rwfunc test() -> () {
 	t0:time = time·now()
-	println("hello kvlang")
+	println("hello pathlang")
 	t1:time = time·now()
 	delta:time/duration = time·sub(t1, t0)
 	ns:int64 = time/duration·as_nanos(delta)

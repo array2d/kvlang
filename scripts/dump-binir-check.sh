@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT" || exit 2
 
-KVLANG_BIN="${KVLANG_BIN:-$ROOT/bin/byteseek}"
+PATHLANG_BIN="${PATHLANG_BIN:-$ROOT/bin/pathseek}"
 CASE_TIMEOUT="${KV_CASE_TIMEOUT:-180}"
 
 FILE="benchmark/cases/iops/iops.kv"
@@ -43,12 +43,12 @@ while (($#)); do
 	shift
 done
 
-[ -x "$KVLANG_BIN" ] || die "KVLANG_BIN 不可执行：$KVLANG_BIN"
+[ -x "$PATHLANG_BIN" ] || die "PATHLANG_BIN 不可执行：$PATHLANG_BIN"
 [ -f "$FILE" ] || die "文件不存在：$FILE"
 [[ "$SCALE" =~ ^[0-9]+$ ]] || die "--scale 需为正整数：$SCALE"
 command -v timeout >/dev/null 2>&1 || die "需要 coreutils timeout"
 
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/kvlang-binir.XXXXXX")" || die "mktemp 失败"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/pathlang-binir.XXXXXX")" || die "mktemp 失败"
 cleanup() { [ "$KEEP" -eq 1 ] || rm -rf "$TMP"; }
 trap cleanup EXIT
 
@@ -58,8 +58,8 @@ DSN="shm://$TMP/store.shm"
 STDOUT="$TMP/stdout.txt"
 STDERR="$TMP/stderr.txt"
 
-env KVSPACE="$DSN" RC2_DUMP_BINIR=1 timeout -k 5 "$CASE_TIMEOUT" \
-	"$KVLANG_BIN" "$SRC" >"$STDOUT" 2>"$STDERR"
+env PATHSPACE="$DSN" RC2_DUMP_BINIR=1 timeout -k 5 "$CASE_TIMEOUT" \
+	"$PATHLANG_BIN" "$SRC" >"$STDOUT" 2>"$STDERR"
 RC=$?
 
 if [ "$KEEP" -eq 1 ]; then

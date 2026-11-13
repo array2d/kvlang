@@ -10,7 +10,7 @@
 #include "contract/status.h"
 #include "contract/view.h"
 #include "vmbin/handlers/handler_call.h"
-#include <kvspace/kvspace_xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
 #include "vmbin/frame_target_key.h"
 #include "vmbin/handlers/string_text.h"
 

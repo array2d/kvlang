@@ -1,29 +1,29 @@
 
-use kvspace::xvalue;
+use pathspace::xvalue;
 use std::os::raw::c_char;
 extern "C" {
-    fn kvlangXvalueHeadNewScalar(
+    fn pathlangXvalueHeadNewScalar(
         raw: *const u8,
         raw_len: u32,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> i32;
-    fn kvlangXvalueHeadNewSlack(
+    fn pathlangXvalueHeadNewSlack(
         data: *const u8,
         data_len: u64,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> i32;
-    fn kvlangXvalueHeadNewPtr(
+    fn pathlangXvalueHeadNewPtr(
         path: *const u8,
         path_len: u32,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> i32;
-    fn kvlangXvalueHeadNewExt(
+    fn pathlangXvalueHeadNewExt(
         locator: *const u8,
         locator_len: u32,
         langtype: *const c_char,
@@ -40,13 +40,13 @@ fn c_new(r#ref: u8, body: &[u8], langtype: &str) -> Vec<u8> {
     let bp = if body.is_empty() { std::ptr::null() } else { body.as_ptr() };
     let rc = match r#ref {
         xvalue::REF_PTR => unsafe {
-            kvlangXvalueHeadNewPtr(bp, body.len() as u32, lt.as_ptr(), &mut out, &mut total)
+            pathlangXvalueHeadNewPtr(bp, body.len() as u32, lt.as_ptr(), &mut out, &mut total)
         },
         xvalue::REF_EXT => unsafe {
-            kvlangXvalueHeadNewExt(bp, body.len() as u32, lt.as_ptr(), &mut out, &mut total)
+            pathlangXvalueHeadNewExt(bp, body.len() as u32, lt.as_ptr(), &mut out, &mut total)
         },
         xvalue::REF_INLINE => unsafe {
-            kvlangXvalueHeadNewSlack(bp, body.len() as u64, lt.as_ptr(), &mut out, &mut total)
+            pathlangXvalueHeadNewSlack(bp, body.len() as u64, lt.as_ptr(), &mut out, &mut total)
         },
         _ => panic!("bad ref {ref}"),
     };
@@ -178,10 +178,10 @@ fn c_new_wrapper_reads() {
 }
 #[test]
 fn shm_roundtrip() {
-    let dir = std::env::temp_dir().join(format!("kvspace-c-rs-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("pathspace-c-rs-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("db");
-    let kv = kvspace::KVSpace::open(path.to_str().unwrap()).unwrap();
+    let kv = pathspace::PathSpace::open(path.to_str().unwrap()).unwrap();
     kv.mkindex("/t/", 0);
     kv.set("/t/x", &xvalue::int64(42));
     let v = kv.get("/t/x").unwrap();

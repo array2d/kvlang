@@ -4,8 +4,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <kvlang/xvalue.h>
-#include <kvspace/kvspace_xvalue.h>
+#include <pathlang/xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
 #include "vmkv/vmkv_internal.h"
 
 #define VMKV_COORDINATE_TEXT_CAPACITY 32U
@@ -36,7 +36,7 @@ void *vmkv_source_allocate(vmkv_function_source_t *function, size_t size,
                                     ? 8U
                                     : function->allocation_capacity * 2U;
         vmkv_allocation_t *grown = runtimec_allocator_allocate(
-            &function->kvspace_access->allocator,
+            &function->pathspace_access->allocator,
             capacity * sizeof(*grown), _Alignof(vmkv_allocation_t));
         if (grown == NULL) {
             return NULL;
@@ -47,7 +47,7 @@ void *vmkv_source_allocate(vmkv_function_source_t *function, size_t size,
         }
         if (function->allocations != NULL) {
             (void)runtimec_allocator_deallocate(
-                &function->kvspace_access->allocator, function->allocations,
+                &function->pathspace_access->allocator, function->allocations,
                 function->allocation_capacity * sizeof(*grown),
                 _Alignof(vmkv_allocation_t));
         }
@@ -55,7 +55,7 @@ void *vmkv_source_allocate(vmkv_function_source_t *function, size_t size,
         function->allocation_capacity = capacity;
     }
     void *pointer = runtimec_allocator_allocate(
-        &function->kvspace_access->allocator, size, alignment);
+        &function->pathspace_access->allocator, size, alignment);
     if (pointer == NULL) {
         return NULL;
     }
@@ -78,22 +78,22 @@ bool vmkv_source_split_wire(const uint8_t *wire, size_t wire_size,
         return false;
     }
     
-    if (wire_size < sizeof(kvspaceXvalueHead)) {
+    if (wire_size < sizeof(pathspaceXvalueHead)) {
         return false;
     }
-    const kvspaceXvalueHead *head =
-        (const kvspaceXvalueHead *)(const void *)wire;
+    const pathspaceXvalueHead *head =
+        (const pathspaceXvalueHead *)(const void *)wire;
     
-    const uint64_t total_size = kvspaceXvalueHeadTotalLen(head);
+    const uint64_t total_size = pathspaceXvalueHeadTotalLen(head);
     if (total_size == 0U || total_size > (uint64_t)wire_size) {
         return false;
     }
     
     const uint8_t *langtype = NULL;
     const uint16_t langtype_size =
-        kvlangXvalueHeadLangtypeBounded(wire, (uint64_t)wire_size, &langtype);
-    *output_body = wire + KVSPACE_XVALUE_HEAD_LEN;
-    *output_body_size = (size_t)kvspaceXvalueHeadLen(head);
+        pathlangXvalueHeadLangtypeBounded(wire, (uint64_t)wire_size, &langtype);
+    *output_body = wire + PATHSPACE_XVALUE_HEAD_LEN;
+    *output_body_size = (size_t)pathspaceXvalueHeadLen(head);
     if (langtype_size != 0U && langtype != NULL) {
         *output_langtype = runtimec_string_view_make(
             (const char *)(const void *)langtype, langtype_size);
@@ -104,12 +104,12 @@ bool vmkv_source_split_wire(const uint8_t *wire, size_t wire_size,
 static runtimec_status_t vmkv_source_read_value(
     vmkv_source_build_t *build, runtimec_key_view_t key,
     const uint8_t **output_wire, size_t *output_size, runtimec_error_t *error) {
-    runtimec_kvspace_access_t *host = build->function->kvspace_access;
+    runtimec_pathspace_access_t *host = build->function->pathspace_access;
     const runtimec_snapshot_t *snapshot = &build->function->snapshot;
 
-    runtimec_kvspace_value_header_t header;
-    runtimec_kvspace_value_header_reset(&header);
-    runtimec_status_t status = runtimec_kvspace_access_read_header(
+    runtimec_pathspace_value_header_t header;
+    runtimec_pathspace_value_header_reset(&header);
+    runtimec_status_t status = runtimec_pathspace_access_read_header(
         host, snapshot, key, &header, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
@@ -130,7 +130,7 @@ static runtimec_status_t vmkv_source_read_value(
     output.data = buffer;
     output.size = 0U;
     output.capacity = size;
-    status = runtimec_kvspace_access_read(host, snapshot, key, &output, error);
+    status = runtimec_pathspace_access_read(host, snapshot, key, &output, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;
     }
@@ -534,7 +534,7 @@ static runtimec_status_t vmkv_source_release(
 }
 
 runtimec_status_t vmkv_source_open_function(
-    runtimec_kvspace_access_t *kvspace_access,
+    runtimec_pathspace_access_t *pathspace_access,
     runtimec_string_view_t function_path,
     vmkv_function_source_t **output_function,
     runtimec_snapshot_t *output_snapshot,
@@ -546,7 +546,7 @@ runtimec_status_t vmkv_source_open_function(
         runtimec_snapshot_reset(output_snapshot);
     }
     runtimec_error_reset(error);
-    if (kvspace_access == NULL ||
+    if (pathspace_access == NULL ||
         !runtimec_string_view_is_valid(function_path) ||
         function_path.size == 0U || output_function == NULL ||
         output_snapshot == NULL || error == NULL) {
@@ -554,7 +554,7 @@ runtimec_status_t vmkv_source_open_function(
                                 VMKV_DIAG_INVALID_REQUEST,
                                 "vmkv source: invalid open request");
     }
-    const runtimec_allocator_t allocator = kvspace_access->allocator;
+    const runtimec_allocator_t allocator = pathspace_access->allocator;
     vmkv_function_source_t *function = runtimec_allocator_allocate(
         &allocator, sizeof(*function), _Alignof(vmkv_function_source_t));
     if (function == NULL) {
@@ -563,7 +563,7 @@ runtimec_status_t vmkv_source_open_function(
                                 "vmkv source: allocation failed");
     }
     memset(function, 0, sizeof(*function));
-    function->kvspace_access = kvspace_access;
+    function->pathspace_access = pathspace_access;
 
     vmkv_source_build_t build = {
         .function = function,
@@ -575,8 +575,8 @@ runtimec_status_t vmkv_source_open_function(
     runtimec_snapshot_reset(&function->snapshot);
     function->snapshot.function_key =
         runtimec_key_view_make(function_path.data, function_path.size);
-    runtimec_status_t status = runtimec_kvspace_access_source_revision(
-        kvspace_access, function->snapshot.function_key,
+    runtimec_status_t status = runtimec_pathspace_access_source_revision(
+        pathspace_access, function->snapshot.function_key,
         &function->snapshot.source_revision, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         (void)vmkv_source_release(function, &allocator);
@@ -639,8 +639,8 @@ runtimec_status_t vmkv_source_open_function(
     memset(function->write_parameters, 0,
            write_capacity * sizeof(*function->write_parameters));
 
-    status = runtimec_kvspace_access_list(
-        kvspace_access, &function->snapshot,
+    status = runtimec_pathspace_access_list(
+        pathspace_access, &function->snapshot,
         runtimec_key_view_make(prefix, prefix_size), vmkv_source_list_visit,
         &build, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -786,7 +786,7 @@ runtimec_status_t vmkv_source_close_function(vmkv_function_source_t *function) {
     if (function == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    const runtimec_allocator_t allocator = function->kvspace_access->allocator;
+    const runtimec_allocator_t allocator = function->pathspace_access->allocator;
     return vmkv_source_release(function, &allocator);
 }
 

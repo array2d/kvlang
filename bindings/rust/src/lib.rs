@@ -6,10 +6,10 @@ use std::ptr;
 mod ffi {
     use super::*;
     extern "C" {
-        pub fn kvspaceConnect(dsn: *const c_char) -> *mut std::ffi::c_void;
-        pub fn kvspaceClose(h: *mut std::ffi::c_void);
-        pub fn kvspaceXvalueInProcessAddress(h: *mut std::ffi::c_void) -> *mut u8;
-        pub fn kvspaceResolveOffset(
+        pub fn pathspaceConnect(dsn: *const c_char) -> *mut std::ffi::c_void;
+        pub fn pathspaceClose(h: *mut std::ffi::c_void);
+        pub fn pathspaceXvalueInProcessAddress(h: *mut std::ffi::c_void) -> *mut u8;
+        pub fn pathspaceResolveOffset(
             h: *mut std::ffi::c_void,
             key: *const c_char,
             parent_key_anchor: u64,
@@ -17,7 +17,7 @@ mod ffi {
             err: *mut c_char,
             err_cap: u32,
         ) -> i32;
-        pub fn kvspaceRealloc(
+        pub fn pathspaceRealloc(
             h: *mut std::ffi::c_void,
             key: *const c_char,
             body_length: u64,
@@ -26,39 +26,39 @@ mod ffi {
             err: *mut c_char,
             err_cap: u32,
         ) -> i32;
-        pub fn kvspaceFree(
+        pub fn pathspaceFree(
             h: *mut std::ffi::c_void,
             key: *const c_char,
             err: *mut c_char,
             err_cap: u32,
         ) -> i32;
-        pub fn kvspaceCp(
+        pub fn pathspaceCp(
             h: *mut std::ffi::c_void,
             old_key: *const c_char,
             new_key: *const c_char,
             err: *mut c_char,
             err_cap: u32,
         ) -> i32;
-        pub fn kvspaceMkindex(
+        pub fn pathspaceMkindex(
             h: *mut std::ffi::c_void,
             key: *const c_char,
             err: *mut c_char,
             err_cap: u32,
         ) -> i32;
-        pub fn kvspaceDeltree(
+        pub fn pathspaceDeltree(
             h: *mut std::ffi::c_void,
             key: *const c_char,
             err: *mut c_char,
             err_cap: u32,
         ) -> i32;
-        pub fn kvspaceCpdir(
+        pub fn pathspaceCpdir(
             h: *mut std::ffi::c_void,
             source_key: *const c_char,
             destination_key: *const c_char,
             err: *mut c_char,
             err_cap: u32,
         ) -> i32;
-        pub fn kvspaceListlen(
+        pub fn pathspaceListlen(
             h: *mut std::ffi::c_void,
             key: *const c_char,
             out_count: *mut i64,
@@ -66,7 +66,7 @@ mod ffi {
             err: *mut c_char,
             err_cap: u32,
         ) -> i32;
-        pub fn kvspaceList(
+        pub fn pathspaceList(
             h: *mut std::ffi::c_void,
             key: *const c_char,
             out_names: *mut c_char,
@@ -78,28 +78,28 @@ mod ffi {
             err_cap: u32,
         ) -> i32;
         
-        pub fn kvlangXvalueHeadNewScalar(
+        pub fn pathlangXvalueHeadNewScalar(
             raw: *const u8,
             raw_len: u32,
             langtype: *const c_char,
             out: *mut *mut u8,
             out_len: *mut u64,
         ) -> i32;
-        pub fn kvlangXvalueHeadNewSlack(
+        pub fn pathlangXvalueHeadNewSlack(
             data: *const u8,
             data_len: u64,
             langtype: *const c_char,
             out: *mut *mut u8,
             out_len: *mut u64,
         ) -> i32;
-        pub fn kvlangXvalueHeadNewPtr(
+        pub fn pathlangXvalueHeadNewPtr(
             path: *const u8,
             path_len: u32,
             langtype: *const c_char,
             out: *mut *mut u8,
             out_len: *mut u64,
         ) -> i32;
-        pub fn kvlangXvalueHeadNewExt(
+        pub fn pathlangXvalueHeadNewExt(
             locator: *const u8,
             locator_len: u32,
             langtype: *const c_char,
@@ -136,7 +136,7 @@ pub mod xvalue {
         let mut total: u64 = 0;
         let raw = v.to_le_bytes();
         let rc = unsafe {
-            ffi::kvlangXvalueHeadNewScalar(raw.as_ptr(), 8, NO_TYPE, &mut out, &mut total)
+            ffi::pathlangXvalueHeadNewScalar(raw.as_ptr(), 8, NO_TYPE, &mut out, &mut total)
         };
         if rc != 0 {
             return Vec::new();
@@ -148,7 +148,7 @@ pub mod xvalue {
         let mut total: u64 = 0;
         let raw = v.to_le_bytes();
         let rc = unsafe {
-            ffi::kvlangXvalueHeadNewScalar(raw.as_ptr(), 8, NO_TYPE, &mut out, &mut total)
+            ffi::pathlangXvalueHeadNewScalar(raw.as_ptr(), 8, NO_TYPE, &mut out, &mut total)
         };
         if rc != 0 {
             return Vec::new();
@@ -159,7 +159,7 @@ pub mod xvalue {
         let mut out: *mut u8 = ptr::null_mut();
         let mut total: u64 = 0;
         let rc = unsafe {
-            ffi::kvlangXvalueHeadNewSlack(s.as_ptr(), s.len() as u64, NO_TYPE, &mut out, &mut total)
+            ffi::pathlangXvalueHeadNewSlack(s.as_ptr(), s.len() as u64, NO_TYPE, &mut out, &mut total)
         };
         if rc != 0 {
             return Vec::new();
@@ -171,7 +171,7 @@ pub mod xvalue {
         let mut out: *mut u8 = ptr::null_mut();
         let mut total: u64 = 0;
         let rc = unsafe {
-            ffi::kvlangXvalueHeadNewScalar(ptr::null(), 0, NO_TYPE, &mut out, &mut total)
+            ffi::pathlangXvalueHeadNewScalar(ptr::null(), 0, NO_TYPE, &mut out, &mut total)
         };
         if rc != 0 {
             return Vec::new();
@@ -183,7 +183,7 @@ pub mod xvalue {
         let mut out: *mut u8 = ptr::null_mut();
         let mut total: u64 = 0;
         let rc = unsafe {
-            ffi::kvlangXvalueHeadNewPtr(target.as_ptr(), target.len() as u32, NO_TYPE, &mut out, &mut total)
+            ffi::pathlangXvalueHeadNewPtr(target.as_ptr(), target.len() as u32, NO_TYPE, &mut out, &mut total)
         };
         if rc != 0 {
             return Vec::new();
@@ -195,7 +195,7 @@ pub mod xvalue {
         let mut out: *mut u8 = ptr::null_mut();
         let mut total: u64 = 0;
         let rc = unsafe {
-            ffi::kvlangXvalueHeadNewExt(
+            ffi::pathlangXvalueHeadNewExt(
                 locator.as_ptr(),
                 locator.len() as u32,
                 NO_TYPE,
@@ -256,28 +256,28 @@ pub mod xvalue {
     }
 }
 
-const KVSPACE_OK: i32 = 0;
-const KVSPACE_MISSING: i32 = -2; 
+const PATHSPACE_OK: i32 = 0;
+const PATHSPACE_MISSING: i32 = -2; 
 
-pub struct KVSpace {
+pub struct PathSpace {
     ptr: *mut std::ffi::c_void,
     path: String,
 }
 
-impl KVSpace {
+impl PathSpace {
     
     pub fn open(path: &str) -> Result<Self, String> {
         let _ = std::fs::remove_file(path);
         let dsn = CString::new(format!("shm://{path}")).map_err(|e| e.to_string())?;
-        let ptr = unsafe { ffi::kvspaceConnect(dsn.as_ptr()) };
+        let ptr = unsafe { ffi::pathspaceConnect(dsn.as_ptr()) };
         if ptr.is_null() {
-            return Err(format!("kvspaceConnect(shm://{path}) failed"));
+            return Err(format!("pathspaceConnect(shm://{path}) failed"));
         }
-        Ok(KVSpace { ptr, path: path.to_string() })
+        Ok(PathSpace { ptr, path: path.to_string() })
     }
 
     fn base(&self) -> Option<*mut u8> {
-        let b = unsafe { ffi::kvspaceXvalueInProcessAddress(self.ptr) };
+        let b = unsafe { ffi::pathspaceXvalueInProcessAddress(self.ptr) };
         (!b.is_null()).then_some(b)
     }
 
@@ -286,9 +286,9 @@ impl KVSpace {
         let mut off: u64 = 0;
         let mut err = [0 as c_char; 256];
         let rc = unsafe {
-            ffi::kvspaceResolveOffset(self.ptr, ckey.as_ptr(), 0, &mut off, err.as_mut_ptr(), 256)
+            ffi::pathspaceResolveOffset(self.ptr, ckey.as_ptr(), 0, &mut off, err.as_mut_ptr(), 256)
         };
-        if rc != KVSPACE_OK {
+        if rc != PATHSPACE_OK {
             return None;
         }
         let base = self.base()?;
@@ -315,7 +315,7 @@ impl KVSpace {
         let mut off: u64 = 0;
         let mut err = [0 as c_char; 256];
         let rc = unsafe {
-            ffi::kvspaceRealloc(
+            ffi::pathspaceRealloc(
                 self.ptr,
                 ckey.as_ptr(),
                 body_len as u64,
@@ -325,7 +325,7 @@ impl KVSpace {
                 256,
             )
         };
-        if rc != KVSPACE_OK {
+        if rc != PATHSPACE_OK {
             return Err(err_str(&err));
         }
         let base = self.base().ok_or("no in-process value region")?;
@@ -348,8 +348,8 @@ impl KVSpace {
     pub fn delete(&self, key: &str) -> Result<(), String> {
         let ckey = CString::new(key).map_err(|e| e.to_string())?;
         let mut err = [0 as c_char; 256];
-        let rc = unsafe { ffi::kvspaceFree(self.ptr, ckey.as_ptr(), err.as_mut_ptr(), 256) };
-        if rc == KVSPACE_OK || rc == KVSPACE_MISSING {
+        let rc = unsafe { ffi::pathspaceFree(self.ptr, ckey.as_ptr(), err.as_mut_ptr(), 256) };
+        if rc == PATHSPACE_OK || rc == PATHSPACE_MISSING {
             Ok(())
         } else {
             Err(err_str(&err))
@@ -359,34 +359,34 @@ impl KVSpace {
     pub fn deltree(&self, prefix: &str) -> Result<(), String> {
         let cp = CString::new(prefix).map_err(|e| e.to_string())?;
         let mut err = [0 as c_char; 256];
-        let rc = unsafe { ffi::kvspaceDeltree(self.ptr, cp.as_ptr(), err.as_mut_ptr(), 256) };
-        if rc == KVSPACE_OK { Ok(()) } else { Err(err_str(&err)) }
+        let rc = unsafe { ffi::pathspaceDeltree(self.ptr, cp.as_ptr(), err.as_mut_ptr(), 256) };
+        if rc == PATHSPACE_OK { Ok(()) } else { Err(err_str(&err)) }
     }
 
     pub fn cp(&self, src: &str, dst: &str) -> Result<(), String> {
         let (s, d) = (CString::new(src).unwrap(), CString::new(dst).unwrap());
         let mut err = [0 as c_char; 256];
         let rc = unsafe {
-            ffi::kvspaceCp(self.ptr, s.as_ptr(), d.as_ptr(), err.as_mut_ptr(), 256)
+            ffi::pathspaceCp(self.ptr, s.as_ptr(), d.as_ptr(), err.as_mut_ptr(), 256)
         };
-        if rc == KVSPACE_OK { Ok(()) } else { Err(err_str(&err)) }
+        if rc == PATHSPACE_OK { Ok(()) } else { Err(err_str(&err)) }
     }
 
     pub fn cpdir(&self, src: &str, dst: &str) -> Result<(), String> {
         let (s, d) = (CString::new(src).unwrap(), CString::new(dst).unwrap());
         let mut err = [0 as c_char; 256];
         let rc = unsafe {
-            ffi::kvspaceCpdir(self.ptr, s.as_ptr(), d.as_ptr(), err.as_mut_ptr(), 256)
+            ffi::pathspaceCpdir(self.ptr, s.as_ptr(), d.as_ptr(), err.as_mut_ptr(), 256)
         };
-        if rc == KVSPACE_OK { Ok(()) } else { Err(err_str(&err)) }
+        if rc == PATHSPACE_OK { Ok(()) } else { Err(err_str(&err)) }
     }
 
     pub fn mkindex(&self, path: &str, capacity: u32) -> Result<(), String> {
         let _ = capacity;
         let cp = CString::new(path).map_err(|e| e.to_string())?;
         let mut err = [0 as c_char; 256];
-        let rc = unsafe { ffi::kvspaceMkindex(self.ptr, cp.as_ptr(), err.as_mut_ptr(), 256) };
-        if rc == KVSPACE_OK { Ok(()) } else { Err(err_str(&err)) }
+        let rc = unsafe { ffi::pathspaceMkindex(self.ptr, cp.as_ptr(), err.as_mut_ptr(), 256) };
+        if rc == PATHSPACE_OK { Ok(()) } else { Err(err_str(&err)) }
     }
 
     pub fn list(&self, prefix: &str) -> Vec<String> {
@@ -398,9 +398,9 @@ impl KVSpace {
         let mut m: u32 = 0;
         let mut err = [0 as c_char; 256];
         let rc = unsafe {
-            ffi::kvspaceListlen(self.ptr, cp.as_ptr(), &mut n, &mut m, err.as_mut_ptr(), 256)
+            ffi::pathspaceListlen(self.ptr, cp.as_ptr(), &mut n, &mut m, err.as_mut_ptr(), 256)
         };
-        if rc != KVSPACE_OK || n <= 0 {
+        if rc != PATHSPACE_OK || n <= 0 {
             return vec![];
         }
         let cap = (n as usize).saturating_mul(m as usize + 1) as u32;
@@ -410,7 +410,7 @@ impl KVSpace {
         let mut buf = vec![0u8; cap as usize];
         let (mut len, mut count, mut gen) = (0u32, 0u32, 0u64);
         let rc = unsafe {
-            ffi::kvspaceList(
+            ffi::pathspaceList(
                 self.ptr,
                 cp.as_ptr(),
                 buf.as_mut_ptr() as *mut c_char,
@@ -422,7 +422,7 @@ impl KVSpace {
                 256,
             )
         };
-        if rc != KVSPACE_OK {
+        if rc != PATHSPACE_OK {
             return vec![];
         }
         buf.truncate(len as usize);
@@ -440,12 +440,12 @@ fn err_str(err: &[c_char; 256]) -> String {
         .map(|c| *c as u8)
         .collect();
     let s = String::from_utf8_lossy(&bytes).into_owned();
-    if s.is_empty() { "kvspace: operation failed".into() } else { s }
+    if s.is_empty() { "pathspace: operation failed".into() } else { s }
 }
 
-impl Drop for KVSpace {
+impl Drop for PathSpace {
     fn drop(&mut self) {
-        unsafe { ffi::kvspaceClose(self.ptr) };
+        unsafe { ffi::pathspaceClose(self.ptr) };
         let _ = std::fs::remove_file(&self.path);
     }
 }

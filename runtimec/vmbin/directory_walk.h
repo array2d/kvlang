@@ -13,7 +13,7 @@ extern "C" {
 
 #define RUNTIMEC_DIRECTORY_WALK_KEY_CAPACITY 1024U
 
-#define KVSPACE_KEY_RESOLUTION_MIN_WIRE 16U
+#define PATHSPACE_KEY_RESOLUTION_MIN_WIRE 16U
 
 typedef struct runtimec_directory_walk {
     runtimec_key_directory_t directory;
@@ -23,7 +23,7 @@ typedef struct runtimec_directory_walk {
 
 bool runtimec_directory_walk_open(runtimec_directory_walk_t *walk,
                                   const runtimec_allocator_t *allocator,
-                                  void *kvspace_handle, const char *directory,
+                                  void *pathspace_handle, const char *directory,
                                   bool resolve_pointer, bool expand_extension);
 
 bool runtimec_directory_walk_count(const runtimec_directory_walk_t *walk,

@@ -1,10 +1,10 @@
 
-#include <kvlang/xvalue.h>
+#include <pathlang/xvalue.h>
 
 #include <stdbool.h>
 #include <string.h>
 
-int kvlangCoordIsCoord(const char *name) {
+int pathlangCoordIsCoord(const char *name) {
     if (!name || name[0] != '[')
         return 0;
     size_t n = strlen(name);
@@ -16,7 +16,7 @@ int kvlangCoordIsCoord(const char *name) {
     return 1;
 }
 
-int kvlangParseCoord(const char *name, int64_t *coords, int maxn) {
+int pathlangParseCoord(const char *name, int64_t *coords, int maxn) {
     if (!name || name[0] != '[')
         return -1;
     int n = 0;
@@ -44,8 +44,8 @@ int kvlangParseCoord(const char *name, int64_t *coords, int maxn) {
     return -1;
 }
 
-int kvlangCoordCmp(const char *a, const char *b) {
-    int ia = kvlangCoordIsCoord(a), ib = kvlangCoordIsCoord(b);
+int pathlangCoordCmp(const char *a, const char *b) {
+    int ia = pathlangCoordIsCoord(a), ib = pathlangCoordIsCoord(b);
     if (!ia && !ib)
         return strcmp(a, b);
     if (!ia)
@@ -53,8 +53,8 @@ int kvlangCoordCmp(const char *a, const char *b) {
     if (!ib)
         return -1;
     int64_t ca[8], cb[8];
-    int na = kvlangParseCoord(a, ca, 8);
-    int nb = kvlangParseCoord(b, cb, 8);
+    int na = pathlangParseCoord(a, ca, 8);
+    int nb = pathlangParseCoord(b, cb, 8);
     if (na < 0 || nb < 0)
         return strcmp(a, b); 
     for (int i = 0; i < na && i < nb; i++) {

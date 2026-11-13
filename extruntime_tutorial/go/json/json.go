@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	storetypeShort = C.KVSPACE_XVALUE_ST_SHORT
-	refPtr         = C.KVSPACE_REF_PTR
+	storetypeShort = C.PATHSPACE_XVALUE_ST_SHORT
+	refPtr         = C.PATHSPACE_REF_PTR
 )
 
 func cstr(s string) *C.char { return C.CString(s) }
@@ -32,26 +32,26 @@ func gostr(s *C.char) string {
 	return C.GoString(s)
 }
 
-func headOf(data []byte) (C.kvspaceHead_t, bool) {
-	var h C.kvspaceHead_t
-	if len(data) < int(C.KVSPACE_XVALUE_HEAD_LEN) {
+func headOf(data []byte) (C.pathspaceHead_t, bool) {
+	var h C.pathspaceHead_t
+	if len(data) < int(C.PATHSPACE_XVALUE_HEAD_LEN) {
 		return h, false
 	}
 	var bl uint64
 	for i := 5; i >= 0; i-- {
 		bl = (bl << 8) | uint64(data[i])
 	}
-	if bl > 0x7fffffff || uint64(C.KVSPACE_XVALUE_HEAD_LEN)+bl > uint64(len(data)) {
+	if bl > 0x7fffffff || uint64(C.PATHSPACE_XVALUE_HEAD_LEN)+bl > uint64(len(data)) {
 		return h, false
 	}
-	h.headlen = C.uint16_t(C.KVSPACE_XVALUE_HEAD_LEN)
-	h.body_offset = C.int32_t(C.KVSPACE_XVALUE_HEAD_LEN)
+	h.headlen = C.uint16_t(C.PATHSPACE_XVALUE_HEAD_LEN)
+	h.body_offset = C.int32_t(C.PATHSPACE_XVALUE_HEAD_LEN)
 	h.body_len = C.int32_t(bl)
 	h.storetype = C.uint8_t(data[6])
 	h.ref = C.uint8_t(data[7])
 
 	var lt string
-	apos := int(C.KVSPACE_XVALUE_HEAD_LEN) + int(bl)
+	apos := int(C.PATHSPACE_XVALUE_HEAD_LEN) + int(bl)
 	if apos+2 <= len(data) {
 		alen := int(binary.LittleEndian.Uint16(data[apos : apos+2]))
 		if alen >= 2 && apos+alen <= len(data) {
@@ -63,7 +63,7 @@ func headOf(data []byte) (C.kvspaceHead_t, bool) {
 				if p+3+rlen > end {
 					break
 				}
-				if tag == C.KVSPACE_XVALUE_ATTR_TAG_LANGTYPE {
+				if tag == C.PATHSPACE_XVALUE_ATTR_TAG_LANGTYPE {
 					lt = string(data[p+3 : p+3+rlen])
 					break
 				}
@@ -101,7 +101,7 @@ func headOf(data []byte) (C.kvspaceHead_t, bool) {
 	return h, true
 }
 
-func langtypeOf(h *C.kvspaceHead_t) string { return C.GoString(&h.langtype[0]) }
+func langtypeOf(h *C.pathspaceHead_t) string { return C.GoString(&h.langtype[0]) }
 
 func baseKind(lt string) string {
 	if strings.Contains(lt, sep) {
@@ -125,13 +125,13 @@ func getXValue(c unsafe.Pointer, key string, resolve int) []byte {
 	defer C.free(unsafe.Pointer(ck))
 	var out *C.uint8_t
 	var outLen C.uint32_t
-	if C.kvspaceGet(c, ck, C.int(resolve), &out, &outLen) != 0 || out == nil || outLen == 0 {
+	if C.pathspaceGet(c, ck, C.int(resolve), &out, &outLen) != 0 || out == nil || outLen == 0 {
 		return nil
 	}
 	return C.GoBytes(unsafe.Pointer(out), C.int(outLen))
 }
 
-func headAt(c unsafe.Pointer, key string) (C.kvspaceHead_t, bool) {
+func headAt(c unsafe.Pointer, key string) (C.pathspaceHead_t, bool) {
 	return headOf(getXValue(c, key, 0))
 }
 
@@ -160,10 +160,10 @@ func writeBody(c unsafe.Pointer, key string, ref, storetype C.uint8_t, langtype 
 	if cur, ok := headAt(c, key); ok &&
 		cur.ref == ref && cur.storetype == storetype &&
 		int(cur.body_len) == len(body) && langtypeOf(&cur) == langtype {
-		place = C.kvspaceWriteInPlace(c, ck, 0, n, &dst, &err[0], 256)
+		place = C.pathspaceWriteInPlace(c, ck, 0, n, &dst, &err[0], 256)
 	}
 	if place != 0 {
-		place = C.kvspaceWriteNewPlace(c, ck, ref, storetype, n, C.uint64_t(n), cl, &dst, &err[0], 256)
+		place = C.pathspaceWriteNewPlace(c, ck, ref, storetype, n, C.uint64_t(n), cl, &dst, &err[0], 256)
 	}
 	if place == 0 {
 		if len(body) > 0 && dst != nil {
@@ -179,13 +179,13 @@ func writeBody(c unsafe.Pointer, key string, ref, storetype C.uint8_t, langtype 
 		if len(body) > 0 {
 			bp = (*C.uint8_t)(unsafe.Pointer(&body[0]))
 		}
-		rc = C.kvlangXvalueHeadNewPtr(bp, n, cl, &wire, &wireLen)
+		rc = C.pathlangXvalueHeadNewPtr(bp, n, cl, &wire, &wireLen)
 	} else if ref == 0 && storetype == 0 && len(body) == 0 && langtype == "" {
-		rc = C.kvlangXvalueHeadNewNone(&wire, &wireLen)
+		rc = C.pathlangXvalueHeadNewNone(&wire, &wireLen)
 	} else {
-		rc = C.kvspaceXvalueHeadReserve(storetype, C.uint64_t(len(body)), C.uint64_t(len(body)), cl, &wire, &wireLen)
+		rc = C.pathspaceXvalueHeadReserve(storetype, C.uint64_t(len(body)), C.uint64_t(len(body)), cl, &wire, &wireLen)
 		if rc == 0 && wire != nil && len(body) > 0 {
-			bodyDst := unsafe.Add(unsafe.Pointer(wire), int(C.KVSPACE_XVALUE_HEAD_LEN))
+			bodyDst := unsafe.Add(unsafe.Pointer(wire), int(C.PATHSPACE_XVALUE_HEAD_LEN))
 			copy(unsafe.Slice((*byte)(bodyDst), len(body)), body)
 		}
 	}
@@ -195,7 +195,7 @@ func writeBody(c unsafe.Pointer, key string, ref, storetype C.uint8_t, langtype 
 		}
 		return
 	}
-	C.kvspaceSetValue(c, ck, wire, C.uint32_t(wireLen), &err[0], 256)
+	C.pathspaceSetValue(c, ck, wire, C.uint32_t(wireLen), &err[0], 256)
 	C.free(unsafe.Pointer(wire))
 }
 
@@ -220,19 +220,19 @@ func list(c unsafe.Pointer, prefix string, resolve int) []string {
 	cp := cstr(prefix)
 	defer C.free(unsafe.Pointer(cp))
 	var count C.int32_t
-	if C.kvspaceListLen(c, cp, 0, C.int(resolve), &count) != 0 || count <= 0 {
+	if C.pathspaceListLen(c, cp, 0, C.int(resolve), &count) != 0 || count <= 0 {
 		return nil
 	}
 	names := make([]string, 0, int(count))
 	buf := make([]byte, 1024)
 	for i := C.int32_t(0); i < count; i++ {
 		var n C.uint32_t
-		if C.kvspaceListAt(c, cp, 0, C.int(resolve), i, (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.uint32_t(len(buf)), &n) != 0 {
+		if C.pathspaceListAt(c, cp, 0, C.int(resolve), i, (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.uint32_t(len(buf)), &n) != 0 {
 			if n <= C.uint32_t(len(buf)) {
 				continue
 			}
 			buf = make([]byte, int(n))
-			if C.kvspaceListAt(c, cp, 0, C.int(resolve), i, (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.uint32_t(len(buf)), &n) != 0 {
+			if C.pathspaceListAt(c, cp, 0, C.int(resolve), i, (*C.uint8_t)(unsafe.Pointer(&buf[0])), C.uint32_t(len(buf)), &n) != 0 {
 				continue
 			}
 		}
@@ -248,51 +248,51 @@ func del(c unsafe.Pointer, key string) {
 	defer C.free(unsafe.Pointer(ck))
 	keys := [1]*C.char{ck}
 	var err [256]C.char
-	C.kvspaceDel(c, &keys[0], 1, &err[0], 256)
+	C.pathspaceDel(c, &keys[0], 1, &err[0], 256)
 }
 
 func delTree(c unsafe.Pointer, prefix string) {
 	cp := cstr(prefix)
 	defer C.free(unsafe.Pointer(cp))
 	var err [256]C.char
-	C.kvspaceDelTree(c, cp, &err[0], 256)
+	C.pathspaceDelTree(c, cp, &err[0], 256)
 }
 
 func mkindex(c unsafe.Pointer, path string) {
 	cp := cstr(path)
 	defer C.free(unsafe.Pointer(cp))
 	var err [256]C.char
-	C.kvspaceMkindex(c, cp, 0, &err[0], 256)
+	C.pathspaceMkindex(c, cp, 0, &err[0], 256)
 }
 
 func resolveRead(c unsafe.Pointer, pc string, idx int) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.kvlangRwirextResolveRead(c, cp, C.int(idx)))
+	return gostr(C.pathlangRwirextResolveRead(c, cp, C.int(idx)))
 }
 
 func resolveReadPath(c unsafe.Pointer, pc string, idx int) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.kvlangRwirextResolveReadPath(c, cp, C.int(idx)))
+	return gostr(C.pathlangRwirextResolveReadPath(c, cp, C.int(idx)))
 }
 
 func resolveWrite(c unsafe.Pointer, pc string, idx int) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.kvlangRwirextResolveWrite(c, cp, C.int(idx)))
+	return gostr(C.pathlangRwirextResolveWrite(c, cp, C.int(idx)))
 }
 
 func nextPC(pc string) string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return gostr(C.kvlangRwirextNextPc(cp))
+	return gostr(C.pathlangRwirextNextPc(cp))
 }
 
 func params(c unsafe.Pointer, pc string) []string {
 	cp := cstr(pc)
 	defer C.free(unsafe.Pointer(cp))
-	return strings.Split(gostr(C.kvlangRwirextParams(c, cp)), "\n")
+	return strings.Split(gostr(C.pathlangRwirextParams(c, cp)), "\n")
 }
 
 func parseXValue(data []byte) (kind string, raw []byte, arrLen int) {
@@ -336,17 +336,17 @@ func encodeXValue(kind string, raw []byte, dims []int32) []byte {
 	var ol C.uint64_t
 	var rc C.int
 	if (kind == "" || kind == "None") && len(raw) == 0 && len(dims) == 0 {
-		rc = C.kvlangXvalueHeadNewNone(&out, &ol)
+		rc = C.pathlangXvalueHeadNewNone(&out, &ol)
 	} else if kind == "char" || strings.HasPrefix(kind, "char/") {
-		rc = C.kvlangXvalueHeadNewSlack((*C.uint8_t)(buf), C.uint64_t(len(raw)), C.uint64_t(len(raw)), clt, &out, &ol)
+		rc = C.pathlangXvalueHeadNewSlack((*C.uint8_t)(buf), C.uint64_t(len(raw)), C.uint64_t(len(raw)), clt, &out, &ol)
 	} else if len(dims) > 0 && kind != kindMap && !strings.Contains(kind, sep) && !strings.HasPrefix(kind, "/") {
 		udims := make([]C.uint64_t, len(dims))
 		for i, d := range dims {
 			udims[i] = C.uint64_t(d)
 		}
-		rc = C.kvlangXvalueHeadNewTensor(&udims[0], C.uint32_t(len(dims)), (*C.uint8_t)(buf), C.uint64_t(len(raw)), clt, &out, &ol)
+		rc = C.pathlangXvalueHeadNewTensor(&udims[0], C.uint32_t(len(dims)), (*C.uint8_t)(buf), C.uint64_t(len(raw)), clt, &out, &ol)
 	} else {
-		rc = C.kvlangXvalueHeadNewScalar(C.KVSPACE_XVALUE_ST_SHORT, (*C.uint8_t)(buf), C.uint32_t(len(raw)), clt, &out, &ol)
+		rc = C.pathlangXvalueHeadNewScalar(C.PATHSPACE_XVALUE_ST_SHORT, (*C.uint8_t)(buf), C.uint32_t(len(raw)), clt, &out, &ol)
 	}
 	if rc != 0 || out == nil || ol == 0 || ol > 0xffffffff {
 		if out != nil {
@@ -379,7 +379,7 @@ func constructChar(raw []byte) []byte {
 	defer C.free(unsafe.Pointer(clt))
 	var out *C.uint8_t
 	var ol C.uint32_t
-	if C.kvlangXvalueNewChar((*C.uint8_t)(buf), C.uint32_t(len(raw)), clt, &out, &ol) != 0 || out == nil {
+	if C.pathlangXvalueNewChar((*C.uint8_t)(buf), C.uint32_t(len(raw)), clt, &out, &ol) != 0 || out == nil {
 		return nil
 	}
 	defer C.free(unsafe.Pointer(out))
@@ -543,13 +543,13 @@ var (
 )
 
 func init() {
-	sep = cconst("KVSPACE_MEMBER_SEP")
-	runtimeSep = cconst("KVSPACE_RUNTIME_MEMBER_SEP")
-	dirSuf = cconst("KVSPACE_DIR_INDEX_SUF")
-	kindMap = cconst("KVLANG_KIND_MAP")
-	kindInt64 = cconst("KVLANG_KIND_INT64")
-	kindFloat64 = cconst("KVLANG_KIND_FLOAT64")
-	kindBool = cconst("KVLANG_KIND_BOOL")
+	sep = cconst("PATHSPACE_MEMBER_SEP")
+	runtimeSep = cconst("PATHSPACE_RUNTIME_MEMBER_SEP")
+	dirSuf = cconst("PATHSPACE_DIR_INDEX_SUF")
+	kindMap = cconst("PATHLANG_KIND_MAP")
+	kindInt64 = cconst("PATHLANG_KIND_INT64")
+	kindFloat64 = cconst("PATHLANG_KIND_FLOAT64")
+	kindBool = cconst("PATHLANG_KIND_BOOL")
 
 	myrwircaps = []op{
 		{"json" + sep + "to", []string{"*"}, []string{"*"}},
@@ -561,10 +561,10 @@ func cconst(name string) string {
 	cn := cstr(name)
 	defer C.free(unsafe.Pointer(cn))
 	var s *C.char
-	if strings.HasPrefix(name, "KVLANG_") {
-		s = C.kvlangConstLanguage(cn)
+	if strings.HasPrefix(name, "PATHLANG_") {
+		s = C.pathlangConstLanguage(cn)
 	} else {
-		s = C.kvspaceConstStorage(cn)
+		s = C.pathspaceConstStorage(cn)
 	}
 	if s == nil {
 		return ""
@@ -656,7 +656,7 @@ func hasPrefixChildren(c unsafe.Pointer, prefix string) bool {
 	cp := cstr(prefix)
 	defer C.free(unsafe.Pointer(cp))
 	var count C.int32_t
-	return C.kvspaceListLen(c, cp, 0, 0, &count) == 0 && count > 0
+	return C.pathspaceListLen(c, cp, 0, 0, &count) == 0 && count > 0
 }
 
 func isContainer(c unsafe.Pointer, path string) bool {
@@ -837,7 +837,7 @@ func register(c unsafe.Pointer) {
 		co := cstr(o.name)
 		rp, ra := cstrSlice(o.rp)
 		wp, wa := cstrSlice(o.wp)
-		C.kvlangDefRwir(c, co, rp, C.int32_t(len(o.rp)), wp, C.int32_t(len(o.wp)))
+		C.pathlangDefRwir(c, co, rp, C.int32_t(len(o.rp)), wp, C.int32_t(len(o.wp)))
 		C.free(unsafe.Pointer(co))
 		for _, p := range ra {
 			C.free(unsafe.Pointer(p))
@@ -920,17 +920,17 @@ func serveOp(c unsafe.Pointer) {
 func connect(dsn string) unsafe.Pointer {
 	cd := cstr(dsn)
 	defer C.free(unsafe.Pointer(cd))
-	return C.kvspaceConnect(cd)
+	return C.pathspaceConnect(cd)
 }
 
-func disconnect(c unsafe.Pointer) { C.kvspaceClose(c) }
+func disconnect(c unsafe.Pointer) { C.pathspaceClose(c) }
 
 func Serve(dsn string) {
 	c := connect(dsn)
 	if c == nil {
 		return
 	}
-	defer C.kvspaceClose(c)
+	defer C.pathspaceClose(c)
 	register(c)
 	for {
 		serveOp(c)

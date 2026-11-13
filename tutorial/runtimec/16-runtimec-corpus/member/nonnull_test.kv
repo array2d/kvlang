@@ -4,7 +4,7 @@
 //
 // 四组，每条都配对侧：单侧断言会漏「算子整体取反」这类缺陷。
 //   1. 零值 local：x:int64=0 —— 键存在且带 langtype ⇒ 不是 None。
-//   2. （略）「声明未写」在 kvlang 源码层**不可表达**：parser 拒绝「声明了标量
+//   2. （略）「声明未写」在 pathlang 源码层**不可表达**：parser 拒绝「声明了标量
 //      却不给初值」（`parser.rs:3132`「declared scalar … but assigned an array
 //      literal」）。帧准备物化零值的规则因此只能从「声明并写 0」这条间接验，
 //      与第 1 组同形——不单列。

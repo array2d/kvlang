@@ -89,7 +89,7 @@ static void expect_slot(void *kv, const char *key, const char *want, int *line) 
 
 int main(int argc, char **argv) {
     if (argc < 3) {
-        fprintf(stderr, "usage: %s <libkvlanglayout.so> <libkvspace.so>\n", argv[0]);
+        fprintf(stderr, "usage: %s <libpathlanglayout.so> <libpathspace.so>\n", argv[0]);
         return 2;
     }
     void *layout_dl = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
@@ -97,27 +97,27 @@ int main(int argc, char **argv) {
         fprintf(stderr, "dlopen layout 失败: %s\n", dlerror());
         return 2;
     }
-    define_rwir = (define_rwir_fn)dlsym(layout_dl, "kvlangLayoutDefineRwir");
+    define_rwir = (define_rwir_fn)dlsym(layout_dl, "pathlangLayoutDefineRwir");
     if (!define_rwir) {
-        fprintf(stderr, "layout 未导出 kvlangLayoutDefineRwir\n");
+        fprintf(stderr, "layout 未导出 pathlangLayoutDefineRwir\n");
         return 2;
     }
     void *kv_dl = dlopen(argv[2], RTLD_NOW | RTLD_LOCAL);
     if (!kv_dl) {
-        fprintf(stderr, "dlopen kvspace 失败: %s\n", dlerror());
+        fprintf(stderr, "dlopen pathspace 失败: %s\n", dlerror());
         return 2;
     }
-    kv_connect = (connect_fn)dlsym(kv_dl, "kvspaceConnect");
-    kv_close = (close_fn)dlsym(kv_dl, "kvspaceClose");
-    kv_resolve = (resolve_fn)dlsym(kv_dl, "kvspaceResolveOffset");
-    kv_inproc = (inproc_fn)dlsym(kv_dl, "kvspaceXvalueInProcessAddress");
+    kv_connect = (connect_fn)dlsym(kv_dl, "pathspaceConnect");
+    kv_close = (close_fn)dlsym(kv_dl, "pathspaceClose");
+    kv_resolve = (resolve_fn)dlsym(kv_dl, "pathspaceResolveOffset");
+    kv_inproc = (inproc_fn)dlsym(kv_dl, "pathspaceXvalueInProcessAddress");
     if (!kv_connect || !kv_close || !kv_resolve || !kv_inproc) {
-        fprintf(stderr, "kvspace 缺少所需符号\n");
+        fprintf(stderr, "pathspace 缺少所需符号\n");
         return 2;
     }
 
     char dsn[256];
-    snprintf(dsn, sizeof dsn, "shm:///tmp/kvlang_layout_defrwir_%ld.shm", (long)getpid());
+    snprintf(dsn, sizeof dsn, "shm:///tmp/pathlang_layout_defrwir_%ld.shm", (long)getpid());
     char err[512];
 
     const char *reads1[] = {"int64"};
@@ -216,7 +216,7 @@ int main(int argc, char **argv) {
           "无读参却声明变参应返回 -1（err=%s）", err);
 
     char path[256];
-    snprintf(path, sizeof path, "/tmp/kvlang_layout_defrwir_%ld.shm", (long)getpid());
+    snprintf(path, sizeof path, "/tmp/pathlang_layout_defrwir_%ld.shm", (long)getpid());
     unlink(path);
 
     if (failures) {

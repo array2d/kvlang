@@ -4,10 +4,10 @@
 #include <string.h>
 
 #include "contract/view.h"
-#include <kvlang/xvalue.h>
-#include <kvspace/kvspace_xvalue.h>
+#include <pathlang/xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
 
-#include "contract/kvspace_interface.h"
+#include "contract/pathspace_interface.h"
 
 runtimec_status_t runtimec_vthread_status_handle(
     const binrwir_binvthread_frame_t *frame, void **output_handle) {
@@ -17,9 +17,9 @@ runtimec_status_t runtimec_vthread_status_handle(
     if (frame == NULL || output_handle == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    *output_handle = frame->kvspace_handle;
+    *output_handle = frame->pathspace_handle;
     
-    return frame->kvspace_handle != NULL ? RUNTIMEC_STATUS_SUCCESS
+    return frame->pathspace_handle != NULL ? RUNTIMEC_STATUS_SUCCESS
                                          : RUNTIMEC_STATUS_NOT_IMPLEMENTED;
 }
 
@@ -68,10 +68,10 @@ static runtimec_status_t runtimec_vthread_status_fail(
 }
 
 runtimec_status_t runtimec_vthread_status_write(
-    void *kvspace_handle, const char *status_key, runtimec_bytes_view_t status) {
+    void *pathspace_handle, const char *status_key, runtimec_bytes_view_t status) {
     char message[256];
 
-    if (kvspace_handle == NULL || status_key == NULL ||
+    if (pathspace_handle == NULL || status_key == NULL ||
         status_key[0] == '\0') {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -87,22 +87,22 @@ runtimec_status_t runtimec_vthread_status_write(
     const size_t langtype_length = strlen(RUNTIMEC_VTHREAD_STATUS_LANGTYPE);
     const uint64_t attr_length = 3U + (uint64_t)langtype_length;
     uint64_t value_offset = 0U;
-    if (kvspaceRealloc(kvspace_handle, status_key, (uint64_t)status.size,
+    if (pathspaceRealloc(pathspace_handle, status_key, (uint64_t)status.size,
                        attr_length, &value_offset, message,
                        (uint32_t)sizeof(message)) != 0) {
         return RUNTIMEC_STATUS_ERROR;
     }
-    const uint8_t *base = kvspaceXvalueInProcessAddress(kvspace_handle);
+    const uint8_t *base = pathspaceXvalueInProcessAddress(pathspace_handle);
     if (base == NULL) {
         return RUNTIMEC_STATUS_UNSUPPORTED;
     }
     uint8_t *slot = (uint8_t *)(uintptr_t)(base + value_offset);
     if (status.size != 0U) {
-        memcpy(slot + KVSPACE_XVALUE_HEAD_LEN, status.data, status.size);
+        memcpy(slot + PATHSPACE_XVALUE_HEAD_LEN, status.data, status.size);
     }
     {
-        uint8_t *attr = slot + KVSPACE_XVALUE_HEAD_LEN + (uint64_t)status.size;
-        attr[0] = (uint8_t)KVLANG_XVALUE_ATTR_TAG_LANGTYPE;
+        uint8_t *attr = slot + PATHSPACE_XVALUE_HEAD_LEN + (uint64_t)status.size;
+        attr[0] = (uint8_t)PATHLANG_XVALUE_ATTR_TAG_LANGTYPE;
         attr[1] = (uint8_t)(langtype_length & 0xFFU);
         attr[2] = (uint8_t)((langtype_length >> 8U) & 0xFFU);
         memcpy(attr + 3, RUNTIMEC_VTHREAD_STATUS_LANGTYPE, langtype_length);
@@ -111,7 +111,7 @@ runtimec_status_t runtimec_vthread_status_write(
 }
 
 runtimec_status_t runtimec_vthread_status_read(
-    void *kvspace_handle, const char *status_key,
+    void *pathspace_handle, const char *status_key,
     runtimec_string_view_t *output_text, runtimec_error_t *error) {
     const uint8_t *wire = NULL;
     uint32_t wire_length = 0U;
@@ -121,14 +121,14 @@ runtimec_status_t runtimec_vthread_status_read(
     if (output_text != NULL) {
         *output_text = runtimec_string_view_make(NULL, 0U);
     }
-    if (kvspace_handle == NULL || status_key == NULL ||
+    if (pathspace_handle == NULL || status_key == NULL ||
         status_key[0] == '\0' || output_text == NULL) {
         return runtimec_vthread_status_fail(
             error, RUNTIMEC_STATUS_INVALID, 1,
             "invalid status read request");
     }
     
-    if (!runtimec_kvspace_read_wire(kvspace_handle, status_key, &wire,
+    if (!runtimec_pathspace_read_wire(pathspace_handle, status_key, &wire,
                                     &wire_length)) {
         return runtimec_vthread_status_fail(
             error, RUNTIMEC_STATUS_ERROR, 4, "status read failed");
@@ -140,17 +140,17 @@ runtimec_status_t runtimec_vthread_status_read(
             "status key is absent");
     }
     {
-        kvspaceXvalueHead head;
-        if (wire_length < KVSPACE_XVALUE_HEAD_LEN) {
+        pathspaceXvalueHead head;
+        if (wire_length < PATHSPACE_XVALUE_HEAD_LEN) {
             return runtimec_vthread_status_fail(
                 error, RUNTIMEC_STATUS_ERROR, 5, "status wire is truncated");
         }
         memcpy(&head, wire, sizeof(head));
         
-        if (!kvspaceXvalueHeadPaddingIsZero(&head) ||
-            kvspaceXvalueHeadTotalLen(&head) == 0U ||
-            kvspaceXvalueHeadTotalLen(&head) > (uint64_t)wire_length ||
-            kvspaceXvalueHeadEffectiveLen(wire, (uint64_t)wire_length,
+        if (!pathspaceXvalueHeadPaddingIsZero(&head) ||
+            pathspaceXvalueHeadTotalLen(&head) == 0U ||
+            pathspaceXvalueHeadTotalLen(&head) > (uint64_t)wire_length ||
+            pathspaceXvalueHeadEffectiveLen(wire, (uint64_t)wire_length,
                                           &effective_length) != 0) {
             return runtimec_vthread_status_fail(
                 error, RUNTIMEC_STATUS_INVALID, 3,
@@ -162,7 +162,7 @@ runtimec_status_t runtimec_vthread_status_read(
             error, RUNTIMEC_STATUS_INVALID, 3,
             "status slot does not match the fixed shape");
     }
-    body = wire + KVSPACE_XVALUE_HEAD_LEN;
+    body = wire + PATHSPACE_XVALUE_HEAD_LEN;
     *output_text = runtimec_string_view_make((const char *)body,
                                              (size_t)effective_length);
     return RUNTIMEC_STATUS_SUCCESS;

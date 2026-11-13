@@ -5,12 +5,12 @@ use std::os::raw::{c_char, c_int, c_void};
 pub type Handle = *mut c_void;
 
 extern "C" {
-    fn kvspaceConnect(dsn: *const c_char) -> Handle;
-    fn kvspaceClose(h: Handle);
+    fn pathspaceConnect(dsn: *const c_char) -> Handle;
+    fn pathspaceClose(h: Handle);
     
     fn free(p: *mut c_void);
 
-    fn kvspaceResolveOffset(
+    fn pathspaceResolveOffset(
         h: Handle,
         key: *const c_char,
         parent_key_anchor: u64,
@@ -19,7 +19,7 @@ extern "C" {
         err_cap: u32,
     ) -> c_int;
     
-    fn kvspaceRealloc(
+    fn pathspaceRealloc(
         h: Handle,
         key: *const c_char,
         body_length: u64,
@@ -29,11 +29,11 @@ extern "C" {
         err_cap: u32,
     ) -> c_int;
     
-    fn kvspaceFree(h: Handle, key: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
+    fn pathspaceFree(h: Handle, key: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
     
-    fn kvspaceXvalueInProcessAddress(h: Handle) -> *mut u8;
+    fn pathspaceXvalueInProcessAddress(h: Handle) -> *mut u8;
     
-    fn kvspaceListlen(
+    fn pathspaceListlen(
         h: Handle,
         key: *const c_char,
         out_count: *mut i64,
@@ -42,7 +42,7 @@ extern "C" {
         err_cap: u32,
     ) -> c_int;
     
-    fn kvspaceList(
+    fn pathspaceList(
         h: Handle,
         key: *const c_char,
         out_names: *mut c_char,
@@ -53,26 +53,26 @@ extern "C" {
         err: *mut c_char,
         err_cap: u32,
     ) -> c_int;
-    fn kvspaceDeltree(h: Handle, key: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
-    fn kvspaceMkindex(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
+    fn pathspaceDeltree(h: Handle, key: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
+    fn pathspaceMkindex(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
     
-    fn kvlangXvalueHeadNewNone(out: *mut *mut u8, out_len: *mut u64) -> c_int;
+    fn pathlangXvalueHeadNewNone(out: *mut *mut u8, out_len: *mut u64) -> c_int;
     
-    fn kvlangXvalueHeadNewScalar(
+    fn pathlangXvalueHeadNewScalar(
         raw: *const u8,
         raw_len: u32,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
-    fn kvlangXvalueHeadNewSlack(
+    fn pathlangXvalueHeadNewSlack(
         data: *const u8,
         data_len: u64,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
-    fn kvlangXvalueHeadNewTensor(
+    fn pathlangXvalueHeadNewTensor(
         dims: *const u64,
         ndim: u32,
         raw: *const u8,
@@ -81,7 +81,7 @@ extern "C" {
         out: *mut *mut u8,
         out_len: *mut u64,
     ) -> c_int;
-    fn kvlangXvalueHeadNewCode(
+    fn pathlangXvalueHeadNewCode(
         body: *const u8,
         body_len: u64,
         langtype: *const c_char,
@@ -89,26 +89,26 @@ extern "C" {
         out_len: *mut u64,
     ) -> c_int;
 
-    fn kvlangXvalueNewChar(
+    fn pathlangXvalueNewChar(
         bytes: *const u8,
         len: u32,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvlangXvalueNewBool(
+    fn pathlangXvalueNewBool(
         v: u8,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvlangXvalueNewInt64(
+    fn pathlangXvalueNewInt64(
         v: i64,
         langtype: *const c_char,
         out: *mut *mut u8,
         out_len: *mut u32,
     ) -> c_int;
-    fn kvlangXvalueNewFloat64(
+    fn pathlangXvalueNewFloat64(
         v: f64,
         langtype: *const c_char,
         out: *mut *mut u8,
@@ -172,7 +172,7 @@ fn err_ret(buf: &mut [c_char; 256], ret: c_int) -> Result<(), String> {
         .to_string_lossy()
         .into_owned();
     Err(if msg.is_empty() {
-        "kvspace: error".to_string()
+        "pathspace: error".to_string()
     } else {
         msg
     })
@@ -190,7 +190,7 @@ fn call_codec(
             unsafe { free(out as *mut c_void) };
         }
         return Err(format!(
-            "kvspace codec {what} failed (rc={rc}, len={out_len})"
+            "pathspace codec {what} failed (rc={rc}, len={out_len})"
         ));
     }
     let bytes = unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec();
@@ -210,7 +210,7 @@ fn call_codec64(
             unsafe { free(out as *mut c_void) };
         }
         return Err(format!(
-            "kvspace codec {what} failed (rc={rc}, len={out_len})"
+            "pathspace codec {what} failed (rc={rc}, len={out_len})"
         ));
     }
     let bytes = unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec();
@@ -220,15 +220,15 @@ fn call_codec64(
 
 fn connect_or_panic(dsn: &str) -> Handle {
     let c = CString::new(dsn).expect("no NUL in dsn");
-    let h = unsafe { kvspaceConnect(c.as_ptr()) };
+    let h = unsafe { pathspaceConnect(c.as_ptr()) };
     if h.is_null() {
-        panic!("kvspace connect failed: {dsn}");
+        panic!("pathspace connect failed: {dsn}");
     }
     h
 }
 
 pub fn test_dsn(tag: &str) -> String {
-    format!("shm:///tmp/kvlanglayout_{}_{}", tag, std::process::id())
+    format!("shm:///tmp/pathlanglayout_{}_{}", tag, std::process::id())
 }
 
 pub fn remove_test_store(dsn: &str) {
@@ -240,7 +240,7 @@ pub fn remove_test_store(dsn: &str) {
 
 pub fn try_connect(dsn: &str) -> Option<Handle> {
     let c = CString::new(dsn).ok()?;
-    let h = unsafe { kvspaceConnect(c.as_ptr()) };
+    let h = unsafe { pathspaceConnect(c.as_ptr()) };
     (!h.is_null()).then_some(h)
 }
 
@@ -257,9 +257,9 @@ impl Kv {
 
     pub fn try_conn(dsn: &str) -> Result<Kv, String> {
         let c = CString::new(dsn).map_err(|_| format!("dsn contains NUL: {dsn:?}"))?;
-        let h = unsafe { kvspaceConnect(c.as_ptr()) };
+        let h = unsafe { pathspaceConnect(c.as_ptr()) };
         if h.is_null() {
-            return Err(format!("kvspace connect failed: {dsn}"));
+            return Err(format!("pathspace connect failed: {dsn}"));
         }
         Ok(Kv { h })
     }
@@ -285,7 +285,7 @@ impl Kv {
 
         if xvalue.is_empty() {
             let ret =
-                unsafe { kvspaceFree(self.h, ck.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
+                unsafe { pathspaceFree(self.h, ck.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
             return err_ret(&mut err, ret);
         }
         if xvalue.len() < 16 {
@@ -307,7 +307,7 @@ impl Kv {
 
         let mut off: u64 = 0;
         let ret = unsafe {
-            kvspaceRealloc(
+            pathspaceRealloc(
                 self.h,
                 ck.as_ptr(),
                 body_len,
@@ -320,7 +320,7 @@ impl Kv {
         if ret != 0 {
             return err_ret(&mut err, ret);
         }
-        let base = unsafe { kvspaceXvalueInProcessAddress(self.h) };
+        let base = unsafe { pathspaceXvalueInProcessAddress(self.h) };
         if base.is_null() {
             return Err(format!(
                 "{key}: backend has no in-process address space (durable cannot be written \
@@ -348,7 +348,7 @@ impl Kv {
         let mut off: u64 = 0;
         let mut err: [c_char; 256] = [0; 256];
         let ret = unsafe {
-            kvspaceResolveOffset(
+            pathspaceResolveOffset(
                 self.h,
                 c.as_ptr(),
                 0,
@@ -360,7 +360,7 @@ impl Kv {
         if ret != 0 {
             return Vec::new();
         }
-        let base = unsafe { kvspaceXvalueInProcessAddress(self.h) };
+        let base = unsafe { pathspaceXvalueInProcessAddress(self.h) };
         if base.is_null() {
             return Vec::new();
         }
@@ -385,7 +385,7 @@ impl Kv {
         let mut max_name: u32 = 0;
         let mut err: [c_char; 256] = [0; 256];
         let ret = unsafe {
-            kvspaceListlen(
+            pathspaceListlen(
                 self.h,
                 c.as_ptr(),
                 &mut count,
@@ -407,7 +407,7 @@ impl Kv {
         let mut listed: u32 = 0;
         let mut generation: u64 = 0;
         let ret = unsafe {
-            kvspaceList(
+            pathspaceList(
                 self.h,
                 c.as_ptr(),
                 buf.as_mut_ptr() as *mut c_char,
@@ -432,21 +432,21 @@ impl Kv {
     pub fn del_tree(&mut self, prefix: &str) -> Result<(), String> {
         let c = CString::new(prefix).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
-        let ret = unsafe { kvspaceDeltree(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
+        let ret = unsafe { pathspaceDeltree(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
         err_ret(&mut err, ret)
     }
 
     pub fn mkindex(&mut self, path: &str) -> Result<(), String> {
         let c = CString::new(path).expect("no NUL");
         let mut err: [c_char; 256] = [0; 256];
-        let ret = unsafe { kvspaceMkindex(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
+        let ret = unsafe { pathspaceMkindex(self.h, c.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
         err_ret(&mut err, ret)
     }
 }
 
 impl Drop for Kv {
     fn drop(&mut self) {
-        unsafe { kvspaceClose(self.h) };
+        unsafe { pathspaceClose(self.h) };
     }
 }
 
@@ -502,19 +502,19 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>,
     let dims = al_to_dims(kind, array_len);
     if (kind.is_empty() || kind == "None") && raw.is_empty() {
         return call_codec64("HeadNewNone", |out, out_len| unsafe {
-            kvlangXvalueHeadNewNone(out, out_len)
+            pathlangXvalueHeadNewNone(out, out_len)
         });
     }
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     if kind == "char" || kind.starts_with("char/") {
         return call_codec64("HeadNewSlack", |out, out_len| unsafe {
-            kvlangXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64, empty, out, out_len)
+            pathlangXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64, empty, out, out_len)
         });
     }
     if !dims.is_empty() && !kind.contains('·') && !kind.starts_with('/') {
         let d: Vec<u64> = dims.iter().map(|&x| x as u64).collect();
         return call_codec64("HeadNewTensor", |out, out_len| unsafe {
-            kvlangXvalueHeadNewTensor(
+            pathlangXvalueHeadNewTensor(
                 d.as_ptr(),
                 d.len() as u32,
                 raw.as_ptr(),
@@ -527,11 +527,11 @@ pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>,
     }
     if kind == "rwir" || kind == "def langtype" || (kind == "rwfunc" && !raw.is_empty()) {
         return call_codec64("HeadNewCode", |out, out_len| unsafe {
-            kvlangXvalueHeadNewCode(raw.as_ptr(), raw.len() as u64, empty, out, out_len)
+            pathlangXvalueHeadNewCode(raw.as_ptr(), raw.len() as u64, empty, out, out_len)
         });
     }
     call_codec64("HeadNewScalar", |out, out_len| unsafe {
-        kvlangXvalueHeadNewScalar(raw.as_ptr(), raw.len() as u32, empty, out, out_len)
+        pathlangXvalueHeadNewScalar(raw.as_ptr(), raw.len() as u32, empty, out, out_len)
     })
 }
 
@@ -580,41 +580,41 @@ pub fn new_char(kind: &str, s: &str) -> Result<Vec<u8>, String> {
     };
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     call_codec64("HeadNewSlack", |out, out_len| unsafe {
-        kvlangXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64, empty, out, out_len)
+        pathlangXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64, empty, out, out_len)
     })
 }
 
 pub fn new_char_byte(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     call_codec("NewChar", |out, out_len| unsafe {
-        kvlangXvalueNewChar(bytes.as_ptr(), bytes.len() as u32, empty, out, out_len)
+        pathlangXvalueNewChar(bytes.as_ptr(), bytes.len() as u32, empty, out, out_len)
     })
 }
 
 pub fn new_none() -> Result<Vec<u8>, String> {
     call_codec64("HeadNewNone", |out, out_len| unsafe {
-        kvlangXvalueHeadNewNone(out, out_len)
+        pathlangXvalueHeadNewNone(out, out_len)
     })
 }
 
 pub fn new_bool(v: bool) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     call_codec("NewBool", |out, out_len| unsafe {
-        kvlangXvalueNewBool(v as u8, empty, out, out_len)
+        pathlangXvalueNewBool(v as u8, empty, out, out_len)
     })
 }
 
 pub fn new_int64(v: i64) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     call_codec("NewInt64", |out, out_len| unsafe {
-        kvlangXvalueNewInt64(v, empty, out, out_len)
+        pathlangXvalueNewInt64(v, empty, out, out_len)
     })
 }
 
 pub fn new_float64(v: f64) -> Result<Vec<u8>, String> {
     let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     call_codec("NewFloat64", |out, out_len| unsafe {
-        kvlangXvalueNewFloat64(v, empty, out, out_len)
+        pathlangXvalueNewFloat64(v, empty, out, out_len)
     })
 }
 

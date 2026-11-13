@@ -113,8 +113,8 @@ JIT_EXCLUSIVE_STORAGE_PATTERN = re.compile(
     r"spill[ _]?slot|spill[ _]?state|spilled?[ _]?register)",
     re.IGNORECASE,
 )
-CONTRACT_HEADER = ("contract", "kvspace_access.h")
-CONTRACT_IMPLEMENTATION = ("contract", "kvspace_access.c")
+CONTRACT_HEADER = ("contract", "pathspace_access.h")
+CONTRACT_IMPLEMENTATION = ("contract", "pathspace_access.c")
 BODY_OFFSET_DEFINITION = re.compile(
     r"#define\s+RUNTIMEC_XVALUE_BODY_OFFSET_BYTES\s+(\S+)")
 CONTRACT_BODY_ADDRESS_FUNCTION = "runtimec_xvalue_body_address("
@@ -175,7 +175,7 @@ AUDIT_RULES = (
     "removed-static-address-resolver",
     "removed-value-cache-model",
     "policy-merge-outside-owner",
-    "stale-kvspace-header-copy",
+    "stale-pathspace-header-copy",
     "target-dependencies",
     "unresolved-private-include",
     "xvalue-body-address-contract",
@@ -233,7 +233,7 @@ def inferred_include_layer(token: str) -> str | None:
     parts = tuple(part for part in PurePosixPath(token).parts if part not in {".", ".."})
     if not parts:
         return None
-    if parts[0] == "kvlang":
+    if parts[0] == "pathlang":
         return "public"
     if parts[0] == "runtimec" and len(parts) > 1:
         parts = parts[1:]
@@ -251,7 +251,7 @@ def resolve_include(
         *(runtimec_root / directory / token for directory in INTERNAL_PREFIXES),
         repository_root / "include" / token,
         repository_root / token,
-        repository_root.parent / "kvspace" / "include" / token,
+        repository_root.parent / "pathspace" / "include" / token,
     ]
     return next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
 
@@ -476,12 +476,12 @@ def audit_addressed_binrwir_model(
         ))
     offset_definition = BODY_OFFSET_DEFINITION.search(host_text)
     if offset_definition is None or \
-            offset_definition.group(1) != "KVSPACE_XVALUE_HEAD_LEN":
+            offset_definition.group(1) != "PATHSPACE_XVALUE_HEAD_LEN":
         findings.append(Finding(
             relative_display(contract_anchor, repository_root), 1,
             "xvalue-body-address-contract",
             "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES must be defined as "
-            "KVSPACE_XVALUE_HEAD_LEN, never as a numeric literal",
+            "PATHSPACE_XVALUE_HEAD_LEN, never as a numeric literal",
         ))
     for token in ("resolve_static_xvalue_address",):
         if token not in host_text:
@@ -625,13 +625,13 @@ def audit_build_graph(
                 f"{kind or 'with an unresolvable kind'}; it must be SHARED",
             ))
 
-    stale_copy = repository_root / "include" / "kvspace"
+    stale_copy = repository_root / "include" / "pathspace"
     if stale_copy.exists():
         findings.append(Finding(
             relative_display(stale_copy, repository_root), 1,
-            "stale-kvspace-header-copy",
-            "kvspace headers have one definition point, "
-            "kvspace/include/kvspace/; a copy under include/kvspace/ must not exist",
+            "stale-pathspace-header-copy",
+            "pathspace headers have one definition point, "
+            "pathspace/include/pathspace/; a copy under include/pathspace/ must not exist",
         ))
     return findings
 
@@ -806,13 +806,13 @@ typedef struct binrwir_jit_lowering_plan_options_t {
 """
 
 SELFTEST_CONTRACT_HEADER = """\
-#define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES KVSPACE_XVALUE_HEAD_LEN
+#define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES PATHSPACE_XVALUE_HEAD_LEN
 static_assert(RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U, "offset");
 runtimec_value_body_address_t
 runtimec_xvalue_body_address(runtimec_xvalue_address_t xvalue_address);
 runtimec_status_t
-runtimec_kvspace_access_resolve_static_xvalue_address(
-    runtimec_kvspace_access_t *access, runtimec_xvalue_address_t *output);
+runtimec_pathspace_access_resolve_static_xvalue_address(
+    runtimec_pathspace_access_t *access, runtimec_xvalue_address_t *output);
 """
 
 SELFTEST_CONTRACT_SOURCE = """\
@@ -888,8 +888,8 @@ def selftest_base_tree() -> dict[str, str]:
     return {
         "CMakeLists.txt": SELFTEST_CMAKE,
         "interface/public_interface.c": "int runtimec_public_interface(void) { return 0; }\n",
-        "contract/kvspace_access.h": SELFTEST_CONTRACT_HEADER,
-        "contract/kvspace_access.c": SELFTEST_CONTRACT_SOURCE,
+        "contract/pathspace_access.h": SELFTEST_CONTRACT_HEADER,
+        "contract/pathspace_access.c": SELFTEST_CONTRACT_SOURCE,
         "binrwir/argument.h": SELFTEST_ARGUMENT_HEADER,
         "binrwir/argument.c": (
             "int binrwir_argument_validate(void) {\n"
@@ -1031,34 +1031,34 @@ SELFTEST_CASES = (
                              "    uint32_t code_generation_revision;\n"
                              "    uint32_t optional_flag;\n")),)),
     SelftestCase("contract-anchor-missing", ("contract-anchor-missing",),
-                 delete=("contract/kvspace_access.h",)),
+                 delete=("contract/pathspace_access.h",)),
     SelftestCase("xvalue-body-offset-follows-head-length",
                  forbid=("xvalue-body-address-contract",),
-                 write=(("contract/kvspace_access.h",
+                 write=(("contract/pathspace_access.h",
                          SELFTEST_CONTRACT_HEADER.replace(
                              "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 8U",
                              "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES == 16U")),)),
     SelftestCase("xvalue-body-offset-numeric-literal",
                  ("xvalue-body-address-contract",),
-                 write=(("contract/kvspace_access.h",
+                 write=(("contract/pathspace_access.h",
                          SELFTEST_CONTRACT_HEADER.replace(
                              "#define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES "
-                             "KVSPACE_XVALUE_HEAD_LEN",
+                             "PATHSPACE_XVALUE_HEAD_LEN",
                              "#define RUNTIMEC_XVALUE_BODY_OFFSET_BYTES 8U")),)),
     SelftestCase("xvalue-body-contract-token-missing",
                  ("xvalue-body-address-contract",),
-                 write=(("contract/kvspace_access.h",
+                 write=(("contract/pathspace_access.h",
                          SELFTEST_CONTRACT_HEADER.replace(
                              "runtimec_status_t\n"
-                             "runtimec_kvspace_access_resolve_static_xvalue_address(\n"
-                             "    runtimec_kvspace_access_t *access, "
+                             "runtimec_pathspace_access_resolve_static_xvalue_address(\n"
+                             "    runtimec_pathspace_access_t *access, "
                              "runtimec_xvalue_address_t *output);\n", "")),)),
     SelftestCase("contract-derivation-missing",
                  ("contract-body-address-derivation",),
-                 write=(("contract/kvspace_access.c", "int contract_placeholder;\n"),)),
+                 write=(("contract/pathspace_access.c", "int contract_placeholder;\n"),)),
     SelftestCase("contract-derivation-zero-address-removed",
                  ("contract-body-address-derivation",),
-                 write=(("contract/kvspace_access.c",
+                 write=(("contract/pathspace_access.c",
                          SELFTEST_CONTRACT_SOURCE.replace(
                              "    if (xvalue_address == RUNTIMEC_XVALUE_ADDRESS_NONE ||\n"
                              "        xvalue_address > UINT64_MAX - "
@@ -1067,7 +1067,7 @@ SELFTEST_CASES = (
                              "RUNTIMEC_XVALUE_BODY_OFFSET_BYTES) {\n")),)),
     SelftestCase("contract-derivation-comment-decoy",
                  ("contract-body-address-derivation",),
-                 write=(("contract/kvspace_access.c",
+                 write=(("contract/pathspace_access.c",
                          "/* runtimec_xvalue_body_address( { { */\n"
                          "runtimec_value_body_address_t\n"
                          "runtimec_xvalue_body_address(runtimec_xvalue_address_t "
@@ -1081,7 +1081,7 @@ SELFTEST_CASES = (
                          "}\n"),)),
     SelftestCase("contract-derivation-decoy-clean",
                  forbid=("contract-body-address-derivation",),
-                 write=(("contract/kvspace_access.c",
+                 write=(("contract/pathspace_access.c",
                          "/* runtimec_xvalue_body_address( { { */\n" +
                          SELFTEST_CONTRACT_SOURCE),)),
     SelftestCase("body-offset-arithmetic-outside-contract",
@@ -1099,9 +1099,9 @@ SELFTEST_CASES = (
     SelftestCase("removed-resolver-name", ("removed-static-address-resolver",),
                  write=(("contract/status.c",
                          "int resolve_static_value_body_address(void);\n"),)),
-    SelftestCase("stale-kvspace-header-copy", ("stale-kvspace-header-copy",),
-                 write=(("../include/kvspace/xvalue_head.h",
-                         "#define KVSPACE_XVALUE_HEAD_LEN 16u\n"),)),
+    SelftestCase("stale-pathspace-header-copy", ("stale-pathspace-header-copy",),
+                 write=(("../include/pathspace/xvalue_head.h",
+                         "#define PATHSPACE_XVALUE_HEAD_LEN 16u\n"),)),
     SelftestCase("unreadable-source", ("read-error",),
                  write=(("vmbin/value_access.c", b"\xff\xfe\x00"),)),
     SelftestCase("jit-storage-outside-jit", ("jit-storage-outside-jit",),
@@ -1112,11 +1112,11 @@ SELFTEST_CASES = (
     SelftestCase("forbidden-tree-include", ("forbidden-tree-include",),
                  write=(("engine/execution_window.c",
                          '#include "runtime/legacy.h"\n' + SELFTEST_EXECUTION_WINDOW),)),
-    SelftestCase("kvspace-include-resolves", forbid=("unresolved-private-include",),
-                 write=(("contract/kvspace_access.h",
-                         '#include "kvspace/xvalue_head.h"\n' + SELFTEST_CONTRACT_HEADER),
-                        ("../../kvspace/include/kvspace/xvalue_head.h",
-                         "#define KVSPACE_XVALUE_HEAD_LEN 16u\n"))),
+    SelftestCase("pathspace-include-resolves", forbid=("unresolved-private-include",),
+                 write=(("contract/pathspace_access.h",
+                         '#include "pathspace/xvalue_head.h"\n' + SELFTEST_CONTRACT_HEADER),
+                        ("../../pathspace/include/pathspace/xvalue_head.h",
+                         "#define PATHSPACE_XVALUE_HEAD_LEN 16u\n"))),
     SelftestCase("unresolved-private-include", ("unresolved-private-include",),
                  write=(("engine/execution_window.c",
                          '#include "not_here/missing.h"\n' + SELFTEST_EXECUTION_WINDOW),)),
@@ -1155,7 +1155,7 @@ def run_selftest() -> int:
     with tempfile.TemporaryDirectory(prefix="runtimec-layers-selftest-") as directory:
         workspace = Path(directory)
         for case in SELFTEST_CASES:
-            root = workspace / "kvlang"
+            root = workspace / "pathlang"
             runtimec_root = root / "runtimec"
             if root.exists():
                 shutil.rmtree(root)

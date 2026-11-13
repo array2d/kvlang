@@ -279,13 +279,13 @@ lib string {
 	rwfunc join(*'[int64]'[]char/utf32 #parts,
 	            *[]char/utf32 #sep) -> (*[]char/utf32 #r) {
 		"" -> *r
-		kvspace·listlen(*parts) -> c:int64
+		pathspace·listlen(*parts) -> c:int64
 		i:int64 = 0
 		while (i < c) {
 			if (i > 0) {
 				string·concat(*r, *sep) -> *r
 			}
-			kvspace·listat(*parts, i) -> key:char/utf8
+			pathspace·listat(*parts, i) -> key:char/utf8
 			(*parts)·*key -> v:[]char/utf32
 			string·concat(*r, v) -> *r
 			i = i + 1

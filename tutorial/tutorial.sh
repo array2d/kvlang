@@ -4,7 +4,7 @@ set -euo pipefail
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 GO_MIN=1.24
 GO_FULL=1.25.8                                # version to download if go not installed or too old
-WORKDIR="${KVWORKDIR:-$HOME/kvlang-tutorial}"
+WORKDIR="${KVWORKDIR:-$HOME/pathlang-tutorial}"
 INSTALL_PREFIX="$HOME/.local"
 
 say()  { echo -e "${GREEN}==>${NC} $*"; }
@@ -62,30 +62,30 @@ say "python3 $(python3 --version)"
 mkdir -p "$WORKDIR"
 cd "$WORKDIR"
 
-if [ ! -d kvspace-go ]; then
-    say "cloning kvspace-go"
+if [ ! -d pathspace-go ]; then
+    say "cloning pathspace-go"
     # deps are vendored under deps/
 else
-    say "kvspace-go already exists, git pull"
-    git -C kvspace-go pull --ff-only
+    say "pathspace-go already exists, git pull"
+    git -C pathspace-go pull --ff-only
 fi
 
-if [ ! -d kvlang ]; then
-    say "cloning kvlang"
+if [ ! -d pathlang ]; then
+    say "cloning pathlang"
     # sources are in this tree
 else
-    say "kvlang already exists, git pull"
-    git -C kvlang pull --ff-only
+    say "pathlang already exists, git pull"
+    git -C pathlang pull --ff-only
 fi
 
 
-say "building kvspace-go"
-cd "$WORKDIR/kvspace-go"
+say "building pathspace-go"
+cd "$WORKDIR/pathspace-go"
 GOPROXY="$GOPROXY" PREFIX="$INSTALL_PREFIX" make build
 export PATH="$INSTALL_PREFIX/bin:$PATH"
 
-say "building kvlang"
-cd "$WORKDIR/kvlang"
+say "building pathlang"
+cd "$WORKDIR/pathlang"
 GOPROXY="$GOPROXY" PREFIX="$INSTALL_PREFIX" make build
 export PATH="$INSTALL_PREFIX/bin:$PATH"
 
@@ -100,5 +100,5 @@ say "redis is up"
 
 
 say "running tutorial/test.py"
-cd "$WORKDIR/kvlang"
+cd "$WORKDIR/pathlang"
 python3 tutorial/test.py

@@ -1,15 +1,15 @@
 
-use kvlanglayout::{init_dirs, kvkind, Kv};
+use pathlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_kvlanglayout")
+    env!("CARGO_BIN_EXE_pathlanglayout")
 }
 
 fn temp_file(tag: &str, src: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
-        "kvlanglayout_semop_{}_{}.kv",
+        "pathlanglayout_semop_{}_{}.kv",
         tag,
         std::process::id()
     ));
@@ -20,7 +20,7 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
 }
 
 fn dsn(tag: &str) -> String {
-    kvlanglayout::ffi::test_dsn(&format!("semop_{tag}"))
+    pathlanglayout::ffi::test_dsn(&format!("semop_{tag}"))
 }
 
 fn slot_text(kv: &mut Kv, key: &str) -> String {
@@ -63,7 +63,7 @@ fn dump_ops(tag: &str, src: &str) -> (String, Vec<String>) {
     
     drop(kv);
     let _ = std::fs::remove_file(&file);
-    kvlanglayout::ffi::remove_test_store(&db);
+    pathlanglayout::ffi::remove_test_store(&db);
     (opcode, operands)
 }
 
@@ -111,5 +111,5 @@ fn semantic_operator_never_resolves_as_call() {
     assert_eq!(kvkind::kind(&fn_alloc, &kv.langtype_of(fn_key)), "rwfunc");
     drop(kv);
     let _ = std::fs::remove_file(&file);
-    kvlanglayout::ffi::remove_test_store(&db);
+    pathlanglayout::ffi::remove_test_store(&db);
 }

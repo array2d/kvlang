@@ -1,6 +1,6 @@
 
-#include <kvspace/kvspace_xvalue.h>
-#include <kvlang/xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
+#include <pathlang/xvalue.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +28,7 @@ static void emit_none(void) {
     uint8_t *wire = NULL;
     uint64_t length = 0;
 
-    REQUIRE(kvlangXvalueHeadNewNone(&wire, &length) == 0, "none");
+    REQUIRE(pathlangXvalueHeadNewNone(&wire, &length) == 0, "none");
     if (wire != NULL) {
         emit("none", wire, length);
         free(wire);
@@ -40,7 +40,7 @@ static void emit_scalar_int64(void) {
     uint8_t *wire = NULL;
     uint64_t length = 0;
 
-    REQUIRE(kvlangXvalueHeadNewScalar(body, 8,
+    REQUIRE(pathlangXvalueHeadNewScalar(body, 8,
                                        "int64", &wire, &length) == 0,
             "int64");
     if (wire != NULL) {
@@ -54,7 +54,7 @@ static void emit_scalar_bool(void) {
     uint8_t *wire = NULL;
     uint64_t length = 0;
 
-    REQUIRE(kvlangXvalueHeadNewScalar(body, 1, "bool",
+    REQUIRE(pathlangXvalueHeadNewScalar(body, 1, "bool",
                                        &wire, &length) == 0,
             "bool");
     if (wire != NULL) {
@@ -68,7 +68,7 @@ static void emit_slack_utf8(void) {
     uint8_t *wire = NULL;
     uint64_t length = 0;
 
-    REQUIRE(kvlangXvalueHeadNewSlack(body, sizeof body, "[]char/utf8",
+    REQUIRE(pathlangXvalueHeadNewSlack(body, sizeof body, "[]char/utf8",
                                       &wire, &length) == 0,
             "utf8");
     if (wire != NULL) {
@@ -82,7 +82,7 @@ static void emit_slack_no_langtype(void) {
     uint8_t *wire = NULL;
     uint64_t length = 0;
 
-    REQUIRE(kvlangXvalueHeadNewSlack(body, sizeof body, "", &wire, &length) == 0,
+    REQUIRE(pathlangXvalueHeadNewSlack(body, sizeof body, "", &wire, &length) == 0,
             "no-langtype");
     if (wire != NULL) {
         emit("slack-no-langtype", wire, length);
@@ -97,7 +97,7 @@ static void emit_tensor(void) {
     uint64_t length = 0;
 
     memset(body, 0xab, sizeof body);
-    REQUIRE(kvlangXvalueHeadNewTensor(dims, 2, body, sizeof body,
+    REQUIRE(pathlangXvalueHeadNewTensor(dims, 2, body, sizeof body,
                                        "[2,3]float32", &wire, &length) == 0,
             "tensor");
     if (wire != NULL) {
@@ -110,7 +110,7 @@ static void emit_ptr(void) {
     uint8_t *wire = NULL;
     uint64_t length = 0;
 
-    REQUIRE(kvlangXvalueHeadNewPtr((const uint8_t *)"/lib/f", 6, "[]char/utf8",
+    REQUIRE(pathlangXvalueHeadNewPtr((const uint8_t *)"/lib/f", 6, "[]char/utf8",
                                     &wire, &length) == 0,
             "ptr");
     if (wire != NULL) {
@@ -123,7 +123,7 @@ static void emit_ext(void) {
     uint8_t *wire = NULL;
     uint64_t length = 0;
 
-    REQUIRE(kvlangXvalueHeadNewExt((const uint8_t *)"s3://b/k", 8, "", &wire,
+    REQUIRE(pathlangXvalueHeadNewExt((const uint8_t *)"s3://b/k", 8, "", &wire,
                                     &length) == 0,
             "ext");
     if (wire != NULL) {
@@ -136,7 +136,7 @@ static void emit_reserve(void) {
     uint8_t *wire = NULL;
     uint64_t length = 0;
 
-    REQUIRE(kvlangXvalueHeadReserve(4, "[]u8",
+    REQUIRE(pathlangXvalueHeadReserve(4, "[]u8",
                                      &wire, &length) == 0,
             "reserve");
     if (wire != NULL) {

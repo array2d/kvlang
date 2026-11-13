@@ -2,10 +2,10 @@
 rwfunc word_count(*'[int64]'[]char/utf32 #chars) -> (*int64 #nw) {
 	*nw = 0
 	0 -> state:int64
-	kvspace·listlen(*chars) -> n:int64
+	pathspace·listlen(*chars) -> n:int64
 	0 -> i:int64
 	while (i < n) {
-		kvspace·listat(*chars, i) -> k:int64
+		pathspace·listat(*chars, i) -> k:int64
 		(*chars)·*k -> c:[]char/utf32
 		blank:bool = c == " "
 

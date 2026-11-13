@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	dsn := flag.String("kvspace", "redis://127.0.0.1:6379", "kvspace DSN")
+	dsn := flag.String("pathspace", "redis://127.0.0.1:6379", "pathspace DSN")
 	flag.Parse()
 
 	json.Serve(*dsn)

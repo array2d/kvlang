@@ -7,13 +7,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "contract/kvspace_interface.h"
-#include "contract/kvspace_access.h"
+#include "contract/pathspace_interface.h"
+#include "contract/pathspace_access.h"
 
 #if defined(__APPLE__)
-#define RUNTIMEC_KVSPACE_FRONTEND_SONAME "libkvspace.dylib"
+#define RUNTIMEC_PATHSPACE_FRONTEND_SONAME "libpathspace.dylib"
 #else
-#define RUNTIMEC_KVSPACE_FRONTEND_SONAME "libkvspace.so"
+#define RUNTIMEC_PATHSPACE_FRONTEND_SONAME "libpathspace.so"
 #endif
 
 #define RUNTIMEC_PLATFORM_ERROR_TEXT_CAPACITY 512U
@@ -22,9 +22,9 @@ struct runtimec_platform_session_t {
     runtimec_allocator_t allocator;
     void *library;
     bool library_borrowed;
-    void *kvspace_handle;
-    runtimec_kvspace_access_t *kvspace_access;
-    bool kvspace_access_active;
+    void *pathspace_handle;
+    runtimec_pathspace_access_t *pathspace_access;
+    bool pathspace_access_active;
     runtimec_session_t *session;
 };
 
@@ -64,24 +64,24 @@ static runtimec_status_t runtimec_platform_fail(runtimec_error_t *error,
 static runtimec_status_t runtimec_platform_load_frontend(
     runtimec_platform_session_t *platform_session, runtimec_error_t *error) {
     static char error_text[RUNTIMEC_PLATFORM_ERROR_TEXT_CAPACITY];
-    void *library = dlopen(RUNTIMEC_KVSPACE_FRONTEND_SONAME,
+    void *library = dlopen(RUNTIMEC_PATHSPACE_FRONTEND_SONAME,
                            RTLD_NOW | RTLD_NOLOAD);
     if (library != NULL) {
         platform_session->library = library;
         platform_session->library_borrowed = true;
         return RUNTIMEC_STATUS_SUCCESS;
     }
-    library = dlopen(RUNTIMEC_KVSPACE_FRONTEND_SONAME, RTLD_NOW | RTLD_LOCAL);
+    library = dlopen(RUNTIMEC_PATHSPACE_FRONTEND_SONAME, RTLD_NOW | RTLD_LOCAL);
     if (library == NULL) {
         const char *detail = dlerror();
         int written = snprintf(error_text, sizeof(error_text),
-                               "cannot load kvspace frontend '%s': %s",
-                               RUNTIMEC_KVSPACE_FRONTEND_SONAME,
+                               "cannot load pathspace frontend '%s': %s",
+                               RUNTIMEC_PATHSPACE_FRONTEND_SONAME,
                                detail != NULL ? detail : "not found");
         if (written <= 0 || (size_t)written >= sizeof(error_text)) {
             return runtimec_platform_fail(
                 error, RUNTIMEC_STATUS_UNSUPPORTED, 1,
-                "cannot load kvspace frontend (diagnostic text too long)");
+                "cannot load pathspace frontend (diagnostic text too long)");
         }
         return runtimec_platform_fail(error, RUNTIMEC_STATUS_UNSUPPORTED, 2,
                                       error_text);
@@ -99,15 +99,15 @@ static void runtimec_platform_release_chain(
         (void)runtimec_session_destroy(platform_session->session);
         platform_session->session = NULL;
     }
-    if (platform_session->kvspace_access_active) {
-        (void)runtimec_kvspace_access_destroy(platform_session->kvspace_access,
+    if (platform_session->pathspace_access_active) {
+        (void)runtimec_pathspace_access_destroy(platform_session->pathspace_access,
                                               &ignored);
-        platform_session->kvspace_access = NULL;
-        platform_session->kvspace_access_active = false;
+        platform_session->pathspace_access = NULL;
+        platform_session->pathspace_access_active = false;
     }
-    if (platform_session->kvspace_handle != NULL) {
+    if (platform_session->pathspace_handle != NULL) {
         
-        kvspaceClose(platform_session->kvspace_handle);
+        pathspaceClose(platform_session->pathspace_handle);
     }
     if (platform_session->library != NULL) {
         if (!platform_session->library_borrowed) {
@@ -154,18 +154,18 @@ runtimec_status_t runtimec_platform_session_create(
         return status;
     }
 
-    platform_session->kvspace_handle = kvspaceConnect(data_source_name);
-    if (platform_session->kvspace_handle == NULL) {
+    platform_session->pathspace_handle = pathspaceConnect(data_source_name);
+    if (platform_session->pathspace_handle == NULL) {
         static char connect_text[RUNTIMEC_PLATFORM_ERROR_TEXT_CAPACITY];
         int written = snprintf(connect_text, sizeof(connect_text),
-                               "cannot connect kvspace data source '%s'",
+                               "cannot connect pathspace data source '%s'",
                                data_source_name);
         status = (written > 0 && (size_t)written < sizeof(connect_text))
                      ? runtimec_platform_fail(error, RUNTIMEC_STATUS_ERROR, 5,
                                               connect_text)
                      : runtimec_platform_fail(
                            error, RUNTIMEC_STATUS_ERROR, 5,
-                           "cannot connect kvspace data source");
+                           "cannot connect pathspace data source");
         (void)runtimec_platform_release_chain(platform_session);
         (void)runtimec_allocator_deallocate(
             &allocator, platform_session, sizeof(*platform_session),
@@ -173,13 +173,13 @@ runtimec_status_t runtimec_platform_session_create(
         return status;
     }
 
-    const runtimec_kvspace_access_request_t access_request = {
+    const runtimec_pathspace_access_request_t access_request = {
         .allocator = allocator,
-        .borrowed_kvspace_handle = platform_session->kvspace_handle,
+        .borrowed_pathspace_handle = platform_session->pathspace_handle,
         .instance_identifier = instance_identifier,
     };
-    status = runtimec_kvspace_access_create(
-        &access_request, &platform_session->kvspace_access, error);
+    status = runtimec_pathspace_access_create(
+        &access_request, &platform_session->pathspace_access, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         (void)runtimec_platform_release_chain(platform_session);
         (void)runtimec_allocator_deallocate(
@@ -187,10 +187,10 @@ runtimec_status_t runtimec_platform_session_create(
             _Alignof(runtimec_platform_session_t));
         return status;
     }
-    platform_session->kvspace_access_active = true;
+    platform_session->pathspace_access_active = true;
 
     runtimec_session_t *session = NULL;
-    status = runtimec_session_create(platform_session->kvspace_access, options,
+    status = runtimec_session_create(platform_session->pathspace_access, options,
                                      &session, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         (void)runtimec_platform_release_chain(platform_session);

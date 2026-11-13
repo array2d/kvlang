@@ -1,18 +1,18 @@
 
-use kvlanglayout::{compile, init_dirs, kvkind, Kv};
+use pathlanglayout::{compile, init_dirs, kvkind, Kv};
 
 struct TempStore(String);
 
 impl Drop for TempStore {
     fn drop(&mut self) {
-        kvlanglayout::ffi::remove_test_store(&self.0);
+        pathlanglayout::ffi::remove_test_store(&self.0);
     }
 }
 
 fn fresh_kv(tag: &str) -> (TempStore, Kv) {
-    let dsn = kvlanglayout::ffi::test_dsn(&format!("uintlit_{tag}"));
+    let dsn = pathlanglayout::ffi::test_dsn(&format!("uintlit_{tag}"));
     let store = TempStore(dsn.clone());
-    kvlanglayout::ffi::remove_test_store(&dsn);
+    pathlanglayout::ffi::remove_test_store(&dsn);
 
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();

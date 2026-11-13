@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <kvlang/runtimec.h>
+#include <pathlang/runtimec.h>
 
 static int g_failures = 0;
 
@@ -13,8 +13,8 @@ static void check(int condition, const char *message) {
     }
 }
 
-static kvlang_runtime_create_request_t invalid_request(void) {
-    kvlang_runtime_create_request_t request;
+static pathlang_runtime_create_request_t invalid_request(void) {
+    pathlang_runtime_create_request_t request;
     memset(&request, 0, sizeof(request));
     request.structure_size = sizeof(request);
     request.data_source_name = NULL; 
@@ -22,8 +22,8 @@ static kvlang_runtime_create_request_t invalid_request(void) {
     return request;
 }
 
-static kvlang_runtime_create_request_t unconnectable_request(void) {
-    kvlang_runtime_create_request_t request;
+static pathlang_runtime_create_request_t unconnectable_request(void) {
+    pathlang_runtime_create_request_t request;
     memset(&request, 0, sizeof(request));
     request.structure_size = sizeof(request);
     request.data_source_name = "no-such-scheme://runtimec-error-status-test";
@@ -38,41 +38,41 @@ typedef struct observation {
     size_t required_length;
 } observation_t;
 
-static observation_t observe(const kvlang_runtime_create_request_t *request,
+static observation_t observe(const pathlang_runtime_create_request_t *request,
                              char *data, size_t capacity) {
     observation_t seen;
-    kvlang_runtime_t *runtime = NULL;
+    pathlang_runtime_t *runtime = NULL;
 
     memset(&seen, 0, sizeof(seen));
     if (data == NULL) {
-        seen.returned = kvlang_runtime_create(request, &runtime, NULL);
+        seen.returned = pathlang_runtime_create(request, &runtime, NULL);
         return seen;
     }
-    kvlang_runtime_error_t error;
+    pathlang_runtime_error_t error;
     memset(&error, 0, sizeof(error));
     error.message.data = data;
     error.message.capacity = capacity;
     if (capacity != 0U) {
         memset(data, 0, capacity);
     }
-    seen.returned = kvlang_runtime_create(request, &runtime, &error);
+    seen.returned = pathlang_runtime_create(request, &runtime, &error);
     seen.error_status = error.status;
     seen.length = error.message.length;
     seen.required_length = error.message.required_length;
     if (runtime != NULL) {
         char destroy_message[128];
-        kvlang_runtime_error_t destroy_error;
+        pathlang_runtime_error_t destroy_error;
         memset(&destroy_error, 0, sizeof(destroy_error));
         destroy_message[0] = '\0';
         destroy_error.message.data = destroy_message;
         destroy_error.message.capacity = sizeof(destroy_message);
-        (void)kvlang_runtime_destroy(runtime, &destroy_error);
+        (void)pathlang_runtime_destroy(runtime, &destroy_error);
     }
     return seen;
 }
 
 static void check_status_is_independent_of_the_message_buffer(
-    const kvlang_runtime_create_request_t *request,
+    const pathlang_runtime_create_request_t *request,
     runtimec_status_t expected, const char *label) {
     char ample_text[512];
     char one_byte[1];
@@ -147,13 +147,13 @@ static void check_status_is_independent_of_the_message_buffer(
     check(with_ample_capacity.length != 0U, message);
 
     {
-        kvlang_runtime_t *runtime = NULL;
-        kvlang_runtime_error_t error;
+        pathlang_runtime_t *runtime = NULL;
+        pathlang_runtime_error_t error;
         memset(&error, 0, sizeof(error));
         error.message.data = NULL;
         error.message.capacity = 64U; 
         const runtimec_status_t returned =
-            kvlang_runtime_create(request, &runtime, &error);
+            pathlang_runtime_create(request, &runtime, &error);
         snprintf(message, sizeof(message),
                  "%s: malformed error buffer returned %d (expected %d)", label,
                  (int)returned, (int)expected);
@@ -167,15 +167,15 @@ static void check_status_is_independent_of_the_message_buffer(
                  error.message.length);
         check(error.message.length == 0U, message);
         if (runtime != NULL) {
-            (void)kvlang_runtime_destroy(runtime, NULL);
+            (void)pathlang_runtime_destroy(runtime, NULL);
         }
     }
 }
 
 int main(void) {
     
-    const kvlang_runtime_create_request_t invalid = invalid_request();
-    const kvlang_runtime_create_request_t unconnectable = unconnectable_request();
+    const pathlang_runtime_create_request_t invalid = invalid_request();
+    const pathlang_runtime_create_request_t unconnectable = unconnectable_request();
 
     check_status_is_independent_of_the_message_buffer(
         &invalid, RUNTIMEC_STATUS_INVALID, "invalid request");

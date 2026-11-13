@@ -1259,7 +1259,7 @@ pub fn write_func(
         ));
     }
 
-    let werr = |e: String| format!("kvspace write {func_dir}: {e}");
+    let werr = |e: String| format!("pathspace write {func_dir}: {e}");
     kv.del_tree(&func_dir).map_err(werr)?;
     kv.mkindex(&format!("{func_dir}/")).map_err(werr)?;
     kv.set(&pairs).map_err(werr)?;
@@ -1429,7 +1429,7 @@ pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) -> Result<(), String> {
             field_default(&fld.ty, fld.default.as_ref())?,
         ));
     }
-    let werr = |e: String| format!("kvspace write {base}: {e}");
+    let werr = |e: String| format!("pathspace write {base}: {e}");
     kv.del_tree(&base).map_err(werr)?;
     kv.set(&pairs).map_err(werr)
 }
@@ -1507,7 +1507,7 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
         ));
     }
     kv.set(&pairs)
-        .map_err(|e| format!("kvspace write {base}: {e}"))
+        .map_err(|e| format!("pathspace write {base}: {e}"))
 }
 
 fn collect_insts(
@@ -2560,7 +2560,7 @@ mod tests {
     #[test]
     fn format_preserves_lib() {
         roundtrip("lib http {\n\trwfunc get(*[]char/utf32 #url) -> (*[]char/utf32 #resp) {\n\t\thttp·call(\"GET\", \"\", *url, \"\") -> *resp\n\t}\n}\n");
-        roundtrip("lib byteseek {\nlib session {\nlib s1 {\nrwfunc main() -> () {\ns:int64 = 3 + 4\nprintln(s)\n}\n}\n}\n}\nmain()\n");
+        roundtrip("lib pathseek {\nlib session {\nlib s1 {\nrwfunc main() -> () {\ns:int64 = 3 + 4\nprintln(s)\n}\n}\n}\n}\nmain()\n");
     }
 
     #[test]
@@ -2575,7 +2575,7 @@ mod tests {
 
     #[test]
     fn nested_lib_layout_and_merge() {
-        let dsn_nested = format!("fs:///tmp/kvlanglayout_nested_{}", std::process::id());
+        let dsn_nested = format!("fs:///tmp/pathlanglayout_nested_{}", std::process::id());
         
         struct Guard_nested(String);
         impl Drop for Guard_nested {
@@ -2588,7 +2588,7 @@ mod tests {
         
         if crate::ffi::try_connect(&dsn_nested).is_none() {
             eprintln!(
-                "SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归",
+                "SKIP: 后端不可用（{}）——本期 libpathspace 只服务 shm://，这是能力边界不是回归",
                 dsn_nested
             );
             return;
@@ -2648,7 +2648,7 @@ mod tests {
 
     #[test]
     fn call_slots_use_target_type() {
-        let dsn_call_kind = format!("fs:///tmp/kvlanglayout_call_kind_{}", std::process::id());
+        let dsn_call_kind = format!("fs:///tmp/pathlanglayout_call_kind_{}", std::process::id());
         
         struct Guard_call_kind(String);
         impl Drop for Guard_call_kind {
@@ -2661,7 +2661,7 @@ mod tests {
         
         if crate::ffi::try_connect(&dsn_call_kind).is_none() {
             eprintln!(
-                "SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归",
+                "SKIP: 后端不可用（{}）——本期 libpathspace 只服务 shm://，这是能力边界不是回归",
                 dsn_call_kind
             );
             return;
@@ -2734,7 +2734,7 @@ mod tests {
 
     #[test]
     fn struct_definition_uses_child_keys() {
-        let dsn_struct = format!("fs:///tmp/kvlanglayout_struct_{}", std::process::id());
+        let dsn_struct = format!("fs:///tmp/pathlanglayout_struct_{}", std::process::id());
         
         struct Guard_struct(String);
         impl Drop for Guard_struct {
@@ -2747,7 +2747,7 @@ mod tests {
         
         if crate::ffi::try_connect(&dsn_struct).is_none() {
             eprintln!(
-                "SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归",
+                "SKIP: 后端不可用（{}）——本期 libpathspace 只服务 shm://，这是能力边界不是回归",
                 dsn_struct
             );
             return;
@@ -2780,7 +2780,7 @@ mod tests {
     #[test]
     fn dot_is_ordinary_char_contiguous_coords() {
         
-        let dsn_dot = format!("fs:///tmp/kvlanglayout_dot_{}", std::process::id());
+        let dsn_dot = format!("fs:///tmp/pathlanglayout_dot_{}", std::process::id());
         
         struct Guard_dot(String);
         impl Drop for Guard_dot {
@@ -2793,7 +2793,7 @@ mod tests {
         
         if crate::ffi::try_connect(&dsn_dot).is_none() {
             eprintln!(
-                "SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归",
+                "SKIP: 后端不可用（{}）——本期 libpathspace 只服务 shm://，这是能力边界不是回归",
                 dsn_dot
             );
             return;
@@ -2867,7 +2867,7 @@ mod tests {
     #[test]
     fn named_block_falls_through_without_return() {
         
-        let dsn = format!("fs:///tmp/kvlanglayout_named_block_{}", std::process::id());
+        let dsn = format!("fs:///tmp/pathlanglayout_named_block_{}", std::process::id());
         struct Guard(String);
         impl Drop for Guard {
             fn drop(&mut self) {
@@ -2879,7 +2879,7 @@ mod tests {
         
         if crate::ffi::try_connect(&dsn).is_none() {
             eprintln!(
-                "SKIP: 后端不可用（{}）——本期 libkvspace 只服务 shm://，这是能力边界不是回归",
+                "SKIP: 后端不可用（{}）——本期 libpathspace 只服务 shm://，这是能力边界不是回归",
                 dsn
             );
             return;

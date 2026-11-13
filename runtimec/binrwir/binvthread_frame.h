@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#include "contract/kvspace_access.h"
+#include "contract/pathspace_access.h"
 #include "contract/snapshot.h"
 #include "contract/status.h"
 #include "contract/view.h"
@@ -27,7 +27,7 @@ typedef struct binrwir_binvthread_frame {
     
     binrwir_frame_bindings_t *bindings;
     
-    void *kvspace_handle;
+    void *pathspace_handle;
     
     runtimec_key_view_t frame_path;
     
@@ -35,7 +35,7 @@ typedef struct binrwir_binvthread_frame {
     
     runtimec_string_view_t vthread_identifier;
     
-    runtimec_kvspace_access_t *kvspace_access;
+    runtimec_pathspace_access_t *pathspace_access;
     
     runtimec_snapshot_t snapshot;
     uint64_t snapshot_generation;

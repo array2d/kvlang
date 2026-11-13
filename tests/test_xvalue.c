@@ -1,5 +1,5 @@
-#include <kvspace/kvspace_xvalue.h>
-#include <kvlang/xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
+#include <pathlang/xvalue.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,26 +19,26 @@ static int failures = 0;
 static int value_ok(const uint8_t *v, uint64_t total, uint64_t body_len,
                     const char *lt) {
     size_t want = strlen(lt);
-    kvspaceXvalueHead h;
+    pathspaceXvalueHead h;
     memcpy(&h, v, sizeof h);
-    if (kvspaceXvalueHeadLen(&h) != body_len ||
-        !kvspaceXvalueHeadPaddingIsZero(&h))
+    if (pathspaceXvalueHeadLen(&h) != body_len ||
+        !pathspaceXvalueHeadPaddingIsZero(&h))
         return 0;
-    if (kvspaceXvalueHeadTotalLen(&h) != total)
+    if (pathspaceXvalueHeadTotalLen(&h) != total)
         return 0;
-    const uint64_t alen = kvspaceXvalueHeadAttrsLen(&h);
-    if (total != KVSPACE_XVALUE_HEAD_LEN + body_len + alen)
+    const uint64_t alen = pathspaceXvalueHeadAttrsLen(&h);
+    if (total != PATHSPACE_XVALUE_HEAD_LEN + body_len + alen)
         return 0;
     const uint8_t *ltp = NULL;
-    uint16_t n = kvlangXvalueHeadLangtypeBounded(v, total, &ltp);
+    uint16_t n = pathlangXvalueHeadLangtypeBounded(v, total, &ltp);
     if (n != want || (want && (!ltp || memcmp(ltp, lt, want) != 0)))
         return 0;
     uint64_t eff = UINT64_MAX;
-    if (kvspaceXvalueHeadEffectiveLen(v, total, &eff) != 0 || eff != body_len)
+    if (pathspaceXvalueHeadEffectiveLen(v, total, &eff) != 0 || eff != body_len)
         return 0;
     if (want) {
-        const uint8_t *a = v + KVSPACE_XVALUE_HEAD_LEN + body_len;
-        if (a[0] != KVLANG_XVALUE_ATTR_TAG_LANGTYPE || a[1] != want ||
+        const uint8_t *a = v + PATHSPACE_XVALUE_HEAD_LEN + body_len;
+        if (a[0] != PATHLANG_XVALUE_ATTR_TAG_LANGTYPE || a[1] != want ||
             a[2] != 0)
             return 0;
     }
@@ -48,11 +48,11 @@ static int value_ok(const uint8_t *v, uint64_t total, uint64_t body_len,
 static void test_none(void) {
     uint8_t *buf = NULL;
     uint64_t n = 0;
-    CHECK(kvlangXvalueHeadNewNone(&buf, &n) == 0, "none new");
+    CHECK(pathlangXvalueHeadNewNone(&buf, &n) == 0, "none new");
     CHECK(n == 16, "none len %llu", (unsigned long long)n);
-    kvspaceXvalueHead h;
+    pathspaceXvalueHead h;
     memcpy(&h, buf, sizeof h);
-    CHECK(kvspaceXvalueHeadLen(&h) == 0, "none head");
+    CHECK(pathspaceXvalueHeadLen(&h) == 0, "none head");
     CHECK(buf[0] == 0 && buf[7] == 0 && buf[8] == 0 && buf[9] == 0,
           "none bodylen/attrslen zero");
     for (int at = 10; at <= 15; at++)
@@ -65,20 +65,20 @@ static void test_scalar(void) {
     uint8_t raw[8] = {0x2a, 0, 0, 0, 0, 0, 0, 0};
     uint8_t *buf = NULL;
     uint64_t n = 0;
-    CHECK(kvlangXvalueHeadNewScalar(raw, 8, "int64", &buf, &n) == 0,
+    CHECK(pathlangXvalueHeadNewScalar(raw, 8, "int64", &buf, &n) == 0,
           "i64 new");
     CHECK(n == 32, "i64 len %llu", (unsigned long long)n);
-    CHECK(memcmp(buf + KVSPACE_XVALUE_HEAD_LEN, raw, 8) == 0, "i64 body@16");
+    CHECK(memcmp(buf + PATHSPACE_XVALUE_HEAD_LEN, raw, 8) == 0, "i64 body@16");
     CHECK(value_ok(buf, n, 8, "int64"), "i64 langtype attr");
     free(buf);
 
-    CHECK(kvlangXvalueHeadNewScalar(raw, 8, "", &buf, &n) == 0,
+    CHECK(pathlangXvalueHeadNewScalar(raw, 8, "", &buf, &n) == 0,
           "scalar no-langtype");
     CHECK(n == 24, "no-langtype len %llu", (unsigned long long)n);
     CHECK(value_ok(buf, n, 8, ""), "no-langtype empty attr");
     free(buf);
 
-    CHECK(kvlangXvalueHeadNewScalar(NULL, 1, "", &buf, &n) != 0 && buf == NULL,
+    CHECK(pathlangXvalueHeadNewScalar(NULL, 1, "", &buf, &n) != 0 && buf == NULL,
           "scalar NULL body rejected");
 }
 
@@ -86,21 +86,21 @@ static void test_slack(void) {
     const uint8_t hi[] = {'h', 'i'};
     uint8_t *buf = NULL;
     uint64_t n = 0;
-    CHECK(kvlangXvalueHeadNewSlack(hi, sizeof hi, "[]char/utf8", &buf, &n) ==
+    CHECK(pathlangXvalueHeadNewSlack(hi, sizeof hi, "[]char/utf8", &buf, &n) ==
               0,
           "slack new");
     CHECK(n == 16 + 2 + 14, "slack len %llu", (unsigned long long)n);
-    CHECK(memcmp(buf + KVSPACE_XVALUE_HEAD_LEN, hi, 2) == 0, "slack body");
+    CHECK(memcmp(buf + PATHSPACE_XVALUE_HEAD_LEN, hi, 2) == 0, "slack body");
     CHECK(value_ok(buf, n, 2, "[]char/utf8"), "slack langtype attr");
     free(buf);
 
-    CHECK(kvlangXvalueHeadNewSlack(NULL, 0, "", &buf, &n) == 0,
+    CHECK(pathlangXvalueHeadNewSlack(NULL, 0, "", &buf, &n) == 0,
           "empty slack");
     CHECK(n == 16, "empty slack len %llu", (unsigned long long)n);
     CHECK(value_ok(buf, n, 0, ""), "empty slack attr");
     free(buf);
 
-    CHECK(kvlangXvalueHeadNewSlack(NULL, 1, "", &buf, &n) != 0 && buf == NULL,
+    CHECK(pathlangXvalueHeadNewSlack(NULL, 1, "", &buf, &n) != 0 && buf == NULL,
           "slack NULL body rejected");
 }
 
@@ -110,16 +110,16 @@ static void test_tensor(void) {
     uint8_t *buf = NULL;
     uint64_t n = 0;
     memset(raw, 0xab, sizeof raw);
-    CHECK(kvlangXvalueHeadNewTensor(dims, 2, raw, sizeof raw,
+    CHECK(pathlangXvalueHeadNewTensor(dims, 2, raw, sizeof raw,
                                      "[2,3]float32", &buf, &n) == 0,
           "tensor new");
     CHECK(n == 55, "tensor len %llu", (unsigned long long)n);
     CHECK(value_ok(buf, n, sizeof raw, "[2,3]float32"), "tensor attr");
     free(buf);
-    CHECK(kvlangXvalueHeadNewTensor(NULL, 2, raw, sizeof raw, "", &buf, &n) !=
+    CHECK(pathlangXvalueHeadNewTensor(NULL, 2, raw, sizeof raw, "", &buf, &n) !=
               0,
           "tensor NULL dims rejected");
-    CHECK(kvlangXvalueHeadNewTensor(dims, 0, raw, sizeof raw, "", &buf, &n) !=
+    CHECK(pathlangXvalueHeadNewTensor(dims, 0, raw, sizeof raw, "", &buf, &n) !=
               0,
           "tensor ndim=0 rejected");
 }
@@ -127,32 +127,32 @@ static void test_tensor(void) {
 static void test_ptr_ext(void) {
     uint8_t *buf = NULL;
     uint64_t n = 0;
-    CHECK(kvlangXvalueHeadNewPtr((const uint8_t *)"/lib/f", 6, "[]char/utf8",
+    CHECK(pathlangXvalueHeadNewPtr((const uint8_t *)"/lib/f", 6, "[]char/utf8",
                                   &buf, &n) == 0,
           "ptr new");
     CHECK(n == 37, "ptr len %llu", (unsigned long long)n);
     CHECK(value_ok(buf, n, 6, "*[]char/utf8"), "ptr attr");
     free(buf);
 
-    CHECK(kvlangXvalueHeadNewPtr((const uint8_t *)"/x", 2, "", &buf, &n) == 0,
+    CHECK(pathlangXvalueHeadNewPtr((const uint8_t *)"/x", 2, "", &buf, &n) == 0,
           "ptr empty kindexpr");
     CHECK(value_ok(buf, n, 2, "*"), "ptr bare star");
     free(buf);
 
-    CHECK(kvlangXvalueHeadNewPtr((const uint8_t *)"/x", 2, "*int64", &buf,
+    CHECK(pathlangXvalueHeadNewPtr((const uint8_t *)"/x", 2, "*int64", &buf,
                                   &n) != 0,
           "ptr double prefix rejected");
 
-    CHECK(kvlangXvalueHeadNewExt((const uint8_t *)"s3://b/k", 8, "", &buf,
+    CHECK(pathlangXvalueHeadNewExt((const uint8_t *)"s3://b/k", 8, "", &buf,
                                   &n) == 0,
           "ext new");
     CHECK(n == 28, "ext len %llu", (unsigned long long)n);
     CHECK(value_ok(buf, n, 8, "@"), "ext attr");
     free(buf);
 
-    CHECK(kvlangXvalueHeadNewExt(NULL, 1, "", &buf, &n) != 0,
+    CHECK(pathlangXvalueHeadNewExt(NULL, 1, "", &buf, &n) != 0,
           "ext NULL locator rejected");
-    CHECK(kvlangXvalueHeadNewExt((const uint8_t *)"x", 1, "@x", &buf, &n) != 0,
+    CHECK(pathlangXvalueHeadNewExt((const uint8_t *)"x", 1, "@x", &buf, &n) != 0,
           "ext double prefix rejected");
 }
 
@@ -160,13 +160,13 @@ static void test_code_reserve(void) {
     const uint8_t body[5] = {1, 2, 3, 4, 5};
     uint8_t *buf = NULL;
     uint64_t n = 0;
-    CHECK(kvlangXvalueHeadNewCode(body, sizeof body, "rwir", &buf, &n) == 0,
+    CHECK(pathlangXvalueHeadNewCode(body, sizeof body, "rwir", &buf, &n) == 0,
           "code new");
     CHECK(n == 16 + 5 + 7, "code len %llu", (unsigned long long)n);
     CHECK(value_ok(buf, n, 5, "rwir"), "code attr");
     free(buf);
 
-    CHECK(kvlangXvalueHeadReserve(4, "[]u8", &buf, &n) == 0, "reserve new");
+    CHECK(pathlangXvalueHeadReserve(4, "[]u8", &buf, &n) == 0, "reserve new");
     CHECK(n == 27, "reserve len %llu", (unsigned long long)n);
     for (int i = 0; i < 4; i++)
         CHECK(buf[16 + i] == 0, "reserve body byte %d zero", i);
@@ -177,25 +177,25 @@ static void test_code_reserve(void) {
 static void test_padding_rejected(void) {
     uint8_t *buf = NULL;
     uint64_t n = 0;
-    CHECK(kvlangXvalueHeadNewScalar((const uint8_t *)"abcd", 4, "int64",
+    CHECK(pathlangXvalueHeadNewScalar((const uint8_t *)"abcd", 4, "int64",
                                      &buf, &n) == 0,
           "padding build");
     const uint8_t *lt = (const uint8_t *)"sentinel";
-    CHECK(kvlangXvalueHeadLangtypeBounded(buf, n, &lt) == 5 && lt != NULL,
+    CHECK(pathlangXvalueHeadLangtypeBounded(buf, n, &lt) == 5 && lt != NULL,
           "padding zero accepted");
     for (int at = 10; at <= 15; at++) {
         buf[at] = 1;
-        kvspaceXvalueHead h;
+        pathspaceXvalueHead h;
         memcpy(&h, buf, sizeof h);
         lt = (const uint8_t *)"sentinel";
-        CHECK(kvlangXvalueHeadLangtypeBounded(buf, n, &lt) == 0 && lt == NULL,
+        CHECK(pathlangXvalueHeadLangtypeBounded(buf, n, &lt) == 0 && lt == NULL,
               "nonzero padding byte %d rejected", at);
-        CHECK(!kvspaceXvalueHeadPaddingIsZero(&h),
+        CHECK(!pathspaceXvalueHeadPaddingIsZero(&h),
               "helper sees padding byte %d", at);
-        CHECK(kvspaceXvalueHeadTotalLen(&h) == 0,
+        CHECK(pathspaceXvalueHeadTotalLen(&h) == 0,
               "total len refuses padding byte %d", at);
         uint64_t eff = 0;
-        CHECK(kvspaceXvalueHeadEffectiveLen(buf, n, &eff) != 0,
+        CHECK(pathspaceXvalueHeadEffectiveLen(buf, n, &eff) != 0,
               "effective len refuses padding byte %d", at);
         buf[at] = 0;
     }
@@ -206,7 +206,7 @@ static void test_tag_two_rejected(void) {
     const uint8_t body[] = {'a', 'b', 'c'};
     uint8_t *base = NULL;
     uint64_t base_len = 0;
-    CHECK(kvlangXvalueHeadNewSlack(body, sizeof body, "[]char/utf8", &base,
+    CHECK(pathlangXvalueHeadNewSlack(body, sizeof body, "[]char/utf8", &base,
                                     &base_len) == 0,
           "tag2 base build");
     const uint64_t extra = 11;
@@ -218,13 +218,13 @@ static void test_tag_two_rejected(void) {
         return;
     }
     memcpy(wire, base, (size_t)base_len);
-    kvspaceXvalueHead h;
+    pathspaceXvalueHead h;
     memcpy(&h, wire, sizeof h);
-    kvspaceXvalueHeadSetAttrsLen(&h,
-                                 (uint16_t)(kvspaceXvalueHeadAttrsLen(&h) + extra));
+    pathspaceXvalueHeadSetAttrsLen(&h,
+                                 (uint16_t)(pathspaceXvalueHeadAttrsLen(&h) + extra));
     memcpy(wire, &h, sizeof h);
     
-    uint8_t *a = wire + KVSPACE_XVALUE_HEAD_LEN + kvspaceXvalueHeadLen(&h);
+    uint8_t *a = wire + PATHSPACE_XVALUE_HEAD_LEN + pathspaceXvalueHeadLen(&h);
     a[0] = 2;
     a[1] = 8;
     a[2] = 0;
@@ -233,10 +233,10 @@ static void test_tag_two_rejected(void) {
         a[3 + i] = (uint8_t)(reallen >> (8 * i));
 
     const uint8_t *lt = (const uint8_t *)"sentinel";
-    CHECK(kvlangXvalueHeadLangtypeBounded(wire, total, &lt) == 0 && lt == NULL,
+    CHECK(pathlangXvalueHeadLangtypeBounded(wire, total, &lt) == 0 && lt == NULL,
           "tag 2 rejected by scan");
     uint64_t eff = UINT64_MAX;
-    CHECK(kvspaceXvalueHeadEffectiveLen(wire, total, &eff) != 0,
+    CHECK(pathspaceXvalueHeadEffectiveLen(wire, total, &eff) != 0,
           "tag 2 rejected by effective len");
     free(wire);
     free(base);
@@ -251,25 +251,25 @@ static void test_tag_two_position_independent(void) {
 
     for (int tag2_first = 0; tag2_first <= 1; tag2_first++) {
         const uint16_t attrs = (uint16_t)(lt_record + tag2_record);
-        const uint64_t total = KVSPACE_XVALUE_HEAD_LEN + 3 + attrs;
+        const uint64_t total = PATHSPACE_XVALUE_HEAD_LEN + 3 + attrs;
         uint8_t *wire = (uint8_t *)calloc(1, (size_t)total);
         CHECK(wire != NULL, "tag2-position allocation");
         if (!wire)
             return;
-        kvspaceXvalueHead h = {.padding = {0}};
-        kvspaceXvalueHeadSetLen(&h, 3);
-        kvspaceXvalueHeadSetAttrsLen(&h, attrs);
+        pathspaceXvalueHead h = {.padding = {0}};
+        pathspaceXvalueHeadSetLen(&h, 3);
+        pathspaceXvalueHeadSetAttrsLen(&h, attrs);
         memcpy(wire, &h, sizeof h);
-        wire[KVSPACE_XVALUE_HEAD_LEN + 0] = 'a';
-        wire[KVSPACE_XVALUE_HEAD_LEN + 1] = 'b';
-        wire[KVSPACE_XVALUE_HEAD_LEN + 2] = 'c';
+        wire[PATHSPACE_XVALUE_HEAD_LEN + 0] = 'a';
+        wire[PATHSPACE_XVALUE_HEAD_LEN + 1] = 'b';
+        wire[PATHSPACE_XVALUE_HEAD_LEN + 2] = 'c';
 
-        uint8_t *a = wire + KVSPACE_XVALUE_HEAD_LEN + 3;
+        uint8_t *a = wire + PATHSPACE_XVALUE_HEAD_LEN + 3;
         if (tag2_first) {
             a[0] = 2; a[1] = 8; a[2] = 0;
             a += tag2_record;
         }
-        a[0] = KVLANG_XVALUE_ATTR_TAG_LANGTYPE;
+        a[0] = PATHLANG_XVALUE_ATTR_TAG_LANGTYPE;
         a[1] = (uint8_t)lt_len;
         a[2] = 0;
         memcpy(a + 3, lt_data, lt_len);
@@ -280,8 +280,8 @@ static void test_tag_two_position_independent(void) {
 
         const uint8_t *data = NULL;
         uint16_t data_len = 0;
-        const int rc = kvspaceXvalueGetAttr(wire, total,
-                                            KVLANG_XVALUE_ATTR_TAG_LANGTYPE,
+        const int rc = pathspaceXvalueGetAttr(wire, total,
+                                            PATHLANG_XVALUE_ATTR_TAG_LANGTYPE,
                                             &data, &data_len);
         CHECK(rc == -1,
               "tag 2 位于 langtype %s 时仍须拒绝（rc=%d）",
@@ -296,14 +296,14 @@ static void test_tag_two_position_independent(void) {
 static void test_bounded_and_truncated(void) {
     uint8_t *buf = NULL;
     uint64_t n = 0;
-    CHECK(kvlangXvalueHeadNewSlack((const uint8_t *)"abc", 3, "[]char/utf8",
+    CHECK(pathlangXvalueHeadNewSlack((const uint8_t *)"abc", 3, "[]char/utf8",
                                     &buf, &n) == 0,
           "bounded build");
     const uint8_t *lt = (const uint8_t *)"sentinel";
-    CHECK(kvlangXvalueHeadLangtypeBounded(buf, n - 1, &lt) == 0 && lt == NULL,
+    CHECK(pathlangXvalueHeadLangtypeBounded(buf, n - 1, &lt) == 0 && lt == NULL,
           "truncated wire rejected");
     lt = (const uint8_t *)"sentinel";
-    CHECK(kvlangXvalueHeadLangtypeBounded(buf, KVSPACE_XVALUE_HEAD_LEN, &lt) ==
+    CHECK(pathlangXvalueHeadLangtypeBounded(buf, PATHSPACE_XVALUE_HEAD_LEN, &lt) ==
                   0 &&
               lt == NULL,
           "wire cut before body/attr rejected");
@@ -311,11 +311,11 @@ static void test_bounded_and_truncated(void) {
 
     uint8_t short_wire[9] = {0};
     lt = (const uint8_t *)"sentinel";
-    CHECK(kvlangXvalueHeadLangtypeBounded(short_wire, 9, &lt) == 0 &&
+    CHECK(pathlangXvalueHeadLangtypeBounded(short_wire, 9, &lt) == 0 &&
               lt == NULL,
           "wire shorter than head rejected");
     lt = (const uint8_t *)"sentinel";
-    CHECK(kvlangXvalueHeadLangtypeBounded(NULL, 16, &lt) == 0 && lt == NULL,
+    CHECK(pathlangXvalueHeadLangtypeBounded(NULL, 16, &lt) == 0 && lt == NULL,
           "NULL wire rejected");
 }
 
@@ -330,12 +330,12 @@ static void test_attrslen_limit(void) {
     lt[max_langtype] = '\0';
     uint8_t *buf = NULL;
     uint64_t n = 0;
-    CHECK(kvlangXvalueHeadNewScalar(NULL, 0, lt, &buf, &n) == 0,
+    CHECK(pathlangXvalueHeadNewScalar(NULL, 0, lt, &buf, &n) == 0,
           "attrslen == UINT16_MAX accepted");
     if (buf) {
-        kvspaceXvalueHead h;
+        pathspaceXvalueHead h;
         memcpy(&h, buf, sizeof h);
-        CHECK(kvspaceXvalueHeadAttrsLen(&h) == UINT16_MAX,
+        CHECK(pathspaceXvalueHeadAttrsLen(&h) == UINT16_MAX,
               "max attrslen lands in u16");
         free(buf);
     }
@@ -343,7 +343,7 @@ static void test_attrslen_limit(void) {
     lt[too_long_langtype] = '\0';
     buf = NULL;
     n = 0;
-    CHECK(kvlangXvalueHeadNewScalar(NULL, 0, lt, &buf, &n) != 0 && buf == NULL,
+    CHECK(pathlangXvalueHeadNewScalar(NULL, 0, lt, &buf, &n) != 0 && buf == NULL,
           "attrslen > UINT16_MAX rejected");
     free(lt);
 }

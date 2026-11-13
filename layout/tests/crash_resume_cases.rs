@@ -1,7 +1,7 @@
 
 mod support;
 
-use kvlanglayout::{compile, init_dirs, kvkind, Kv};
+use pathlanglayout::{compile, init_dirs, kvkind, Kv};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use support::TempDirectory;
 
@@ -161,7 +161,7 @@ fn callee_patches_pointer_read_param() {
 
 #[test]
 fn listat_absent_entry_is_no_kill() {
-    let src = "rwfunc f() -> (*bool #out) {\n\tname:[]char/utf8 = \"init\"\n\tx:int64 = 0\n\tkvspace·listat(/tmp/rc_dir, 99) -> name\n\tu:[]char/utf8 = name\n\tname = \"zzzz\"\n\tx = x + 1\n\tu == \"init\" -> *out\n}\nrwfunc test() -> () {\n\n\tf() -> r:bool\n\tif (r) {\n\t\tprintln(\"u is init (correct)\")\n\t} else {\n\t\tprintln(\"u is NOT init (wrong)\")\n\t}\n}\n";
+    let src = "rwfunc f() -> (*bool #out) {\n\tname:[]char/utf8 = \"init\"\n\tx:int64 = 0\n\tpathspace·listat(/tmp/rc_dir, 99) -> name\n\tu:[]char/utf8 = name\n\tname = \"zzzz\"\n\tx = x + 1\n\tu == \"init\" -> *out\n}\nrwfunc test() -> () {\n\n\tf() -> r:bool\n\tif (r) {\n\t\tprintln(\"u is init (correct)\")\n\t} else {\n\t\tprintln(\"u is NOT init (wrong)\")\n\t}\n}\n";
     assert_eq!(
         verdicts(src, &["f"]),
         ["CONDITIONALLY_RESUMABLE:2<-0,5<-caller"]

@@ -1,14 +1,14 @@
 
-#include <kvlang/const.h>
+#include <pathlang/const.h>
 
 #include <stddef.h>
 #include <string.h>
 
-const char *kvlangConstLanguage(const char *name) {
+const char *pathlangConstLanguage(const char *name) {
     static const struct { const char *key; const char *val; } table[] = {
-#define KVLANG_CONST_ENTRY(name) { #name, name },
-        KVLANG_KV(KVLANG_CONST_ENTRY)
-#undef KVLANG_CONST_ENTRY
+#define PATHLANG_CONST_ENTRY(name) { #name, name },
+        PATHLANG_KV(PATHLANG_CONST_ENTRY)
+#undef PATHLANG_CONST_ENTRY
     };
     if (!name)
         return NULL;

@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <kvlang/runtimec.h>
+#include <pathlang/runtimec.h>
 
 static int g_failures = 0;
 
@@ -26,10 +26,10 @@ static runtimec_status_t test_extension_handler(void *frame, const void *instruc
 
 #define TEST_TAKEN_OPERATION_IDENTIFIER UINT32_C(0x0177)
 
-static kvlang_runtime_extension_entry_t make_entry(uint32_t identifier,
+static pathlang_runtime_extension_entry_t make_entry(uint32_t identifier,
                                                    uint32_t structure_size,
-                                                   kvlang_runtime_extension_handler_t handler) {
-    kvlang_runtime_extension_entry_t entry;
+                                                   pathlang_runtime_extension_handler_t handler) {
+    pathlang_runtime_extension_entry_t entry;
     memset(&entry, 0, sizeof(entry));
     entry.structure_size = structure_size;
     entry.operation_identifier = identifier;
@@ -38,10 +38,10 @@ static kvlang_runtime_extension_entry_t make_entry(uint32_t identifier,
     return entry;
 }
 
-static kvlang_runtime_create_request_t make_request(
-    const kvlang_runtime_extension_module_t *modules, size_t module_count,
+static pathlang_runtime_create_request_t make_request(
+    const pathlang_runtime_extension_module_t *modules, size_t module_count,
     size_t structure_size) {
-    kvlang_runtime_create_request_t request;
+    pathlang_runtime_create_request_t request;
     memset(&request, 0, sizeof(request));
     request.structure_size = structure_size;
     request.data_source_name = "shm:///tmp/runtimec-extension-test";
@@ -51,10 +51,10 @@ static kvlang_runtime_create_request_t make_request(
     return request;
 }
 
-static runtimec_status_t create_with(const kvlang_runtime_create_request_t *request,
+static runtimec_status_t create_with(const pathlang_runtime_create_request_t *request,
                                      char *message, size_t message_capacity) {
-    kvlang_runtime_t *runtime = NULL;
-    kvlang_runtime_error_t error;
+    pathlang_runtime_t *runtime = NULL;
+    pathlang_runtime_error_t error;
     memset(&error, 0, sizeof(error));
     error.message.data = message;
     error.message.capacity = message_capacity;
@@ -63,15 +63,15 @@ static runtimec_status_t create_with(const kvlang_runtime_create_request_t *requ
     if (message_capacity != 0U) {
         message[0] = '\0';
     }
-    const runtimec_status_t status = kvlang_runtime_create(request, &runtime, &error);
+    const runtimec_status_t status = pathlang_runtime_create(request, &runtime, &error);
     if (runtime != NULL) {
-        kvlang_runtime_error_t destroy_error;
+        pathlang_runtime_error_t destroy_error;
         memset(&destroy_error, 0, sizeof(destroy_error));
         char destroy_message[128];
         destroy_message[0] = '\0';
         destroy_error.message.data = destroy_message;
         destroy_error.message.capacity = sizeof(destroy_message);
-        (void)kvlang_runtime_destroy(runtime, &destroy_error);
+        (void)pathlang_runtime_destroy(runtime, &destroy_error);
     }
     if (message_capacity != 0U && error.message.length < message_capacity) {
         message[error.message.length] = '\0';
@@ -80,16 +80,16 @@ static runtimec_status_t create_with(const kvlang_runtime_create_request_t *requ
 }
 
 static void test_valid_extension_is_accepted(void) {
-    const kvlang_runtime_extension_entry_t entry = make_entry(
-        TEST_FREE_OPERATION_IDENTIFIER, sizeof(kvlang_runtime_extension_entry_t),
+    const pathlang_runtime_extension_entry_t entry = make_entry(
+        TEST_FREE_OPERATION_IDENTIFIER, sizeof(pathlang_runtime_extension_entry_t),
         test_extension_handler);
-    const kvlang_runtime_extension_module_t module = {
+    const pathlang_runtime_extension_module_t module = {
         .module_name = "test-extension",
         .entries = &entry,
         .entry_count = 1U,
     };
-    const kvlang_runtime_create_request_t request = make_request(
-        &module, 1U, sizeof(kvlang_runtime_create_request_t));
+    const pathlang_runtime_create_request_t request = make_request(
+        &module, 1U, sizeof(pathlang_runtime_create_request_t));
     char message[256];
     const runtimec_status_t status = create_with(&request, message, sizeof(message));
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -100,16 +100,16 @@ static void test_valid_extension_is_accepted(void) {
 }
 
 static void test_duplicate_identifier_is_rejected(void) {
-    const kvlang_runtime_extension_entry_t entry = make_entry(
-        TEST_TAKEN_OPERATION_IDENTIFIER, sizeof(kvlang_runtime_extension_entry_t),
+    const pathlang_runtime_extension_entry_t entry = make_entry(
+        TEST_TAKEN_OPERATION_IDENTIFIER, sizeof(pathlang_runtime_extension_entry_t),
         test_extension_handler);
-    const kvlang_runtime_extension_module_t module = {
+    const pathlang_runtime_extension_module_t module = {
         .module_name = "duplicate-module",
         .entries = &entry,
         .entry_count = 1U,
     };
-    const kvlang_runtime_create_request_t request = make_request(
-        &module, 1U, sizeof(kvlang_runtime_create_request_t));
+    const pathlang_runtime_create_request_t request = make_request(
+        &module, 1U, sizeof(pathlang_runtime_create_request_t));
     char message[256];
     const runtimec_status_t status = create_with(&request, message, sizeof(message));
     check(status != RUNTIMEC_STATUS_SUCCESS,
@@ -119,40 +119,40 @@ static void test_duplicate_identifier_is_rejected(void) {
 }
 
 static void test_missing_handler_is_rejected(void) {
-    const kvlang_runtime_extension_entry_t entry = make_entry(
-        TEST_FREE_OPERATION_IDENTIFIER, sizeof(kvlang_runtime_extension_entry_t),
+    const pathlang_runtime_extension_entry_t entry = make_entry(
+        TEST_FREE_OPERATION_IDENTIFIER, sizeof(pathlang_runtime_extension_entry_t),
         NULL);
-    const kvlang_runtime_extension_module_t module = {
+    const pathlang_runtime_extension_module_t module = {
         .module_name = "handlerless",
         .entries = &entry,
         .entry_count = 1U,
     };
-    const kvlang_runtime_create_request_t request = make_request(
-        &module, 1U, sizeof(kvlang_runtime_create_request_t));
+    const pathlang_runtime_create_request_t request = make_request(
+        &module, 1U, sizeof(pathlang_runtime_create_request_t));
     char message[256];
     check(create_with(&request, message, sizeof(message)) != RUNTIMEC_STATUS_SUCCESS,
           "an extension entry without a handler must be rejected");
 }
 
 static void test_wrong_request_size_is_rejected(void) {
-    const kvlang_runtime_create_request_t request = make_request(
-        NULL, 0U, sizeof(kvlang_runtime_create_request_t) - 1U);
+    const pathlang_runtime_create_request_t request = make_request(
+        NULL, 0U, sizeof(pathlang_runtime_create_request_t) - 1U);
     char message[256];
     check(create_with(&request, message, sizeof(message)) != RUNTIMEC_STATUS_SUCCESS,
           "a create request with a wrong structure_size must be rejected");
 }
 
 static void test_wrong_entry_size_is_rejected(void) {
-    const kvlang_runtime_extension_entry_t entry = make_entry(
-        TEST_FREE_OPERATION_IDENTIFIER, sizeof(kvlang_runtime_extension_entry_t) - 1U,
+    const pathlang_runtime_extension_entry_t entry = make_entry(
+        TEST_FREE_OPERATION_IDENTIFIER, sizeof(pathlang_runtime_extension_entry_t) - 1U,
         test_extension_handler);
-    const kvlang_runtime_extension_module_t module = {
+    const pathlang_runtime_extension_module_t module = {
         .module_name = "wrong-size",
         .entries = &entry,
         .entry_count = 1U,
     };
-    const kvlang_runtime_create_request_t request = make_request(
-        &module, 1U, sizeof(kvlang_runtime_create_request_t));
+    const pathlang_runtime_create_request_t request = make_request(
+        &module, 1U, sizeof(pathlang_runtime_create_request_t));
     char message[256];
     check(create_with(&request, message, sizeof(message)) != RUNTIMEC_STATUS_SUCCESS,
           "an extension entry with a wrong structure_size must be rejected");

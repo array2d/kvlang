@@ -4,7 +4,7 @@ flowchart LR
   ROUTE["engine route"]
   REPOSITORY["compilation repository<br/>address-qualified lease"]
   HOST["host services<br/>RWIR load and static key dereference<br/>return XValue base only; no body offset choice"]
-  KVSPACE["external kvspace<br/>RWIR and XValue base<br/>fixed 8-byte head then authoritative V.body"]
+  PATHSPACE["external pathspace<br/>RWIR and XValue base<br/>fixed 8-byte head then authoritative V.body"]
   VMKV["vmkv<br/>only owner of checked xvalue_address + 8<br/>addressed BinRWIR emission or fail closed"]
   BINRWIR["top-level process-local BinRWIR<br/>opid plus argidx and uint64 argaddr"]
   VMBIN["vmbin<br/>address-driven memory executor"]
@@ -32,7 +32,7 @@ flowchart LR
   ROUTE --> BINRWIR
   ROUTE --> JIT_EXECUTOR
   ROUTE --> VMBIN
-  HOST --> KVSPACE
+  HOST --> PATHSPACE
   VMKV --> SPECIFICATION
   VMKV -->|"request static key dereference"| HOST
   HOST -->|"nonzero uint64 xvalue_address"| VMKV
@@ -42,8 +42,8 @@ flowchart LR
   VMBIN --> BINRWIR
   JIT_COMPILER --> BINRWIR
   JIT_EXECUTOR --> BINRWIR
-  VMBIN -. "direct final argaddr load and store; no XValue or body cache" .-> KVSPACE
-  JIT_SAFEPOINT -. "COMMIT_COMPLETED_STATE only after full instruction completion" .-> KVSPACE
+  VMBIN -. "direct final argaddr load and store; no XValue or body cache" .-> PATHSPACE
+  JIT_SAFEPOINT -. "COMMIT_COMPLETED_STATE only after full instruction completion" .-> PATHSPACE
 
   BINRWIR -. "forbidden ownership dependency" .-> VMBIN
   BINRWIR -. "forbidden ownership dependency" .-> JIT
@@ -58,7 +58,7 @@ flowchart LR
   classDef neutral fill:#ede9fe,stroke:#7c3aed,color:#2e1065
   classDef compiler fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
   classDef executor fill:#ecfdf5,stroke:#059669,color:#052e16
-  class SPECIFICATION,KVSPACE specification
+  class SPECIFICATION,PATHSPACE specification
   class BINRWIR neutral
   class VMKV,COMPILER,REPOSITORY,JIT_COMPILER,BACKENDS compiler
   class VMBIN,JIT_EXECUTOR,JIT_SAFEPOINT executor

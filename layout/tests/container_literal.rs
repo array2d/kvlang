@@ -1,5 +1,5 @@
 
-use kvlanglayout::{init_dirs, Kv};
+use pathlanglayout::{init_dirs, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -18,12 +18,12 @@ impl TempDir {
 }
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_kvlanglayout")
+    env!("CARGO_BIN_EXE_pathlanglayout")
 }
 
 fn temp_dir(tag: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!(
-        "kvlanglayout_container_literal_{}_{}",
+        "pathlanglayout_container_literal_{}_{}",
         tag,
         std::process::id()
     ));

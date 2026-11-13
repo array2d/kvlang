@@ -1,15 +1,15 @@
 
-use kvlanglayout::{init_dirs, kvkind, Kv};
+use pathlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_kvlanglayout")
+    env!("CARGO_BIN_EXE_pathlanglayout")
 }
 
 fn temp_file(tag: &str, src: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
-        "kvlanglayout_concat_{}_{}.kv",
+        "pathlanglayout_concat_{}_{}.kv",
         tag,
         std::process::id()
     ));
@@ -20,7 +20,7 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
 }
 
 fn dsn(tag: &str) -> String {
-    kvlanglayout::ffi::test_dsn(&format!("concat_{tag}"))
+    pathlanglayout::ffi::test_dsn(&format!("concat_{tag}"))
 }
 
 struct Fixture {
@@ -32,7 +32,7 @@ struct Fixture {
 impl Drop for Fixture {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.file);
-        kvlanglayout::ffi::remove_test_store(&self.db);
+        pathlanglayout::ffi::remove_test_store(&self.db);
     }
 }
 

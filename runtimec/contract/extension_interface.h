@@ -1,6 +1,6 @@
 #ifndef RUNTIMEC_CONTRACT_EXTENSION_INTERFACE_H
 #define RUNTIMEC_CONTRACT_EXTENSION_INTERFACE_H
 
-#include <kvlang/runtimec.h>
+#include <pathlang/runtimec.h>
 
 #endif

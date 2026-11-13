@@ -1,7 +1,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use kvlanglayout::{compile, init_dirs, kvkind, Kv};
+use pathlanglayout::{compile, init_dirs, kvkind, Kv};
 
 fn read_tutorial(path: &str) -> String {
     std::fs::read_to_string(path)
@@ -50,7 +50,7 @@ fn fresh_kv() -> (TempStore, Kv) {
         env!("CARGO_MANIFEST_DIR"),
         std::process::id()
     );
-    kvlanglayout::ffi::remove_test_store(&dsn);
+    pathlanglayout::ffi::remove_test_store(&dsn);
 
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();

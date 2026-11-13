@@ -17,9 +17,9 @@ from unittest import mock
 
 RED, GREEN, YELLOW, NC = "\033[0;31m", "\033[0;32m", "\033[1;33m", "\033[0m"
 ROOT = Path(__file__).resolve().parent.parent
-KV = str(ROOT / "kvlang")
-LAYOUT_BIN = str(ROOT / "bin" / "kvlanglayout")
-TERM_BIN = str(ROOT / "bin" / "byteseek")
+KV = str(ROOT / "pathlang")
+LAYOUT_BIN = str(ROOT / "bin" / "pathlanglayout")
+TERM_BIN = str(ROOT / "bin" / "pathseek")
 CASE_TIMEOUT = 120
 _C_DSN = ""
 FAIL_CSV = (ROOT / "tutorial" / "test_failures.csv").resolve()
@@ -101,17 +101,17 @@ def _needs_skip(f: Path) -> bool:
 def _flush_backend() -> None:
     try:
         r = subprocess.run(
-            ["kvspace", "clear"],
+            ["pathspace", "clear"],
             capture_output=True, text=True, timeout=60,
-            env={**os.environ, "KVSPACE": _C_DSN},
+            env={**os.environ, "PATHSPACE": _C_DSN},
         )
     except FileNotFoundError:
         raise SystemExit(
-            "kvspace CLI not found in PATH; set PATH to the kvspace prefix bin"
+            "pathspace CLI not found in PATH; set PATH to the pathspace prefix bin"
         )
     if r.returncode != 0:
         raise SystemExit(
-            f"kvspace clear failed ({r.returncode}): {r.stderr.strip()[:200]}"
+            f"pathspace clear failed ({r.returncode}): {r.stderr.strip()[:200]}"
         )
 
 def _extract_bench_us(stdout: str) -> tuple[str, float]:
@@ -152,7 +152,7 @@ def _benchmark_error(results: dict[str, subprocess.CompletedProcess[str]],
 def _invalid_row(f: Path) -> dict[str, str]:
     return {
         "file": str(f.relative_to(ROOT)),
-        "kvlang_ms": "invalid",
+        "pathlang_ms": "invalid",
         "python_ms": "invalid",
         "c_ms": "invalid",
     }
@@ -160,7 +160,7 @@ def _invalid_row(f: Path) -> dict[str, str]:
 def _benchmark_file(f: Path, expects: list[str]) -> tuple[dict[str, str], str]:
     rel = str(f.relative_to(ROOT))
     invalid = _invalid_row(f)
-    with tempfile.TemporaryDirectory(prefix="kvlang-bench-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="pathlang-bench-") as tmp:
         executable = Path(tmp) / "program"
         try:
             compiled = subprocess.run(
@@ -185,13 +185,13 @@ def _benchmark_file(f: Path, expects: list[str]) -> tuple[dict[str, str], str]:
             return invalid, "program timed out"
 
     error = _benchmark_error(
-        {"kvlang": kv_result, "python": py_result, "c": c_result}, expects,
+        {"pathlang": kv_result, "python": py_result, "c": c_result}, expects,
     )
     if error:
         return invalid, error
     return {
         "file": rel,
-        "kvlang_ms": f"{kv_ms:.3f}",
+        "pathlang_ms": f"{kv_ms:.3f}",
         "python_ms": f"{py_ms:.3f}",
         "c_ms": f"{c_ms:.3f}",
     }, ""
@@ -230,7 +230,7 @@ def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
         _flush_backend()
     boot = subprocess.run([TERM_BIN, "-c", 'print("boot")'], capture_output=True,
                           text=True, timeout=60, cwd=str(ROOT),
-                          env={**env, "KVSPACE": dsn})
+                          env={**env, "PATHSPACE": dsn})
     if boot.returncode != 0:
         return False, f"isa boot failed: {boot.stderr.strip()[:100]}"
     layout = subprocess.run([LAYOUT_BIN, rel, dsn], capture_output=True, text=True,
@@ -240,7 +240,7 @@ def _run_test_file(f: Path, expects: list[str], env: dict) -> tuple[bool, str]:
     entry = "test"
     try:
         crun = subprocess.run([TERM_BIN, entry], capture_output=True, text=True,
-                              timeout=CASE_TIMEOUT, cwd=str(ROOT), env={**env, "KVSPACE": dsn})
+                              timeout=CASE_TIMEOUT, cwd=str(ROOT), env={**env, "PATHSPACE": dsn})
     except subprocess.TimeoutExpired:
         return False, "timeout"
     if crun.returncode != 0:
@@ -273,29 +273,29 @@ def main():
     ap.add_argument("--no-build", action="store_true", help="skip make build")
     ap.add_argument("--errorexit", action="store_true", help="exit on first error")
     ap.add_argument("--bench", action="store_true", help="benchmark matching .kv/.py/.c files")
-    ap.add_argument("--kvspace", default="",
+    ap.add_argument("--pathspace", default="",
                     help="DSN，必填且只接受 shm://（如 shm:///tmp/kv.shm）；无默认值")
-    ap.add_argument("--layout-bin", default=LAYOUT_BIN, help="kvlanglayout 路径")
-    ap.add_argument("--term-bin", default=TERM_BIN, help="byteseek 路径")
+    ap.add_argument("--layout-bin", default=LAYOUT_BIN, help="pathlanglayout 路径")
+    ap.add_argument("--term-bin", default=TERM_BIN, help="pathseek 路径")
     ap.add_argument("--case-timeout", type=int, default=CASE_TIMEOUT,
                     help=f"单用例运行超时（秒），默认 {CASE_TIMEOUT}")
     args = ap.parse_args()
     LAYOUT_BIN, TERM_BIN = args.layout_bin, args.term_bin
     CASE_TIMEOUT = args.case_timeout
-    _C_DSN = args.kvspace
+    _C_DSN = args.pathspace
     if not _C_DSN:
-        ap.error("缺少 --kvspace=：DSN 必填且只接受 shm://，例如 "
-                 "--kvspace=shm:///tmp/kv.shm（无默认值）")
+        ap.error("缺少 --pathspace=：DSN 必填且只接受 shm://，例如 "
+                 "--pathspace=shm:///tmp/kv.shm（无默认值）")
     if not _C_DSN.startswith("shm://"):
-        ap.error(f"--kvspace 只接受 shm://，收到 {_C_DSN!r}")
-    _BACKEND_TMP = tempfile.TemporaryDirectory(prefix="kvlang-tut-")
+        ap.error(f"--pathspace 只接受 shm://，收到 {_C_DSN!r}")
+    _BACKEND_TMP = tempfile.TemporaryDirectory(prefix="pathlang-tut-")
 
     files = [f for f in discover(ROOT / "tutorial")
              if args.filter in str(f)]
 
-    print(f"kvlang: {os.path.abspath(KV)}")
-    print(f"KVSPACE: {_C_DSN}")
-    prefix = "kvlang"
+    print(f"pathlang: {os.path.abspath(KV)}")
+    print(f"PATHSPACE: {_C_DSN}")
+    prefix = "pathlang"
 
     if args.bench:
         sys.exit(1 if run_benchmarks(files, args.errorexit) else 0)
@@ -356,7 +356,7 @@ def _write_benchmark_csv(rows: list[dict[str, str]]) -> None:
     with open(BENCH_CSV, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(
             fh,
-            fieldnames=["file", "kvlang_ms", "python_ms", "c_ms"],
+            fieldnames=["file", "pathlang_ms", "python_ms", "c_ms"],
             lineterminator="\n",
         )
         w.writeheader()
@@ -368,12 +368,12 @@ class BenchmarkTest(unittest.TestCase):
         self.root = Path(self.tempdir.name)
         self.tutorial = self.root / "tutorial"
         self.tutorial.mkdir()
-        self.kvlang = self.root / "kvlang"
-        self.kvlang.write_text("#!/bin/sh\nprintf 'answer 42\\n'\n", encoding="utf-8")
-        self.kvlang.chmod(0o755)
+        self.pathlang = self.root / "pathlang"
+        self.pathlang.write_text("#!/bin/sh\nprintf 'answer 42\\n'\n", encoding="utf-8")
+        self.pathlang.chmod(0o755)
         self.patchers = [
             mock.patch.object(MODULE, "ROOT", self.root),
-            mock.patch.object(MODULE, "KV", str(self.kvlang)),
+            mock.patch.object(MODULE, "KV", str(self.pathlang)),
             mock.patch.object(MODULE, "FAIL_CSV", self.tutorial / "test_failures.csv"),
             mock.patch.object(MODULE, "BENCH_CSV", self.tutorial / "benchmark.csv"),
             mock.patch.object(MODULE, "_flush_backend"),
@@ -413,11 +413,11 @@ class BenchmarkTest(unittest.TestCase):
         rows = self.read_rows()
         self.assertEqual(len(rows), 1)
         self.assertEqual(
-            list(rows[0]), ["file", "kvlang_ms", "python_ms", "c_ms"],
+            list(rows[0]), ["file", "pathlang_ms", "python_ms", "c_ms"],
         )
         self.assertEqual(rows[0]["file"], "tutorial/case.kv")
         self.assertNotIn(b"\r\n", BENCH_CSV.read_bytes())
-        for field in ("kvlang_ms", "python_ms", "c_ms"):
+        for field in ("pathlang_ms", "python_ms", "c_ms"):
             self.assertGreaterEqual(float(rows[0][field]), 0)
 
     @unittest.skipUnless(shutil.which("gcc"), "gcc is required")
@@ -428,7 +428,7 @@ class BenchmarkTest(unittest.TestCase):
 
         row = self.read_rows()[0]
         self.assertEqual(
-            [row["kvlang_ms"], row["python_ms"], row["c_ms"]],
+            [row["pathlang_ms"], row["python_ms"], row["c_ms"]],
             ["invalid", "invalid", "invalid"],
         )
 
@@ -452,7 +452,7 @@ class BenchmarkTest(unittest.TestCase):
         source.write_text('println("answer 42")\n', encoding="utf-8")
 
         self.assertEqual(run_benchmarks([source]), 1)
-        self.assertEqual(self.read_rows()[0]["kvlang_ms"], "invalid")
+        self.assertEqual(self.read_rows()[0]["pathlang_ms"], "invalid")
 
     def test_marks_nonzero_exit_invalid(self):
         failed = subprocess.CompletedProcess(
@@ -462,7 +462,7 @@ class BenchmarkTest(unittest.TestCase):
         self.assertIn(
             "exited with status 1",
             _benchmark_error(
-                {"kvlang": failed, "python": failed, "c": failed}, ["answer 42"],
+                {"pathlang": failed, "python": failed, "c": failed}, ["answer 42"],
             ),
         )
 
@@ -473,7 +473,7 @@ class BenchmarkTest(unittest.TestCase):
 
         self.assertEqual(
             _benchmark_error(
-                {"kvlang": result, "python": result, "c": result}, ["answer 42"],
+                {"pathlang": result, "python": result, "c": result}, ["answer 42"],
             ),
             "",
         )

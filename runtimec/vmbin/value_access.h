@@ -8,7 +8,7 @@
 #include "contract/diagnostic_band.h"
 #include "binrwir/binvthread_frame.h"
 #include "contract/error.h"
-#include "contract/kvspace_access.h"
+#include "contract/pathspace_access.h"
 #include "contract/status.h"
 #include "contract/view.h"
 

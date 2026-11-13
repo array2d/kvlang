@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT" || exit 2
 
-A_BIN="${KVLANG_BIN:-$ROOT/bin/byteseek}"
+A_BIN="${PATHLANG_BIN:-$ROOT/bin/pathseek}"
 A_LIB="$ROOT/lib"
 A_ENV=""
 B_BIN=""
@@ -27,7 +27,7 @@ usage() {
 	cat <<'EOF'
 usage: bench-shm-ab.sh [options]
 
-  --a-bin PATH     A 臂可执行（默认 $KVLANG_BIN 或 <repo>/bin/byteseek）
+  --a-bin PATH     A 臂可执行（默认 $PATHLANG_BIN 或 <repo>/bin/pathseek）
   --a-lib DIR      A 臂库目录（默认 <repo>/lib）
   --a-env 'K=V ..' A 臂额外环境变量
   --b-bin PATH     B 臂可执行（给此项或 --b-env 才启用 B）
@@ -79,12 +79,12 @@ if [ -n "$B_BIN" ] || [ -n "$B_ENV" ]; then
 	[ -d "$B_LIB" ] || die "B 臂库目录不存在：$B_LIB"
 fi
 
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/kvlang-bench-ab.XXXXXX")" || die "mktemp 失败"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/pathlang-bench-ab.XXXXXX")" || die "mktemp 失败"
 trap 'rm -rf "$TMP"' EXIT
 
 stage_arm() { # $1=dir $2=bin $3=lib
 	mkdir -p "$1/bin" "$1/lib"
-	cp "$2" "$1/bin/byteseek"
+	cp "$2" "$1/bin/pathseek"
 	cp -a "$3/." "$1/lib/"
 }
 
@@ -133,8 +133,8 @@ run_once() {
 	local dsn="shm://$d/store.shm"
 	local -a e=()
 	[ -n "$envs" ] && read -r -a e <<<"$envs"
-	env KVSPACE="$dsn" ${e[@]+"${e[@]}"} timeout -k 5 "$CASE_TIMEOUT" \
-		"$arm/bin/byteseek" "$src" >"$out" 2>"$d/err"
+	env PATHSPACE="$dsn" ${e[@]+"${e[@]}"} timeout -k 5 "$CASE_TIMEOUT" \
+		"$arm/bin/pathseek" "$src" >"$out" 2>"$d/err"
 	return $?
 }
 

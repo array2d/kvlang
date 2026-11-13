@@ -13,9 +13,9 @@
 #include "contract/error.h"
 #include "contract/status.h"
 #include "contract/view.h"
-#include "contract/kvspace_interface.h"
-#include <kvlang/xvalue.h>
-#include <kvspace/kvspace_xvalue.h>
+#include "contract/pathspace_interface.h"
+#include <pathlang/xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
 #include "vmbin/frame_target_key.h"
 #include "vmbin/handlers/handler_call.h"
 #include "vmbin/value_access.h"
@@ -1017,15 +1017,15 @@ static runtimec_status_t container_write_member(
     }
     memcpy(langtype_text, declared.data, declared.size);
     langtype_text[declared.size] = '\0';
-    if (kvlangXvalueHeadNewSlack(element.read_bytes, (uint64_t)element.size,
+    if (pathlangXvalueHeadNewSlack(element.read_bytes, (uint64_t)element.size,
                                   langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         return RUNTIMEC_STATUS_ERROR;
     }
     message[0] = '\0';
-    const bool wrote = runtimec_kvspace_write_wire(
-        frame->kvspace_handle, member_key, wire, (uint32_t)wire_size, message,
+    const bool wrote = runtimec_pathspace_write_wire(
+        frame->pathspace_handle, member_key, wire, (uint32_t)wire_size, message,
         (uint32_t)sizeof(message));
     const int set_status = wrote ? 0 : 1;
     free(wire);
@@ -1048,7 +1048,7 @@ static bool container_index_container(
     buffer[key_length] = '/';
     buffer[key_length + 1U] = '\0';
     message[0] = '\0';
-    const int mkindex_status = kvspaceMkindex(frame->kvspace_handle, buffer,
+    const int mkindex_status = pathspaceMkindex(frame->pathspace_handle, buffer,
                                               message, (uint32_t)sizeof(message));
     buffer[key_length] = '\0';
     if (mkindex_status != 0) {
@@ -1216,13 +1216,13 @@ static bool container_struct_clone(
                                 prototype_path, sizeof(prototype_path),
                                 &prototype_size) ||
         prototype_size == 0U ||
-        kvspaceCpdir(frame->kvspace_handle, prototype_path, slot_key, message,
+        pathspaceCpdir(frame->pathspace_handle, prototype_path, slot_key, message,
                       (uint32_t)sizeof(message)) == 0) {
         return prototype_size != 0U;
     }
     char rollback[256];
     rollback[0] = '\0';
-    (void)kvspaceDeltree(frame->kvspace_handle, slot_key, rollback,
+    (void)pathspaceDeltree(frame->pathspace_handle, slot_key, rollback,
                          (uint32_t)sizeof(rollback));
     vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                        RUNTIMEC_CONTAINER_DIAG_UNPARSEABLE_LANGTYPE,

@@ -2,14 +2,14 @@ sequenceDiagram
   participant Client as C client
   participant Interface as Public interface
   participant Route as engine route
-  participant Host as Host and kvspace services
+  participant Host as Host and pathspace services
   participant Repository as Compilation repository
   participant Vmkv as vmkv
   participant Compiler as binrwir_compiler
   participant JitCompiler as Internal JIT compiler
   participant JitExecute as binrwir_jit_execute
   participant VmbinExecute as vmbin_execute
-  participant XValue as KVspace XValue: 8-byte head plus V.body
+  participant XValue as Pathspace XValue: 8-byte head plus V.body
 
   Client->>Interface: structured execute request
   Interface->>Route: validated request

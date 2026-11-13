@@ -1,10 +1,10 @@
 
 rwfunc count_children(*[]char/utf32 #prefix) -> (*int64 #n) {
-	kvspace·listlen(*prefix) -> *n
+	pathspace·listlen(*prefix) -> *n
 }
 
 rwfunc test() -> () {
-	kvspace·mkindex("/tmp/kvtc/")
+	pathspace·mkindex("/tmp/kvtc/")
 	1 -> /tmp/kvtc/a
 	2 -> /tmp/kvtc/bb
 	3 -> /tmp/kvtc/ccc

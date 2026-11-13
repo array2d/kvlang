@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <kvlang/runtimec.h>
+#include <pathlang/runtimec.h>
 
 #include "engine/execution_window.h"
 #include "engine/platform_session.h"
@@ -10,14 +10,14 @@
 #define RUNTIMEC_DEFAULT_COMPILATION_CACHE_CAPACITY 256U
 #define RUNTIMEC_DEFAULT_MACHINE_CODE_CAPACITY (1U << 20)
 
-static int kvlang_runtime_text_buffer_is_valid(
-    const kvlang_runtime_text_buffer_t *buffer) {
+static int pathlang_runtime_text_buffer_is_valid(
+    const pathlang_runtime_text_buffer_t *buffer) {
     return buffer != NULL &&
            (buffer->capacity == 0U || buffer->data != NULL);
 }
 
-static void kvlang_runtime_text_buffer_clear(
-    kvlang_runtime_text_buffer_t *buffer) {
+static void pathlang_runtime_text_buffer_clear(
+    pathlang_runtime_text_buffer_t *buffer) {
     if (buffer != NULL) {
         buffer->length = 0U;
         buffer->required_length = 0U;
@@ -27,7 +27,7 @@ static void kvlang_runtime_text_buffer_clear(
     }
 }
 
-static void kvlang_runtime_report(kvlang_runtime_error_t *error,
+static void pathlang_runtime_report(pathlang_runtime_error_t *error,
                                   runtimec_status_t status,
                                   const char *message) {
     if (error == NULL) {
@@ -36,8 +36,8 @@ static void kvlang_runtime_report(kvlang_runtime_error_t *error,
     error->status = status;
     error->operation_status = status;
     error->code = 0;
-    kvlang_runtime_text_buffer_clear(&error->message);
-    if (message == NULL || !kvlang_runtime_text_buffer_is_valid(&error->message)) {
+    pathlang_runtime_text_buffer_clear(&error->message);
+    if (message == NULL || !pathlang_runtime_text_buffer_is_valid(&error->message)) {
         return;
     }
     const size_t message_length = strlen(message);
@@ -50,16 +50,16 @@ static void kvlang_runtime_report(kvlang_runtime_error_t *error,
     error->message.length = message_length;
 }
 
-static runtimec_status_t kvlang_runtime_fail(
-    kvlang_runtime_error_t *error, runtimec_status_t status,
+static runtimec_status_t pathlang_runtime_fail(
+    pathlang_runtime_error_t *error, runtimec_status_t status,
     const char *message) {
-    kvlang_runtime_report(error, status, message);
+    pathlang_runtime_report(error, status, message);
     return status;
 }
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_create(
-    const kvlang_runtime_create_request_t *request,
-    kvlang_runtime_t **output, kvlang_runtime_error_t *error) {
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_create(
+    const pathlang_runtime_create_request_t *request,
+    pathlang_runtime_t **output, pathlang_runtime_error_t *error) {
     if (output != NULL) {
         *output = NULL;
     }
@@ -68,45 +68,45 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_create(
         request->data_source_name == NULL ||
         request->data_source_name[0] == '\0' ||
         request->instance_identifier == 0U) {
-        return kvlang_runtime_fail(
+        return pathlang_runtime_fail(
             error, RUNTIMEC_STATUS_INVALID,
             "invalid runtimec create request");
     }
     
-    if (request->structure_size != sizeof(kvlang_runtime_create_request_t)) {
-        return kvlang_runtime_fail(
+    if (request->structure_size != sizeof(pathlang_runtime_create_request_t)) {
+        return pathlang_runtime_fail(
             error, RUNTIMEC_STATUS_INVALID,
             "runtimec create request has an unexpected structure_size");
     }
     
     for (size_t module = 0U; module < request->extension_count; ++module) {
-        const kvlang_runtime_extension_module_t *entry_module =
+        const pathlang_runtime_extension_module_t *entry_module =
             &request->extensions[module];
         if (entry_module->module_name == NULL ||
             entry_module->module_name[0] == '\0' ||
             entry_module->entries == NULL || entry_module->entry_count == 0U) {
-            return kvlang_runtime_fail(
+            return pathlang_runtime_fail(
                 error, RUNTIMEC_STATUS_INVALID,
                 "runtimec extension module is incomplete");
         }
         for (size_t item = 0U; item < entry_module->entry_count; ++item) {
-            const kvlang_runtime_extension_entry_t *entry =
+            const pathlang_runtime_extension_entry_t *entry =
                 &entry_module->entries[item];
             
-            if (entry->structure_size != sizeof(kvlang_runtime_extension_entry_t)) {
-                return kvlang_runtime_fail(
+            if (entry->structure_size != sizeof(pathlang_runtime_extension_entry_t)) {
+                return pathlang_runtime_fail(
                     error, RUNTIMEC_STATUS_INVALID,
                     "runtimec extension entry has an unexpected structure_size");
             }
             if (entry->handler == NULL) {
-                return kvlang_runtime_fail(
+                return pathlang_runtime_fail(
                     error, RUNTIMEC_STATUS_INVALID,
                     "runtimec extension entry has no handler");
             }
         }
     }
     if (request->extension_count != 0U && request->extensions == NULL) {
-        return kvlang_runtime_fail(
+        return pathlang_runtime_fail(
             error, RUNTIMEC_STATUS_INVALID,
             "runtimec extension table is missing");
     }
@@ -133,21 +133,21 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_create(
         
         if (engine_error.message.size != 0U &&
             engine_error.message.data != NULL) {
-            return kvlang_runtime_fail(error, status,
+            return pathlang_runtime_fail(error, status,
                                        engine_error.message.data);
         }
-        return kvlang_runtime_fail(error, status,
+        return pathlang_runtime_fail(error, status,
                                    runtimec_status_name(status));
     }
-    *output = (kvlang_runtime_t *)platform_session;
+    *output = (pathlang_runtime_t *)platform_session;
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_destroy(
-    kvlang_runtime_t *runtime, kvlang_runtime_error_t *error) {
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_destroy(
+    pathlang_runtime_t *runtime, pathlang_runtime_error_t *error) {
     
     if (runtime == NULL) {
-        return kvlang_runtime_fail(
+        return pathlang_runtime_fail(
             error, RUNTIMEC_STATUS_INVALID,
             "invalid runtimec destroy request");
     }
@@ -156,7 +156,7 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_destroy(
     const runtimec_status_t status = runtimec_platform_session_destroy(
         (runtimec_platform_session_t *)runtime, &engine_error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return kvlang_runtime_fail(
+        return pathlang_runtime_fail(
             error, status,
             engine_error.message.data != NULL ? engine_error.message.data
                                               : runtimec_status_name(status));
@@ -164,30 +164,30 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_destroy(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_execute(
-    kvlang_runtime_t *runtime,
-    const kvlang_runtime_execute_request_t *request,
-    kvlang_runtime_execute_result_t *output,
-    kvlang_runtime_error_t *error) {
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_execute(
+    pathlang_runtime_t *runtime,
+    const pathlang_runtime_execute_request_t *request,
+    pathlang_runtime_execute_result_t *output,
+    pathlang_runtime_error_t *error) {
     if (output != NULL) {
-        kvlang_runtime_text_buffer_clear(&output->value);
-        kvlang_runtime_text_buffer_clear(&output->program_counter);
+        pathlang_runtime_text_buffer_clear(&output->value);
+        pathlang_runtime_text_buffer_clear(&output->program_counter);
     }
     
     if (runtime == NULL || request == NULL || output == NULL ||
-        !kvlang_runtime_text_buffer_is_valid(&output->value) ||
-        !kvlang_runtime_text_buffer_is_valid(&output->program_counter) ||
-        request->entry_kind < KVLANG_RUNTIME_ENTRY_FUNCTION ||
-        request->entry_kind > KVLANG_RUNTIME_ENTRY_BOOTSTRAP ||
+        !pathlang_runtime_text_buffer_is_valid(&output->value) ||
+        !pathlang_runtime_text_buffer_is_valid(&output->program_counter) ||
+        request->entry_kind < PATHLANG_RUNTIME_ENTRY_FUNCTION ||
+        request->entry_kind > PATHLANG_RUNTIME_ENTRY_BOOTSTRAP ||
         request->entry_name == NULL || request->entry_name[0] == '\0' ||
         (request->argument_count != 0U && request->arguments == NULL)) {
-        return kvlang_runtime_fail(
+        return pathlang_runtime_fail(
             error, RUNTIMEC_STATUS_INVALID,
             "invalid runtimec execute request");
     }
     
-    if (request->entry_kind != KVLANG_RUNTIME_ENTRY_FUNCTION) {
-        return kvlang_runtime_fail(
+    if (request->entry_kind != PATHLANG_RUNTIME_ENTRY_FUNCTION) {
+        return pathlang_runtime_fail(
             error, RUNTIMEC_STATUS_NOT_IMPLEMENTED,
             "only ENTRY_FUNCTION is implemented; PROGRAM_COUNTER / VTHREAD / "
             "BOOTSTRAP need a storage-recovery entry");
@@ -199,7 +199,7 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_execute(
     runtimec_status_t status = runtimec_platform_session_get_session(
         (const runtimec_platform_session_t *)runtime, &session, &engine_error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return kvlang_runtime_fail(
+        return pathlang_runtime_fail(
             error, status,
             engine_error.message.data != NULL ? engine_error.message.data
                                               : runtimec_status_name(status));
@@ -209,7 +209,7 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_execute(
     static const char entry_frame[] = "/vthread/0/[1]";
     
     if (request->entry_name[0] == '/') {
-        return kvlang_runtime_fail(
+        return pathlang_runtime_fail(
             error, RUNTIMEC_STATUS_INVALID,
             "entry name must be a bare function name, e.g. \"test\"; "
             "got a key starting with '/' (this entry adds the /lib/ prefix "
@@ -221,7 +221,7 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_execute(
                  request->entry_name);
     if (function_length < 0 ||
         (size_t)function_length >= sizeof(function_path)) {
-        return kvlang_runtime_fail(error, RUNTIMEC_STATUS_INVALID,
+        return pathlang_runtime_fail(error, RUNTIMEC_STATUS_INVALID,
                                    "entry name is too long");
     }
 
@@ -245,14 +245,14 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_execute(
     status = runtimec_execution_window_execute(session, &window_request,
                                                &window_result, &window_error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
-        return kvlang_runtime_fail(
+        return pathlang_runtime_fail(
             error, status,
             window_error.message.data != NULL ? window_error.message.data
                                               : runtimec_status_name(status));
     }
     
     if (window_result.execution_exit.kind != BINRWIR_EXECUTION_EXIT_DONE) {
-        return kvlang_runtime_fail(
+        return pathlang_runtime_fail(
             error, RUNTIMEC_STATUS_NOT_IMPLEMENTED,
             "execution stopped before DONE: this entry does not drive CALL / "
             "HANDOFF / YIELD yet");
@@ -261,7 +261,7 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_execute(
     if (window_result.return_value.size != 0U) {
         if (output->value.capacity < window_result.return_value.size + 1U) {
             output->value.required_length = window_result.return_value.size;
-            return kvlang_runtime_fail(error, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
+            return pathlang_runtime_fail(error, RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
                                        "value buffer is too small");
         }
         memcpy(output->value.data, window_result.return_value.data,
@@ -277,7 +277,7 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_execute(
                      window_result.execution_exit.logical_program_counter);
         if (counter_length < 0 ||
             output->program_counter.capacity < (size_t)counter_length + 1U) {
-            return kvlang_runtime_fail(error,
+            return pathlang_runtime_fail(error,
                                        RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY,
                                        "program_counter buffer is too small");
         }

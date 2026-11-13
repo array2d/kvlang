@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "contract/error.h"
-#include "contract/kvspace_access.h"
+#include "contract/pathspace_access.h"
 #include "contract/program_counter.h"
 #include "core_operations.h"
 #include "frame_slot.h"
@@ -612,14 +612,14 @@ static bool vmbin_interpreter_observable(
 static bool vmbin_interpreter_status_continue(
     vmbin_execution_t *execution, uint32_t identifier,
     binrwir_execution_exit_t *output_exit) {
-    char key[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    char key[RUNTIMEC_PATHSPACE_KEY_CAPACITY];
     runtimec_string_view_t text;
     runtimec_error_t error;
     binrwir_instruction_view_t instruction;
 
     if (!vmbin_interpreter_observable(execution->frame) ||
-        execution->frame->kvspace_access == NULL ||
-        execution->frame->kvspace_access->handle == NULL ||
+        execution->frame->pathspace_access == NULL ||
+        execution->frame->pathspace_access->handle == NULL ||
         runtimec_vthread_status_key(
             execution->frame->frame_path,
             runtimec_string_view_from_c_string("/‥status"), key,
@@ -628,7 +628,7 @@ static bool vmbin_interpreter_status_continue(
     }
     runtimec_error_reset(&error);
     if (runtimec_vthread_status_read(
-            execution->frame->kvspace_access->handle, key, &text, &error) !=
+            execution->frame->pathspace_access->handle, key, &text, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
         return true;
     }
@@ -662,11 +662,11 @@ static bool vmbin_interpreter_status_continue(
 
 static void vmbin_interpreter_write_error_status(
     const binrwir_binvthread_frame_t *frame) {
-    char key[RUNTIMEC_KVSPACE_KEY_CAPACITY];
+    char key[RUNTIMEC_PATHSPACE_KEY_CAPACITY];
     static const char error_text[] = "error";
 
-    if (frame->kvspace_access == NULL ||
-        frame->kvspace_access->handle == NULL ||
+    if (frame->pathspace_access == NULL ||
+        frame->pathspace_access->handle == NULL ||
         runtimec_vthread_status_key(
             frame->frame_path,
             runtimec_string_view_from_c_string("/‥status"), key,
@@ -674,7 +674,7 @@ static void vmbin_interpreter_write_error_status(
         return;
     }
     (void)runtimec_vthread_status_write(
-        frame->kvspace_access->handle, key,
+        frame->pathspace_access->handle, key,
         runtimec_bytes_view_make((const uint8_t *)error_text,
                                  sizeof(error_text) - 1U));
 }
@@ -685,7 +685,7 @@ static void vmbin_interpreter_commit_pc(vmbin_execution_t *execution,
     runtimec_error_t error;
 
     if (!vmbin_interpreter_observable(execution->frame) ||
-        execution->frame->kvspace_access == NULL ||
+        execution->frame->pathspace_access == NULL ||
         !runtimec_string_view_is_valid(execution->frame->vthread_identifier) ||
         execution->frame->vthread_identifier.size == 0U) {
         return;
@@ -693,8 +693,8 @@ static void vmbin_interpreter_commit_pc(vmbin_execution_t *execution,
     runtimec_error_reset(&error);
     counter.stack_identifier = execution->frame->stack_identifier;
     counter.source_instruction_ordinal = (int32_t)source_program_counter;
-    if (runtimec_kvspace_access_write_program_counter(
-            execution->frame->kvspace_access,
+    if (runtimec_pathspace_access_write_program_counter(
+            execution->frame->pathspace_access,
             execution->frame->vthread_identifier, counter, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
         vmbin_interpreter_write_error_status(execution->frame);
@@ -737,7 +737,7 @@ vmbin_execute(const binrwir_binfunc_t *program,
               const binrwir_execution_plan_t *execution_plan,
               binrwir_binvthread_frame_t *frame,
               const binrwir_registry_t *builtin_registry,
-              void *kvspace_handle,
+              void *pathspace_handle,
               vmbin_profile_t *profile,
               binrwir_execution_exit_t *output_exit) {
     vmbin_execution_t execution;
@@ -767,7 +767,7 @@ vmbin_execute(const binrwir_binfunc_t *program,
     execution.profile = profile;
     execution.frame = frame;
     
-    frame->kvspace_handle = kvspace_handle;
+    frame->pathspace_handle = pathspace_handle;
     
     execution.instruction_count = program_view.instruction_count;
 

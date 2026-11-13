@@ -1,9 +1,9 @@
 
 extern "C" {
-    #include <kvspace/kvspace.h>
-    #include <kvspace/kvspace_xvalue.h>
-    #include <kvlang/xvalue.h>
-#include <kvlang/xvalue.h>
+    #include <pathspace/pathspace.h>
+    #include <pathspace/pathspace_xvalue.h>
+    #include <pathlang/xvalue.h>
+#include <pathlang/xvalue.h>
 }
 
 #include <cstdio>
@@ -21,24 +21,24 @@ struct KV {
     KV(const char *p) : path(p) {
         ::unlink(p);
         std::string dsn = "shm://" + path;
-        kv = kvspaceConnect(dsn.c_str());
+        kv = pathspaceConnect(dsn.c_str());
         if (!kv) throw std::runtime_error("connect failed");
     }
-    ~KV() { kvspaceClose(kv); ::unlink(path.c_str()); }
+    ~KV() { pathspaceClose(kv); ::unlink(path.c_str()); }
 
     void set(const char *key, const char *langtype, const uint8_t *body, uint32_t len) {
         const uint16_t lt_len = (langtype && langtype[0]) ? (uint16_t)strlen(langtype) : 0;
         const uint64_t attr_len = lt_len ? 3ull + lt_len : 0ull;
         uint64_t offset = 0; char err[256];
-        if (kvspaceRealloc(kv, key, len, attr_len, &offset, err, sizeof(err)) != KVSPACE_OK)
+        if (pathspaceRealloc(kv, key, len, attr_len, &offset, err, sizeof(err)) != PATHSPACE_OK)
             throw std::runtime_error(std::string("set ") + key + ": " + err);
-        uint8_t *base = kvspaceXvalueInProcessAddress(kv);
+        uint8_t *base = pathspaceXvalueInProcessAddress(kv);
         if (!base) throw std::runtime_error("no in-process address space");
         uint8_t *wire = base + offset;
-        if (len && body) memcpy(wire + KVSPACE_XVALUE_HEAD_LEN, body, len);
+        if (len && body) memcpy(wire + PATHSPACE_XVALUE_HEAD_LEN, body, len);
         if (lt_len) {
-            uint8_t *a = wire + KVSPACE_XVALUE_HEAD_LEN + len;
-            a[0] = KVLANG_XVALUE_ATTR_TAG_LANGTYPE;
+            uint8_t *a = wire + PATHSPACE_XVALUE_HEAD_LEN + len;
+            a[0] = PATHLANG_XVALUE_ATTR_TAG_LANGTYPE;
             a[1] = (uint8_t)lt_len;
             a[2] = (uint8_t)(lt_len >> 8);
             memcpy(a + 3, langtype, lt_len);
@@ -47,17 +47,17 @@ struct KV {
     
     bool get(const char *key, std::string &kind, std::string &raw) {
         uint64_t offset = 0; char err[256];
-        if (kvspaceResolveOffset(kv, key, 0, &offset, err, sizeof(err)) != KVSPACE_OK)
+        if (pathspaceResolveOffset(kv, key, 0, &offset, err, sizeof(err)) != PATHSPACE_OK)
             return false;
-        const uint8_t *base = kvspaceXvalueInProcessAddress(kv);
+        const uint8_t *base = pathspaceXvalueInProcessAddress(kv);
         if (!base) return false;
         const uint8_t *wire = base + offset;
-        const auto *h = reinterpret_cast<const kvspaceXvalueHead *>(wire);
-        const uint64_t total = kvspaceXvalueHeadTotalLen(h);
+        const auto *h = reinterpret_cast<const pathspaceXvalueHead *>(wire);
+        const uint64_t total = pathspaceXvalueHeadTotalLen(h);
         if (total == 0) return false;
         const uint8_t *lt = nullptr;
         
-        const uint16_t lt_len = kvlangXvalueHeadLangtypeBounded(wire, total, &lt);
+        const uint16_t lt_len = pathlangXvalueHeadLangtypeBounded(wire, total, &lt);
         if (lt_len == 0 || lt == nullptr) return false;
         const char *k = reinterpret_cast<const char *>(lt);
         uint16_t k_len = lt_len;
@@ -74,24 +74,24 @@ struct KV {
             }
         }
         kind.assign(k != nullptr ? k : "", k_len);
-        raw.assign(reinterpret_cast<const char *>(wire + KVSPACE_XVALUE_HEAD_LEN),
-                   static_cast<size_t>(kvspaceXvalueHeadLen(h)));
+        raw.assign(reinterpret_cast<const char *>(wire + PATHSPACE_XVALUE_HEAD_LEN),
+                   static_cast<size_t>(pathspaceXvalueHeadLen(h)));
         return true;
     }
-    void del(const char *key) { char err[256]; kvspaceFree(kv, key, err, sizeof(err)); }
-    void deltree(const char *p) { char err[256]; kvspaceDeltree(kv, p, err, sizeof(err)); }
-    void mkindex(const char *p) { kvspaceMkindex(kv, p, nullptr, 0); }
+    void del(const char *key) { char err[256]; pathspaceFree(kv, key, err, sizeof(err)); }
+    void deltree(const char *p) { char err[256]; pathspaceDeltree(kv, p, err, sizeof(err)); }
+    void mkindex(const char *p) { pathspaceMkindex(kv, p, nullptr, 0); }
     
     std::vector<std::string> list(const char *prefix) {
         std::vector<std::string> r;
         int64_t count = 0; uint32_t max_name = 0; char err[256];
-        if (kvspaceListlen(kv, prefix, &count, &max_name, err, sizeof(err)) != KVSPACE_OK ||
+        if (pathspaceListlen(kv, prefix, &count, &max_name, err, sizeof(err)) != PATHSPACE_OK ||
             count <= 0)
             return r;
         std::vector<char> names(static_cast<size_t>(count) * (max_name + 1));
         uint32_t length = 0, listed = 0; uint64_t generation = 0;
-        if (kvspaceList(kv, prefix, names.data(), static_cast<uint32_t>(names.size()),
-                        &length, &listed, &generation, err, sizeof(err)) != KVSPACE_OK)
+        if (pathspaceList(kv, prefix, names.data(), static_cast<uint32_t>(names.size()),
+                        &length, &listed, &generation, err, sizeof(err)) != PATHSPACE_OK)
             return r;
         for (uint32_t i = 0; i < length;) {
             const char *name = names.data() + i;
@@ -116,7 +116,7 @@ int main() {
         return std::pair<uint8_t *, uint32_t>{b, n};
     };
 
-    KV kv("/tmp/kvspace_cpp.shm");
+    KV kv("/tmp/pathspace_cpp.shm");
     kv.mkindex("/cpp/");
 
     auto [vi, li] = xv_int(42);

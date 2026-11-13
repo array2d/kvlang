@@ -7,8 +7,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "contract/kvspace_interface.h"
-#include "contract/kvspace_access.h"
+#include "contract/pathspace_interface.h"
+#include "contract/pathspace_access.h"
 #include "engine/execution_window.h"
 #include "engine/session.h"
 
@@ -82,7 +82,7 @@ int main(int argument_count, char **arguments) {
     const char *capability = NULL;
     const char *source_path = NULL;
     
-    const char *kvspace_library = NULL;
+    const char *pathspace_library = NULL;
     const char *layout_library = NULL;
     char template_buffer[CAPABILITY_PROBE_TEMPLATE_CAPACITY];
     char source_buffer[CAPABILITY_PROBE_TEMPLATE_CAPACITY];
@@ -94,9 +94,9 @@ int main(int argument_count, char **arguments) {
     int ordinal = 1;
 
     while (ordinal < argument_count) {
-        if (strcmp(arguments[ordinal], "--kvspace") == 0 &&
+        if (strcmp(arguments[ordinal], "--pathspace") == 0 &&
             ordinal + 1 < argument_count) {
-            kvspace_library = arguments[ordinal + 1];
+            pathspace_library = arguments[ordinal + 1];
             ordinal += 2;
         } else if (strcmp(arguments[ordinal], "--layout") == 0 &&
                    ordinal + 1 < argument_count) {
@@ -113,11 +113,11 @@ int main(int argument_count, char **arguments) {
     if (dsn == NULL || capability == NULL) {
         fprintf(stderr,
                 "usage: capability_probe <dsn> <capability> [source.kv] "
-                "--kvspace <lib> --layout <lib>\n");
+                "--pathspace <lib> --layout <lib>\n");
         return 2;
     }
-    if (kvspace_library == NULL || layout_library == NULL) {
-        fprintf(stderr, "missing library path: --kvspace and --layout are required\n");
+    if (pathspace_library == NULL || layout_library == NULL) {
+        fprintf(stderr, "missing library path: --pathspace and --layout are required\n");
         return 2;
     }
 
@@ -162,7 +162,7 @@ int main(int argument_count, char **arguments) {
     const char *source =
         source_path != NULL ? source_buffer : template_buffer;
 
-    (void)kvspace_library;
+    (void)pathspace_library;
     void *layout_handle_library = dlopen(layout_library, RTLD_NOW | RTLD_LOCAL);
     layout_code_function_t layout_code_function = NULL;
 
@@ -171,11 +171,11 @@ int main(int argument_count, char **arguments) {
         return 2;
     }
     {
-        void *symbol = dlsym(layout_handle_library, "kvlangLayoutCode");
+        void *symbol = dlsym(layout_handle_library, "pathlangLayoutCode");
         memcpy(&layout_code_function, &symbol, sizeof(layout_code_function));
     }
     if (layout_code_function == NULL) {
-        fprintf(stderr, "layout library lacks kvlangLayoutCode\n");
+        fprintf(stderr, "layout library lacks pathlangLayoutCode\n");
         return 2;
     }
     runtimec_error_t error;
@@ -191,20 +191,20 @@ int main(int argument_count, char **arguments) {
         return 0;
     }
 
-    void *kvspace_handle = kvspaceConnect(dsn);
-    if (kvspace_handle == NULL) {
+    void *pathspace_handle = pathspaceConnect(dsn);
+    if (pathspace_handle == NULL) {
         fprintf(stderr, "cannot connect %s\n", dsn);
         return 2;
     }
-    const runtimec_kvspace_access_request_t adapter_request = {
+    const runtimec_pathspace_access_request_t adapter_request = {
         .allocator = {.context = NULL,
                       .allocate = probe_allocate,
                       .deallocate = probe_deallocate},
-        .borrowed_kvspace_handle = kvspace_handle,
+        .borrowed_pathspace_handle = pathspace_handle,
         .instance_identifier = UINT64_C(1),
     };
-    runtimec_kvspace_access_t *kvspace_access = NULL;
-    if (runtimec_kvspace_access_create(&adapter_request, &kvspace_access, &error) !=
+    runtimec_pathspace_access_t *pathspace_access = NULL;
+    if (runtimec_pathspace_access_create(&adapter_request, &pathspace_access, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
         fprintf(stderr, "adapter failed\n");
         return 2;
@@ -219,8 +219,8 @@ int main(int argument_count, char **arguments) {
         runtimec_error_t probe_error;
         runtimec_error_reset(&probe_error);
         const runtimec_status_t probe_status =
-            runtimec_kvspace_access_source_revision(
-                kvspace_access, probe_snapshot.function_key,
+            runtimec_pathspace_access_source_revision(
+                pathspace_access, probe_snapshot.function_key,
             &probe_snapshot.source_revision, &probe_error);
         fprintf(stderr,
                 "probe: source_revision status=%d gen=%llu instance=%llu "
@@ -241,7 +241,7 @@ int main(int argument_count, char **arguments) {
     options.machine_code_capacity = 0U;
     options.enable_jit = false;
     runtimec_session_t *session = NULL;
-    if (runtimec_session_create(kvspace_access, &options, &session, &error) !=
+    if (runtimec_session_create(pathspace_access, &options, &session, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
         fprintf(stderr, "session failed: %.*s\n", (int)error.message.size,
                 error.message.data != NULL ? error.message.data : "");
@@ -269,8 +269,8 @@ int main(int argument_count, char **arguments) {
     request.source_logical_program_counter = 1U;
     
     {
-        runtimec_kvspace_access_t *session_host = NULL;
-        if (runtimec_session_get_kvspace_access(session, &session_host) ==
+        runtimec_pathspace_access_t *session_host = NULL;
+        if (runtimec_session_get_pathspace_access(session, &session_host) ==
                 RUNTIMEC_STATUS_SUCCESS && session_host != NULL) {
             runtimec_snapshot_t before_snapshot;
             runtimec_snapshot_reset(&before_snapshot);
@@ -280,7 +280,7 @@ int main(int argument_count, char **arguments) {
             runtimec_error_t before_error;
             runtimec_error_reset(&before_error);
             const runtimec_status_t before_status =
-                runtimec_kvspace_access_source_revision(
+                runtimec_pathspace_access_source_revision(
                     session_host, before_snapshot.function_key,
                 &before_snapshot.source_revision, &before_error);
             fprintf(stderr,
@@ -354,7 +354,7 @@ int main(int argument_count, char **arguments) {
     }
 
     runtimec_session_destroy(session);
-    runtimec_kvspace_access_destroy(kvspace_access, &error);
-    kvspaceClose(kvspace_handle);
+    runtimec_pathspace_access_destroy(pathspace_access, &error);
+    pathspaceClose(pathspace_handle);
     return 0;
 }

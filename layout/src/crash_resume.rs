@@ -243,45 +243,45 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
     ("time/duration·before", WHOLE),
     ("time/duration·after", WHOLE),
     
-    ("kvspace·del", HEAP_WRITE),
-    ("kvspace·deltree", HEAP_WRITE),
-    ("kvspace·mkindex", HEAP_WRITE),
-    ("kvspace·extindex", HEAP_WRITE),
-    ("kvspace·delextindex", HEAP_WRITE),
+    ("pathspace·del", HEAP_WRITE),
+    ("pathspace·deltree", HEAP_WRITE),
+    ("pathspace·mkindex", HEAP_WRITE),
+    ("pathspace·extindex", HEAP_WRITE),
+    ("pathspace·delextindex", HEAP_WRITE),
     (
-        "kvspace·cp",
+        "pathspace·cp",
         OpSpec {
             heap_read: true,
             ..HEAP_WRITE
         },
     ),
     (
-        "kvspace·cpdir",
+        "pathspace·cpdir",
         OpSpec {
             heap_read: true,
             ..HEAP_WRITE
         },
     ),
     (
-        "kvspace·cplist",
+        "pathspace·cplist",
         OpSpec {
             heap_read: true,
             ..HEAP_WRITE
         },
     ),
-    ("kvspace·listlen", HEAP_READ),
+    ("pathspace·listlen", HEAP_READ),
     (
-        "kvspace·listat",
+        "pathspace·listat",
         OpSpec {
             write: WriteMode::Partial,
             ..HEAP_READ
         },
     ),
-    ("kvspace·watch", OPAQUE),
-    ("kvspace/key·abs", CREATE),
-    ("kvspace/key·tostr", CREATE),
+    ("pathspace·watch", OPAQUE),
+    ("pathspace/key·abs", CREATE),
+    ("pathspace/key·tostr", CREATE),
     (
-        "kvlang·resolvekey",
+        "pathlang·resolvekey",
         OpSpec {
             heap_read: true,
             ..CREATE
@@ -855,7 +855,7 @@ fn parse_step(input: &StepInput, ctx: &Ctx, addr_taken: &mut BTreeSet<String>) -
     );
     let copy = matches!(input.op.as_str(), "=" | "copy");
     
-    let address_of = matches!(input.op.as_str(), "kvspace/key·abs" | "kvlang·resolvekey");
+    let address_of = matches!(input.op.as_str(), "pathspace/key·abs" | "pathlang·resolvekey");
     let patches = spec.map_or(0, |s| s.patches);
     for (i, read) in reads.iter().enumerate() {
         match parse_operand(read, ctx) {
@@ -1684,7 +1684,7 @@ mod tests {
             ];
             if extra_heap {
                 steps.push(s("=", &["\"q"], &["t"]));
-                steps.push(s("kvspace/key·abs", &["t"], &["_p"]));
+                steps.push(s("pathspace/key·abs", &["t"], &["_p"]));
                 steps.push(s("=", &["\"r"], &["*_p"]));
             }
             steps.push(s("return", &[], &[]));
@@ -2103,7 +2103,7 @@ mod tests {
             vec![
                 s("=", &["\"init"], &["name"]),
                 s("=", &["0"], &["x"]),
-                s("kvspace·listat", &["/tmp/rc_dir", "99"], &["name"]),
+                s("pathspace·listat", &["/tmp/rc_dir", "99"], &["name"]),
                 s("=", &["name"], &["u"]),
                 s("=", &["\"zzzz"], &["name"]),
                 s("add", &["x", "1"], &["x"]),
@@ -2217,7 +2217,7 @@ mod tests {
             vec![],
             vec![],
             vec![
-                s("kvspace/key·abs", &["x"], &["p"]),
+                s("pathspace/key·abs", &["x"], &["p"]),
                 s("goto", &["L"], &[]),
                 s("=", &["0"], &["z"]),
                 s("=", &["x"], &["t"]),
@@ -2406,15 +2406,15 @@ mod tests {
             "int32",
             "int64",
             "int8",
-            "kvspace/key·abs",
-            "kvlang·resolvekey",
-            "kvspace·cp",
-            "kvspace·cpdir",
-            "kvspace·del",
-            "kvspace·deltree",
-            "kvspace·listat",
-            "kvspace·listlen",
-            "kvspace·mkindex",
+            "pathspace/key·abs",
+            "pathlang·resolvekey",
+            "pathspace·cp",
+            "pathspace·cpdir",
+            "pathspace·del",
+            "pathspace·deltree",
+            "pathspace·listat",
+            "pathspace·listlen",
+            "pathspace·mkindex",
             "le",
             "log",
             "lt",

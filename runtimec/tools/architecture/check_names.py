@@ -122,7 +122,7 @@ VOID_LIFECYCLE_PATTERN = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 EXTERNAL_VOID_LIFECYCLE_PATTERN = re.compile(
-    r"\bextern\s+void\s+(kvspace[A-Za-z0-9_]*(?:destroy|close)[A-Za-z0-9_]*)"
+    r"\bextern\s+void\s+(pathspace[A-Za-z0-9_]*(?:destroy|close)[A-Za-z0-9_]*)"
     r"\s*\([^;{}]*\)\s*;",
     re.IGNORECASE | re.DOTALL,
 )
@@ -175,7 +175,7 @@ def iter_product_files(runtimec_root: Path):
 
 def audit_public_headers(runtimec_root: Path, repository_root: Path) -> list[Finding]:
     include_root = runtimec_root / "include"
-    allowed_header = include_root / "kvlang" / "runtimec.h"
+    allowed_header = include_root / "pathlang" / "runtimec.h"
     return [
         Finding(relative_display(header, repository_root), 1,
                 "noncanonical-public-header",
@@ -200,9 +200,9 @@ MEMBER_ACCESS_PATTERN = re.compile(r"(?:->|\.)\s*([A-Za-z_][A-Za-z0-9_]*)")
 OFFSETOF_FIELD_PATTERN = re.compile(r"\boffsetof\s*\([^,()]*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)")
 
 FOREIGN_ABI_IDENTIFIERS = (
-    "KVSPACE_XVALUE_HEAD_LEN", "KVSPACE_XVALUE_PTR_INLINE",
-    "KVSPACE_XVALUE_PTR_PTR",
-    "KVSPACE_REF_INLINE", "KVSPACE_REF_PTR", "KVSPACE_REF_EXT",
+    "PATHSPACE_XVALUE_HEAD_LEN", "PATHSPACE_XVALUE_PTR_INLINE",
+    "PATHSPACE_XVALUE_PTR_PTR",
+    "PATHSPACE_REF_INLINE", "PATHSPACE_REF_PTR", "PATHSPACE_REF_EXT",
 )
 
 def mask_foreign_abi_positions(code: str) -> str:
@@ -322,24 +322,24 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
     return sorted(set(findings)), scanned
 
 SELFTEST_CASES = (
-    ("foreign-member-access", "static void probe(const kvspaceXvalueHead *head) {\n"
+    ("foreign-member-access", "static void probe(const pathspaceXvalueHead *head) {\n"
                               "    int value = head->ptr;\n"
                               "    int other = head.ptr;\n"
                               "}\n", ()),
     ("foreign-offsetof-field", "static int probe(void) {\n"
-                               "    return (int)offsetof(kvspaceXvalueHead, ptr);\n"
+                               "    return (int)offsetof(pathspaceXvalueHead, ptr);\n"
                                "}\n", ()),
     ("local-variable", "static int ptr;\n", ("abbreviation-ptr-use-pointer",)),
     ("parameter", "static int probe(int ptr) { return ptr; }\n",
      ("abbreviation-ptr-use-pointer",)),
     ("type-alias", "typedef int ptr;\n", ("abbreviation-ptr-use-pointer",)),
     ("foreign-macro", "static unsigned probe(void) {\n"
-                      "    return (unsigned)KVSPACE_XVALUE_PTR_INLINE;\n"
+                      "    return (unsigned)PATHSPACE_XVALUE_PTR_INLINE;\n"
                       "}\n", ()),
     ("own-uppercase-abbreviation", "#define OUR_PTR_LIMIT 4\n",
      ("abbreviation-ptr-use-pointer",)),
     ("external-void-lifecycle-is-allowed",
-     "extern void kvspaceClose(void *handle);\n", ()),
+     "extern void pathspaceClose(void *handle);\n", ()),
     ("local-void-lifecycle-is-still-rejected",
      "static void probe_close(void *handle) { (void)handle; }\n",
      ("void-lifecycle-function",)),
@@ -347,7 +347,7 @@ SELFTEST_CASES = (
      "extern void local_close(void *handle);\n",
      ("void-lifecycle-function",)),
     ("upstream-name-without-extern-is-rejected",
-     "void kvspaceClose(void *handle);\n",
+     "void pathspaceClose(void *handle);\n",
      ("void-lifecycle-function",)),
     ("stdout-write", "static void probe(void) {\n"
                      '    fprintf(stderr, "boom");\n'
@@ -363,7 +363,7 @@ SELFTEST_CASES = (
      ()),
     ("todo-in-comment-across-includes-is-fine",
      '#include "contract/status.h"\n'
-     '#include "kvspace/kvspace.h"\n'
+     '#include "pathspace/pathspace.h"\n'
      "\n"
      "/*\n"
      " * 待补（后续独立能力）：动态 key 的引用解析。TODO 记在这里。\n"
@@ -375,7 +375,7 @@ SELFTEST_CASES = (
      ("debug-marker-in-product-source",)),
     ("mixed-member-and-local",
      "static int ptr;\n"
-     "static void probe(const kvspaceXvalueHead *head) { (void)head->ptr; }\n",
+     "static void probe(const pathspaceXvalueHead *head) { (void)head->ptr; }\n",
      ("abbreviation-ptr-use-pointer",)),
 )
 

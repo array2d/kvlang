@@ -22,13 +22,13 @@ jobs:
       - name: 产物清单
         run: |
           set -euo pipefail
-          test -x bin/kvlangrun
+          test -x bin/pathlangrun
           test -x bin/kv_runner
-          test -x bin/kvlanglayout
-          test -f lib/libkvspace.so.1
-          test -f lib/libkvlanglayout.so
-          test -f lib/libkvlang_runtime.so
-          test -f lib/libkvlang_xvalue.a
+          test -x bin/pathlanglayout
+          test -f lib/libpathspace.so.1
+          test -f lib/libpathlanglayout.so
+          test -f lib/libpathlang_runtime.so
+          test -f lib/libpathlang_xvalue.a
           ls -1 bin lib
 
       - name: runtimec ctest

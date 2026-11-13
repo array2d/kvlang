@@ -15,9 +15,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path = [p for p in sys.path if os.path.abspath(p or os.getcwd()) != _HERE]
 import numpy as np
 
-KVLANG = Path(__file__).resolve().parents[3]
-BIN = KVLANG / "bin"
-LIB = KVLANG / "lib"
+PATHLANG = Path(__file__).resolve().parents[3]
+BIN = PATHLANG / "bin"
+LIB = PATHLANG / "lib"
 
 def _argv_option(name):
     prefix = f"{name}="
@@ -29,88 +29,88 @@ def _argv_option(name):
 _RUNTIME_LIB_OVERRIDE = _argv_option("runtime-lib")
 
 def _find_lib(name, path, *rels):
-    cands = ([path] if path else []) + [str(KVLANG / r) for r in rels]
+    cands = ([path] if path else []) + [str(PATHLANG / r) for r in rels]
     for c in cands:
         if os.path.exists(c):
             return ctypes.CDLL(c)
     return ctypes.CDLL(name)
 
-if os.path.isdir(LIB / "kvspace") and "KVSPACE_BACKEND_PATH" not in os.environ:
-    os.environ["KVSPACE_BACKEND_PATH"] = str(LIB / "kvspace")
+if os.path.isdir(LIB / "pathspace") and "PATHSPACE_BACKEND_PATH" not in os.environ:
+    os.environ["PATHSPACE_BACKEND_PATH"] = str(LIB / "pathspace")
 
-_ks = _find_lib("libkvspace.so.1", None, "lib/libkvspace.so.1", "lib/libkvspace.so")
-_rt = _find_lib("libkvlang_runtime.so", _RUNTIME_LIB_OVERRIDE,
-                "lib/libkvlang_runtime.so", "lib/libkvlang_runtimec2.so")
-_lay = _find_lib("libkvlanglayout.so", None,
-                 "lib/libkvlanglayout.so", "layout/target/release/libkvlanglayout.so")
+_ks = _find_lib("libpathspace.so.1", None, "lib/libpathspace.so.1", "lib/libpathspace.so")
+_rt = _find_lib("libpathlang_runtime.so", _RUNTIME_LIB_OVERRIDE,
+                "lib/libpathlang_runtime.so", "lib/libpathlang_runtimec2.so")
+_lay = _find_lib("libpathlanglayout.so", None,
+                 "lib/libpathlanglayout.so", "layout/target/release/libpathlanglayout.so")
 
-class kvspace_head_t(ctypes.Structure):
+class pathspace_head_t(ctypes.Structure):
     _fields_ = [("headlen", ctypes.c_uint16), ("ref", ctypes.c_uint8),
                 ("storetype", ctypes.c_uint8), ("body_len", ctypes.c_int32),
                 ("ndim", ctypes.c_int32), ("dims", ctypes.c_int32 * 8),
                 ("langtype", ctypes.c_uint8 * 256), ("langtype_len", ctypes.c_int32),
                 ("body_offset", ctypes.c_int32), ("body_cap", ctypes.c_uint64)]
 
-class kvlang_kindexpr_t(ctypes.Structure):
+class pathlang_kindexpr_t(ctypes.Structure):
     _fields_ = [("ref", ctypes.c_int32), ("ndim", ctypes.c_int32),
                 ("dims", ctypes.c_int32 * 8), ("array_len", ctypes.c_int32),
                 ("kind", ctypes.c_uint8 * 64)]
 
 def _bind():
-    _ks.kvspaceConnect.argtypes = [ctypes.c_char_p]; _ks.kvspaceConnect.restype = ctypes.c_void_p
-    _ks.kvspaceClose.argtypes = [ctypes.c_void_p]
-    _ks.kvspaceGet.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int,
+    _ks.pathspaceConnect.argtypes = [ctypes.c_char_p]; _ks.pathspaceConnect.restype = ctypes.c_void_p
+    _ks.pathspaceClose.argtypes = [ctypes.c_void_p]
+    _ks.pathspaceGet.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int,
                                ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
                                ctypes.POINTER(ctypes.c_uint32)]
-    _ks.kvspaceGet.restype = ctypes.c_int
-    _ks.kvspaceGetHead.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(kvspace_head_t)]
-    _ks.kvspaceGetHead.restype = ctypes.c_int
-    _ks.kvspaceSetValue.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+    _ks.pathspaceGet.restype = ctypes.c_int
+    _ks.pathspaceGetHead.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.POINTER(pathspace_head_t)]
+    _ks.pathspaceGetHead.restype = ctypes.c_int
+    _ks.pathspaceSetValue.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
                                     ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32,
                                     ctypes.c_char_p, ctypes.c_uint32]
-    _ks.kvspaceSetValue.restype = ctypes.c_int
-    _ks.kvspaceListLen.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
+    _ks.pathspaceSetValue.restype = ctypes.c_int
+    _ks.pathspaceListLen.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
                                    ctypes.POINTER(ctypes.c_int32)]
-    _ks.kvspaceListLen.restype = ctypes.c_int
-    _ks.kvspaceListAt.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
+    _ks.pathspaceListLen.restype = ctypes.c_int
+    _ks.pathspaceListAt.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int, ctypes.c_int,
                                   ctypes.c_int32, ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32,
                                   ctypes.POINTER(ctypes.c_uint32)]
-    _ks.kvspaceListAt.restype = ctypes.c_int
-    _ks.kvspaceDel.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_uint32,
+    _ks.pathspaceListAt.restype = ctypes.c_int
+    _ks.pathspaceDel.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char_p), ctypes.c_uint32,
                                ctypes.c_char_p, ctypes.c_uint32]
-    _ks.kvspaceDel.restype = ctypes.c_int
-    _ks.kvlangXvalueNewChar.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32, ctypes.c_char_p,
+    _ks.pathspaceDel.restype = ctypes.c_int
+    _ks.pathlangXvalueNewChar.argtypes = [ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint32, ctypes.c_char_p,
                                    ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
                                    ctypes.POINTER(ctypes.c_uint32)]
-    _ks.kvlangXvalueNewChar.restype = ctypes.c_int
-    _ks.kvlangXvalueHeadNewScalar.argtypes = [ctypes.c_uint8, ctypes.POINTER(ctypes.c_uint8),
+    _ks.pathlangXvalueNewChar.restype = ctypes.c_int
+    _ks.pathlangXvalueHeadNewScalar.argtypes = [ctypes.c_uint8, ctypes.POINTER(ctypes.c_uint8),
                                                ctypes.c_uint32, ctypes.c_char_p,
                                                ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
                                                ctypes.POINTER(ctypes.c_uint64)]
-    _ks.kvlangXvalueHeadNewScalar.restype = ctypes.c_int
-    _ks.kvlangXvalueHeadNewTensor.argtypes = [ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint32,
+    _ks.pathlangXvalueHeadNewScalar.restype = ctypes.c_int
+    _ks.pathlangXvalueHeadNewTensor.argtypes = [ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint32,
                                                ctypes.POINTER(ctypes.c_uint8), ctypes.c_uint64,
                                                ctypes.c_char_p,
                                                ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
                                                ctypes.POINTER(ctypes.c_uint64)]
-    _ks.kvlangXvalueHeadNewTensor.restype = ctypes.c_int
-    for fn in ("kvlangRwirextParams", "kvlangRwirextResolveRead", "kvlangRwirextResolveReadPath",
-               "kvlangRwirextResolveWrite", "kvlangRwirextNextPc"):
+    _ks.pathlangXvalueHeadNewTensor.restype = ctypes.c_int
+    for fn in ("pathlangRwirextParams", "pathlangRwirextResolveRead", "pathlangRwirextResolveReadPath",
+               "pathlangRwirextResolveWrite", "pathlangRwirextNextPc"):
         getattr(_rt, fn).restype = ctypes.c_void_p
-    _rt.kvlangDefRwir.restype = ctypes.c_int
-    _rt.kvlangDefRwir.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+    _rt.pathlangDefRwir.restype = ctypes.c_int
+    _rt.pathlangDefRwir.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
                                   ctypes.POINTER(ctypes.c_char_p), ctypes.c_int32,
                                   ctypes.POINTER(ctypes.c_char_p), ctypes.c_int32]
-    _rt.kvlangRwirextParams.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-    _rt.kvlangRwirextResolveRead.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
-    _rt.kvlangRwirextResolveReadPath.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
-    _rt.kvlangRwirextResolveWrite.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
-    _rt.kvlangRwirextNextPc.argtypes = [ctypes.c_char_p]
-    _lay.kvlangLayoutCode.restype = ctypes.c_int
-    _lay.kvlangLayoutCode.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
+    _rt.pathlangRwirextParams.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
+    _rt.pathlangRwirextResolveRead.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    _rt.pathlangRwirextResolveReadPath.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    _rt.pathlangRwirextResolveWrite.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+    _rt.pathlangRwirextNextPc.argtypes = [ctypes.c_char_p]
+    _lay.pathlangLayoutCode.restype = ctypes.c_int
+    _lay.pathlangLayoutCode.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p,
                                       ctypes.c_uint32, ctypes.c_char_p, ctypes.c_uint32]
-    _lay.kvlangKindexprParse.restype = ctypes.c_int
-    _lay.kvlangKindexprParse.argtypes = [ctypes.c_char_p, ctypes.POINTER(kvlang_kindexpr_t)]
+    _lay.pathlangKindexprParse.restype = ctypes.c_int
+    _lay.pathlangKindexprParse.argtypes = [ctypes.c_char_p, ctypes.POINTER(pathlang_kindexpr_t)]
 
 _bind()
 _libc = ctypes.CDLL(None); _libc.free.argtypes = [ctypes.c_void_p]
@@ -194,22 +194,22 @@ SHARED_VIDS_TYPE = "[]char/utf32·[]char/utf32"
 
 class Engine:
     def __init__(self, dsn):
-        self.kv = _ks.kvspaceConnect(dsn.encode())
+        self.kv = _ks.pathspaceConnect(dsn.encode())
         if not self.kv:
-            raise RuntimeError(f"kvspaceConnect failed: {dsn}")
+            raise RuntimeError(f"pathspaceConnect failed: {dsn}")
 
     def close(self):
         if self.kv:
-            _ks.kvspaceClose(self.kv); self.kv = None
+            _ks.pathspaceClose(self.kv); self.kv = None
 
     def _set_wire(self, key, ptr, length):
         err = ctypes.create_string_buffer(256)
-        if _ks.kvspaceSetValue(self.kv, key.encode(), ptr, length, err, 256) != 0:
-            raise RuntimeError(f"kvspaceSetValue({key}): {err.value.decode('utf-8', 'replace')}")
+        if _ks.pathspaceSetValue(self.kv, key.encode(), ptr, length, err, 256) != 0:
+            raise RuntimeError(f"pathspaceSetValue({key}): {err.value.decode('utf-8', 'replace')}")
 
     def kv_get(self, key, resolve=1):
         out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
-        if _ks.kvspaceGet(self.kv, key.encode(), resolve, ctypes.byref(out), ctypes.byref(ol)) != 0:
+        if _ks.pathspaceGet(self.kv, key.encode(), resolve, ctypes.byref(out), ctypes.byref(ol)) != 0:
             return ""
         if not out or ol.value < 8:
             return ""
@@ -227,7 +227,7 @@ class Engine:
         buf = (ctypes.c_uint8 * max(len(b), 1))()
         if b:
             ctypes.memmove(buf, b, len(b))
-        if _ks.kvlangXvalueNewChar(buf, len(b), lt, ctypes.byref(out), ctypes.byref(ol)) != 0:
+        if _ks.pathlangXvalueNewChar(buf, len(b), lt, ctypes.byref(out), ctypes.byref(ol)) != 0:
             return
         try:
             self._set_wire(key, out, ol.value)
@@ -236,34 +236,34 @@ class Engine:
 
     def kv_exists(self, key):
         out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
-        return _ks.kvspaceGet(self.kv, key.encode(), 0, ctypes.byref(out), ctypes.byref(ol)) == 0 and bool(out)
+        return _ks.pathspaceGet(self.kv, key.encode(), 0, ctypes.byref(out), ctypes.byref(ol)) == 0 and bool(out)
 
     def kv_list(self, prefix, resolve=1):
         count = ctypes.c_int32()
-        if _ks.kvspaceListLen(self.kv, prefix.encode(), 0, resolve, ctypes.byref(count)) != 0 or count.value <= 0:
+        if _ks.pathspaceListLen(self.kv, prefix.encode(), 0, resolve, ctypes.byref(count)) != 0 or count.value <= 0:
             return []
         names = []
         buf = (ctypes.c_uint8 * 1024)()
         for i in range(count.value):
             ol = ctypes.c_uint32()
-            if _ks.kvspaceListAt(self.kv, prefix.encode(), 0, resolve, i, buf, 1024, ctypes.byref(ol)) == 0 and ol.value > 0:
+            if _ks.pathspaceListAt(self.kv, prefix.encode(), 0, resolve, i, buf, 1024, ctypes.byref(ol)) == 0 and ol.value > 0:
                 names.append(ctypes.string_at(buf, ol.value).decode("utf-8", "replace"))
         return names
 
     def kv_del(self, key):
         keys = (ctypes.c_char_p * 1)(key.encode())
         err = ctypes.create_string_buffer(256)
-        _ks.kvspaceDel(self.kv, keys, 1, err, 256)
+        _ks.pathspaceDel(self.kv, keys, 1, err, 256)
 
     def view(self, key):
-        h = kvspace_head_t()
-        if _ks.kvspaceGetHead(self.kv, key.encode(), ctypes.byref(h)) != 0:
+        h = pathspace_head_t()
+        if _ks.pathspaceGetHead(self.kv, key.encode(), ctypes.byref(h)) != 0:
             return None
         out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
-        if _ks.kvspaceGet(self.kv, key.encode(), 1, ctypes.byref(out), ctypes.byref(ol)) != 0 or not out:
+        if _ks.pathspaceGet(self.kv, key.encode(), 1, ctypes.byref(out), ctypes.byref(ol)) != 0 or not out:
             return None
-        kx = kvlang_kindexpr_t()
-        if _lay.kvlangKindexprParse(ctypes.cast(h.langtype, ctypes.c_char_p), ctypes.byref(kx)) != 0:
+        kx = pathlang_kindexpr_t()
+        if _lay.pathlangKindexprParse(ctypes.cast(h.langtype, ctypes.c_char_p), ctypes.byref(kx)) != 0:
             return None
         kind = bytes(kx.kind).split(b"\x00", 1)[0].decode()
         if kx.ref != 0 or kind not in _KIND_CTYPE:
@@ -292,10 +292,10 @@ class Engine:
         out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint64()
         if ndim > 0:
             dims = (ctypes.c_uint64 * ndim)(*shape)
-            rc = _ks.kvlangXvalueHeadNewTensor(dims, ndim, buf, len(raw), lt,
+            rc = _ks.pathlangXvalueHeadNewTensor(dims, ndim, buf, len(raw), lt,
                                                 ctypes.byref(out), ctypes.byref(ol))
         else:
-            rc = _ks.kvlangXvalueHeadNewScalar(0, buf, len(raw), lt,
+            rc = _ks.pathlangXvalueHeadNewScalar(0, buf, len(raw), lt,
                                                 ctypes.byref(out), ctypes.byref(ol))
         if rc != 0 or not out:
             raise RuntimeError(f"xvalue encode failed: {key}")
@@ -305,18 +305,18 @@ class Engine:
             _libc.free(ctypes.cast(out, ctypes.c_void_p))
 
     def read_arg(self, pc, i):
-        path = _s(_rt.kvlangRwirextResolveReadPath(self.kv, pc.encode(), i))
+        path = _s(_rt.pathlangRwirextResolveReadPath(self.kv, pc.encode(), i))
         if path:
             v = self.view(path)
             if v is not None:
                 return v
-        return _parse(_s(_rt.kvlangRwirextResolveRead(self.kv, pc.encode(), i)))
+        return _parse(_s(_rt.pathlangRwirextResolveRead(self.kv, pc.encode(), i)))
 
     def _ensure_vids_queue(self, op):
         if not self.kv_exists(SHARED_VIDS):
             out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint64()
             dummy = (ctypes.c_uint8 * 1)()
-            if _ks.kvlangXvalueHeadNewScalar(0, dummy, 0, SHARED_VIDS_TYPE.encode(),
+            if _ks.pathlangXvalueHeadNewScalar(0, dummy, 0, SHARED_VIDS_TYPE.encode(),
                                               ctypes.byref(out), ctypes.byref(ol)) == 0 and out:
                 try:
                     self._set_wire(SHARED_VIDS, out, ol.value)
@@ -324,12 +324,12 @@ class Engine:
                     _libc.free(ctypes.cast(out, ctypes.c_void_p))
         vids_key = f"/lib/{op}/vids"
         if not self.kv_exists(vids_key):
-            _ks.kvlangXvalueNewPtr.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
+            _ks.pathlangXvalueNewPtr.argtypes = [ctypes.c_char_p, ctypes.c_char_p,
                                           ctypes.POINTER(ctypes.POINTER(ctypes.c_uint8)),
                                           ctypes.POINTER(ctypes.c_uint32)]
-            _ks.kvlangXvalueNewPtr.restype = ctypes.c_int
+            _ks.pathlangXvalueNewPtr.restype = ctypes.c_int
             out = ctypes.POINTER(ctypes.c_uint8)(); ol = ctypes.c_uint32()
-            if _ks.kvlangXvalueNewPtr(SHARED_VIDS_TYPE.encode(), SHARED_VIDS.encode(),
+            if _ks.pathlangXvalueNewPtr(SHARED_VIDS_TYPE.encode(), SHARED_VIDS.encode(),
                                  ctypes.byref(out), ctypes.byref(ol)) == 0 and out:
                 try:
                     self._set_wire(vids_key, out, ol.value)
@@ -342,25 +342,25 @@ class Engine:
         for op, (nr, _) in OPS.items():
             rp = _arr(["*"] * nr)
             wp = _arr(["*"])
-            _rt.kvlangDefRwir(self.kv, op.encode(), rp, nr, wp, 1)
+            _rt.pathlangDefRwir(self.kv, op.encode(), rp, nr, wp, 1)
             self._ensure_vids_queue(op)
         rp = _arr(["*..."])
-        _rt.kvlangDefRwir(self.kv, PRINT_OP.encode(), rp, 1, None, 0)
+        _rt.pathlangDefRwir(self.kv, PRINT_OP.encode(), rp, 1, None, 0)
         self._ensure_vids_queue(PRINT_OP)
 
     def _handle(self, op, nr, fn, pc):
-        params = _s(_rt.kvlangRwirextParams(self.kv, pc.encode())).split("\n")
+        params = _s(_rt.pathlangRwirextParams(self.kv, pc.encode())).split("\n")
         if op == PRINT_OP:
             parts = []
             for i in range(len(params) - 1):
-                path = _s(_rt.kvlangRwirextResolveReadPath(self.kv, pc.encode(), i))
+                path = _s(_rt.pathlangRwirextResolveReadPath(self.kv, pc.encode(), i))
                 v = self.view(path) if path else None
                 parts.append(_fmt(v) if v is not None
-                             else _s(_rt.kvlangRwirextResolveRead(self.kv, pc.encode(), i)))
+                             else _s(_rt.pathlangRwirextResolveRead(self.kv, pc.encode(), i)))
             print(" ".join(parts), flush=True)
         else:
             args = [self.read_arg(pc, i) for i in range(nr)]
-            self.alloc(_s(_rt.kvlangRwirextResolveWrite(self.kv, pc.encode(), 0)), np.asarray(fn(args)))
+            self.alloc(_s(_rt.pathlangRwirextResolveWrite(self.kv, pc.encode(), 0)), np.asarray(fn(args)))
 
     def serve(self, stop):
         table = {**OPS, PRINT_OP: (1, None)}
@@ -375,7 +375,7 @@ class Engine:
                     if not pc:
                         continue
                     claimed.add(vid)
-                    ps = _s(_rt.kvlangRwirextParams(self.kv, pc.encode())).split("\n")
+                    ps = _s(_rt.pathlangRwirextParams(self.kv, pc.encode())).split("\n")
                     op = ps[0] if ps else ""
                     if op not in table:
                         continue
@@ -384,7 +384,7 @@ class Engine:
                         self._handle(op, nr, fn, pc)
                     except Exception as e:
                         print(f"[numpy] {op} @ {pc}: {e}", file=sys.stderr, flush=True)
-                    nxt = _s(_rt.kvlangRwirextNextPc(pc.encode()))
+                    nxt = _s(_rt.pathlangRwirextNextPc(pc.encode()))
                     self.kv_set(f"/vthread/{vid}/‥pc", nxt)
                     self.kv_del(f"/lib/{op}/vids/{vid}")
             time.sleep(0.005)
@@ -400,25 +400,25 @@ def _normalize_legacy_syntax(src: str) -> str:
     return "\n".join(out) + ("\n" if src.endswith("\n") else "")
 
 def _env():
-    ld = f"{LIB}:{LIB / 'kvspace'}"
+    ld = f"{LIB}:{LIB / 'pathspace'}"
     if os.environ.get("LD_LIBRARY_PATH"):
         ld = f"{ld}:{os.environ['LD_LIBRARY_PATH']}"
     return {**os.environ, "LD_LIBRARY_PATH": ld,
-            "KVSPACE_BACKEND_PATH": os.environ.get("KVSPACE_BACKEND_PATH", str(LIB / "kvspace"))}
+            "PATHSPACE_BACKEND_PATH": os.environ.get("PATHSPACE_BACKEND_PATH", str(LIB / "pathspace"))}
 
 def _setup_c_runtime_prefix(tmp_dir: Path) -> Path:
     pfx = tmp_dir / "pfx"
     (pfx / "bin").mkdir(parents=True, exist_ok=True)
     (pfx / "lib").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(BIN / "byteseek", pfx / "bin" / "byteseek")
-    for p in LIB.glob("libkvspace.so*"):
+    shutil.copy2(BIN / "pathseek", pfx / "bin" / "pathseek")
+    for p in LIB.glob("libpathspace.so*"):
         shutil.copy2(p, pfx / "lib" / p.name, follow_symlinks=False)
-    shutil.copy2(LIB / "libkvlanglayout.so", pfx / "lib" / "libkvlanglayout.so")
-    if (LIB / "kvspace").is_dir():
-        shutil.copytree(LIB / "kvspace", pfx / "lib" / "kvspace", symlinks=True)
-    rt_so = Path(_RUNTIME_LIB_OVERRIDE or (LIB / "libkvlang_runtime.so")).resolve()
-    os.symlink(rt_so, pfx / "lib" / "libkvlang_runtimec2.so")
-    return pfx / "bin" / "byteseek"
+    shutil.copy2(LIB / "libpathlanglayout.so", pfx / "lib" / "libpathlanglayout.so")
+    if (LIB / "pathspace").is_dir():
+        shutil.copytree(LIB / "pathspace", pfx / "lib" / "pathspace", symlinks=True)
+    rt_so = Path(_RUNTIME_LIB_OVERRIDE or (LIB / "libpathlang_runtime.so")).resolve()
+    os.symlink(rt_so, pfx / "lib" / "libpathlang_runtimec2.so")
+    return pfx / "bin" / "pathseek"
 
 def _cleanup_dsn(dsn: str):
     if dsn.startswith("shm://"):
@@ -437,15 +437,15 @@ def _cleanup_dsn(dsn: str):
 def run(kvfile, dsn=None):
     kvfile = Path(kvfile).resolve()
     own_dsn = dsn is None
-    dsn = dsn or os.environ.get("KVSPACE") or f"shm:///tmp/kvlang_numpy_{os.getpid()}"
+    dsn = dsn or os.environ.get("PATHSPACE") or f"shm:///tmp/pathlang_numpy_{os.getpid()}"
     if own_dsn:
         _cleanup_dsn(dsn)
 
-    with tempfile.TemporaryDirectory(prefix="kvlang-np-pfx-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="pathlang-np-pfx-") as tmp:
         driver = _setup_c_runtime_prefix(Path(tmp))
-        env = {**_env(), "KVSPACE": dsn}
+        env = {**_env(), "PATHSPACE": dsn}
         pub = subprocess.run([str(driver), "isa", "publish"], capture_output=True, text=True,
-                             cwd=str(KVLANG), env=env, timeout=30)
+                             cwd=str(PATHLANG), env=env, timeout=30)
         if pub.returncode != 0:
             if own_dsn:
                 _cleanup_dsn(dsn)
@@ -457,7 +457,7 @@ def run(kvfile, dsn=None):
         src = _normalize_legacy_syntax(kvfile.read_text(encoding="utf-8"))
         entry_buf = ctypes.create_string_buffer(512)
         err_buf = ctypes.create_string_buffer(512)
-        if _lay.kvlangLayoutCode(src.encode(), dsn.encode(),
+        if _lay.pathlangLayoutCode(src.encode(), dsn.encode(),
                                  entry_buf, 512, err_buf, 512) != 0:
             eng.close()
             if own_dsn:
@@ -471,7 +471,7 @@ def run(kvfile, dsn=None):
         th.start()
         try:
             r = subprocess.run([str(driver), entry], capture_output=True, text=True,
-                               cwd=str(KVLANG), env=env, timeout=60)
+                               cwd=str(PATHLANG), env=env, timeout=60)
         finally:
             stop.set(); th.join(timeout=2); eng.close()
             if own_dsn:

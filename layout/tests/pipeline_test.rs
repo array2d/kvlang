@@ -1,4 +1,4 @@
-use kvlanglayout::{compile, init_dirs, kvkind, Kv};
+use pathlanglayout::{compile, init_dirs, kvkind, Kv};
 
 fn body(data: &[u8]) -> &[u8] {
     kvkind::body(data)
@@ -13,7 +13,7 @@ struct TempStore(String);
 
 impl Drop for TempStore {
     fn drop(&mut self) {
-        kvlanglayout::ffi::remove_test_store(&self.0);
+        pathlanglayout::ffi::remove_test_store(&self.0);
     }
 }
 
@@ -21,10 +21,10 @@ fn fresh_kv() -> (TempStore, Kv) {
     
     static SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let dsn = format!(
-        "shm:///tmp/kvlanglayout_test_{}",
+        "shm:///tmp/pathlanglayout_test_{}",
         SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
     );
-    kvlanglayout::ffi::remove_test_store(&dsn);
+    pathlanglayout::ffi::remove_test_store(&dsn);
 
     let store = TempStore(dsn.clone());
     let mut kv = Kv::conn(&dsn);

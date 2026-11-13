@@ -6,7 +6,7 @@
 #include <stdint.h>
 
 #include "contract/allocator.h"
-#include "contract/kvspace_access.h"
+#include "contract/pathspace_access.h"
 #include "contract/status.h"
 #include "contract/view.h"
 

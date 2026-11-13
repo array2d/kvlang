@@ -109,10 +109,10 @@ NON_FAMILY_MACROS = frozenset({
 
 REVIEWED_OVERSIZE = {
     "scalar_handle_debugger": "调试器入口：状态机分支天然多，见 workspace/622 裁定",
-    "runtimec_host_kvspace_watch":
+    "runtimec_host_pathspace_watch":
         "37 行，超过 ABI 适配层的 30：在「取 key / 取期望值 / 调 Watch」之外还多一段"
         "**超时不是错误**（ABI 返回 0 且 out=NULL 时写参保持原样）——那段是本条独有的返回约定，抽不出来",
-    "runtimec_host_kvspace_list_at":
+    "runtimec_host_pathspace_list_at":
         "42 行，超过 ABI 适配层的 30：在「取 path / 取下标 / 调 ListAt」之外还多一段"
         "**写进调用方缓冲**（ABI 是 buffer+capacity 而非返回指针）——缓冲约定是这条独有的",
 }

@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT" || exit 2
 
-KVLANG_BIN="${KVLANG_BIN:-$ROOT/bin/byteseek}"
-LAYOUT_BIN="${KVLANG_LAYOUT_BIN:-$ROOT/bin/kvlanglayout}"
+PATHLANG_BIN="${PATHLANG_BIN:-$ROOT/bin/pathseek}"
+LAYOUT_BIN="${PATHLANG_LAYOUT_BIN:-$ROOT/bin/pathlanglayout}"
 CASE_TIMEOUT="${KV_CASE_TIMEOUT:-180}"
 
 MODE="all"
@@ -58,12 +58,12 @@ while (($#)); do
 	shift
 done
 
-[ -x "$KVLANG_BIN" ] || die "KVLANG_BIN 不可执行：$KVLANG_BIN"
-[ -x "$LAYOUT_BIN" ] || die "KVLANG_LAYOUT_BIN 不可执行：$LAYOUT_BIN"
+[ -x "$PATHLANG_BIN" ] || die "PATHLANG_BIN 不可执行：$PATHLANG_BIN"
+[ -x "$LAYOUT_BIN" ] || die "PATHLANG_LAYOUT_BIN 不可执行：$LAYOUT_BIN"
 command -v timeout >/dev/null 2>&1 || die "需要 coreutils timeout"
 command -v python3 >/dev/null 2>&1 || die "需要 python3（读取 benchmark/run.py 的 SWEEP）"
 
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/kvlang-parity.XXXXXX")" || die "mktemp 失败"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/pathlang-parity.XXXXXX")" || die "mktemp 失败"
 trap 'rm -rf "$TMP"' EXIT
 
 normalize() {
@@ -94,15 +94,15 @@ run_tutorial() {
 	[ "$nojit" -eq 1 ] && e=(RC2_NOJIT=1)
 	local rc
 
-	env KVSPACE="$dsn" ${e[@]+"${e[@]}"} timeout -k 5 "$CASE_TIMEOUT" \
-		"$KVLANG_BIN" -c 'print("boot")' >/dev/null 2>"$d/boot.err"
+	env PATHSPACE="$dsn" ${e[@]+"${e[@]}"} timeout -k 5 "$CASE_TIMEOUT" \
+		"$PATHLANG_BIN" -c 'print("boot")' >/dev/null 2>"$d/boot.err"
 	rc=$?
 	[ "$rc" -ne 0 ] && {
 		printf '<boot failed rc=%s> %s\n' "$rc" "$(tail -n 1 "$d/boot.err")" >"$out"
 		return 90
 	}
 
-	env KVSPACE="$dsn" ${e[@]+"${e[@]}"} timeout -k 5 "$CASE_TIMEOUT" \
+	env PATHSPACE="$dsn" ${e[@]+"${e[@]}"} timeout -k 5 "$CASE_TIMEOUT" \
 		"$LAYOUT_BIN" "$rel" "$dsn" >/dev/null 2>"$d/layout.err"
 	rc=$?
 	[ "$rc" -ne 0 ] && {
@@ -110,8 +110,8 @@ run_tutorial() {
 		return 91
 	}
 
-	env KVSPACE="$dsn" ${e[@]+"${e[@]}"} timeout -k 5 "$CASE_TIMEOUT" \
-		"$KVLANG_BIN" test >"$out" 2>"$d/run.err"
+	env PATHSPACE="$dsn" ${e[@]+"${e[@]}"} timeout -k 5 "$CASE_TIMEOUT" \
+		"$PATHLANG_BIN" test >"$out" 2>"$d/run.err"
 	return $?
 }
 
@@ -124,8 +124,8 @@ run_bench() {
 	local dsn="shm://$d/store.shm"
 	local -a e=()
 	[ "$nojit" -eq 1 ] && e=(RC2_NOJIT=1)
-	env KVSPACE="$dsn" ${e[@]+"${e[@]}"} timeout -k 5 "$CASE_TIMEOUT" \
-		"$KVLANG_BIN" "$src" >"$out" 2>"$d/run.err"
+	env PATHSPACE="$dsn" ${e[@]+"${e[@]}"} timeout -k 5 "$CASE_TIMEOUT" \
+		"$PATHLANG_BIN" "$src" >"$out" 2>"$d/run.err"
 	return $?
 }
 
@@ -139,8 +139,8 @@ run_file() {
 	local dsn="shm://$d/store.shm"
 	local -a e=()
 	[ "$nojit" -eq 1 ] && e=(RC2_NOJIT=1)
-	env KVSPACE="$dsn" ${e[@]+"${e[@]}"} timeout -k 5 "$CASE_TIMEOUT" \
-		"$KVLANG_BIN" "$src" >"$out" 2>"$d/run.err"
+	env PATHSPACE="$dsn" ${e[@]+"${e[@]}"} timeout -k 5 "$CASE_TIMEOUT" \
+		"$PATHLANG_BIN" "$src" >"$out" 2>"$d/run.err"
 	return $?
 }
 
@@ -267,7 +267,7 @@ run_bench_suite() {
 }
 
 printf 'mode=%s filter=%s scale=%s backend=shm\n' "$MODE" "${FILTER:--}" "$SCALE_MODE"
-printf 'A: JIT on           %s\n' "$KVLANG_BIN"
+printf 'A: JIT on           %s\n' "$PATHLANG_BIN"
 printf 'B: RC2_NOJIT=1      same binary\n'
 
 if [ "${#FILES[@]}" -gt 0 ]; then

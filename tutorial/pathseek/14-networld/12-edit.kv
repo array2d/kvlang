@@ -1,0 +1,49 @@
+
+rwfunc test() -> () {
+	d:[]char/utf32 = "/tmp/pathlang_edit"
+	p:[]char/utf32 = "/tmp/pathlang_edit/t.txt"
+	noenv:'[int64]'[]char/utf32 = {}
+	clean:'[int64]'[]char/utf32 = {"rm", "-rf", "/tmp/pathlang_edit"}
+	networld/proc·exec(clean, noenv) -> rc:uint8
+	networld/fs·mkdir(d) -> mc:int64
+	networld/fs·writetext(p, "alpha\nbeta\nalpha\ngamma\n") -> w0:int64
+	networld/edit·read(p, 2, 2) -> (v1:[]char/utf32, t1:int64, s1:int64)
+	println("window=", v1)
+	println("(total,sz)=(", t1, ",", s1, ")")
+	networld/edit·replace(p, "beta", "BETA", 1) -> (d1:int64, h1:int64, c1:int64)
+	println("dry= (", d1, ",", h1, ",", c1, ")")
+	networld/fs·readtext(p) -> (unchanged:[]char/utf32, _)
+	println("unchanged=", unchanged)
+	networld/edit·replace(p, "alpha", "A", 0) -> (d2:int64, h2:int64, c2:int64)
+	println("ambiguous= (", d2, ",", h2, ",", c2, ")")
+	networld/edit·replace(p, "zzz", "A", 0) -> (d3:int64, h3:int64, c3:int64)
+	println("missing= (", d3, ",", h3, ",", c3, ")")
+	networld/edit·replace(p, "beta", "BETA", 0) -> (d4:int64, h4:int64, c4:int64)
+	println("ok= (", d4, ",", h4, ",", c4, ")")
+	networld/fs·readtext(p) -> (after:[]char/utf32, _)
+	println("after=", after)
+	olds:'[int64]'[]char/utf32 = {"BETA", "gamma"}
+	news:'[int64]'[]char/utf32 = {"B", "G"}
+	networld/edit·multi(p, olds, news, 0) -> (md:int64, mb:int64, mc2:int64)
+	println("multi= (", md, ",", mb, ",", mc2, ")")
+	olds2:'[int64]'[]char/utf32 = {"B", "alpha"}
+	news2:'[int64]'[]char/utf32 = {"C", "D"}
+	networld/edit·multi(p, olds2, news2, 0) -> (rd:int64, rb:int64, rc2:int64)
+	println("rolled= (", rd, ",", rb, ",", rc2, ")")
+	networld/fs·readtext(p) -> (keep:[]char/utf32, _)
+	println("keep=", keep)
+	olds3:'[int64]'[]char/utf32 = {"B"}
+	news3:'[int64]'[]char/utf32 = {"C", "D"}
+	networld/edit·multi(p, olds3, news3, 0) -> (ld:int64, lb:int64, lc:int64)
+	println("lenbad= (", ld, ",", lb, ",", lc, ")")
+	networld/edit·write(p, "x\n") -> (wn:int64, wc:int64)
+	networld/fs·readtext(p) -> (final:[]char/utf32, _)
+	println("final=", final)
+	networld/fs·glob("/tmp/pathlang_edit/*.tmp") -> left:[]char/utf32
+	println("tmpleft=", string·len(left))
+	networld/shell·run("printf '\\377\\376' > /tmp/pathlang_edit/bin.dat") -> binw:[]char/utf32
+	networld/edit·read("/tmp/pathlang_edit/bin.dat", 1, 0) -> (bv:[]char/utf32, bt:int64, bs:int64)
+	println("bin-total=", bt)
+	networld/edit·replace("/tmp/pathlang_edit/bin.dat", "x", "y", 0) -> (bd:int64, bh:int64, bc:int64)
+	println("bin-code=", bc)
+}

@@ -7,15 +7,15 @@
 #include <string.h>
 
 #include "contract/extension_interface.h"
-#include "contract/kvspace_access.h"
+#include "contract/pathspace_access.h"
 
-#include <kvlang/xvalue.h>
-#include <kvspace/kvspace_xvalue.h>
+#include <pathlang/xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
 
 #include "binrwir/binvthread_frame.h"
 #include "binrwir/execution_exit.h"
 #include "binrwir/instruction.h"
-#include "contract/kvspace_interface.h"
+#include "contract/pathspace_interface.h"
 #include "engine/session.h"
 #include "vmbin/value_access.h"
 
@@ -29,11 +29,11 @@ static runtimec_status_t extension_call_from(const void *frame_handle,
                                              const void *instruction_handle,
                                              void *output_exit_handle,
                                              bool needs_exit, extension_call_t *output,
-                                             kvlang_runtime_error_t *error);
+                                             pathlang_runtime_error_t *error);
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_read_argument_text(
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_read_argument_text(
     const void *frame, const void *instruction, size_t index,
-    kvlang_runtime_text_buffer_t *output, kvlang_runtime_error_t *error) {
+    pathlang_runtime_text_buffer_t *output, pathlang_runtime_error_t *error) {
     extension_call_t call;
     runtimec_status_t status = extension_call_from(frame, instruction, NULL, false, &call, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -64,9 +64,9 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_read_argument_text(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_read_argument_integer(
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_read_argument_integer(
     const void *frame, const void *instruction, size_t index, int64_t *output,
-    kvlang_runtime_error_t *error) {
+    pathlang_runtime_error_t *error) {
     extension_call_t call;
     runtimec_status_t status = extension_call_from(frame, instruction, NULL, false, &call, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -120,10 +120,10 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_read_argument_integer(
     }
 }
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_read_argument_wire(
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_read_argument_wire(
     const void *frame, const void *instruction, size_t index,
     const uint8_t **output_data, size_t *output_size,
-    kvlang_runtime_error_t *error) {
+    pathlang_runtime_error_t *error) {
     extension_call_t call;
     runtimec_status_t status = extension_call_from(frame, instruction, NULL, false, &call, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -152,8 +152,8 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_read_argument_wire(
         return RUNTIMEC_STATUS_INVALID;
     }
     const uint8_t *wire = (const uint8_t *)(uintptr_t)xvalue_address;
-    const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)(const void *)wire;
-    const uint64_t total = kvspaceXvalueHeadTotalLen(head);
+    const pathspaceXvalueHead *head = (const pathspaceXvalueHead *)(const void *)wire;
+    const uint64_t total = pathspaceXvalueHeadTotalLen(head);
     if (total == 0U || total > (uint64_t)SIZE_MAX) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -166,10 +166,10 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_read_argument_wire(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_read_argument_langtype(
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_read_argument_langtype(
     const void *frame, const void *instruction, size_t index,
     const char **output_data, size_t *output_size,
-    kvlang_runtime_error_t *error) {
+    pathlang_runtime_error_t *error) {
     extension_call_t call;
     runtimec_status_t status = extension_call_from(frame, instruction, NULL, false, &call, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -196,9 +196,9 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_read_argument_langtype(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_write_argument_wire(
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_write_argument_wire(
     void *frame, const void *instruction, size_t index, const uint8_t *data,
-    size_t size, kvlang_runtime_error_t *error) {
+    size_t size, pathlang_runtime_error_t *error) {
     extension_call_t call;
     runtimec_status_t status = extension_call_from(frame, instruction, NULL, true, &call, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -215,9 +215,9 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_write_argument_wire(
         runtimec_bytes_view_make(data, size), &internal);
 }
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_write_argument_text(
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_write_argument_text(
     void *frame, const void *instruction, size_t index, const char *data,
-    size_t size, kvlang_runtime_error_t *error) {
+    size_t size, pathlang_runtime_error_t *error) {
     if (data == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
@@ -237,9 +237,9 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_write_argument_text(
         runtimec_bytes_view_make((const uint8_t *)data, size), &internal);
 }
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_write_argument_integer(
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_write_argument_integer(
     void *frame, const void *instruction, size_t index, int64_t value,
-    kvlang_runtime_error_t *error) {
+    pathlang_runtime_error_t *error) {
     extension_call_t call;
     runtimec_status_t status = extension_call_from(frame, instruction, NULL, true, &call, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -282,20 +282,20 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_write_argument_integer(
         runtimec_bytes_view_make(bytes, width), &internal);
 }
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_set_exit(
-    void *output_exit, kvlang_runtime_exit_kind_t kind, int64_t detail_code,
-    const char *message, kvlang_runtime_error_t *error) {
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_set_exit(
+    void *output_exit, pathlang_runtime_exit_kind_t kind, int64_t detail_code,
+    const char *message, pathlang_runtime_error_t *error) {
     (void)error;
     binrwir_execution_exit_t *exit_handle =
         (binrwir_execution_exit_t *)output_exit;
     if (exit_handle == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    if (kind == KVLANG_RUNTIME_EXIT_NONE) {
+    if (kind == PATHLANG_RUNTIME_EXIT_NONE) {
         *exit_handle = (binrwir_execution_exit_t){0};
         return RUNTIMEC_STATUS_SUCCESS;
     }
-    if (kind == KVLANG_RUNTIME_EXIT_ERROR) {
+    if (kind == PATHLANG_RUNTIME_EXIT_ERROR) {
         exit_handle->kind = BINRWIR_EXECUTION_EXIT_ERROR;
         exit_handle->detail_code = (uint32_t)detail_code;
     } else {
@@ -306,16 +306,16 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_set_exit(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_make_pointer(
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_make_pointer(
     const char *target_key, size_t target_size, const char *target_langtype,
-    kvlang_runtime_text_buffer_t *output, kvlang_runtime_error_t *error) {
+    pathlang_runtime_text_buffer_t *output, pathlang_runtime_error_t *error) {
     (void)error;
     if (target_key == NULL || target_langtype == NULL || output == NULL) {
         return RUNTIMEC_STATUS_INVALID;
     }
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
-    if (kvlangXvalueHeadNewPtr((const uint8_t *)target_key,
+    if (pathlangXvalueHeadNewPtr((const uint8_t *)target_key,
                                 (uint32_t)target_size, target_langtype, &wire,
                                 &wire_size) != 0 ||
         wire == NULL) {
@@ -333,25 +333,25 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_make_pointer(
     return RUNTIMEC_STATUS_SUCCESS;
 }
 
-KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_dereference_pointer(
-    const uint8_t *wire, size_t size, kvlang_runtime_text_buffer_t *output_key,
-    kvlang_runtime_text_buffer_t *output_langtype,
-    kvlang_runtime_error_t *error) {
+PATHLANG_RUNTIMEC_EXPORT runtimec_status_t pathlang_runtime_dereference_pointer(
+    const uint8_t *wire, size_t size, pathlang_runtime_text_buffer_t *output_key,
+    pathlang_runtime_text_buffer_t *output_langtype,
+    pathlang_runtime_error_t *error) {
     (void)error;
-    if (wire == NULL || size < KVSPACE_XVALUE_HEAD_LEN) {
+    if (wire == NULL || size < PATHSPACE_XVALUE_HEAD_LEN) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)(const void *)wire;
-    if (!kvspaceXvalueHeadPaddingIsZero(head)) {
+    const pathspaceXvalueHead *head = (const pathspaceXvalueHead *)(const void *)wire;
+    if (!pathspaceXvalueHeadPaddingIsZero(head)) {
         return RUNTIMEC_STATUS_INVALID;
     }
-    const uint64_t body_length = kvspaceXvalueHeadLen(head);
-    if (KVSPACE_XVALUE_HEAD_LEN + body_length > (uint64_t)size) {
+    const uint64_t body_length = pathspaceXvalueHeadLen(head);
+    if (PATHSPACE_XVALUE_HEAD_LEN + body_length > (uint64_t)size) {
         return RUNTIMEC_STATUS_INVALID;
     }
     const uint8_t *langtype = NULL;
     const uint16_t langtype_size =
-        kvlangXvalueHeadLangtypeBounded(wire, (uint64_t)size, &langtype);
+        pathlangXvalueHeadLangtypeBounded(wire, (uint64_t)size, &langtype);
     
     if (langtype == NULL || langtype_size == 0U || langtype[0] != '*') {
         return RUNTIMEC_STATUS_INVALID;
@@ -361,7 +361,7 @@ KVLANG_RUNTIMEC_EXPORT runtimec_status_t kvlang_runtime_dereference_pointer(
             output_key->required_length = (size_t)body_length;
             return RUNTIMEC_STATUS_INSUFFICIENT_CAPACITY;
         }
-        memcpy(output_key->data, wire + KVSPACE_XVALUE_HEAD_LEN,
+        memcpy(output_key->data, wire + PATHSPACE_XVALUE_HEAD_LEN,
                (size_t)body_length);
         output_key->length = (size_t)body_length;
         output_key->required_length = (size_t)body_length;
@@ -385,7 +385,7 @@ static runtimec_status_t extension_call_from(const void *frame_handle,
                                              void *output_exit_handle,
                                              bool needs_exit,
                                              extension_call_t *output,
-                                             kvlang_runtime_error_t *error) {
+                                             pathlang_runtime_error_t *error) {
     (void)needs_exit;
     (void)error;
     if (output == NULL) {

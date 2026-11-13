@@ -1,0 +1,39 @@
+
+lib pathlang/reflect {
+	rwfunc fnlist(*[]char/utf32 #name) -> (*[]char/utf32 #listing) {
+		"" -> *listing
+		"/lib/" + *name -> base:[]char/utf32
+		base + "·" -> mdir:[]char/utf32
+		ms:'[int64]'[]char/utf32 = {}
+		pathspace·members(mdir) -> (ms, n:int64)
+		i:int64 = 0
+		while (i < n) {
+			pathspace·listat(ms, i) -> mk:char/utf8
+			ms·*mk -> k8:[]char/utf32
+			char/utf32(k8) -> key:[]char/utf32
+			
+			base·*key -> v:char/utf32
+			compactarray·parselangtype(v) -> k:char/utf8
+			
+			if (v != None && k != "langtype") {
+				string·find(key, ".src") -> src:int64
+				if (src < 0) {
+					string·len(key) -> klen:int64
+					string·char(key, klen - 1) -> tail:char/utf32
+					if (tail == "/") {
+						klen - 1 -> cut:int64
+						string·slice(key, 0, cut) -> cap:[]char/utf32
+					} else {
+						key -> cap
+					}
+					if (*listing == "") {
+						cap -> *listing
+					} else {
+						*listing + ", " + cap -> *listing
+					}
+				}
+			}
+			i + 1 -> i
+		}
+	}
+}

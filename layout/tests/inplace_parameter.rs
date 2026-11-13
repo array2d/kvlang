@@ -1,7 +1,7 @@
 
 mod support;
 
-use kvlanglayout::{compile, format, init_dirs, kvkind, printlib, vet, vet_with_store, Kv};
+use pathlanglayout::{compile, format, init_dirs, kvkind, printlib, vet, vet_with_store, Kv};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use support::TempDirectory;
 
@@ -174,7 +174,7 @@ fn rwir_decl_supports_inplace_on_write_parameter_and_rejects_on_read() {
 }
 
 #[test]
-fn compile_persists_inplace_in_kvspace_and_printlib_reconstructs_it() {
+fn compile_persists_inplace_in_pathspace_and_printlib_reconstructs_it() {
     let (_store, mut kv) = fresh_kv();
     let src = concat!(
         "rwir native_acc(*int64 #d) -> (inplace *int64 #acc)\n",

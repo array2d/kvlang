@@ -1,9 +1,9 @@
 import ctypes, os, struct, sys, tempfile
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import kvspace
-from kvspace import (xv_int, xv_float, xv_str, xv_index, xv_link, xv_ext,
-                     xv_langtype, _xv_from_wire, KVSpace,
+import pathspace
+from pathspace import (xv_int, xv_float, xv_str, xv_index, xv_link, xv_ext,
+                     xv_langtype, _xv_from_wire, PathSpace,
                      HEAD_LEN, PADDING_LEN, ATTR_TAG_LANGTYPE,
                      BANNED_ATTR_TAG_REALLEN, REF_INLINE, REF_PTR, REF_EXT)
 _U8P = ctypes.POINTER(ctypes.c_uint8)
@@ -13,7 +13,7 @@ _CS = ctypes.c_char_p
 
 def c_new(ref, body, langtype=""):
     prefix = "*" if ref == REF_PTR else ("@" if ref == REF_EXT else "")
-    return kvspace._build(body, langtype, prefix=prefix)
+    return pathspace._build(body, langtype, prefix=prefix)
 
 def c_peek(data):
     assert len(data) >= HEAD_LEN, "shorter than one head"
@@ -81,7 +81,7 @@ def main():
 
     print("-- ShmSet + readback --")
     d = tempfile.mkdtemp()
-    kv = KVSpace(os.path.join(d, "db"))
+    kv = PathSpace(os.path.join(d, "db"))
     kv.set("/x", xv_int(99, "int64"))
     got = kv.get("/x", resolve=False)
     check("shm.nonnull", got is not None, True)

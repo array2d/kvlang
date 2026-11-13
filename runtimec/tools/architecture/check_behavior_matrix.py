@@ -9,7 +9,7 @@ from pathlib import Path
 
 EXPECTED_COLUMNS = (
     "Decision", "Behavior", "C", "Python", "Rust", "Go", "V8/TypeScript",
-    "Agreement", "kvlang decision", "Boundary fixture", "Invalid input",
+    "Agreement", "pathlang decision", "Boundary fixture", "Invalid input",
     "Design record",
 )
 EXPECTED_MATRIX_VERSION = "2"

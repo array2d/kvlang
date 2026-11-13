@@ -1,12 +1,12 @@
-# Contributing to kvlang
+# Contributing to pathlang
 
 Thanks for your interest! Here's how to get started.
 
 ## Setup
 
 ```bash
-git clone <this-repository> kvlang
-cd kvlang
+git clone <this-repository> pathlang
+cd pathlang
 make build
 ```
 
@@ -24,14 +24,14 @@ python3 run.py             # integration tests (requires Redis)
 ## Project structure
 
 ```
-cmd/kvlang/         CLI entry point
+cmd/pathlang/         CLI entry point
 internal/
   parser/           .kv source → AST
   lower/            control flow lowering (if/while → block + branch)
   layoutrwir/       AST → KV path tree (opcodes at /vthread/*)
   vthread/          virtual thread lifecycle
   kvcpu/            128-worker goroutine scheduler
-  kvspace/          KV storage abstraction (Redis backend)
+  pathspace/          KV storage abstraction (Redis backend)
   vtype/            typed value system (int, float, bool, string, tensor)
   op/
     builtin/        native operators (arith, compare, logic, cast, call, io)
@@ -46,7 +46,7 @@ doc/                design documents, specs, drafts
 
 - **KV path addressing**: code and data share one tree. Instructions are paths. Call = subtree copy.
 - **vthread**: lightweight execution context. State stored as KV paths under `/vthread/<vtid>/`.
-- **typed values**: `kvspace.Value{kind, raw}` — kind maps directly to `vtype.VType.Name()`.
+- **typed values**: `pathspace.Value{kind, raw}` — kind maps directly to `vtype.VType.Name()`.
 
 ## Commit conventions
 

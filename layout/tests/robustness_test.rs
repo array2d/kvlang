@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use kvlanglayout::{compile, init_dirs, kvkind, parser, vet, Kv};
+use pathlanglayout::{compile, init_dirs, kvkind, parser, vet, Kv};
 
 static SEQ: AtomicUsize = AtomicUsize::new(0);
 
@@ -19,7 +19,7 @@ impl Drop for Store {
 
 fn store() -> Store {
     let dir = format!(
-        "/tmp/kvlanglayout_robust_{}_{}",
+        "/tmp/pathlanglayout_robust_{}_{}",
         std::process::id(),
         SEQ.fetch_add(1, Ordering::SeqCst)
     );
@@ -301,7 +301,7 @@ fn failed_compile_keeps_previous_function_intact() {
 
 #[test]
 fn cli_reports_errors_without_panicking() {
-    let dir = std::env::temp_dir().join(format!("kvlanglayout_robust_cli_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("pathlanglayout_robust_cli_{}", std::process::id()));
     
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
@@ -311,7 +311,7 @@ fn cli_reports_errors_without_panicking() {
         "rwfunc test() -> () {\n\tprintln(\"before\")\n\tbreak\n}\n",
     )
     .unwrap();
-    let bin = env!("CARGO_BIN_EXE_kvlanglayout");
+    let bin = env!("CARGO_BIN_EXE_pathlanglayout");
     let dsn = format!("shm://{}", dir.join("db").display());
     for args in [
         vec!["vet".to_string(), f.display().to_string()],
@@ -364,7 +364,7 @@ fn truncated_corpus_never_panics() {
             let s = &src[..cut];
             if std::panic::catch_unwind(|| {
                 let _ = vet(s);
-                let _ = kvlanglayout::format(s);
+                let _ = pathlanglayout::format(s);
             })
             .is_err()
             {
@@ -379,7 +379,7 @@ fn truncated_corpus_never_panics() {
 #[test]
 fn format_round_trips_member_reads_and_empty_kindexp() {
     let src = "rwfunc f(*int64 #a, *int64 #n) -> (*int64 #r) {\n\tm:[]char/utf8·int64 = {}\n\tk = \"x\"\n\tm·x = 1\n\tm·x -> v1\n\tm·*k -> v2\n\t\"/tmp/up\"·*n -> v3\n\t\"/tmp/up\"·0 -> v4\n\tm·\"a b\" -> v5\n\tm·\"if\" -> v6\n\tv1 + m·x -> *r\n}\n";
-    let once = kvlanglayout::format(src).unwrap();
+    let once = pathlanglayout::format(src).unwrap();
     assert!(
         !once.contains("=("),
         "member read rendered as a call:\n{once}"
@@ -391,7 +391,7 @@ fn format_round_trips_member_reads_and_empty_kindexp() {
         errors(&once)
     );
     assert_eq!(
-        kvlanglayout::format(&once).unwrap(),
+        pathlanglayout::format(&once).unwrap(),
         once,
         "format must be idempotent"
     );

@@ -19,7 +19,7 @@
 #include "binrwir/binfunc.h"
 #include "contract/member_key_text.h"
 #include "contract/status.h"
-#include "contract/kvspace_interface.h"
+#include "contract/pathspace_interface.h"
 #include "vmbin/frame_target_key.h"
 #include "vmbin/directory_walk.h"
 #include "vmbin/handlers/handler_call.h"
@@ -377,39 +377,39 @@ static int runtimec_host_delete_one(void *handle, const char *path, char *error,
 
     keys[0] = path;
     
-    return kvspaceFree(handle, keys[0], error, error_capacity);
+    return pathspaceFree(handle, keys[0], error, error_capacity);
 }
 
-static runtimec_status_t runtimec_host_kvspace_delete(
+static runtimec_status_t runtimec_host_pathspace_delete(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_host_single_path_operation(frame, instruction, output_exit,
                                                runtimec_host_delete_one);
 }
-static runtimec_status_t runtimec_host_kvspace_delete_tree(
+static runtimec_status_t runtimec_host_pathspace_delete_tree(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_host_single_path_operation(frame, instruction, output_exit,
-                                               kvspaceDeltree);
+                                               pathspaceDeltree);
 }
-static runtimec_status_t runtimec_host_kvspace_copy(
+static runtimec_status_t runtimec_host_pathspace_copy(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_host_copy_operation(frame, instruction, output_exit,
-                                            kvspaceCp);
+                                            pathspaceCp);
 }
-static runtimec_status_t runtimec_host_kvspace_copy_directory(
+static runtimec_status_t runtimec_host_pathspace_copy_directory(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
     return runtimec_host_copy_operation(frame, instruction, output_exit,
-                                            kvspaceCpdir);
+                                            pathspaceCpdir);
 }
 
-static runtimec_status_t runtimec_host_kvspace_make_index(
+static runtimec_status_t runtimec_host_pathspace_make_index(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
@@ -426,11 +426,11 @@ static runtimec_status_t runtimec_host_kvspace_make_index(
     message[0] = '\0';
     return runtimec_host_finish_call(
         output_exit,
-        kvspaceMkindex(handle, keys[0], message, sizeof(message)),
+        pathspaceMkindex(handle, keys[0], message, sizeof(message)),
         source_program_counter);
 }
 
-static runtimec_status_t runtimec_host_kvspace_list_length(
+static runtimec_status_t runtimec_host_pathspace_list_length(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
@@ -459,7 +459,7 @@ static runtimec_status_t runtimec_host_kvspace_list_length(
                                      output_exit, source_program_counter);
 }
 
-static runtimec_status_t runtimec_host_kvspace_list_at(
+static runtimec_status_t runtimec_host_pathspace_list_at(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
@@ -546,7 +546,7 @@ static runtimec_status_t runtimec_host_write_pointer_wire(
                                   source_program_counter);
     }
     message[0] = '\0';
-    if (!runtimec_kvspace_write_wire(frame->kvspace_handle, key, wire,
+    if (!runtimec_pathspace_write_wire(frame->pathspace_handle, key, wire,
                                    (uint32_t)wire_size, message,
                                    sizeof(message))) {
         return runtimec_host_fail(output_exit, RUNTIMEC_STATUS_ERROR,
@@ -766,7 +766,7 @@ static runtimec_status_t runtimec_host_build_pointer_wire(
     kindexpr[declared.size - kindexpr_size] = '\0';
     
     uint64_t wire_size = 0U;
-    if (kvlangXvalueHeadNewPtr((const uint8_t *)target,
+    if (pathlangXvalueHeadNewPtr((const uint8_t *)target,
                                 (uint32_t)strlen(target), kindexpr, output_wire,
                                 &wire_size) != 0 ||
         *output_wire == NULL || wire_size > UINT32_MAX) {
@@ -1047,7 +1047,7 @@ static runtimec_status_t runtimec_host_resolve_write(
     return status;
 }
 
-static runtimec_status_t runtimec_host_kvlang_resolve(
+static runtimec_status_t runtimec_host_pathlang_resolve(
     binrwir_binvthread_frame_t *frame,
     const binrwir_instruction_view_t *instruction,
     binrwir_execution_exit_t *output_exit) {
@@ -1199,9 +1199,9 @@ static const binrwir_registry_entry_t runtimec_host_entry_table[] = {
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
      .handler = runtimec_host_key_tostr},
     
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVLANG_RESOLVE_POINTER,
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_PATHLANG_RESOLVE_POINTER,
      .flags = BINRWIR_REGISTRY_FLAG_NONE,
-     .handler = runtimec_host_kvlang_resolve},
+     .handler = runtimec_host_pathlang_resolve},
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_RANDOM_UNSIGNED_64,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
      .handler = runtimec_host_random_unsigned_64},
@@ -1227,27 +1227,27 @@ static const binrwir_registry_entry_t runtimec_host_entry_table[] = {
     {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_VTHREAD_SET_STATUS,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
      .handler = runtimec_host_vthread_setstatus},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_DELETE,
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_PATHSPACE_DELETE,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
-     .handler = runtimec_host_kvspace_delete},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_DELETE_TREE,
+     .handler = runtimec_host_pathspace_delete},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_PATHSPACE_DELETE_TREE,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
-     .handler = runtimec_host_kvspace_delete_tree},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_COPY,
+     .handler = runtimec_host_pathspace_delete_tree},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_PATHSPACE_COPY,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
-     .handler = runtimec_host_kvspace_copy},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_COPY_DIRECTORY,
+     .handler = runtimec_host_pathspace_copy},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_PATHSPACE_COPY_DIRECTORY,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
-     .handler = runtimec_host_kvspace_copy_directory},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_LIST_LENGTH,
+     .handler = runtimec_host_pathspace_copy_directory},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_PATHSPACE_LIST_LENGTH,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
-     .handler = runtimec_host_kvspace_list_length},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_LIST_AT,
+     .handler = runtimec_host_pathspace_list_length},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_PATHSPACE_LIST_AT,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
-     .handler = runtimec_host_kvspace_list_at},
-    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_KVSPACE_MAKE_INDEX,
+     .handler = runtimec_host_pathspace_list_at},
+    {.operation_identifier = BINRWIR_OPERATION_IDENTIFIER_PATHSPACE_MAKE_INDEX,
      .flags = BINRWIR_REGISTRY_FLAG_EFFECT,
-     .handler = runtimec_host_kvspace_make_index},
+     .handler = runtimec_host_pathspace_make_index},
 };
 
 const binrwir_registry_entry_t *runtimec_host_handler_entries(

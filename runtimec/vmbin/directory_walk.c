@@ -5,11 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <kvlang/xvalue.h>
-#include <kvspace/kvspace_xvalue.h>
+#include <pathlang/xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
 
 #include "contract/key_resolution.h"
-#include "contract/kvspace_interface.h"
+#include "contract/pathspace_interface.h"
 
 static void *walk_libc_allocate(void *context, size_t size, size_t alignment) {
     (void)context;
@@ -55,7 +55,7 @@ static runtimec_status_t walk_source(void *context, const char *directory,
     char error_text[256];
     error_text[0] = '\0';
     const int status =
-        kvspaceList(source->handle, source->directory, names, capacity,
+        pathspaceList(source->handle, source->directory, names, capacity,
                     output_length, output_count, output_generation, error_text,
                     (uint32_t)sizeof(error_text));
     if (status == 0) {
@@ -94,34 +94,34 @@ static runtimec_status_t walk_reader(void *context, const char *key,
     error_text[0] = '\0';
     uint64_t value_offset = 0U;
     const int resolve_status =
-        kvspaceResolveOffset(handle, key, 0U, &value_offset, error_text,
+        pathspaceResolveOffset(handle, key, 0U, &value_offset, error_text,
                        (uint32_t)sizeof(error_text));
     if (resolve_status != 0) {
         return RUNTIMEC_STATUS_INVALID; 
     }
-    const uint8_t *base = kvspaceXvalueInProcessAddress(handle);
+    const uint8_t *base = pathspaceXvalueInProcessAddress(handle);
     if (base == NULL) {
         return RUNTIMEC_STATUS_ERROR; 
     }
     const uint8_t *wire = base + value_offset;
     const uint64_t wire_size =
-        kvspaceXvalueHeadTotalLen((const kvspaceXvalueHead *)(const void *)wire);
-    if (wire_size < KVSPACE_XVALUE_HEAD_LEN) {
+        pathspaceXvalueHeadTotalLen((const pathspaceXvalueHead *)(const void *)wire);
+    if (wire_size < PATHSPACE_XVALUE_HEAD_LEN) {
         return RUNTIMEC_STATUS_ERROR;
     }
-    const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)(const void *)wire;
-    if (!kvspaceXvalueHeadPaddingIsZero(head)) {
+    const pathspaceXvalueHead *head = (const pathspaceXvalueHead *)(const void *)wire;
+    if (!pathspaceXvalueHeadPaddingIsZero(head)) {
         return RUNTIMEC_STATUS_ERROR;
     }
     if (output_body != NULL) {
-        *output_body = (const char *)wire + KVSPACE_XVALUE_HEAD_LEN;
+        *output_body = (const char *)wire + PATHSPACE_XVALUE_HEAD_LEN;
     }
     if (output_body_size != NULL) {
-        *output_body_size = (size_t)kvspaceXvalueHeadLen(head);
+        *output_body_size = (size_t)pathspaceXvalueHeadLen(head);
     }
     const uint8_t *langtype = NULL;
     const uint16_t langtype_size =
-        kvlangXvalueHeadLangtypeBounded(wire, (uint64_t)wire_size, &langtype);
+        pathlangXvalueHeadLangtypeBounded(wire, (uint64_t)wire_size, &langtype);
     if (output_langtype != NULL && langtype != NULL) {
         *output_langtype = (const char *)langtype;
     }
@@ -133,7 +133,7 @@ static runtimec_status_t walk_reader(void *context, const char *key,
 
 bool runtimec_directory_walk_open(runtimec_directory_walk_t *walk,
                                   const runtimec_allocator_t *allocator,
-                                  void *kvspace_handle, const char *directory,
+                                  void *pathspace_handle, const char *directory,
                                   bool resolve_pointer, bool expand_extension) {
     
     if (walk == NULL) {
@@ -141,7 +141,7 @@ bool runtimec_directory_walk_open(runtimec_directory_walk_t *walk,
     }
     memset(walk, 0, sizeof(*walk));
 
-    if (kvspace_handle == NULL || directory == NULL) {
+    if (pathspace_handle == NULL || directory == NULL) {
         return false;
     }
 
@@ -154,10 +154,10 @@ bool runtimec_directory_walk_open(runtimec_directory_walk_t *walk,
         return false;
     }
     memset(source, 0, sizeof(*source));
-    source->handle = kvspace_handle;
+    source->handle = pathspace_handle;
 
     if (resolve_pointer) {
-        if (runtimec_key_resolve_prefix(walk_reader, kvspace_handle, directory,
+        if (runtimec_key_resolve_prefix(walk_reader, pathspace_handle, directory,
                                         source->directory,
                                         sizeof(source->directory)) !=
             RUNTIMEC_STATUS_SUCCESS) {

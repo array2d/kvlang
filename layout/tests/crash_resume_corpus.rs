@@ -1,5 +1,5 @@
 
-use kvlanglayout::{compile, init_dirs, kvkind, Kv};
+use pathlanglayout::{compile, init_dirs, kvkind, Kv};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

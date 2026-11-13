@@ -3,8 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <kvlang/runtimec.h>
-#include <kvlang/xvalue.h>
+#include <pathlang/runtimec.h>
+#include <pathlang/xvalue.h>
 
 #include "binrwir/argument.h"
 #include "binrwir/binfunc.h"
@@ -144,11 +144,11 @@ static void check_round_trip(const uint8_t *body, size_t body_size,
     uint64_t wire_size = 0U;
     fixture_t fixture;
     char output[256];
-    kvlang_runtime_text_buffer_t buffer;
-    kvlang_runtime_error_t error;
+    pathlang_runtime_text_buffer_t buffer;
+    pathlang_runtime_error_t error;
     char message[256];
 
-    if (kvlangXvalueHeadNewSlack(body, (uint64_t)body_size, "[]char/utf8",
+    if (pathlangXvalueHeadNewSlack(body, (uint64_t)body_size, "[]char/utf8",
                                  &wire, &wire_size) != 0 ||
         wire == NULL) {
         printf("[FAIL] %s: cannot encode the wire\n", label);
@@ -170,7 +170,7 @@ static void check_round_trip(const uint8_t *body, size_t body_size,
     error.message.data = message;
     error.message.capacity = sizeof(message);
 
-    const runtimec_status_t status = kvlang_runtime_read_argument_text(
+    const runtimec_status_t status = pathlang_runtime_read_argument_text(
         &fixture.frame, &fixture.instruction, 0U, &buffer, &error);
     snprintf(message, sizeof(message),
              "%s: read_argument_text status=%d (expected 0)", label,
@@ -207,11 +207,11 @@ static void check_integer_round_trip(void) {
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
     fixture_t fixture;
-    kvlang_runtime_error_t error;
+    pathlang_runtime_error_t error;
     char message[128];
     int64_t value = 0;
 
-    if (kvlangXvalueHeadNewSlack(body, sizeof(body), "int64", &wire,
+    if (pathlangXvalueHeadNewSlack(body, sizeof(body), "int64", &wire,
                                  &wire_size) != 0 ||
         wire == NULL) {
         printf("[FAIL] integer: cannot encode the wire\n");
@@ -229,7 +229,7 @@ static void check_integer_round_trip(void) {
     error.message.data = message;
     error.message.capacity = sizeof(message);
 
-    const runtimec_status_t status = kvlang_runtime_read_argument_integer(
+    const runtimec_status_t status = pathlang_runtime_read_argument_integer(
         &fixture.frame, &fixture.instruction, 0U, &value, &error);
     snprintf(message, sizeof(message),
              "integer: status=%d (expected 0)", (int)status);

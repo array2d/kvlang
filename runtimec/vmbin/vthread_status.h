@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-#define RUNTIMEC_VTHREAD_STATUS_HEAD_LENGTH KVSPACE_XVALUE_HEAD_LEN
+#define RUNTIMEC_VTHREAD_STATUS_HEAD_LENGTH PATHSPACE_XVALUE_HEAD_LEN
 #define RUNTIMEC_VTHREAD_STATUS_CONTENT_LIMIT 16U
 #define RUNTIMEC_VTHREAD_STATUS_CAPACITY 80U
 
@@ -27,10 +27,10 @@ runtimec_status_t runtimec_vthread_status_key(
     size_t capacity);
 
 runtimec_status_t runtimec_vthread_status_write(
-    void *kvspace_handle, const char *status_key, runtimec_bytes_view_t status);
+    void *pathspace_handle, const char *status_key, runtimec_bytes_view_t status);
 
 runtimec_status_t runtimec_vthread_status_read(
-    void *kvspace_handle, const char *status_key,
+    void *pathspace_handle, const char *status_key,
     runtimec_string_view_t *output_text, runtimec_error_t *error);
 
 #ifdef __cplusplus

@@ -1,0 +1,10 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@/pathspace
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: pathspace
+Description: PathSpace 存储 ABI（单库：shm 引擎 + XValue 字节层；语言层见 pathlang）
+Version: @PROJECT_VERSION@
+Libs: -L${libdir} -lpathspace
+Cflags: -I${includedir}

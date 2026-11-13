@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -u
-if [ -z "${KVSPACE:-}" ]; then
-  echo "缺少 KVSPACE：DSN 必填、无默认值。" >&2
-  echo "用法：KVSPACE=shm:///tmp/crashrecover.shm $0" >&2
+if [ -z "${PATHSPACE:-}" ]; then
+  echo "缺少 PATHSPACE：DSN 必填、无默认值。" >&2
+  echo "用法：PATHSPACE=shm:///tmp/crashrecover.shm $0" >&2
   exit 2
 fi
-export KVSPACE
-KV=/usr/bin/kvspace
-KVLANG=/usr/bin/kvlang
+export PATHSPACE
+KV=/usr/bin/pathspace
+PATHLANG=/usr/bin/pathlang
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PROG="$DIR/02-crashrecover.kv"
 PC_KEY=$(printf '/vthread/%%s/\xe2\x80\xa5pc')       # ‥pc, U+2025
@@ -16,13 +16,13 @@ ST_KEY=$(printf '/vthread/%%s/\xe2\x80\xa5status')
 val() { "$KV" get "$1" 2>/dev/null | cut -f2- | sed 's/^[^:]*://'; }  # 输出 "key<TAB>kind:value" → 剥 kind:
 fail() { echo "FAIL: $*"; exit 1; }
 
-echo "== 清空 kvspace + /crashtest =="
+echo "== 清空 pathspace + /crashtest =="
 "$KV" clear >/dev/null 2>&1
 "$KV" deltree /crashtest >/dev/null 2>&1
 
 echo "== Phase1：启动 worker，跑到 step3 时外部 SIGKILL =="
 ERR=$(mktemp); OUT1=$(mktemp)
-LOG_LEVEL=info "$KVLANG" "$PROG" >"$OUT1" 2>"$ERR" &  # info 级才吐 "vthread <vid>"，供 resume 捕获
+LOG_LEVEL=info "$PATHLANG" "$PROG" >"$OUT1" 2>"$ERR" &  # info 级才吐 "vthread <vid>"，供 resume 捕获
 PID=$!
 vid=""
 for _ in $(seq 1 50); do
@@ -54,9 +54,9 @@ echo "  崩溃时: step=$step1 done=[$done1] status=$st1 pc=$pc1"
 grep -q '^step 3$' "$OUT1" || fail "Phase1 stdout 应含到 step 3"
 grep -q '^step 4$' "$OUT1" && fail "Phase1 不应跑到 step 4"
 
-echo "== Phase2：另起进程 kvlang run $vid，从持久化 pc 续跑 =="
+echo "== Phase2：另起进程 pathlang run $vid，从持久化 pc 续跑 =="
 OUT2=$(mktemp)
-"$KVLANG" run "$vid" >"$OUT2" 2>/dev/null
+"$PATHLANG" run "$vid" >"$OUT2" 2>/dev/null
 rc2=$?
 [ "$rc2" = "0" ] || fail "run 退出码 $rc2"
 step2=$(val /crashtest/step)
@@ -74,4 +74,4 @@ grep -q '^complete final= 5$' "$OUT2" || fail "resume 未正常收尾"
 
 rm -f "$ERR" "$OUT1" "$OUT2"
 echo
-echo "PASS: 进程被 SIGKILL 后，另一进程从 kvspace 持久化 pc 无缝续跑；step 1..3 未重演，4..5 补齐至完成。"
+echo "PASS: 进程被 SIGKILL 后，另一进程从 pathspace 持久化 pc 无缝续跑；step 1..3 未重演，4..5 补齐至完成。"

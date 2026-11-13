@@ -10,7 +10,7 @@ import (
 )
 
 func rtConn(t *testing.T) unsafe.Pointer {
-	dsn := os.Getenv("KVSPACE")
+	dsn := os.Getenv("PATHSPACE")
 	if dsn == "" {
 		dsn = "redis://127.0.0.1:6379"
 	} else if dsn == "shm://" || dsn == "fs://" {

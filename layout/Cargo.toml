@@ -1,12 +1,12 @@
 [package]
-name = "kvlang-layout"
+name = "pathlang-layout"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "kvlang 语法检查 + 布局工具（parser/lower/layoutcode），只依赖 kvspace-durable 的 C ABI"
+description = "pathlang 语法检查 + 布局工具（parser/lower/layoutcode），只依赖 pathspace-durable 的 C ABI"
 
 [lib]
-name = "kvlanglayout"
+name = "pathlanglayout"
 path = "src/lib.rs"
 crate-type = ["rlib", "cdylib"]
 

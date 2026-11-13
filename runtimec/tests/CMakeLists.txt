@@ -35,9 +35,9 @@ target_link_libraries(error_status_priority_test PRIVATE
 
 # 扩展读参的文本语义（TASK-070）：走 interface 的读参入口，需要 engine 全链。
 add_executable(argument_text_wire_test argument_text_wire_test.c)
-# 造 wire 要用语言层构造器（`kvlangXvalueHeadNew*`），其头在 kvlang/include。
+# 造 wire 要用语言层构造器（`pathlangXvalueHeadNew*`），其头在 pathlang/include。
 target_include_directories(argument_text_wire_test PRIVATE
-    "${KVLANG_INCLUDE_DIRECTORY}")
+    "${PATHLANG_INCLUDE_DIRECTORY}")
 target_link_libraries(argument_text_wire_test PRIVATE
     runtimec_interface runtimec_contract runtimec_binrwir runtimec_vmbin
     runtimec_vmkv runtimec_binrwir_compiler runtimec_engine)
@@ -50,7 +50,7 @@ foreach(test_target key_order_test key_resolution_test
         "${CMAKE_CURRENT_SOURCE_DIR}/.."
         "${RUNTIMEC_INCLUDE_DIRECTORY}")
     set_target_properties(${test_target} PROPERTIES
-        BUILD_RPATH "${RUNTIMEC_KVSPACE_LIBRARY_DIRECTORY}")
+        BUILD_RPATH "${RUNTIMEC_PATHSPACE_LIBRARY_DIRECTORY}")
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
         target_compile_options(${test_target} PRIVATE
             -Wall -Wextra -Wpedantic -Werror)

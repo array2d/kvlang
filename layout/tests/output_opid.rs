@@ -1,7 +1,7 @@
 
-use kvlanglayout::code::{compile, init_dirs};
-use kvlanglayout::kvkind;
-use kvlanglayout::{ffi::Kv, keytree};
+use pathlanglayout::code::{compile, init_dirs};
+use pathlanglayout::kvkind;
+use pathlanglayout::{ffi::Kv, keytree};
 
 struct TempStore(String);
 impl Drop for TempStore {
@@ -20,7 +20,7 @@ fn fresh_kv() -> (TempStore, Kv) {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let ordinal = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let dsn = format!(
-        "shm:///tmp/kvlang_output_opid_{}_{}.shm",
+        "shm:///tmp/pathlang_output_opid_{}_{}.shm",
         std::process::id(),
         ordinal
     );
@@ -122,7 +122,7 @@ rwfunc main() -> () {
 fn opid_table_matches_reserved_region() {
     
     for name in ["println", "print", "cerr"] {
-        let id = kvlanglayout::builtin::output_opid(name).unwrap();
+        let id = pathlanglayout::builtin::output_opid(name).unwrap();
         assert!(
             id >= 0xFF00,
             "{name} 的 opid {id:#06x} 不在保留区 0xFF00–0xFFFF 内"

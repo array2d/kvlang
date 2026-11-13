@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "contract/error.h"
-#include "contract/kvspace_access.h"
+#include "contract/pathspace_access.h"
 #include "contract/view.h"
 #include "vmkv/local_types.h"
 #include "vmkv/parameter_type.h"
@@ -81,7 +81,7 @@ static runtimec_program_counter_t vmkv_encoder_set_program_counter(
 
 static bool vmkv_encoder_request_is_valid(const vmkv_encode_request_t *request) {
     return request != NULL &&
-           request->kvspace_access != NULL &&
+           request->pathspace_access != NULL &&
            runtimec_string_view_is_valid(request->function_path) &&
            request->function_path.size != 0U &&
            runtimec_snapshot_is_valid(&request->expected_snapshot);
@@ -508,8 +508,8 @@ static runtimec_status_t vmkv_encode_static_argument_into(
     }
     runtimec_xvalue_address_t xvalue_address = RUNTIMEC_XVALUE_ADDRESS_NONE;
     runtimec_status_t status =
-        runtimec_kvspace_access_resolve_static_xvalue_address(
-            request->kvspace_access, &request->expected_snapshot,
+        runtimec_pathspace_access_resolve_static_xvalue_address(
+            request->pathspace_access, &request->expected_snapshot,
             source_argument->key, &xvalue_address, error);
     
     const bool unresolved = status == RUNTIMEC_STATUS_UNSUPPORTED;
@@ -693,19 +693,19 @@ static runtimec_status_t vmkv_encoder_map_argument(
 
         char key_text[1024];
         const uint64_t wire_size = (uint64_t)source_argument->literal.bytes.size;
-        if (wire_size < KVSPACE_XVALUE_HEAD_LEN) {
+        if (wire_size < PATHSPACE_XVALUE_HEAD_LEN) {
             return vmkv_encoder_fail(
                 error, RUNTIMEC_STATUS_INVALID, VMKV_ENCODER_DIAG_INVALID_REQUEST,
                 "vmkv encoder: key-position literal wire is truncated",
                 logical_program_counter);
         }
-        const kvspaceXvalueHead *literal_head =
-            (const kvspaceXvalueHead *)(const void *)source_argument->literal.bytes.data;
+        const pathspaceXvalueHead *literal_head =
+            (const pathspaceXvalueHead *)(const void *)source_argument->literal.bytes.data;
         const uint8_t *text_bytes =
-            source_argument->literal.bytes.data + KVSPACE_XVALUE_HEAD_LEN;
-        const size_t text_size = (size_t)kvspaceXvalueHeadLen(literal_head);
+            source_argument->literal.bytes.data + PATHSPACE_XVALUE_HEAD_LEN;
+        const size_t text_size = (size_t)pathspaceXvalueHeadLen(literal_head);
         if (text_size == 0U || text_size >= sizeof(key_text) ||
-            KVSPACE_XVALUE_HEAD_LEN + text_size > wire_size) {
+            PATHSPACE_XVALUE_HEAD_LEN + text_size > wire_size) {
             return vmkv_encoder_fail(
                 error, RUNTIMEC_STATUS_INVALID, VMKV_ENCODER_DIAG_INVALID_REQUEST,
                 "vmkv encoder: key-position literal is empty or too long",
@@ -1192,16 +1192,16 @@ static bool vmkv_encoder_operand_is_none(
     if (argument->literal.bytes.size == 0U) {
         return true; 
     }
-    if (argument->literal.bytes.size < KVSPACE_XVALUE_HEAD_LEN ||
+    if (argument->literal.bytes.size < PATHSPACE_XVALUE_HEAD_LEN ||
         argument->literal.bytes.data == NULL) {
         return false;
     }
     {
-        kvspaceXvalueHead head;
+        pathspaceXvalueHead head;
 
         memcpy(&head, argument->literal.bytes.data, sizeof head);
-        return kvspaceXvalueHeadLen(&head) == 0U &&
-               kvspaceXvalueHeadAttrsLen(&head) == 0U;
+        return pathspaceXvalueHeadLen(&head) == 0U &&
+               pathspaceXvalueHeadAttrsLen(&head) == 0U;
     }
 }
 
@@ -1700,7 +1700,7 @@ runtimec_status_t vmkv_encode(vmkv_encoder_t *encoder,
     runtimec_snapshot_t snapshot;
     runtimec_snapshot_reset(&snapshot);
     runtimec_status_t status = vmkv_source_open_function(
-        request->kvspace_access, request->function_path, &function, &snapshot,
+        request->pathspace_access, request->function_path, &function, &snapshot,
         error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;

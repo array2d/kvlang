@@ -5,12 +5,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 BUILD = ROOT.parent / "build" / "tutorial-c"
-KVLANG_ROOT = ROOT.parent
+PATHLANG_ROOT = ROOT.parent
 
-INCS = [str(KVLANG_ROOT / "include")]
-KVSPACE_INCLUDE = ""
+INCS = [str(PATHLANG_ROOT / "include")]
+PATHSPACE_INCLUDE = ""
 LIB = ""
-XVALUE_LIB = str(KVLANG_ROOT / "lib" / "libkvlang_xvalue.a")
+XVALUE_LIB = str(PATHLANG_ROOT / "lib" / "libpathlang_xvalue.a")
 
 passed = 0
 failed = 0
@@ -41,7 +41,7 @@ def include_flags() -> list[str]:
     return flags
 
 def link_flags() -> list[str]:
-    return ["-L", LIB, "-lkvspace", XVALUE_LIB]
+    return ["-L", LIB, "-lpathspace", XVALUE_LIB]
 
 def cc(src: Path, bin: Path, cpp: bool = False) -> bool:
     compiler = "g++" if cpp else "gcc"
@@ -65,7 +65,7 @@ def test_cpp():
 
 def test_python():
     run("Python: test", [sys.executable, str(ROOT / "03_python.py"),
-                         f"{LIB}/libkvspace.so"])
+                         f"{LIB}/libpathspace.so"])
 
 def test_integrity():
     src, bin = ROOT / "05_integrity.c", BUILD / "05_integrity"
@@ -81,7 +81,7 @@ def test_multiprocess():
 
 def test_rust():
     src, bin = ROOT / "04_rust.rs", BUILD / "04_rust"
-    if not run("Rust: compile", ["rustc", str(src), "-L", LIB, "-l", "kvspace",
+    if not run("Rust: compile", ["rustc", str(src), "-L", LIB, "-l", "pathspace",
                                  "-o", str(bin)]):
         return
     run("Rust: run", [str(bin)], {"LD_LIBRARY_PATH": LIB})
@@ -90,17 +90,17 @@ if __name__ == "__main__":
     import argparse
 
     ap = argparse.ArgumentParser(description="tutorial-c：存储 ABI + 语言层的多语言直调")
-    ap.add_argument("--kvspace-include", required=True,
-                    help="kvspace 仓的 include/（提供 <kvspace/*.h>）")
-    ap.add_argument("--kvspace-lib", required=True,
-                    help="内含 libkvspace 的目录")
+    ap.add_argument("--pathspace-include", required=True,
+                    help="pathspace 仓的 include/（提供 <pathspace/*.h>）")
+    ap.add_argument("--pathspace-lib", required=True,
+                    help="内含 libpathspace 的目录")
     ap.add_argument("--xvalue-lib", default=XVALUE_LIB,
-                    help="libkvlang_xvalue.a 路径（默认本仓 lib/）")
+                    help="libpathlang_xvalue.a 路径（默认本仓 lib/）")
     args = ap.parse_args()
-    KVSPACE_INCLUDE = args.kvspace_include
-    LIB = args.kvspace_lib
+    PATHSPACE_INCLUDE = args.pathspace_include
+    LIB = args.pathspace_lib
     XVALUE_LIB = args.xvalue_lib
-    INCS = [str(KVLANG_ROOT / "include"), KVSPACE_INCLUDE]
+    INCS = [str(PATHLANG_ROOT / "include"), PATHSPACE_INCLUDE]
 
     BUILD.mkdir(parents=True, exist_ok=True)
 

@@ -1,5 +1,5 @@
 flowchart TB
-  RWIR["RWIR in kvspace<br/>plaintext operation name<br/>typed and named Read or Write parameters"]
+  RWIR["RWIR in pathspace<br/>plaintext operation name<br/>typed and named Read or Write parameters"]
   SPECIFICATION["myrwircaps and specification<br/>operation name to opid<br/>parameter to argidx"]
   VMKV_VALIDATE["vmkv<br/>validate RWIR and request static key dereference"]
   HOST["host static key dereference<br/>return uint64 XValue base only<br/>no body offset choice"]
@@ -31,9 +31,9 @@ flowchart TB
   COMMIT_COMPLETED["COMMIT_COMPLETED_STATE<br/>materialize every completed dirty body<br/>to original argaddr"]
   DISCARD_INCOMPLETE["DISCARD_INCOMPLETE_STATE<br/>drop all speculative or partial register and spill state<br/>zero body write"]
   VMBIN_EXECUTE["vmbin_execute<br/>address-driven memory execution<br/>mandatory boundary at every instruction completion"]
-  BODY["kvspace XValue<br/>8-byte head then V.body at final argaddr<br/>only authoritative value residency"]
+  BODY["pathspace XValue<br/>8-byte head then V.body at final argaddr<br/>only authoritative value residency"]
   CONTROL["advance logical program counter and checkpoint<br/>only after every completed body write succeeds"]
-  RETAIN["retain last committed program counter and checkpoint<br/>recover or resume only from kvspace"]
+  RETAIN["retain last committed program counter and checkpoint<br/>recover or resume only from pathspace"]
 
   RWIR --> VMKV_VALIDATE
   SPECIFICATION --> VMKV_VALIDATE

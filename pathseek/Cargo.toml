@@ -1,0 +1,22 @@
+[package]
+name = "pathseek"
+version = "0.1.0"
+edition = "2021"
+description = "功能完整的 pathlang runtime：模式2 主导执行 + 纯净 rwir stdlib（term/json/http/pathlanglayout/networld）"
+
+[lib]
+name = "pathseek"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pathseek"
+path = "src/main.rs"
+
+[features]
+embed = []
+
+[dependencies]
+libc = "0.2"
+serde_json = "1"
+ureq = { version = "2", features = ["gzip"] }
+rustyline = "15"

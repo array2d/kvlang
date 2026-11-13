@@ -3,9 +3,9 @@ import argparse, itertools, os, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LAYOUT_BIN = str(ROOT / "bin" / "kvlanglayout")
-TERM_BIN = str(ROOT / "bin" / "byteseek")
-_C_DSN = os.environ.get("KVSPACE", "shm://")
+LAYOUT_BIN = str(ROOT / "bin" / "pathlanglayout")
+TERM_BIN = str(ROOT / "bin" / "pathseek")
+_C_DSN = os.environ.get("PATHSPACE", "shm://")
 ERROR_CASES = Path(__file__).resolve().parent
 RED, GREEN, NC = "\033[0;31m", "\033[0;32m", "\033[0m"
 
@@ -65,7 +65,7 @@ def _unescape_logx(stderr: str) -> str:
 
 def collect_errors(rel: str) -> str:
     dsn = _case_dsn()
-    env = {**os.environ, "KVSPACE": dsn}
+    env = {**os.environ, "PATHSPACE": dsn}
     boot = subprocess.run([TERM_BIN, "-c", 'print("boot")'], capture_output=True,
                           text=True, timeout=60, cwd=str(ROOT), env=env)
     stderr = _unescape_logx(boot.stderr)
@@ -86,17 +86,17 @@ def check(pat: str, errors: str) -> bool:
 
 def main() -> int:
     global _BACKEND_TMP, _C_DSN, _LAST_BACKEND, LAYOUT_BIN, TERM_BIN
-    ap = argparse.ArgumentParser(description="kvlang error_cases verification")
-    ap.add_argument("--kvspace", default=None,
+    ap = argparse.ArgumentParser(description="pathlang error_cases verification")
+    ap.add_argument("--pathspace", default=None,
                     help="Backend DSN prefix (e.g. shm:// or fs://)")
-    ap.add_argument("--layout-bin", default=LAYOUT_BIN, help="kvlanglayout 路径")
-    ap.add_argument("--term-bin", default=TERM_BIN, help="byteseek 路径")
+    ap.add_argument("--layout-bin", default=LAYOUT_BIN, help="pathlanglayout 路径")
+    ap.add_argument("--term-bin", default=TERM_BIN, help="pathseek 路径")
     args = ap.parse_args()
     LAYOUT_BIN, TERM_BIN = args.layout_bin, args.term_bin
-    if args.kvspace:
-        _C_DSN = args.kvspace
+    if args.pathspace:
+        _C_DSN = args.pathspace
     if _C_DSN.startswith(("shm://", "fs://")):
-        _BACKEND_TMP = tempfile.TemporaryDirectory(prefix="kvlang-err-")
+        _BACKEND_TMP = tempfile.TemporaryDirectory(prefix="pathlang-err-")
     try:
         files = [f for f in discover(ERROR_CASES) if f.suffix == ".kv"]
         if not files:

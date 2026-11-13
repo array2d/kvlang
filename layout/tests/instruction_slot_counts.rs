@@ -1,10 +1,10 @@
 
-use kvlanglayout::{init_dirs, Kv};
+use pathlanglayout::{init_dirs, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_kvlanglayout")
+    env!("CARGO_BIN_EXE_pathlanglayout")
 }
 
 struct TempDir(PathBuf);
@@ -23,7 +23,7 @@ impl TempDir {
 
 fn temp_dir(tag: &str) -> TempDir {
     let dir = std::env::temp_dir().join(format!(
-        "kvlanglayout_slotcounts_{}_{}",
+        "pathlanglayout_slotcounts_{}_{}",
         tag,
         std::process::id()
     ));
@@ -152,18 +152,18 @@ fn the_check_detects_a_mismatch_when_one_is_introduced() {
     assert_eq!(count_slots(&mut kv, "/lib/p·f", 1), (5, 1));
 }
 
-#[ignore = "依赖 bin/byteseek，等 TASK-035"]
+#[ignore = "依赖 bin/pathseek，等 TASK-035"]
 #[test]
 fn every_tutorial_instruction_has_matching_slot_counts() {
     let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .to_path_buf();
-    let runtime = repo.join("bin").join("byteseek");
+    let runtime = repo.join("bin").join("pathseek");
     
     assert!(
         runtime.exists(),
-        "缺 {}：无法 boot /‥isa；请先构建 byteseek",
+        "缺 {}：无法 boot /‥isa；请先构建 pathseek",
         runtime.display()
     );
 
@@ -201,7 +201,7 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
         let probe_db = format!("shm://{}", root.join("bootprobe").display());
         let probe = Command::new(&runtime)
             .args(["-c", "print(\"boot\")"])
-            .env("KVSPACE", &probe_db)
+            .env("PATHSPACE", &probe_db)
             .current_dir(&repo)
             .output()
             .unwrap();
@@ -210,9 +210,9 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
             let first = reason.lines().next().unwrap_or("(no stderr)");
             eprintln!(
                 "SKIP every_tutorial_instruction_has_matching_slot_counts: \
-                 byteseek: 依赖未就绪 — {first}"
+                 pathseek: 依赖未就绪 — {first}"
             );
-            eprintln!("  依赖名: byteseek → lib/libkvlang_runtimec2.so");
+            eprintln!("  依赖名: pathseek → lib/libpathlang_runtimec2.so");
             eprintln!("  原因: relink to runtimec pending (tier A/B/C)");
             eprintln!("  跳过 1（依赖未就绪）");
             return;
@@ -223,7 +223,7 @@ fn every_tutorial_instruction_has_matching_slot_counts() {
         let db = format!("shm://{}", root.join(format!("case{index}")).display());
         let boot = Command::new(&runtime)
             .args(["-c", "print(\"boot\")"])
-            .env("KVSPACE", &db)
+            .env("PATHSPACE", &db)
             .current_dir(&repo)
             .output()
             .unwrap();

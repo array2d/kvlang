@@ -1,0 +1,10 @@
+name = "pathlang"
+version = "0.1.0"
+defaultTargets = ["Pathlang"]
+
+[leanOptions]
+autoImplicit = false
+relaxedAutoImplicit = false
+
+[[lean_lib]]
+name = "Pathlang"

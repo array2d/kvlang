@@ -1,0 +1,16 @@
+
+rwfunc test() -> () {
+	pathlang/reflect·fnlist("math") -> m:[]char/utf32
+	println("math=", m)
+	pathlang/reflect·fnlist("pathlang") -> k:[]char/utf32
+	println("pathlang=", k)
+	pathlang/reflect·fnlist("string") -> s:[]char/utf32
+	string·contains(s, "allinset") -> a:bool
+	println("has-allinset=", a)
+	string·contains(s, "[0,") -> p:bool
+	println("has-param=", p)
+	string·len(s) -> sl:int64
+	println("string-nonempty=", sl > 0)
+	pathlang/reflect·fnlist("no_such_lib_xyz") -> e:[]char/utf32
+	println("missing-len=", string·len(e))
+}

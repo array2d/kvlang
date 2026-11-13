@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include "contract/allocator.h"
 #include "binrwir/registry.h"
-#include "contract/kvspace_access.h"
+#include "contract/pathspace_access.h"
 #include "contract/status.h"
 #include "engine/frame_state.h"
 
@@ -37,23 +37,23 @@ typedef struct runtimec_session_options_t {
     size_t machine_code_capacity;
     bool enable_jit;
     
-    void *kvspace_handle;
+    void *pathspace_handle;
     
     const void *extension_modules;
     size_t extension_count;
 } runtimec_session_options_t;
 runtimec_status_t runtimec_session_create(
-    runtimec_kvspace_access_t *kvspace_access,
+    runtimec_pathspace_access_t *pathspace_access,
     const runtimec_session_options_t *options,
     runtimec_session_t **output_session,
     runtimec_error_t *error);
 runtimec_status_t runtimec_session_destroy(runtimec_session_t *session);
-runtimec_status_t runtimec_session_get_kvspace_access(
+runtimec_status_t runtimec_session_get_pathspace_access(
     runtimec_session_t *session,
-    runtimec_kvspace_access_t **output_kvspace_access);
+    runtimec_pathspace_access_t **output_pathspace_access);
 
-runtimec_status_t runtimec_session_get_kvspace_handle(
-    runtimec_session_t *session, void **output_kvspace_handle);
+runtimec_status_t runtimec_session_get_pathspace_handle(
+    runtimec_session_t *session, void **output_pathspace_handle);
 runtimec_status_t runtimec_session_clear_derived_state(
     runtimec_session_t *session);
 

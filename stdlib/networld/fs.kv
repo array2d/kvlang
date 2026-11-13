@@ -175,10 +175,10 @@ lib networld/fs {
 			"/" -> scan
 		}
 		networld/fs·list(scan) -> ns:'[int64]'[]char/utf32
-		kvspace·listlen(ns) -> nc:int64
+		pathspace·listlen(ns) -> nc:int64
 		i = 0
 		while (i < nc) {
-			kvspace·listat(ns, i) -> k:char/utf8
+			pathspace·listat(ns, i) -> k:char/utf8
 			ns·*k -> nm:[]char/utf32
 			networld/fs·match(nm, np) -> ok:bool
 			if (ok) {
@@ -225,7 +225,7 @@ lib networld/fs {
 	            *[]char/utf32 #glob) -> (*[]char/utf32 #hits) {
 		"" -> *hits
 		networld/fs·list(*path) -> ns:'[int64]'[]char/utf32
-		kvspace·listlen(ns) -> nc:int64
+		pathspace·listlen(ns) -> nc:int64
 		if (nc == 0) {
 			networld/fs·readtext(*path) -> (t:[]char/utf32, sz:int64)
 			if (sz > 0) {
@@ -236,7 +236,7 @@ lib networld/fs {
 			gl:int64 = string·len(*glob)
 			i:int64 = 0
 			while (i < nc) {
-				kvspace·listat(ns, i) -> k:char/utf8
+				pathspace·listat(ns, i) -> k:char/utf8
 				ns·*k -> nm:[]char/utf32
 				networld/fs·match(nm, *glob) -> ok:bool
 				if (gl == 0 || ok) {

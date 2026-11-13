@@ -1,5 +1,5 @@
 
-#include "contract/kvspace_interface.h"
+#include "contract/pathspace_interface.h"
 #include "contract/langtype.h"
 #include "value_access.h"
 
@@ -10,8 +10,8 @@
 #include "binrwir/frame_bindings.h"
 #include "frame_slot.h"
 #include "frame_target_key.h"
-#include <kvlang/xvalue.h>
-#include <kvspace/kvspace_xvalue.h>
+#include <pathlang/xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
 
 static runtimec_status_t vmbin_value_access_fail(
     runtimec_error_t *error, runtimec_status_t status,
@@ -34,11 +34,11 @@ static runtimec_status_t vmbin_value_access_locate_member(
     runtimec_status_t status;
 
     (void)argument;
-    if (frame->kvspace_access == NULL) {
+    if (frame->pathspace_access == NULL) {
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_INVALID,
             VMBIN_VALUE_ACCESS_DIAG_UNBOUND_SLOT,
-            "frame carries no kvspace access for a member key");
+            "frame carries no pathspace access for a member key");
     }
     
     status = vmbin_value_access_argument_key(frame, argument, key_text,
@@ -82,8 +82,8 @@ static runtimec_status_t vmbin_value_access_locate_member(
                     RUNTIMEC_XVALUE_ADDRESS_NONE;
                 uint64_t base_generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
 
-                if (runtimec_kvspace_access_resolve_frame_xvalue_address(
-                        frame->kvspace_access, &frame->snapshot,
+                if (runtimec_pathspace_access_resolve_frame_xvalue_address(
+                        frame->pathspace_access, &frame->snapshot,
                         runtimec_key_view_from_c_string(base_key),
                         &base_address, &base_generation, NULL) ==
                         RUNTIMEC_STATUS_SUCCESS &&
@@ -111,8 +111,8 @@ static runtimec_status_t vmbin_value_access_locate_member(
         }
         (void)base_value;
     }
-    status = runtimec_kvspace_access_resolve_frame_xvalue_address(
-        frame->kvspace_access, &frame->snapshot,
+    status = runtimec_pathspace_access_resolve_frame_xvalue_address(
+        frame->pathspace_access, &frame->snapshot,
         runtimec_key_view_from_c_string(key_text), &xvalue_address,
         &generation, error);
     if (status != RUNTIMEC_STATUS_SUCCESS ||
@@ -188,17 +188,17 @@ static void vmbin_value_access_fill_none_facts(
         return; 
     }
     {
-        const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)wire;
-        const uint64_t total = kvspaceXvalueHeadTotalLen(head);
+        const pathspaceXvalueHead *head = (const pathspaceXvalueHead *)wire;
+        const uint64_t total = pathspaceXvalueHeadTotalLen(head);
 
         if (total == 0U) {
             return; 
         }
-        location->body_is_empty = kvspaceXvalueHeadLen(head) == 0U
+        location->body_is_empty = pathspaceXvalueHeadLen(head) == 0U
                                       ? VMBIN_VALUE_FACT_YES
                                       : VMBIN_VALUE_FACT_NO;
         location->has_langtype_record =
-            kvspaceXvalueHeadAttrsLen(head) == 0U ? VMBIN_VALUE_FACT_NO
+            pathspaceXvalueHeadAttrsLen(head) == 0U ? VMBIN_VALUE_FACT_NO
                                                   : VMBIN_VALUE_FACT_YES;
     }
     
@@ -243,7 +243,7 @@ static runtimec_status_t vmbin_value_access_dereference_ex(
             "dereferenced operand does not hold a pointer");
     }
     if (pointer_location.read_bytes == NULL || pointer_location.size == 0U ||
-        frame->kvspace_access == NULL) {
+        frame->pathspace_access == NULL) {
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_INVALID,
             VMBIN_VALUE_ACCESS_DIAG_MALFORMED_WIRE,
@@ -257,8 +257,8 @@ static runtimec_status_t vmbin_value_access_dereference_ex(
             memcmp(pointer_location.read_bytes, "/vthread/",
                    sizeof("/vthread/") - 1U) == 0) {
             uint64_t generation = BINRWIR_FRAME_BINDING_GENERATION_NONE;
-            status = runtimec_kvspace_access_resolve_frame_xvalue_address(
-                frame->kvspace_access, &frame->snapshot, key, &target_address,
+            status = runtimec_pathspace_access_resolve_frame_xvalue_address(
+                frame->pathspace_access, &frame->snapshot, key, &target_address,
                 &generation, error);
             if (status == RUNTIMEC_STATUS_SUCCESS &&
                 generation != frame->snapshot_generation) {
@@ -268,8 +268,8 @@ static runtimec_status_t vmbin_value_access_dereference_ex(
                     "dereference target is not in the frame generation");
             }
         } else {
-            status = runtimec_kvspace_access_resolve_static_xvalue_address(
-                frame->kvspace_access, &frame->snapshot, key, &target_address,
+            status = runtimec_pathspace_access_resolve_static_xvalue_address(
+                frame->pathspace_access, &frame->snapshot, key, &target_address,
                 error);
         }
     }
@@ -387,12 +387,12 @@ static runtimec_status_t vmbin_value_access_locate_plain(
             runtimec_string_view_t key_text = runtimec_string_view_make(NULL, 0U);
             runtimec_string_view_t key_langtype;
             runtimec_xvalue_address_t resolved = RUNTIMEC_XVALUE_ADDRESS_NONE;
-            if (frame->kvspace_access == NULL ||
+            if (frame->pathspace_access == NULL ||
                 binrwir_binfunc_get_symbol(frame->program, argument->slot,
                                            &key_text, &key_langtype) !=
                     RUNTIMEC_STATUS_SUCCESS ||
-                runtimec_kvspace_access_resolve_static_xvalue_address(
-                    frame->kvspace_access, &frame->snapshot,
+                runtimec_pathspace_access_resolve_static_xvalue_address(
+                    frame->pathspace_access, &frame->snapshot,
                     runtimec_key_view_make(key_text.data, key_text.size),
                     &resolved, error) != RUNTIMEC_STATUS_SUCCESS ||
                 resolved == RUNTIMEC_XVALUE_ADDRESS_NONE) {
@@ -689,7 +689,7 @@ static runtimec_status_t vmbin_value_access_create_member(
             "member key cannot be built");
     }
     
-    if (kvlangXvalueHeadNewSlack(value.data, (uint64_t)value.size,
+    if (pathlangXvalueHeadNewSlack(value.data, (uint64_t)value.size,
                                   langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
@@ -699,7 +699,7 @@ static runtimec_status_t vmbin_value_access_create_member(
             "member value cannot be encoded as an XValue");
     }
     message[0] = '\0';
-    const bool wrote = runtimec_kvspace_write_wire(frame->kvspace_handle, key_text,
+    const bool wrote = runtimec_pathspace_write_wire(frame->pathspace_handle, key_text,
                                                  wire, (uint32_t)wire_size,
                                                  message, sizeof(message));
     const int set_status = wrote ? 0 : 1;
@@ -760,7 +760,7 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
         
         return RUNTIMEC_STATUS_SUCCESS;
     }
-    if (frame->bindings == NULL || frame->kvspace_access == NULL) {
+    if (frame->bindings == NULL || frame->pathspace_access == NULL) {
         return RUNTIMEC_STATUS_SUCCESS;
     }
     
@@ -796,7 +796,7 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
     
     if (declared.size == 0U) {
         if (!runtimec_bytes_view_is_valid(value) || value.data == NULL ||
-            value.size < KVSPACE_XVALUE_HEAD_LEN) {
+            value.size < PATHSPACE_XVALUE_HEAD_LEN) {
             return vmbin_value_access_fail(
                 error, RUNTIMEC_STATUS_INVALID,
                 VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_LANGTYPE,
@@ -804,7 +804,7 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
                 "carries no readable head");
         }
         const uint8_t *head_langtype_bytes = NULL;
-        const uint16_t head_langtype_size = kvlangXvalueHeadLangtypeBounded(
+        const uint16_t head_langtype_size = pathlangXvalueHeadLangtypeBounded(
             value.data, (uint64_t)value.size, &head_langtype_bytes);
         const runtimec_string_view_t head_langtype =
             head_langtype_size != 0U && head_langtype_bytes != NULL
@@ -835,7 +835,7 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
             error, RUNTIMEC_STATUS_INVALID, VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
             "local slot key cannot be built");
     }
-    if (kvlangXvalueHeadNewSlack(value.data, (uint64_t)value.size,
+    if (pathlangXvalueHeadNewSlack(value.data, (uint64_t)value.size,
                                   langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
@@ -844,7 +844,7 @@ static runtimec_status_t vmbin_value_access_create_unbound_local(
             "written value cannot be encoded as an XValue");
     }
     message[0] = '\0';
-    if (!runtimec_kvspace_write_wire(frame->kvspace_handle, key_text, wire,
+    if (!runtimec_pathspace_write_wire(frame->pathspace_handle, key_text, wire,
                                    (uint32_t)wire_size, message,
                                    sizeof(message))) {
         free(wire);
@@ -870,11 +870,11 @@ static runtimec_status_t vmbin_value_access_create_static_target(
     uint64_t wire_size = 0U;
     runtimec_status_t status;
 
-    if (frame->kvspace_handle == NULL) {
+    if (frame->pathspace_handle == NULL) {
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_INVALID,
             VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
-            "static write target has no kvspace handle; the key cannot be "
+            "static write target has no pathspace handle; the key cannot be "
             "created or written");
     }
     status = binrwir_binfunc_get_symbol(frame->program, argument->slot,
@@ -908,7 +908,7 @@ static runtimec_status_t vmbin_value_access_create_static_target(
             VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
             "static write value has no bytes");
     }
-    if (kvlangXvalueHeadNewSlack(value.data, (uint64_t)value.size,
+    if (pathlangXvalueHeadNewSlack(value.data, (uint64_t)value.size,
                                   langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
@@ -928,8 +928,8 @@ static runtimec_status_t vmbin_value_access_create_static_target(
     memcpy(key_c_string, key_text.data, key_text.size);
     key_c_string[key_text.size] = '\0';
     message[0] = '\0';
-    const bool wrote = runtimec_kvspace_write_wire(
-        frame->kvspace_handle, key_c_string, wire, (uint32_t)wire_size, message,
+    const bool wrote = runtimec_pathspace_write_wire(
+        frame->pathspace_handle, key_c_string, wire, (uint32_t)wire_size, message,
         sizeof(message));
     const int set_status = wrote ? 0 : 1;
     free(wire);
@@ -962,7 +962,7 @@ runtimec_status_t vmbin_value_access_locate_write(
     }
     
     if (argument->reference_kind == BINRWIR_REFERENCE_LOCAL &&
-        frame->program != NULL && frame->kvspace_access != NULL) {
+        frame->program != NULL && frame->pathspace_access != NULL) {
         runtimec_string_view_t member_name;
         runtimec_string_view_t member_langtype;
 
@@ -977,13 +977,13 @@ runtimec_status_t vmbin_value_access_locate_write(
             if (status != RUNTIMEC_STATUS_SUCCESS) {
                 return status;
             }
-            if (!runtimec_kvspace_access_langtype_has_fixed_zero_width(
+            if (!runtimec_pathspace_access_langtype_has_fixed_zero_width(
                     member_langtype)) {
                 
                 return status;
             }
-            status = runtimec_kvspace_access_ensure_zero_value(
-                frame->kvspace_access, &frame->snapshot,
+            status = runtimec_pathspace_access_ensure_zero_value(
+                frame->pathspace_access, &frame->snapshot,
                 runtimec_key_view_from_c_string(key_text), member_langtype,
                 error);
             if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -994,7 +994,7 @@ runtimec_status_t vmbin_value_access_locate_write(
         }
     }
     if (argument->reference_kind != BINRWIR_REFERENCE_STATIC ||
-        frame->program == NULL || frame->kvspace_access == NULL) {
+        frame->program == NULL || frame->pathspace_access == NULL) {
         return status;
     }
     {
@@ -1016,8 +1016,8 @@ runtimec_status_t vmbin_value_access_locate_write(
                 "static write target has no declared langtype; the key cannot "
                 "be created without one");
         }
-        status = runtimec_kvspace_access_ensure_zero_value(
-            frame->kvspace_access, &frame->snapshot,
+        status = runtimec_pathspace_access_ensure_zero_value(
+            frame->pathspace_access, &frame->snapshot,
             runtimec_key_view_make(key_text.data, key_text.size), key_langtype,
             error);
         if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -1052,11 +1052,11 @@ static runtimec_status_t vmbin_value_access_create_dereference_target(
     char message[256];
     runtimec_status_t status;
 
-    if (frame->kvspace_access == NULL) {
+    if (frame->pathspace_access == NULL) {
         return vmbin_value_access_fail(
             error, RUNTIMEC_STATUS_INVALID,
             VMBIN_VALUE_ACCESS_DIAG_INVALID_REQUEST,
-            "frame carries no kvspace access to create a dereference target");
+            "frame carries no pathspace access to create a dereference target");
     }
     
     plain.dereference = 0U;
@@ -1089,7 +1089,7 @@ static runtimec_status_t vmbin_value_access_create_dereference_target(
     }
     memcpy(langtype_text, declared.data, declared.size);
     langtype_text[declared.size] = '\0';
-    if (kvlangXvalueHeadNewSlack(value.data, (uint64_t)value.size,
+    if (pathlangXvalueHeadNewSlack(value.data, (uint64_t)value.size,
                                   langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
@@ -1107,7 +1107,7 @@ static runtimec_status_t vmbin_value_access_create_dereference_target(
 
         memcpy(key_text, pointer_value.read_bytes, key_size);
         key_text[key_size] = '\0';
-        if (!runtimec_kvspace_write_wire(frame->kvspace_handle, key_text, wire,
+        if (!runtimec_pathspace_write_wire(frame->pathspace_handle, key_text, wire,
                                        (uint32_t)wire_size, message,
                                        sizeof(message))) {
             free(wire);
@@ -1435,9 +1435,9 @@ runtimec_status_t vmbin_value_access_form(
     }
     
     {
-        const kvspaceXvalueHead *head =
-            (const kvspaceXvalueHead *)(const void *)wire;
-        const uint64_t total = kvspaceXvalueHeadTotalLen(head);
+        const pathspaceXvalueHead *head =
+            (const pathspaceXvalueHead *)(const void *)wire;
+        const uint64_t total = pathspaceXvalueHeadTotalLen(head);
 
         if (total == 0) {
             return vmbin_value_access_fail(
@@ -1446,7 +1446,7 @@ runtimec_status_t vmbin_value_access_form(
                 "value head is not a well-formed XValue");
         }
         const uint8_t *langtype = NULL;
-        const uint16_t langtype_size = kvlangXvalueHeadLangtypeBounded(
+        const uint16_t langtype_size = pathlangXvalueHeadLangtypeBounded(
             wire, total, &langtype);
         if (langtype != NULL && langtype_size != 0U) {
             if (langtype[0] == '*') {
@@ -1469,7 +1469,7 @@ runtimec_status_t vmbin_value_access_bind_write_target(
     runtimec_status_t status;
 
     if (frame == NULL || frame->program == NULL || argument == NULL ||
-        frame->bindings == NULL || frame->kvspace_access == NULL ||
+        frame->bindings == NULL || frame->pathspace_access == NULL ||
         !runtimec_key_view_is_valid(target_key) || target_key.size == 0U ||
         error == NULL) {
         return vmbin_value_access_fail(
@@ -1513,8 +1513,8 @@ runtimec_status_t vmbin_value_access_bind_write_target(
             VMBIN_VALUE_ACCESS_DIAG_UNKNOWN_REFERENCE,
             "local slot index is not in the program pool");
     }
-    status = runtimec_kvspace_access_resolve_frame_xvalue_address(
-        frame->kvspace_access, &frame->snapshot, target_key, &xvalue_address,
+    status = runtimec_pathspace_access_resolve_frame_xvalue_address(
+        frame->pathspace_access, &frame->snapshot, target_key, &xvalue_address,
         &generation, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         return status;

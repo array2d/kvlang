@@ -1,7 +1,7 @@
 
 rwfunc test() -> () {
 	10 -> /cp_src
-	kvspace·cp("/cp_src") -> /cp_dst:int64
+	pathspace·cp("/cp_src") -> /cp_dst:int64
 	d1:int64 = /cp_dst      
 	println("dst:", d1)
 	20 -> /cp_src

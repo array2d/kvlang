@@ -1,5 +1,5 @@
 
-#include "contract/kvspace_interface.h"
+#include "contract/pathspace_interface.h"
 #include "vmbin/directory_walk.h"
 #include "vmbin/handlers/scatter.h"
 
@@ -14,8 +14,8 @@
 #include "contract/error.h"
 #include "contract/status.h"
 #include "contract/view.h"
-#include <kvlang/xvalue.h>
-#include <kvspace/kvspace_xvalue.h>
+#include <pathlang/xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
 #include "vmbin/handlers/container.h"
 #include "vmbin/frame_target_key.h"
 #include "vmbin/handlers/handler_call.h"
@@ -40,7 +40,7 @@ static bool scatter_container_empty(const binrwir_binvthread_frame_t *frame,
     uint8_t *wire = NULL;
     uint64_t wire_size = 0U;
 
-    if (kvlangXvalueHeadNewSlack(NULL, 0U, "stringkeymap", &wire,
+    if (pathlangXvalueHeadNewSlack(NULL, 0U, "stringkeymap", &wire,
                                   &wire_size) != 0 ||
         wire == NULL) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
@@ -49,7 +49,7 @@ static bool scatter_container_empty(const binrwir_binvthread_frame_t *frame,
         return false;
     }
     message[0] = '\0';
-    if (!runtimec_kvspace_write_wire(frame->kvspace_handle, base, wire,
+    if (!runtimec_pathspace_write_wire(frame->pathspace_handle, base, wire,
                                    (uint32_t)wire_size, message,
                                    sizeof(message))) {
         free(wire);
@@ -64,7 +64,7 @@ static bool scatter_container_empty(const binrwir_binvthread_frame_t *frame,
         return false;
     }
     message[0] = '\0';
-    if (kvspaceMkindex(frame->kvspace_handle, directory, message,
+    if (pathspaceMkindex(frame->pathspace_handle, directory, message,
                        (uint32_t)sizeof(message)) != 0) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                            VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
@@ -99,7 +99,7 @@ static void scatter_container_create(const binrwir_binvthread_frame_t *frame,
     memcpy(langtype_text, declared.data, declared.size);
     langtype_text[declared.size] = '\0';
     
-    if (kvlangXvalueHeadNewSlack(NULL, 0U, langtype_text, &wire,
+    if (pathlangXvalueHeadNewSlack(NULL, 0U, langtype_text, &wire,
                                   &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
@@ -123,7 +123,7 @@ static void scatter_container_create(const binrwir_binvthread_frame_t *frame,
                            output_exit->logical_program_counter);
         return;
     }
-    if (!runtimec_kvspace_write_wire(frame->kvspace_handle, key, wire,
+    if (!runtimec_pathspace_write_wire(frame->pathspace_handle, key, wire,
                                    (uint32_t)wire_size, message,
                                    sizeof(message))) {
         free(wire);
@@ -139,7 +139,7 @@ static void scatter_container_create(const binrwir_binvthread_frame_t *frame,
         return;
     }
     message[0] = '\0';
-    if (kvspaceMkindex(frame->kvspace_handle, directory, message,
+    if (pathspaceMkindex(frame->pathspace_handle, directory, message,
                        (uint32_t)sizeof(message)) != 0) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                            VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
@@ -173,14 +173,14 @@ static runtimec_status_t scatter_whole_wire(
     {
         const runtimec_xvalue_address_t base = runtimec_value_body_xvalue_address(
             (runtimec_value_body_address_t)(uintptr_t)location.read_bytes);
-        const kvspaceXvalueHead *head;
+        const pathspaceXvalueHead *head;
 
         if (base == RUNTIMEC_XVALUE_ADDRESS_NONE) {
             return RUNTIMEC_STATUS_INVALID;
         }
-        head = (const kvspaceXvalueHead *)(const void *)(uintptr_t)base;
+        head = (const pathspaceXvalueHead *)(const void *)(uintptr_t)base;
         {
-            const uint64_t total = kvspaceXvalueHeadTotalLen(head);
+            const uint64_t total = pathspaceXvalueHeadTotalLen(head);
 
             if (total == 0U || total > UINT32_MAX) {
                 return RUNTIMEC_STATUS_INVALID;
@@ -251,13 +251,13 @@ static bool scatter_member_copy(const binrwir_binvthread_frame_t *frame,
                            output_exit->logical_program_counter);
         return false;
     }
-    if (!runtimec_kvspace_read_wire(frame->kvspace_handle, source_member,
+    if (!runtimec_pathspace_read_wire(frame->pathspace_handle, source_member,
                                     &stored, &stored_size) ||
         stored == NULL) {
         return true; 
     }
     message[0] = '\0';
-    if (!runtimec_kvspace_write_wire(frame->kvspace_handle, target_member, stored,
+    if (!runtimec_pathspace_write_wire(frame->pathspace_handle, target_member, stored,
                                    stored_size, message, sizeof(message))) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
                            VMBIN_HANDLER_CALL_DIAG_CREATE_FAILED,
@@ -303,9 +303,9 @@ static void scatter_member_read(const binrwir_binvthread_frame_t *frame,
         return;
     }
     
-    if (!runtimec_kvspace_read_wire(frame->kvspace_handle, member, &stored,
+    if (!runtimec_pathspace_read_wire(frame->pathspace_handle, member, &stored,
                                     &stored_size) ||
-        stored == NULL || stored_size < KVSPACE_XVALUE_HEAD_LEN) {
+        stored == NULL || stored_size < PATHSPACE_XVALUE_HEAD_LEN) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                            VMBIN_HANDLER_CALL_DIAG_LOCATE_FAILED,
                            output_exit->logical_program_counter);
@@ -335,7 +335,7 @@ static void scatter_member_write(const binrwir_binvthread_frame_t *frame,
     char message[256];
 
     message[0] = '\0';
-    if (!runtimec_kvspace_write_wire(frame->kvspace_handle, member, value->data,
+    if (!runtimec_pathspace_write_wire(frame->pathspace_handle, member, value->data,
                                    (uint32_t)value->size, message,
                                    sizeof(message))) {
         vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_ERROR,
@@ -391,7 +391,7 @@ static void scatter_largest_coordinate(const binrwir_binvthread_frame_t *frame,
         return;
     }
     runtimec_directory_walk_t walk;
-    if (!runtimec_directory_walk_open(&walk, NULL, frame->kvspace_handle,
+    if (!runtimec_directory_walk_open(&walk, NULL, frame->pathspace_handle,
                                       directory, false, false) ||
         !runtimec_directory_walk_count(&walk, &count)) {
         (void)runtimec_directory_walk_close(&walk);
@@ -517,7 +517,7 @@ static void scatter_expand_from_compact(
 
             if (scatter_member_key(base, (int64_t)ordinal, member,
                                    sizeof(member)) != RUNTIMEC_STATUS_SUCCESS ||
-                kvlangXvalueHeadNewSlack(
+                pathlangXvalueHeadNewSlack(
                     source.read_bytes + ordinal * source_type.element_size,
                     source_type.element_size,
                     element_langtype, &wire, &wire_size) != 0) {
@@ -527,7 +527,7 @@ static void scatter_expand_from_compact(
                 return;
             }
             message[0] = '\0';
-            if (!runtimec_kvspace_write_wire(frame->kvspace_handle, member, wire,
+            if (!runtimec_pathspace_write_wire(frame->pathspace_handle, member, wire,
                                            (uint32_t)wire_size, message,
                                            sizeof(message))) {
                 free(wire);
@@ -588,7 +588,7 @@ static void scatter_pack_to_compact(
         return;
     }
     runtimec_directory_walk_t walk;
-    if (!runtimec_directory_walk_open(&walk, NULL, frame->kvspace_handle,
+    if (!runtimec_directory_walk_open(&walk, NULL, frame->pathspace_handle,
                                       directory, false, false) ||
         !runtimec_directory_walk_count(&walk, &member_count)) {
         (void)runtimec_directory_walk_close(&walk);
@@ -617,23 +617,23 @@ static void scatter_pack_to_compact(
                                output_exit->logical_program_counter);
             return;
         }
-        if (!runtimec_kvspace_read_wire(frame->kvspace_handle, member,
+        if (!runtimec_pathspace_read_wire(frame->pathspace_handle, member,
                                        &stored, &stored_size) ||
-            stored == NULL || stored_size < KVSPACE_XVALUE_HEAD_LEN) {
+            stored == NULL || stored_size < PATHSPACE_XVALUE_HEAD_LEN) {
             vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_INVALID,
                                RUNTIMEC_CONTAINER_DIAG_SCATTER_HAS_HOLE,
                                output_exit->logical_program_counter);
             return;
         }
-        element_length = kvspaceXvalueHeadLen(
-            (const kvspaceXvalueHead *)(const void *)stored);
+        element_length = pathspaceXvalueHeadLen(
+            (const pathspaceXvalueHead *)(const void *)stored);
         if (body_size + element_length > sizeof(body)) {
             vmbin_handler_fail(output_exit, RUNTIMEC_STATUS_OUT_OF_MEMORY,
                                RUNTIMEC_CONTAINER_DIAG_NEW_BODY_EXCEEDS_BUFFER,
                                output_exit->logical_program_counter);
             return;
         }
-        memcpy(body + body_size, stored + KVSPACE_XVALUE_HEAD_LEN,
+        memcpy(body + body_size, stored + PATHSPACE_XVALUE_HEAD_LEN,
                (size_t)element_length);
         body_size += (size_t)element_length;
     }
@@ -683,7 +683,7 @@ static void scatter_slice_between(const binrwir_binvthread_frame_t *frame,
     
     {
         runtimec_directory_walk_t walk;
-        if (!runtimec_directory_walk_open(&walk, NULL, frame->kvspace_handle,
+        if (!runtimec_directory_walk_open(&walk, NULL, frame->pathspace_handle,
                                           directory, false, false) ||
             !runtimec_directory_walk_count(&walk, &count)) {
             (void)runtimec_directory_walk_close(&walk);
@@ -761,7 +761,7 @@ static void scatter_member_count(const binrwir_binvthread_frame_t *frame,
     }
     {
         runtimec_directory_walk_t walk;
-        if (!runtimec_directory_walk_open(&walk, NULL, frame->kvspace_handle,
+        if (!runtimec_directory_walk_open(&walk, NULL, frame->pathspace_handle,
                                           directory, false, false) ||
             !runtimec_directory_walk_count(&walk, &count)) {
             (void)runtimec_directory_walk_close(&walk);

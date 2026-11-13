@@ -1,5 +1,5 @@
 
-use kvlanglayout::fusion::{
+use pathlanglayout::fusion::{
     block_admissible, later_write_recovered, no_future_read, per_instruction_ok, FusionInstr,
 };
 

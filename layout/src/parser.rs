@@ -1912,11 +1912,11 @@ impl Parser {
                     
                     let mut segments = std::mem::take(&mut dynamic_segments).into_iter();
                     let mut position = match segments.next() {
-                        Some(first) => ast::call("kvlang·resolvekey", vec![base, first]),
+                        Some(first) => ast::call("pathlang·resolvekey", vec![base, first]),
                         None => base,
                     };
                     for segment in segments {
-                        position = ast::call("kvlang·resolvekey", vec![position, segment]);
+                        position = ast::call("pathlang·resolvekey", vec![position, segment]);
                     }
                     
                     left = ast::call(ast::DEREF_OP, vec![position]);
@@ -2048,7 +2048,7 @@ impl Parser {
             
             if symbol::lookup(&t.value).word == "bitand" {
                 let arg = self.parse_pratt(UNARY_PREC)?;
-                let op = format!("kvspace/key{}abs", keytree::MEMBER_SEP);
+                let op = format!("pathspace/key{}abs", keytree::MEMBER_SEP);
                 if arg.op == ast::MEMBER_READ_OP && arg.args.len() >= 2 {
                     return Some(ast::call(&op, arg.args));
                 }
@@ -3042,7 +3042,7 @@ impl Parser {
                 .map(|a| a.val.clone())
                 .unwrap_or_default();
             
-            inst.expr = Some(ast::call("kvspace·cplist", vec![e]));
+            inst.expr = Some(ast::call("pathspace·cplist", vec![e]));
             inst.writes = vec![s.clone()];
             inst.write_types = if prototype.is_empty() {
                 Vec::new()
@@ -3105,7 +3105,7 @@ impl Parser {
             };
             let mut position = ast::leaf(&base);
             for field in s.split(keytree::MEMBER_SEP).skip(1) {
-                position = ast::call("kvlang·resolvekey", vec![position, ast::leaf(&field[1..])]);
+                position = ast::call("pathlang·resolvekey", vec![position, ast::leaf(&field[1..])]);
             }
             
             let slot = self.fresh_position_slot();
@@ -3213,7 +3213,7 @@ impl Parser {
             pos,
             message: format!(
                 "{ctx} {name:?}: unknown type {disp:?} — 不是已知种类名，\
-                 kvlang 无 int/uint/float/num/char 家族简写，数字须带位宽\
+                 pathlang 无 int/uint/float/num/char 家族简写，数字须带位宽\
                  （int8/int16/int32/int64、uint8/uint16/uint32/uint64、float32/float64），\
                  字符须带编码（char/utf8、char/utf32、char/ascii）"
             ),

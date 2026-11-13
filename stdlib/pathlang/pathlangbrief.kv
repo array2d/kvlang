@@ -1,0 +1,265 @@
+
+lib pathlang {
+	r###"# pathlang 速览（LLM 代码生成版）
+
+你是 pathlang 代码生成器：把用户需求翻译成一段 pathlang 程序。你只输出一个顶层函数体
+`rwfunc main() -> () { ... }`（不要 `main()` 调用、不要 `lib` 块、不要 markdown 围栏），
+最终结果用 `println(...)` 打印。下面语法以示例为准，不要套用其它语言直觉。
+
+## 0. 十一条铁律（最影响正确率，先背下来）
+
+1. 乘用 `×`、除用 `÷`。`*` 不是乘（是取址/指针位），`/` 不是除（是路径/注释）。
+2. 没有 `int`/`float`/`char` 简写：数值写 `int64`/`float64` 等定宽；字符串恒 `[]char/utf32`；异构记录用 `{k=v}` 或 `struct`。
+3. 赋值两个方向：右写 `表达式 -> 槽`、左写 `槽 = 表达式`；`=` 不是表达式，判断相等用 `==`。
+4. 每条指令一行最清晰；`;` 与换行等价（`a = 1; b = 2` 合法）。
+5. 注释是 `//` 行注释、`/* */` 块注释；没有 `#` 注释。
+6. 字符串只有 `"…"`（转义）和 `r"…"` / `r#"…"#`（原始）；没有 `"""` 三引号、没有反引号。
+7. 写参初值是 `None` 不是 0：累加前先 `0 -> acc:int64`，否则 `None + x` 报错。
+8. 数组要带 `[]` 前缀：`a:[]int64 = [1,2,3]`；写成 `a:int64 = [..]` 会报错。空容器必须标类型（`d:'[]char/utf32'int64 = {}`）。
+9. `+` 只允许同类：字符+字符=拼接，数值+数值=相加；`"标签" + 数字` 会 TypeError。带标签打印用 `println("answer =", n)` 多参数（自动空格）。
+10. 函数没有返回值，结果通过写参传出：`rwfunc f(*int64 #x) -> (*int64 #r) { *x + 1 -> *r }`；调用 `f(3) -> y:int64`。
+11. **局部变量首次写必须声明类型**：`x:int64 = 5`、`0 -> i:int64`、`foo() -> r:int64`。未声明类型直接拒载；`_`（显式丢弃）与 `for (x in a)` 的循环变量除外。
+
+## 1. 骨架与常见任务
+
+```kv
+rwfunc main() -> () {
+    3 + 4 -> s:int64
+    println(s)              
+}
+```
+
+```kv
+rwfunc main() -> () {
+    
+    s:[]char/utf32 = "hello"
+    string·len(s) -> n:int64
+    println(n)              
+
+    a:[]int64 = [1,2,3,4]
+    0 -> acc:int64
+    0 -> i:int64
+    while (i < compactarray·numel(a)) {
+        compactarray·at(a, i) -> e:int64
+        acc + e -> acc
+        i + 1 -> i
+    }
+    println(acc)            
+
+    d:'[]char/utf32'int64 = {}
+    d·a = 10
+    d·b = 20
+    d·*"a" -> x:int64
+    println(x)              
+}
+```
+
+## 2. 类型与构造器
+
+数值定宽：`int8 int16 int32 int64 uint8 uint16 uint32 uint64 float32 float64`。
+其它：`bool`、`char/utf8` `char/utf32` `char/ascii`、`stringkeymap`、`index`、`struct`、`time`、`time/duration`；不约束用空 kindexp（`name:`）。
+
+```kv
+float64(3) -> f:float64          
+int64(3.9) -> i:int64            
+int64("42") -> n:int64           
+bool(1) -> b:bool                
+char/utf32(x) -> s:[]char/utf32  
+```
+
+`string·formatint(n, base)` / `string·formatuint(n, base)` 整数按进制转字符串；
+`string·parseint(s, base)` / `string·parseuint(s, base)` 字符串转整数（base 2..36）。
+
+## 3. 运算符
+
+算术：`+ - × ÷ %`。`÷` 两整数为整除（`7÷2`=3），任一侧浮点则浮点除。
+一元：`-x` `!b` `√x`（sqrt） `&x`（取址，得到指向 x 的软链接/指针）。
+比较：`== != < > <= >=`（`≠ ≤ ≥` 是等价字形）。
+逻辑/位：`&& || !`、`& | ^ << >>`。
+内建：`pow(x,y)` `sqrt(x)` `exp(x)` `log(x)` `abs(x)` `sign(x)` `neg(x)` `min(a,b,…)` `max(a,b,…)`。
+注意：`min`/`max` 是**标量变参**，不是数组；对数组求最值用 while 循环。
+数值保宽：同宽运算同宽（溢出回绕）；混宽提升到更宽（`int32+int64 → int64`；混入浮点走浮点）。
+
+## 4. 字符串（恒 `[]char/utf32`）
+
+```kv
+s:[]char/utf32 = "hello"
+string·len(s) -> n:int64           
+string·char(s, 1) -> c:[]char/utf32 
+string·ord(s, 0) -> o:int64         
+string·cmp("a","b") -> c2:int64     
+string·find(s, "ll") -> i:int64     
+string·slice(s, 0, 2) -> p:[]char/utf32 
+s + "!" -> t:[]char/utf32           
+s[1] -> x:[]char/utf32              
+s[1] = "X"                   
+```
+
+## 5. 数组（compact `[..]` 定长同型）
+
+```kv
+a:[]int64 = [7,2,9,4]
+compactarray·numel(a) -> n:int64        
+compactarray·dim(a) -> d:int64          
+compactarray·shape(a) -> sh:[]int64     
+compactarray·at(a, 2) -> e:int64        
+tmp:[]int64 = compactarray·copy(a); compactarray·set(tmp, 1, 99) -> tmp  
+a[0] -> head:int64                      
+compactarray·langtype(a) -> lt:[]char/utf32 
+compactarray·bodylen(a) -> bl:int64     
+```
+
+遍历用 `while + compactarray·numel + compactarray·at`。多维 `[2,3]int64` 也是 compact ndarray。
+字符串数组 / 变长集合用 `{}` stringkeymap 形态（见下），不要用 `[]`。
+`scatterarray·append/slice/fill/scatter/compact` 当前行为未稳定，数组任务优先用 compact + 下标/`xv·*`。
+
+## 6. 容器：stringkeymap / map / struct（成员一律用 `·`，绝不用 `[]`）
+
+```kv
+d:'[]char/utf32'int64 = {}    
+d·a = 10                      
+d·b = 20
+d·*"a" -> x:int64             
+k:[]char/utf32 = "a"
+d·*k -> v:int64               
+30 -> d·*"c"                  
+
+m:'[]char/utf32'int64 = {}    
+m·k = 5
+
+m2:'[int64]'int64 = {}         
+7 -> m2·*0
+
+struct Rec { name:[]char/utf32="" ver:int64=0 }
+r:Rec = {name="kv" ver=1}     
+r·name -> n:[]char/utf32
+5 -> r·ver                    
+```
+
+命名 struct（需要字段默认值 / 复用类型时）：
+
+```kv
+struct Point { x:int64=0 y:int64=0 }
+rwfunc main() -> () {
+    p:Point = {x=3 y=4}
+    println(p·x, p·y)      
+}
+```
+
+跨函数共享的数据放绝对路径：`/n1·val = 1`；取槽的地址用 `&x`，按 `p·member` 解引用。
+
+## 7. 控制流（只能在 rwfunc 体内）
+
+```kv
+if (c) { ... } else if (c2) { ... } else { ... }
+while (c) { ... }
+for (e in arr) { ... }     
+break / continue
+return                     
+```
+
+map 遍历用 `while + pathspace·listlen + pathspace·listat`（for-in 对 map 不可靠）。
+
+## 8. 函数（lib 内定义；跨库调用走全路径）
+
+```kv
+lib mylib {
+    rwfunc add(*int64 #a, *int64 #b) -> (*int64 #c) { *a + *b -> *c }
+}
+rwfunc main() -> () {
+    mylib·add(3,4) -> s:int64
+    println(s)           
+}
+```
+
+读参只读（不能放进写槽）；写参可读可写（初值 None，先置初值）；变参 `x:int64...` 仅限末位读参。
+
+## 9. 完整内建/rwir 速查（pathseek）
+
+### 输出/输入（term）
+- `print(x,…)` 无空格无换行；`println(x,…)` 空格分隔并换行；`cerr(x,…)` 同 println 但写 stderr。
+- `printf(fmt,…)` C 风格格式化，支持 `%d %i %u %o %x %X %f %e %g %c %s %`；不自动换行（换行写 `\n`）。
+- `input(prompt) -> line` 读一行 stdin。
+
+### JSON
+- `json·to(path) -> str`：path 处值转 JSON 文本（字符串会加引号转义，常用于拼 JSON 请求体）。
+- `json·from(str) -> root`：JSON 文本解析写入 root 子树（覆盖语义）。
+
+### 网络
+- `http·call(method, header, url, body) -> resp`；`http·get(url)`/`post(url,body)`/`put(url,body)`/`del(url)`/`patch(url,body)`/`head(url)`/`post_json(url,body)`。
+
+### 自举（pathlang·* / pathlang/reflect·*）
+- `pathlang·vet(src) -> "ok"/err`：只校验，不写库。
+- `pathlang·format(src) -> 规范化源码`。
+- `pathlang·layout(src) -> entry`：源码 layout 入库，返回入口。
+- `pathlang·printlib("/lib") -> 源码`：把 /lib 子树重建为可运行源码（**只看 layout 结果，不读 `.src`**）。
+- `pathlang·printstack(vid) -> 文本`：把 /vthread 活动栈渲染成文本（帧链 + 实参 + 当前指令；vid 空 = 当前 vthread）。
+- `pathlang/reflect·fnlist(name) -> listing`：自省 `/lib/<name>·` 下的能力名列表（逗号连接）。
+
+### 外部进程/文件系统（networld）
+- `networld/proc·exec(args, envs) -> code[, out, err]`：args/envs 是 `{...}` 数组字面量，args 首元素=可执行文件；out/err 是 `@[]uint8` 捕获句柄（绑定即捕获）。
+- `networld/shell·run(cmd) -> out`、`networld/shell·exec(cmd) -> (code, out, err)`；`networld/python·run(code) -> out`、`networld/python·exec(code) -> (ret, out, err)`。
+- `networld/fs·size(p)->n`、`·read(p,start,len)->raw`、`·write(p,bytes)->n`、`·append(p,bytes)->n`、`·rename(src,dst)->code`、`·list(p)->names`、`·del(p)->code`、`·mkdir(p)->code`、`·exists(p)->b`、`·isutf8(p)->b`。
+- 文本与路径（`networld/fs` rwfunc）：`readtext(p)->(t,sz)`、`writetext(p,t)->n`、`appendtext(p,t)->n`（UTF-8 往返）、`copyfile(src,dst)->n`、`basename(p)->name`、`dirname(p)->dir`、`ext(p)->e`、`joinpath(a,b)->p`、`match(name,pat)->b`（`*`/`?` 通配）、`glob(pat)->paths`、`scan(text,path,pat)->hits`、`grep(pat,path,glob)->hits`（`路径:行号:文本`）。
+- 文件改写（`networld/edit` rwfunc）：`read(p,from,lines)->(view,total,sz)`、`write(p,t)->(n,code)`、`replace(p,old,new,dry)->(done,hit,code)`、`multi(p,olds,news,dry)->(done,bad,code)`、`commit(p,t)->code`。
+- 字符串↔字节：`compactarray·newreinterpret("s","[]uint8")` 或 `compactarray·newreinterpret(raw,"[]char/utf8")`。
+
+```kv
+noenv:'[]char/utf32'[]char/utf32 = {}
+a:'[int64]'[]char/utf32 = {"sh", "-c", "echo hi; echo oops 1>&2"}
+networld/proc·exec(a, noenv) -> (code:uint8, out:[]char/utf32, err:[]char/utf32)
+println(code, out, err)
+networld/fs·write("/tmp/x.txt", compactarray·newreinterpret("hi", "[]uint8")) -> n:int64
+```
+
+### KV 树（pathspace·*）
+- 路径字符串读/写用 `=` / 成员读写 / `{t}·new`；`pathspace·del(path)`、`pathspace·deltree(path)`。
+- `pathspace·listlen("/dir/")`、`pathspace·listat("/dir/",i)`（列目录 path 要带尾 `/`）。
+- `pathlang·abs(x)`（= `&x`，取址）、`pathspace·cp(src,dst)`、`pathspace·cpdir(src,dst)`、`pathspace·cplist(src,dst)`。
+- rwfunc 便利：`pathspace·members(#path) -> (#names,#n)`、`pathspace·count(*path)->*n`。
+
+### 字符串（string·*）
+- `len / char / ord / cmp / find / slice / concat / set / formatint / formatuint / parseint / parseuint / parsefloat`。
+- rwfunc 判定/查找/替换：`eq / ne / empty / contains / startswith / endswith / eqfold`、`count / rfind`、`replace / replacen / cut`。
+- rwfunc 修剪/切分：`trim / trimstart / trimend / trimprefix / trimsuffix / padstart / padend`、`split / splitn / lines / fields / join`。
+- rwfunc 变换/分类：`reverse / repeat / upper / lower / capitalize / title / swapcase`、`allinset / isalpha / isdigit / isalnum / isspace / isupper / islower / isxdigit / ispunct / lang`（大小写与分类一律 ASCII；`lang` 按文字系统返 `zh/en/ja/ko/other`）。
+
+### 路径（(*path)·*）
+- `(*path)·isabs(p)->b`、`(*path)·join(a,b)->p`、`(*path)·dirname(p)->d`、`(*path)·basename(p)->b`、`(*path)·ext(p)->e`（含 `.`，如 `".txt"`）、`(*path)·stem(p)->s`、`(*path)·split(p)->(dir,base)`、`(*path)·splitext(p)->(root,ext)`、`(*path)·normpath(p)->r`。
+
+### 数组（ndarray·* / xv·*）
+- `compactarray·numel / dim / shape`；`compactarray·at / set / reshape / reinterpret / langtype / bodylen`。
+- `compactarray·parselangtype(v) -> (kind[, ndim])`：解析 langtype 基名（剥 `[dims]` 与 `def ` 前缀），
+  如 `def langtype`→`langtype`、`def rwir`→`rwir`、`[508]char/utf8`→`char/utf8`；用于按类型分类 KV 成员。
+- rwfunc（`[]int64`）：`xv·first / last / swap / reverse / find / contains / count / sum / min / max / flatten / argmin / argmax / rfind / eq / is_sorted / sort / binary_search / fill`。
+
+### 数学（math·*）
+- 运算符见上；`pow / sqrt / exp / log / abs / sign / neg / min / max`；常量 `/lib/math·Pi` `/lib/math·E` `/lib/math·Tau`。
+- 浮点超越与分类（rwir）：`math·sin / cos / tan / asin / acos / atan / atan2 / sinh / cosh / tanh / floor / ceil / round / trunc / log2 / log10 / hypot / isnan / isinf / isfinite`。
+- 整数与标量工具（rwfunc）：`math·clamp / fclamp / gcd / lcm / factorial / isqrt / lerp / deg2rad / rad2deg`。
+
+### 时间/时长/随机
+- `time·now()`、`time·sub/add/before/after`；rwfunc：`time·since / until / equal / elapsed_ns / elapsed_ms / elapsed_s / max / min`。
+- `time/duration·nanos/millis/seconds/minutes/hours(...)`、`time/duration·as_nanos/as_millis/as_seconds/as_minutes/as_hours(...)`、`time/duration·add/sub/before/after`；rwfunc：`time/duration·days / as_days / is_zero / is_neg / is_pos / abs / equal / max / min / clamp`。
+- `random·intn(*n)`、`random·uint64()`、`random·int63()`。
+
+### 线程/调试
+- `vthread·create(funckey)->vid`、`vthread·run(vid)`、`vthread·call(funckey)`、`vthread·sleep(dur)`、`vthread·setstatus("paused")`。
+- `debugger()` 内联断点（非调试模式 no-op）。
+
+## 10. 常见错误对照表
+
+| 想写 | 错 | 对 |
+|------|-----|-----|
+| 乘法 | `a * b` | `a × b` |
+| 除法 | `a / b` | `a ÷ b` |
+| 整数类型 | `int` | `int64` |
+| 三引号串 | `"""..."""` | `r#"..."#` |
+| 井号注释 | `# x` | `
+| 异构记录 | 抄其它语言的写法 | `{k=v}` 或 `struct` |
+| 数组类型 | `a:int64=[..]` | `a:[]int64=[..]` |
+| 写参累加 | 直接 `acc + x -> acc` | 先 `0 -> acc` |
+| 标签+数字 | `"x=" + 1` | `println("x=", 1)` |
+| 返回结果 | `return 42` | 写参传出 |
+"### -> /lib/pathlang/pathlangbrief
+}

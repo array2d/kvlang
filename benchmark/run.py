@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-KVLANG_ROOT = ROOT.parent
+PATHLANG_ROOT = ROOT.parent
 CASES_DIR = ROOT / "cases"
 RESULTS_DIR = ROOT / "results"
 BENCH_RE = re.compile(r"__bench_ns:\s*(\d+)")
@@ -19,7 +19,7 @@ INPUT_RE = re.compile(r"__bench_input:\s*(.+)")
 OPERATORS = "println,print"
 KV_BACKENDS = ("shm", "fs", "redis")
 NATIVE = ("python", "rust", "c")
-EXT = {"kvlang": ".kv", "python": ".py", "rust": ".rs", "c": ".c"}
+EXT = {"pathlang": ".kv", "python": ".py", "rust": ".rs", "c": ".c"}
 
 SWEEP = {
     "iops":          [500, 1000, 2000],
@@ -37,7 +37,7 @@ SCALE_ENV = "BENCH_SCALE"
 SCALE_TOKEN = "__SCALE__"
 HARNESS_REV = 2
 FIELDS = ["timestamp", "version", "commit", "cpu", "case", "input", "samples",
-          "kvlang_shm_ns", "kvlang_fs_ns", "kvlang_redis_ns",
+          "pathlang_shm_ns", "pathlang_fs_ns", "pathlang_redis_ns",
           "python_ns", "rust_ns", "c_ns",
           "python_ver", "rust_ver", "c_ver", "native_opt", "valid",
           "harness_rev"]
@@ -47,14 +47,14 @@ def sh(cmd, timeout=None, env=None):
                           timeout=timeout, env=env)
 
 def git_version():
-    v = sh(["git", "-C", str(KVLANG_ROOT), "describe", "--tags", "--always",
+    v = sh(["git", "-C", str(PATHLANG_ROOT), "describe", "--tags", "--always",
             "--dirty"]).stdout.strip() or "unknown"
-    c = sh(["git", "-C", str(KVLANG_ROOT), "rev-parse", "--short",
+    c = sh(["git", "-C", str(PATHLANG_ROOT), "rev-parse", "--short",
             "HEAD"]).stdout.strip() or "unknown"
     return v, c
 
 def git_tag():
-    return sh(["git", "-C", str(KVLANG_ROOT), "describe", "--tags",
+    return sh(["git", "-C", str(PATHLANG_ROOT), "describe", "--tags",
                "--abbrev=0"]).stdout.strip() or "v0"
 
 def tool_versions():
@@ -115,7 +115,7 @@ def kv_reset(label, workdir, redis_dsn):
         sh(["redis-cli", "-h", host or "127.0.0.1", "-p", port or "6379",
             "flushall"], timeout=10)
 
-def run_kvlang(case_dir, label, args, workdir, scale):
+def run_pathlang(case_dir, label, args, workdir, scale):
     text = (case_dir / (case_dir.name + ".kv")).read_text()
     src = workdir / (case_dir.name + ".kv")
     src.write_text(text.replace(SCALE_TOKEN, str(scale)))
@@ -123,24 +123,24 @@ def run_kvlang(case_dir, label, args, workdir, scale):
 
     def _run():
         kv_reset(label, workdir, args.redis)
-        env = {**os.environ, "KVSPACE": dsn}
-        create = [args.kvlang_bin, "create", str(src), f"--operators={OPERATORS}"]
+        env = {**os.environ, "PATHSPACE": dsn}
+        create = [args.pathlang_bin, "create", str(src), f"--operators={OPERATORS}"]
         if args.no_stdlib:
             create.append("--no-stdlib")
         created = sh(create, timeout=args.timeout, env=env)
         if created.returncode != 0:
             tail = (created.stderr.strip().splitlines() or [""])[-1]
             raise RuntimeError(
-                f"kvlang/{label} create exit {created.returncode}: {tail[:200]}")
+                f"pathlang/{label} create exit {created.returncode}: {tail[:200]}")
         vid = created.stdout.strip().splitlines()[-1] if created.stdout.strip() else ""
         if not vid:
-            raise RuntimeError(f"kvlang/{label} create printed no vid")
-        r = sh([args.kvlang_bin, "run", vid, f"--operators={OPERATORS}"],
+            raise RuntimeError(f"pathlang/{label} create printed no vid")
+        r = sh([args.pathlang_bin, "run", vid, f"--operators={OPERATORS}"],
                timeout=args.timeout, env=env)
         if r.returncode != 0:
             tail = (r.stderr.strip().splitlines() or [""])[-1]
             raise RuntimeError(
-                f"kvlang/{label} run exit {r.returncode}: {tail[:200]}")
+                f"pathlang/{label} run exit {r.returncode}: {tail[:200]}")
         return r.stdout
     return _run
 
@@ -170,17 +170,17 @@ def sample(runner, repeat, func_sink, key):
 def bench_case(case_dir, args, scale):
     best, func, case_input = {}, {}, None
     for label in args.backends:
-        key = f"kvlang_{label}"
+        key = f"pathlang_{label}"
         with tempfile.TemporaryDirectory(prefix=f"bench-kv-{label}-") as tmp:
             try:
                 b, inp = sample(
-                    run_kvlang(case_dir, label, args, Path(tmp), scale),
+                    run_pathlang(case_dir, label, args, Path(tmp), scale),
                     args.repeat, func, key)
                 best[key] = b
                 if inp is not None:
                     case_input = inp
             except (subprocess.TimeoutExpired, RuntimeError) as e:
-                print(f"  ! kvlang/{label} 失败: {str(e).splitlines()[0]}",
+                print(f"  ! pathlang/{label} 失败: {str(e).splitlines()[0]}",
                       file=sys.stderr)
                 best[key] = None
     for lang in NATIVE:
@@ -197,10 +197,10 @@ def bench_case(case_dir, args, scale):
                       file=sys.stderr)
                 best[lang] = None
     present = [func[k] for k in func if best.get(k) is not None]
-    kv_ok = all(best.get(f"kvlang_{l}") is not None for l in args.backends)
+    kv_ok = all(best.get(f"pathlang_{l}") is not None for l in args.backends)
     valid = kv_ok and len(present) >= 2 and all(x == present[0] for x in present)
     if not kv_ok:
-        print(f"  ! {case_dir.name}: kvlang 无有效数据 → valid=False",
+        print(f"  ! {case_dir.name}: pathlang 无有效数据 → valid=False",
               file=sys.stderr)
     return best, valid, case_input
 
@@ -216,7 +216,7 @@ def fmt_ns(ns):
     return f"{ns}ns"
 
 NS_HDR = ("kv-shm", "kv-fs", "kv-redis", "python", "rust", "c")
-COLS = ("kvlang_shm", "kvlang_fs", "kvlang_redis", "python", "rust", "c")
+COLS = ("pathlang_shm", "pathlang_fs", "pathlang_redis", "python", "rust", "c")
 
 def print_header():
     print(f"{'case':<14}{'input':<14}" + "".join(f"{h:>11}" for h in NS_HDR)
@@ -255,13 +255,13 @@ def main():
     ap.add_argument("-k", "--filter", default="", help="只跑名字含此串的 case")
     ap.add_argument("--repeat", type=int, default=3, help="每列采样次数，取 min")
     ap.add_argument("--backends", default="shm,fs,redis",
-                    help="kvlang 后端子集，逗号分隔（shm,fs,redis）")
+                    help="pathlang 后端子集，逗号分隔（shm,fs,redis）")
     ap.add_argument("--redis", default="redis://127.0.0.1:6379",
                     help="redis 后端 DSN")
-    ap.add_argument("--kvlang-bin",
-                    default=str(Path(__file__).resolve().parent.parent / "bin" / "kvlangrun"))
+    ap.add_argument("--pathlang-bin",
+                    default=str(Path(__file__).resolve().parent.parent / "bin" / "pathlangrun"))
     ap.add_argument("--no-stdlib", action="store_true",
-                    help="向 kvlang 追加 --no-stdlib（跳过 stdlib 引导，只测用户代码）")
+                    help="向 pathlang 追加 --no-stdlib（跳过 stdlib 引导，只测用户代码）")
     ap.add_argument("--timeout", type=int, default=300)
     ap.add_argument("--no-write", action="store_true", help="不写快照")
     ap.add_argument("--show", action="store_true", help="汇总历史后退出")
@@ -303,9 +303,9 @@ def main():
                 "timestamp": ts, "version": version, "commit": commit,
                 "cpu": cpu, "case": cd.name, "input": cinp,
                 "samples": args.repeat,
-                "kvlang_shm_ns": best.get("kvlang_shm") or "",
-                "kvlang_fs_ns": best.get("kvlang_fs") or "",
-                "kvlang_redis_ns": best.get("kvlang_redis") or "",
+                "pathlang_shm_ns": best.get("pathlang_shm") or "",
+                "pathlang_fs_ns": best.get("pathlang_fs") or "",
+                "pathlang_redis_ns": best.get("pathlang_redis") or "",
                 "python_ns": best.get("python") or "",
                 "rust_ns": best.get("rust") or "",
                 "c_ns": best.get("c") or "",
@@ -323,7 +323,7 @@ def main():
         wr = csv.DictWriter(f, fieldnames=FIELDS)
         wr.writeheader()
         wr.writerows(rows)
-    print(f"\n→ 写入 {len(rows)} 行到 {out_path.relative_to(KVLANG_ROOT)}")
+    print(f"\n→ 写入 {len(rows)} 行到 {out_path.relative_to(PATHLANG_ROOT)}")
 
 if __name__ == "__main__":
     main()

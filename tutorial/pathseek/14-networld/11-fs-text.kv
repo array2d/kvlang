@@ -1,0 +1,37 @@
+
+rwfunc test() -> () {
+	d:[]char/utf32 = "/tmp/pathlang_fs_text"
+	a:[]char/utf32 = "/tmp/pathlang_fs_text/a.txt"
+	b:[]char/utf32 = "/tmp/pathlang_fs_text/b.md"
+	c:[]char/utf32 = "/tmp/pathlang_fs_text/c.txt"
+	cp:[]char/utf32 = "/tmp/pathlang_fs_text/copy.md"
+	noenv:'[int64]'[]char/utf32 = {}
+	clean:'[int64]'[]char/utf32 = {"rm", "-rf", "/tmp/pathlang_fs_text"}
+	networld/proc·exec(clean, noenv) -> rc:uint8
+	networld/fs·mkdir(d) -> mc:int64
+	networld/fs·writetext(a, "hello world\n") -> w1:int64
+	networld/fs·writetext(b, "bye\n") -> w2:int64
+	networld/fs·writetext(c, "héllo\n") -> w3:int64
+	networld/fs·readtext(a) -> (t:[]char/utf32, sz:int64)
+	println("size=", sz)
+	println("text=", t)
+	networld/fs·readtext(c) -> (t4:[]char/utf32, sz4:int64)
+	println("utf8=", sz4, t4)
+	networld/fs·match("a.txt", "*.txt") -> m1:bool
+	networld/fs·match("a.txt", "?.md") -> m2:bool
+	println("match=", m1, m2)
+	networld/fs·glob("/tmp/pathlang_fs_text/*.txt") -> g:[]char/utf32
+	println("glob=", g)
+	networld/fs·grep("world", d, "*.txt") -> hits:[]char/utf32
+	println("grep=", hits)
+	networld/fs·appendtext(b, "more line\n") -> wa:int64
+	networld/fs·size(b) -> bsz:int64
+	println("append=", bsz)
+	networld/fs·copyfile(b, cp) -> cpsz:int64
+	println("copied=", cpsz)
+	networld/fs·basename(a) -> bn:[]char/utf32
+	networld/fs·dirname(a) -> dn:[]char/utf32
+	networld/fs·ext(a) -> ex:[]char/utf32
+	networld/fs·joinpath(d, "sub/x.kv") -> jp:[]char/utf32
+	println("path=", bn, dn, ex, jp)
+}

@@ -47,7 +47,7 @@ static void list(void *kv, const char *dir, int show_kind) {
 }
 
 int main(void) {
-    const char *path = "/tmp/kvspace_t01.shm";
+    const char *path = "/tmp/pathspace_t01.shm";
     remove(path);
     void *kv = kv_open_shm(path);
     if (!kv) return 1;
@@ -73,7 +73,7 @@ int main(void) {
     get(kv, "/t01/a");
     list(kv, "/t01/", 0);
 
-    kvspaceClose(kv);
+    pathspaceClose(kv);
     remove(path);
     return 0;
 }

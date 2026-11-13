@@ -55,7 +55,7 @@ fn finish(
 }
 
 #[no_mangle]
-pub extern "C" fn kvlangLayoutFile(
+pub extern "C" fn pathlangLayoutFile(
     path: *const c_char,
     dsn: *const c_char,
     entry_out: *mut c_char,
@@ -72,7 +72,7 @@ pub extern "C" fn kvlangLayoutFile(
 }
 
 #[no_mangle]
-pub extern "C" fn kvlangLayoutCode(
+pub extern "C" fn pathlangLayoutCode(
     src: *const c_char,
     dsn: *const c_char,
     entry_out: *mut c_char,
@@ -86,7 +86,7 @@ pub extern "C" fn kvlangLayoutCode(
 }
 
 #[no_mangle]
-pub extern "C" fn kvlangLayoutVet(src: *const c_char, err_out: *mut c_char, err_cap: u32) -> i32 {
+pub extern "C" fn pathlangLayoutVet(src: *const c_char, err_out: *mut c_char, err_cap: u32) -> i32 {
     let src = cstr(src).to_string();
     match catch_unwind(|| vet(&src)) {
         Ok(Ok(())) => 0,
@@ -102,7 +102,7 @@ pub extern "C" fn kvlangLayoutVet(src: *const c_char, err_out: *mut c_char, err_
 }
 
 #[no_mangle]
-pub extern "C" fn kvlangLayoutFormat(
+pub extern "C" fn pathlangLayoutFormat(
     src: *const c_char,
     out: *mut c_char,
     out_cap: u32,
@@ -127,7 +127,7 @@ pub extern "C" fn kvlangLayoutFormat(
 }
 
 #[no_mangle]
-pub extern "C" fn kvlangLayoutPrintlib(
+pub extern "C" fn pathlangLayoutPrintlib(
     lib: *const c_char,
     dsn: *const c_char,
     out: *mut c_char,
@@ -158,7 +158,7 @@ pub extern "C" fn kvlangLayoutPrintlib(
 }
 
 #[no_mangle]
-pub extern "C" fn kvlangLayoutPrintstack(
+pub extern "C" fn pathlangLayoutPrintstack(
     vid: *const c_char,
     dsn: *const c_char,
     out: *mut c_char,
@@ -189,7 +189,7 @@ pub extern "C" fn kvlangLayoutPrintstack(
 }
 
 #[repr(C)]
-pub struct kvlangKindexpr {
+pub struct pathlangKindexpr {
     pub ref_: i32,      
     pub ndim: i32,      
     pub dims: [i32; 8], 
@@ -198,9 +198,9 @@ pub struct kvlangKindexpr {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn kvlangKindexprParse(
+pub unsafe extern "C" fn pathlangKindexprParse(
     langtype: *const c_char,
-    out: *mut kvlangKindexpr,
+    out: *mut pathlangKindexpr,
 ) -> i32 {
     if langtype.is_null() || out.is_null() {
         return -1;
@@ -216,7 +216,7 @@ pub unsafe extern "C" fn kvlangKindexprParse(
     }
 }
 
-fn parse_kindexpr(s: &str) -> Option<kvlangKindexpr> {
+fn parse_kindexpr(s: &str) -> Option<pathlangKindexpr> {
     let (ref_, body) = match s.as_bytes().first()? {
         b'*' => (1, &s[1..]),
         b'@' => (2, &s[1..]),
@@ -226,7 +226,7 @@ fn parse_kindexpr(s: &str) -> Option<kvlangKindexpr> {
         return None;
     }
     let (dims, kind) = kvkind::parse_langtype(body);
-    let mut out = kvlangKindexpr {
+    let mut out = pathlangKindexpr {
         ref_,
         ndim: 0,
         dims: [0; 8],
@@ -253,7 +253,7 @@ fn parse_kindexpr(s: &str) -> Option<kvlangKindexpr> {
 }
 
 #[no_mangle]
-pub extern "C" fn kvlangLayoutDefineRwir(
+pub extern "C" fn pathlangLayoutDefineRwir(
     dsn: *const c_char,
     opcode: *const c_char,
     read_langtypes: *const *const c_char,
@@ -395,20 +395,20 @@ fn param(ty: String, inplace: bool) -> crate::ast::Param {
 mod tests {
     use super::*;
 
-    fn parse(s: &str) -> Option<kvlangKindexpr> {
+    fn parse(s: &str) -> Option<pathlangKindexpr> {
         let c = std::ffi::CString::new(s).unwrap();
-        let mut out = kvlangKindexpr {
+        let mut out = pathlangKindexpr {
             ref_: -9,
             ndim: -9,
             dims: [-9; 8],
             array_len: -9,
             kind: [0xff; 64],
         };
-        let rc = unsafe { kvlangKindexprParse(c.as_ptr(), &mut out) };
+        let rc = unsafe { pathlangKindexprParse(c.as_ptr(), &mut out) };
         (rc == 0).then_some(out)
     }
 
-    fn kind(k: &kvlangKindexpr) -> &str {
+    fn kind(k: &pathlangKindexpr) -> &str {
         let n = k.kind.iter().position(|&b| b == 0).unwrap();
         std::str::from_utf8(&k.kind[..n]).unwrap()
     }
@@ -436,7 +436,7 @@ mod tests {
         assert!(parse("[-1]int64").is_none());
         assert!(parse(&format!("/lib/{}", "x".repeat(70))).is_none());
         assert!(parse("").is_none() && parse("*").is_none());
-        let rc = unsafe { kvlangKindexprParse(std::ptr::null(), std::ptr::null_mut()) };
+        let rc = unsafe { pathlangKindexprParse(std::ptr::null(), std::ptr::null_mut()) };
         assert_eq!(rc, -1);
     }
 }

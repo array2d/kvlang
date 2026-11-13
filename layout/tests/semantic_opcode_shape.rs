@@ -1,5 +1,5 @@
 
-use kvlanglayout::{init_dirs, kvkind, Kv};
+use pathlanglayout::{init_dirs, kvkind, Kv};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -12,12 +12,12 @@ const OPS: [&str; 22] = [
 ];
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_kvlanglayout")
+    env!("CARGO_BIN_EXE_pathlanglayout")
 }
 
 fn temp_file(tag: &str, src: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
-        "kvlanglayout_shape_{}_{}.kv",
+        "pathlanglayout_shape_{}_{}.kv",
         tag,
         std::process::id()
     ));
@@ -29,7 +29,7 @@ fn temp_file(tag: &str, src: &str) -> PathBuf {
 
 fn dsn(tag: &str) -> String {
     
-    kvlanglayout::ffi::test_dsn(&format!("shape_{tag}"))
+    pathlanglayout::ffi::test_dsn(&format!("shape_{tag}"))
 }
 
 fn slot_text(kv: &mut Kv, key: &str) -> String {
@@ -64,7 +64,7 @@ fn opcodes(tag: &str, func: &str, src: &str) -> Vec<String> {
     
     drop(kv);
     let _ = std::fs::remove_file(&file);
-    kvlanglayout::ffi::remove_test_store(&db);
+    pathlanglayout::ffi::remove_test_store(&db);
     ops
 }
 
@@ -80,7 +80,7 @@ fn assert_semantic(tag: &str, src: &str) {
                 || op.starts_with("string·")
                 || op.starts_with("compactarray·")
                 || op.starts_with("scatterarray·")
-                || op.starts_with("kvspace·"),
+                || op.starts_with("pathspace·"),
             "{tag}: 出现非白名单的带 `·` opcode {op:?}"
         );
     }
@@ -144,7 +144,7 @@ fn string_plus_emits_concat_and_mixed_is_rejected() {
         "stderr: {err}"
     );
     let _ = std::fs::remove_file(&file);
-    kvlanglayout::ffi::remove_test_store(&db);
+    pathlanglayout::ffi::remove_test_store(&db);
 }
 
 #[test]
@@ -170,5 +170,5 @@ fn no_switch_can_bring_typed_names_back() {
     }
     drop(kv);
     let _ = std::fs::remove_file(&file);
-    kvlanglayout::ffi::remove_test_store(&db);
+    pathlanglayout::ffi::remove_test_store(&db);
 }

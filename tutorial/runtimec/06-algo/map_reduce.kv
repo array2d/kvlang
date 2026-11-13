@@ -2,10 +2,10 @@
 rwfunc map_reduce(*'[int64]'int64 #nums) -> (*int64 #count, *int64 #total) {
 	0 -> *count
 	*total = 0
-	kvspace·listlen(*nums) -> n:int64
+	pathspace·listlen(*nums) -> n:int64
 	0 -> i:int64
 	while (i < n) {
-		kvspace·listat(*nums, i) -> k:int64
+		pathspace·listat(*nums, i) -> k:int64
 		(*nums)·*k -> nv:int64
 		rem:int64 = nv % 2
 		rem == 1 -> is_odd:bool

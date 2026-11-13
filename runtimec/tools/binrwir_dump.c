@@ -18,8 +18,8 @@
 #include "contract/allocator.h"
 #include "contract/error.h"
 #include "contract/snapshot.h"
-#include "contract/kvspace_access.h"
-#include "contract/kvspace_interface.h"
+#include "contract/pathspace_access.h"
+#include "contract/pathspace_interface.h"
 #include "vmkv/encoder.h"
 #include "vmkv/rwir_manifest.h"
 
@@ -213,7 +213,7 @@ static int list_functions(void *handle, char names[][NAME_CAPACITY]) {
     uint32_t max_name_length = 0U;
     char count_error[256];
     count_error[0] = '\0';
-    if (kvspaceListlen(handle, "/lib/", &count, &max_name_length, count_error,
+    if (pathspaceListlen(handle, "/lib/", &count, &max_name_length, count_error,
                        (uint32_t)sizeof(count_error)) != 0) {
         return -1;
     }
@@ -231,7 +231,7 @@ static int list_functions(void *handle, char names[][NAME_CAPACITY]) {
     uint64_t generation = 0U;
     char list_error[256];
     list_error[0] = '\0';
-    if (kvspaceList(handle, "/lib/", buffer, capacity, &length, &entry_count,
+    if (pathspaceList(handle, "/lib/", buffer, capacity, &length, &entry_count,
                     &generation, list_error,
                     (uint32_t)sizeof(list_error)) != 0) {
         free(buffer);
@@ -385,14 +385,14 @@ static bool function_has_revision(void *handle, const char *function_path) {
     }
     const uint8_t *raw = NULL;
     uint32_t raw_size = 0U;
-    if (!runtimec_kvspace_read_wire(handle, key, &raw, &raw_size)) {
+    if (!runtimec_pathspace_read_wire(handle, key, &raw, &raw_size)) {
         return false;
     }
     return raw != NULL && raw_size != 0U;
 }
 
 static bool encode_function(dump_context_t *context,
-                            runtimec_kvspace_access_t *services,
+                            runtimec_pathspace_access_t *services,
                             const char *function_path,
                             runtimec_bytes_buffer_t *buffer, char *stage,
                             char *reason) {
@@ -411,7 +411,7 @@ static bool encode_function(dump_context_t *context,
     snapshot.function_key = runtimec_key_view_from_c_string(function_path);
     snapshot.source_position_text =
         runtimec_string_view_from_c_string("[1,0]");
-    runtimec_status_t status = runtimec_kvspace_access_source_revision(
+    runtimec_status_t status = runtimec_pathspace_access_source_revision(
         services, snapshot.function_key, &snapshot.source_revision, &error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
         copy_text(stage, STAGE_CAPACITY, "encode");
@@ -420,7 +420,7 @@ static bool encode_function(dump_context_t *context,
         return false;
     }
     const vmkv_encode_request_t request = {
-        .kvspace_access = services,
+        .pathspace_access = services,
         .function_path = runtimec_string_view_from_c_string(function_path),
         .expected_snapshot = snapshot,
     };
@@ -489,7 +489,7 @@ static bool dump_one_file(dump_context_t *context, const char *source_path,
         remove_tree(work_directory);
         return false;
     }
-    void *handle = kvspaceConnect(data_source);
+    void *handle = pathspaceConnect(data_source);
     if (handle == NULL) {
         copy_text(stage, STAGE_CAPACITY, "layout");
         copy_text(reason, REASON_CAPACITY, "cannot connect temporary store");
@@ -498,7 +498,7 @@ static bool dump_one_file(dump_context_t *context, const char *source_path,
     }
     if (!declare_capabilities(context, data_source, work_directory, stage,
                               reason)) {
-        kvspaceClose(handle);
+        pathspaceClose(handle);
         remove_tree(work_directory);
         return false;
     }
@@ -514,7 +514,7 @@ static bool dump_one_file(dump_context_t *context, const char *source_path,
         copy_text(stage, STAGE_CAPACITY, "layout");
         copy_first_line(reason, REASON_CAPACITY,
                         runtimec_string_view_from_c_string(layout_error));
-        kvspaceClose(handle);
+        pathspaceClose(handle);
         remove_tree(work_directory);
         return false;
     }
@@ -522,7 +522,7 @@ static bool dump_one_file(dump_context_t *context, const char *source_path,
     if (names == NULL) {
         copy_text(stage, STAGE_CAPACITY, "encode");
         copy_text(reason, REASON_CAPACITY, "out of memory");
-        kvspaceClose(handle);
+        pathspaceClose(handle);
         remove_tree(work_directory);
         return false;
     }
@@ -531,24 +531,24 @@ static bool dump_one_file(dump_context_t *context, const char *source_path,
         copy_text(stage, STAGE_CAPACITY, "list");
         copy_text(reason, REASON_CAPACITY, "cannot enumerate /lib");
         free(names);
-        kvspaceClose(handle);
+        pathspaceClose(handle);
         remove_tree(work_directory);
         return false;
     }
-    const runtimec_kvspace_access_request_t adapter_request = {
+    const runtimec_pathspace_access_request_t adapter_request = {
         .allocator = context->allocator,
-        .borrowed_kvspace_handle = handle,
+        .borrowed_pathspace_handle = handle,
         .instance_identifier = UINT64_C(1),
     };
-    runtimec_kvspace_access_t *services = NULL;
+    runtimec_pathspace_access_t *services = NULL;
     runtimec_error_t error;
     runtimec_error_reset(&error);
-    if (runtimec_kvspace_access_create(&adapter_request, &services, &error) !=
+    if (runtimec_pathspace_access_create(&adapter_request, &services, &error) !=
         RUNTIMEC_STATUS_SUCCESS) {
         copy_text(stage, STAGE_CAPACITY, "encode");
         copy_first_line(reason, REASON_CAPACITY, error.message);
         free(names);
-        kvspaceClose(handle);
+        pathspaceClose(handle);
         remove_tree(work_directory);
         return false;
     }
@@ -595,9 +595,9 @@ static bool dump_one_file(dump_context_t *context, const char *source_path,
         runtimec_allocator_deallocate(&context->allocator, buffer.data,
                                       buffer.capacity, 1U);
     }
-    (void)runtimec_kvspace_access_destroy(services, &error);
+    (void)runtimec_pathspace_access_destroy(services, &error);
     free(names);
-    kvspaceClose(handle);
+    pathspaceClose(handle);
     remove_tree(work_directory);
     return succeeded;
 }
@@ -790,14 +790,14 @@ int main(int argument_count, char **arguments) {
     if (argument_count != 5) {
         fprintf(stderr,
                 "usage: %s <corpus-root> <output-root> <layout-library> "
-                "<kvspace-library>\n",
+                "<pathspace-library>\n",
                 arguments[0]);
         return 2;
     }
     const char *corpus_root = arguments[1];
     const char *output_root = arguments[2];
     const char *layout_path = arguments[3];
-    const char *kvspace_path = arguments[4];
+    const char *pathspace_path = arguments[4];
     dump_context_t context;
     memset(&context, 0, sizeof(context));
     context.allocator = dump_allocator();
@@ -807,13 +807,13 @@ int main(int argument_count, char **arguments) {
         return 2;
     }
     context.layout_file = (layout_file_function_t)(uintptr_t)dlsym(
-        layout_library, "kvlangLayoutFile");
+        layout_library, "pathlangLayoutFile");
     if (context.layout_file == NULL) {
-        fprintf(stderr, "layout library has no kvlangLayoutFile\n");
+        fprintf(stderr, "layout library has no pathlangLayoutFile\n");
         return 2;
     }
     
-    (void)kvspace_path;
+    (void)pathspace_path;
     runtimec_error_t error;
     runtimec_error_reset(&error);
     if (!make_directory(output_root)) {

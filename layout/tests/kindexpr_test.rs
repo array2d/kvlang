@@ -1,4 +1,4 @@
-use kvlanglayout::parser::{self};
+use pathlanglayout::parser::{self};
 
 #[test]
 fn parse_type_expression_signature() {

@@ -206,6 +206,6 @@ mod tests {
         assert_eq!(output_opid(""), None);
         
         assert_eq!(output_opid("add"), None);
-        assert_eq!(output_opid("kvspace·listlen"), None);
+        assert_eq!(output_opid("pathspace·listlen"), None);
     }
 }

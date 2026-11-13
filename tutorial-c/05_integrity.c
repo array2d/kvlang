@@ -38,12 +38,12 @@ static int check_str(void *kv, const char *key, const char *expected, int round)
 }
 
 int main(void) {
-    const char *path = "/tmp/kvspace_integrity.shm";
+    const char *path = "/tmp/pathspace_integrity.shm";
     unlink(path);
 
     void *kv = kv_open_shm(path);
     if (!kv) { printf("FAIL: open\n"); return 1; }
-    kvspaceMkindex(kv, "/it/", NULL, 0);
+    pathspaceMkindex(kv, "/it/", NULL, 0);
 
     srand((unsigned)time(NULL));
     char keys[N_KEYS][64];
@@ -140,7 +140,7 @@ int main(void) {
     printf("  total children: %d\n", count);
     free(out);
 
-    kvspaceClose(kv);
+    pathspaceClose(kv);
     unlink(path);
 
     if (errors == 0) printf("\nALL OK (0 errors)\n");

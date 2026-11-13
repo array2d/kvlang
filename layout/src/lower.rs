@@ -497,7 +497,7 @@ fn annotate_position_slots_in(body: &mut [Stmt], tm: &HashMap<String, String>) {
         .enumerate()
         .filter(|(_, st)| {
             matches!(st, Stmt::Instruction(inst)
-                if inst.expr.as_ref().is_some_and(|e| e.op == "kvlang·resolvekey"))
+                if inst.expr.as_ref().is_some_and(|e| e.op == "pathlang·resolvekey"))
         })
         .map(|(index, _)| index)
         .collect();
@@ -564,7 +564,7 @@ fn annotate_position_slots_in(body: &mut [Stmt], tm: &HashMap<String, String>) {
         .enumerate()
         .filter(|(_, st)| {
             matches!(st, Stmt::Instruction(inst)
-                if inst.expr.as_ref().is_some_and(|e| e.op == "kvlang·resolvekey")
+                if inst.expr.as_ref().is_some_and(|e| e.op == "pathlang·resolvekey")
                     && inst.write_types.first().is_none_or(|t| t.is_empty()))
         })
         .map(|(index, _)| index)
@@ -1177,7 +1177,7 @@ fn lower_for_with_cont(
     if is_container {
         init_body.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
-            expr: Some(ast::call("kvspace·listlen", vec![ast::leaf(&iter_slot)])),
+            expr: Some(ast::call("pathspace·listlen", vec![ast::leaf(&iter_slot)])),
             writes: vec![len_slot.clone()],
             write_types: Vec::new(),
             arrow_left: false,
@@ -1238,7 +1238,7 @@ fn lower_for_with_cont(
         body_insts.push(Stmt::Instruction(Instruction {
             comments: Vec::new(),
             expr: Some(ast::call(
-                "kvspace·listat",
+                "pathspace·listat",
                 vec![ast::leaf(&iter_slot), ast::leaf(&idx_slot)],
             )),
             writes: vec![key_slot.clone()],
@@ -1342,7 +1342,7 @@ fn flatten_expr_with(e: &Expr, lg: &mut LabelGen, extra: &mut Vec<Stmt>, none_te
     
     if none_test && e.op == ast::DEREF_OP {
         if let Some(inner) = e.args.first() {
-            if inner.op == "kvlang·resolvekey" {
+            if inner.op == "pathlang·resolvekey" {
                 
                 let position_slot = lg.tmp();
                 extra.push(Stmt::Instruction(Instruction {
@@ -1875,7 +1875,7 @@ fn record_inst_sets(
     }
     
     let nullable_lookup = (symbol::lookup(&op).word == "assign" && reads.len() > 1)
-        || matches!(op.as_str(), "scatterarray·at" | "kvspace·get");
+        || matches!(op.as_str(), "scatterarray·at" | "pathspace·get");
     let mut concat_conflict = None;
     let types = per_write_types(s, tm, structs, &mut concat_conflict);
     for (j, w) in s.writes.iter().enumerate() {
@@ -2138,7 +2138,7 @@ fn infer_op_type(
     if symbol::lookup(opcode).cmp {
         return "bool".to_string();
     }
-    if opcode == "kvspace/key·abs" {
+    if opcode == "pathspace/key·abs" {
         
         let t = reads.first().map(|r| slot_type(r, tm)).unwrap_or_default();
         return format!("*{t}");
@@ -2153,7 +2153,7 @@ fn infer_op_type(
         "kvlen"
         | "compactarray·numel"
         | "compactarray·dim"
-        | "kvspace·listlen"
+        | "pathspace·listlen"
         | "string·len"
         | "string·ord"
         | "string·cmp"
@@ -2166,7 +2166,7 @@ fn infer_op_type(
         "compactarray·langtype" => return "[]char/utf8".to_string(),
         "compactarray·shape" => return "[]int64".to_string(),
         
-        "kvlang·resolvekey" => {
+        "pathlang·resolvekey" => {
             
             let base = reads.first().map(|r| slot_type(r, tm)).unwrap_or_default();
             let container = deref_value_type(&base);
@@ -2504,7 +2504,7 @@ fn exact_kind(
             .and_then(|a| exact_kind(a, declared, stable))?;
         return Some(deref_value_type(&inner).to_string());
     }
-    if op == "kvspace/key·abs" {
+    if op == "pathspace/key·abs" {
         
         let inner = e
             .args
@@ -2540,7 +2540,7 @@ fn exact_kind(
             let t = exact_kind(base, declared, stable)?;
             return container_elem(&t);
         }
-        "kvspace·get" => {
+        "pathspace·get" => {
             let base = e.args.first()?;
             let t = exact_kind(base, declared, stable)?;
             return container_value(&t);
@@ -2554,7 +2554,7 @@ fn exact_kind(
         "kvlen"
         | "compactarray·numel"
         | "compactarray·dim"
-        | "kvspace·listlen"
+        | "pathspace·listlen"
         | "string·len"
         | "string·ord"
         | "string·cmp"
@@ -2757,7 +2757,7 @@ fn collect_inst_stability(
             sources.entry(w.clone()).or_default().push(e.clone());
         }
     }
-    if e.op == "kvspace/key·abs" {
+    if e.op == "pathspace/key·abs" {
         if let Some(a) = e.args.first() {
             if a.is_leaf() {
                 disq.insert(a.val.clone());
@@ -3201,7 +3201,7 @@ pub fn call_result_type(
             concat_result_encoding(&types)
         }
         
-        "kvspace·listat" => container_key_type(argument_types.first()?.as_deref()?),
+        "pathspace·listat" => container_key_type(argument_types.first()?.as_deref()?),
         
         "scatterarray·newscatter" => compact_to_scatter(argument_types.first()?.as_deref()?),
         "scatterarray·newcompact" => scatter_to_compact(argument_types.first()?.as_deref()?),
@@ -3718,12 +3718,12 @@ fn expr_result_type(
     if sym.cmp {
         return "bool".to_string();
     }
-    if e.op == "kvspace/key·abs" {
+    if e.op == "pathspace/key·abs" {
         let t = e.args.first().map(|a| arg_type(a, tm)).unwrap_or_default();
         return format!("*{t}");
     }
     
-    if e.op == "kvlang·resolvekey" {
+    if e.op == "pathlang·resolvekey" {
         
         let base = e.args.first().map(|a| arg_type(a, tm)).unwrap_or_default();
         let container = deref_value_type(&base);
@@ -4463,9 +4463,9 @@ fn record_inst_inplace_usage(
         .collect();
     if let Some(e) = &inst.expr {
         
-        if e.op == "kvlang·resolvekey" && inst.writes.len() == 1 {
+        if e.op == "pathlang·resolvekey" && inst.writes.len() == 1 {
             let mut root = e;
-            while root.op == "kvlang·resolvekey" && !root.args.is_empty() {
+            while root.op == "pathlang·resolvekey" && !root.args.is_empty() {
                 root = &root.args[0];
             }
             
@@ -4586,7 +4586,7 @@ fn check_resolve_write_slot(
     tm: &HashMap<String, String>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    if e.op != "kvlang·resolvekey" || s.writes.len() != 1 {
+    if e.op != "pathlang·resolvekey" || s.writes.len() != 1 {
         return;
     }
     
@@ -4651,7 +4651,7 @@ fn check_resolve_write_slot(
         warn: false,
         info: false,
         message: format!(
-            "kvspace/key·deref（由 `{display}` 展开）：写槽 {:?} 需要显式类型注解\
+            "pathspace/key·deref（由 `{display}` 展开）：写槽 {:?} 需要显式类型注解\
              （如 `{}:T = …`）——base {base:?} 的形态是{base_kind}，成员类型无法静态得出",
             display, write_name
         ),
@@ -4781,7 +4781,7 @@ mod call_result_type_tests {
         
         assert_eq!(
             call_result_type(
-                "kvspace·listat",
+                "pathspace·listat",
                 &types(&["\'[]char/utf32\'int64"]),
                 &no_literals()
             ),
@@ -4789,7 +4789,7 @@ mod call_result_type_tests {
         );
         assert_eq!(
             call_result_type(
-                "kvspace·listat",
+                "pathspace·listat",
                 &types(&["\'[int64]\'int64"]),
                 &no_literals()
             ),
@@ -4797,7 +4797,7 @@ mod call_result_type_tests {
         );
         assert_eq!(
             call_result_type(
-                "kvspace·listat",
+                "pathspace·listat",
                 &types(&["\'int32\'int32"]),
                 &no_literals()
             ),
@@ -4808,23 +4808,23 @@ mod call_result_type_tests {
     #[test]
     fn listat_fails_closed_on_shapes_it_cannot_prove() {
         assert_eq!(
-            call_result_type("kvspace·listat", &types(&["/lib/Point"]), &no_literals()),
+            call_result_type("pathspace·listat", &types(&["/lib/Point"]), &no_literals()),
             None
         );
         assert_eq!(
             call_result_type(
-                "kvspace·listat",
+                "pathspace·listat",
                 &types(&["\'[int64,int64]\'int64"]),
                 &no_literals()
             ),
             None
         );
         assert_eq!(
-            call_result_type("kvspace·listat", &[None], &no_literals()),
+            call_result_type("pathspace·listat", &[None], &no_literals()),
             None
         );
         assert_eq!(
-            call_result_type("kvspace·listat", &[], &no_literals()),
+            call_result_type("pathspace·listat", &[], &no_literals()),
             None
         );
     }

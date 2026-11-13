@@ -1,10 +1,10 @@
 
-#ifndef KVSPACE_TUTORIAL_COMMON_H
-#define KVSPACE_TUTORIAL_COMMON_H
+#ifndef PATHSPACE_TUTORIAL_COMMON_H
+#define PATHSPACE_TUTORIAL_COMMON_H
 
-#include <kvspace/kvspace.h>
-#include <kvspace/kvspace_xvalue.h>
-#include <kvlang/xvalue.h>
+#include <pathspace/pathspace.h>
+#include <pathspace/pathspace_xvalue.h>
+#include <pathlang/xvalue.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,40 +22,40 @@ typedef struct {
 static inline void *kv_open_shm(const char *path) {
     char dsn[512];
     snprintf(dsn, sizeof dsn, "shm://%s", path);
-    return kvspaceConnect(dsn);
+    return pathspaceConnect(dsn);
 }
 
-static inline uint8_t *kv_base(void *h) { return kvspaceXvalueInProcessAddress(h); }
+static inline uint8_t *kv_base(void *h) { return pathspaceXvalueInProcessAddress(h); }
 
 static inline int kv_read(void *h, const char *key, kv_value *out) {
     uint64_t offset = 0;
     char err[KV_ERR_CAP];
-    if (kvspaceResolveOffset(h, key, 0, &offset, err, sizeof err) != KVSPACE_OK)
+    if (pathspaceResolveOffset(h, key, 0, &offset, err, sizeof err) != PATHSPACE_OK)
         return -1;
     uint8_t *base = kv_base(h);
     if (!base)
         return -1;
     const uint8_t *wire = base + offset;
-    const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)(const void *)wire;
-    const uint64_t total = kvspaceXvalueHeadTotalLen(head);
+    const pathspaceXvalueHead *head = (const pathspaceXvalueHead *)(const void *)wire;
+    const uint64_t total = pathspaceXvalueHeadTotalLen(head);
     if (total == 0)
         return -1;
     out->head = wire;
-    out->head_len = KVSPACE_XVALUE_HEAD_LEN;
-    out->body = wire + KVSPACE_XVALUE_HEAD_LEN;
-    out->body_len = (uint32_t)kvspaceXvalueHeadLen(head);
+    out->head_len = PATHSPACE_XVALUE_HEAD_LEN;
+    out->body = wire + PATHSPACE_XVALUE_HEAD_LEN;
+    out->body_len = (uint32_t)pathspaceXvalueHeadLen(head);
     return 0;
 }
 
 static inline const char *kv_kind(const kv_value *v, char *kind, size_t cap) {
     if (cap)
         kind[0] = 0;
-    const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)(const void *)v->head;
-    const uint64_t total = kvspaceXvalueHeadTotalLen(head);
+    const pathspaceXvalueHead *head = (const pathspaceXvalueHead *)(const void *)v->head;
+    const uint64_t total = pathspaceXvalueHeadTotalLen(head);
     if (total == 0 || cap == 0)
         return kind;
     const uint8_t *lt = NULL;
-    uint16_t n = kvlangXvalueHeadLangtypeBounded(v->head, total, &lt);
+    uint16_t n = pathlangXvalueHeadLangtypeBounded(v->head, total, &lt);
     const uint8_t *close = lt && n && lt[0] == '[' ? memchr(lt, ']', n) : NULL;
     if (close) {
         n -= (uint16_t)(close + 1 - lt);
@@ -75,18 +75,18 @@ static inline int kv_write(void *h, const char *key, const uint8_t *body,
     const uint64_t attr_len = lt_len ? 3u + lt_len : 0u;
     uint64_t offset = 0;
     char err[KV_ERR_CAP];
-    if (kvspaceRealloc(h, key, body_len, attr_len, &offset, err, sizeof err) !=
-        KVSPACE_OK)
+    if (pathspaceRealloc(h, key, body_len, attr_len, &offset, err, sizeof err) !=
+        PATHSPACE_OK)
         return -1;
     uint8_t *base = kv_base(h);
     if (!base)
         return -1;
     uint8_t *wire = base + offset;
     if (body_len && body)
-        memcpy(wire + KVSPACE_XVALUE_HEAD_LEN, body, (size_t)body_len);
+        memcpy(wire + PATHSPACE_XVALUE_HEAD_LEN, body, (size_t)body_len);
     if (lt_len) {
-        uint8_t *attr = wire + KVSPACE_XVALUE_HEAD_LEN + body_len;
-        attr[0] = KVLANG_XVALUE_ATTR_TAG_LANGTYPE;
+        uint8_t *attr = wire + PATHSPACE_XVALUE_HEAD_LEN + body_len;
+        attr[0] = PATHLANG_XVALUE_ATTR_TAG_LANGTYPE;
         attr[1] = (uint8_t)lt_len;
         attr[2] = (uint8_t)(lt_len >> 8);
         memcpy(attr + 3, langtype, lt_len);
@@ -112,12 +112,12 @@ static inline int kv_set_raw(void *h, const char *key, const uint8_t *raw,
 
 static inline void kv_del(void *h, const char *key) {
     char err[KV_ERR_CAP];
-    (void)kvspaceFree(h, key, err, sizeof err);
+    (void)pathspaceFree(h, key, err, sizeof err);
 }
 
 static inline void kv_mkindex(void *h, const char *prefix) {
     char err[KV_ERR_CAP];
-    (void)kvspaceMkindex(h, prefix, err, sizeof err);
+    (void)pathspaceMkindex(h, prefix, err, sizeof err);
 }
 
 static inline int kv_list(void *h, const char *prefix, uint8_t **out, uint32_t *out_len) {
@@ -126,15 +126,15 @@ static inline int kv_list(void *h, const char *prefix, uint8_t **out, uint32_t *
     int64_t count = 0;
     uint32_t max_name = 0;
     char err[KV_ERR_CAP];
-    if (kvspaceListlen(h, prefix, &count, &max_name, err, sizeof err) != KVSPACE_OK)
+    if (pathspaceListlen(h, prefix, &count, &max_name, err, sizeof err) != PATHSPACE_OK)
         return -1;
     if (count <= 0)
         return 0;
     char *names = malloc((size_t)count * (max_name + 1));
     uint32_t length = 0, listed = 0;
     uint64_t generation = 0;
-    if (kvspaceList(h, prefix, names, (uint32_t)((size_t)count * (max_name + 1)),
-                    &length, &listed, &generation, err, sizeof err) != KVSPACE_OK) {
+    if (pathspaceList(h, prefix, names, (uint32_t)((size_t)count * (max_name + 1)),
+                    &length, &listed, &generation, err, sizeof err) != PATHSPACE_OK) {
         free(names);
         return -1;
     }

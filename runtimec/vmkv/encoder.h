@@ -18,7 +18,7 @@ extern "C" {
 typedef struct vmkv_encoder_t vmkv_encoder_t;
 
 typedef struct vmkv_encode_request_t {
-    runtimec_kvspace_access_t *kvspace_access;
+    runtimec_pathspace_access_t *pathspace_access;
     runtimec_string_view_t function_path;
     runtimec_snapshot_t expected_snapshot;
 } vmkv_encode_request_t;

@@ -5,7 +5,7 @@
 
 #include <string.h>
 
-#include "contract/kvspace_access.h"
+#include "contract/pathspace_access.h"
 #include "vmkv/vmkv_internal.h"
 
 #define VMKV_SLOT_KEY_MARGIN 32U
@@ -289,7 +289,7 @@ runtimec_status_t vmkv_rwir_reader_create(
                               VMKV_DIAG_INVALID_REQUEST,
                               "vmkv rwir: invalid reader request", NULL, 0U);
     }
-    const runtimec_allocator_t allocator = function->kvspace_access->allocator;
+    const runtimec_allocator_t allocator = function->pathspace_access->allocator;
     vmkv_rwir_reader_t *reader = vmkv_source_allocate(
         function, sizeof(*reader), _Alignof(vmkv_rwir_reader_t));
     if (reader == NULL) {

@@ -1,0 +1,12 @@
+
+rwfunc run_proc(*'[int64]'[]char/utf32 #args,
+		*'[int64]'[]char/utf32 #envs) -> (*uint8 #code) {
+	networld/proc·exec(*args, *envs) -> *code
+}
+
+rwfunc test() -> () {
+	noenv:'[int64]'[]char/utf32 = {}
+	args:'[int64]'[]char/utf32 = {"./bin/pathseek", "-c", "print(\"pathlang in pathlang\")"}
+	run_proc(args, noenv) -> code:uint8
+	println("exit=", code)
+}

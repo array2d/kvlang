@@ -1,0 +1,8 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/slotboxallocTargets.cmake")
+
+# Provide a hint where blockalloc is expected to be found via CMake config
+if(NOT TARGET blockalloc)
+    find_package(blockalloc CONFIG REQUIRED)
+endif()

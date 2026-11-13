@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <string.h>
 
-#include "contract/kvspace_interface.h"
+#include "contract/pathspace_interface.h"
 #include "contract/allocator.h"
 #include "vmbin/directory_walk.h"
 
@@ -111,7 +111,7 @@ static void test_backend_failure_still_releases(void) {
     static char dsn[128];
     snprintf(dsn, sizeof(dsn), "shm:///tmp/runtimec-walk-test-%d/store",
              (int)getpid());
-    void *handle = kvspaceConnect(dsn);
+    void *handle = pathspaceConnect(dsn);
     if (handle == NULL) {
         printf("[skip] test_backend_failure_still_releases: cannot connect to %s\n",
                dsn);
@@ -130,7 +130,7 @@ static void test_backend_failure_still_releases(void) {
           "a second close on the same walk is safe (source pointer was cleared)");
     check(counting.deallocations == counting.allocations,
           "closing twice must not deallocate anything a second time");
-    kvspaceClose(handle);
+    pathspaceClose(handle);
 }
 
 int main(void) {

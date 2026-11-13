@@ -1,0 +1,12 @@
+[package]
+name = "pathspace-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "pathspace 存储层 CLI（libpathspace C ABI；只有 shm://，无运行期 dispatch）"
+
+[[bin]]
+name = "pathspace"
+path = "pathspace.rs"
+
+[dependencies]

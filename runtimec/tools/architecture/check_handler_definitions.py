@@ -59,25 +59,25 @@ def missing_registry_finding(root: Path) -> Finding:
         f"找到后把本文件顶部的 REGISTRY_SOURCE / REGISTRY_SOURCE_GLOBS 指过去。",
     )
 
-def preprocess(root: Path, source: Path, kvspace_include: Path | None = None) -> str:
+def preprocess(root: Path, source: Path, pathspace_include: Path | None = None) -> str:
     command = ["gcc", "-E"]
     for directory in ("runtimec", "runtimec/include", "include"):
         candidate = root / directory
         if candidate.is_dir():
             command.extend(["-I", str(candidate)])
-    if kvspace_include is not None:
-        command.extend(["-I", str(kvspace_include)])
+    if pathspace_include is not None:
+        command.extend(["-I", str(pathspace_include)])
     command.append(str(source))
     completed = subprocess.run(command, text=True, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE)
     if completed.returncode != 0:
         hint = ""
-        if kvspace_include is None:
+        if pathspace_include is None:
             hint = (
-                "\n  提示：handler 源要 include <kvspace/kvspace_xvalue.h>，"
+                "\n  提示：handler 源要 include <pathspace/pathspace_xvalue.h>，"
                 "该头在兄弟仓。加参数重跑：\n"
                 "    python3 runtimec/tools/architecture/check_handler_definitions.py "
-                "--kvspace-include=<kvspace 仓的 include/>"
+                "--pathspace-include=<pathspace 仓的 include/>"
             )
         raise RuntimeError(
             f"cannot preprocess {source}: "
@@ -86,8 +86,8 @@ def preprocess(root: Path, source: Path, kvspace_include: Path | None = None) ->
                      if not line.startswith("#"))
 
 def registered_surfaces(root: Path, registry: Path,
-                        kvspace_include: Path | None) -> list[str]:
-    text = preprocess(root, registry, kvspace_include)
+                        pathspace_include: Path | None) -> list[str]:
+    text = preprocess(root, registry, pathspace_include)
     try:
         start = text.index("runtimec_myrwircaps[] = {")
         end = text.index("\n};", start)
@@ -116,11 +116,11 @@ def surface_aliases(root: Path) -> dict[str, str]:
     return aliases
 
 def registered_operation_codes(root: Path, handler_directory: Path,
-                               kvspace_include: Path | None) -> set[int]:
-    return _registry_scan(root, handler_directory, kvspace_include)
+                               pathspace_include: Path | None) -> set[int]:
+    return _registry_scan(root, handler_directory, pathspace_include)
 
 def _registry_scan(root: Path, handler_directory: Path,
-                   kvspace_include: Path | None) -> set[int]:
+                   pathspace_include: Path | None) -> set[int]:
     literal_pattern = re.compile(
         r"\{\s*(?:\.operation_identifier\s*=\s*)?"
         r"(?:UINT16_C\(\s*)?0x([0-9A-Fa-f]+)"
@@ -132,7 +132,7 @@ def _registry_scan(root: Path, handler_directory: Path,
     identifiers = operation_identifier_constants(root)
     codes: set[int] = set()
     for source in sorted(handler_directory.glob("*.c")):
-        text = preprocess(root, source, kvspace_include)
+        text = preprocess(root, source, pathspace_include)
         for match in literal_pattern.finditer(text):
             codes.add(int(match.group(1), 16))
         for match in name_pattern.finditer(text):
@@ -165,7 +165,7 @@ def catalog_operation_codes(root: Path) -> dict[str, int]:
     return codes
 
 def audit(root: Path,
-          kvspace_include: Path | None = None) -> tuple[list[Finding], int]:
+          pathspace_include: Path | None = None) -> tuple[list[Finding], int]:
     root = root.resolve()
     registry = locate_registry_source(root)
     if registry is None:
@@ -178,11 +178,11 @@ def audit(root: Path,
         return [missing_resource(root, HANDLER_SOURCES)], 0
 
     try:
-        surfaces = registered_surfaces(root, registry, kvspace_include)
+        surfaces = registered_surfaces(root, registry, pathspace_include)
         codes = catalog_operation_codes(root)
         aliases = surface_aliases(root)
         available = registered_operation_codes(root, handler_directory,
-                                              kvspace_include)
+                                              pathspace_include)
     except (RuntimeError, OSError) as error:
         return [Finding(REGISTRY_SOURCE.as_posix(), 1,
                         "uncheckable-handler-definition", str(error))], 0
@@ -365,14 +365,14 @@ def main(command_arguments: list[str] | None = None) -> int:
     parser.add_argument("--selftest", action="store_true",
                         help="prove the checker can fail, using synthetic fixtures")
     parser.add_argument(
-        "--kvspace-include", type=Path, default=None,
-        help="kvspace 仓的 include/（提供 <kvspace/kvspace_xvalue.h>）；"
+        "--pathspace-include", type=Path, default=None,
+        help="pathspace 仓的 include/（提供 <pathspace/pathspace_xvalue.h>）；"
              "预处理 handler 源时必填",
     )
     arguments = parser.parse_args(command_arguments or sys.argv[1:])
     if arguments.selftest:
         return run_selftest()
-    findings, checked = audit(arguments.source_root, arguments.kvspace_include)
+    findings, checked = audit(arguments.source_root, arguments.pathspace_include)
     for finding in sorted(set(findings)):
         print(finding.render())
     if findings:

@@ -1,9 +1,9 @@
 [package]
-name = "kvspace"
+name = "pathspace"
 version = "0.1.0"
 edition = "2021"
-description = "Rust FFI bindings for libkvspace.so (public 12-symbol storage ABI)"
-links = "kvspace"
+description = "Rust FFI bindings for libpathspace.so (public 12-symbol storage ABI)"
+links = "pathspace"
 build = "build.rs"
 
 [dependencies]

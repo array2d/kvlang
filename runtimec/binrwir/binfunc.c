@@ -7,9 +7,9 @@
 #include <string.h>
 
 #include "binrwir/execution_exit.h"
-#include "contract/kvspace_access.h"
+#include "contract/pathspace_access.h"
 
-#include <kvspace/kvspace_xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
 
 #define BINRWIR_BINFUNC_INITIAL_CAPACITY 4U
 
@@ -1409,18 +1409,18 @@ runtimec_status_t binrwir_binfunc_builder_add_symbol(
 }
 
 bool binrwir_literal_is_none_value(runtimec_bytes_view_t wire_bytes) {
-    const kvspaceXvalueHead *head;
+    const pathspaceXvalueHead *head;
     uint64_t total;
 
-    if (wire_bytes.size < KVSPACE_XVALUE_HEAD_LEN || wire_bytes.data == NULL) {
+    if (wire_bytes.size < PATHSPACE_XVALUE_HEAD_LEN || wire_bytes.data == NULL) {
         return false;
     }
-    head = (const kvspaceXvalueHead *)(const void *)wire_bytes.data;
+    head = (const pathspaceXvalueHead *)(const void *)wire_bytes.data;
     
-    total = kvspaceXvalueHeadTotalLen(head);
+    total = pathspaceXvalueHeadTotalLen(head);
     
     return total != 0U && total == (uint64_t)wire_bytes.size &&
-           kvspaceXvalueHeadAttrsLen(head) == 0U &&
+           pathspaceXvalueHeadAttrsLen(head) == 0U &&
            runtimec_xvalue_body_from_wire(wire_bytes).size == 0U;
 }
 

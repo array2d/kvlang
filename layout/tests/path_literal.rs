@@ -1,19 +1,19 @@
 
-use kvlanglayout::{compile, init_dirs, kvkind, Kv};
+use pathlanglayout::{compile, init_dirs, kvkind, Kv};
 use std::process::Command;
 
 struct TempStore(String);
 
 impl Drop for TempStore {
     fn drop(&mut self) {
-        kvlanglayout::ffi::remove_test_store(&self.0);
+        pathlanglayout::ffi::remove_test_store(&self.0);
     }
 }
 
 fn fresh_kv(tag: &str) -> (TempStore, Kv) {
-    let dsn = kvlanglayout::ffi::test_dsn(&format!("pathlit_{tag}"));
+    let dsn = pathlanglayout::ffi::test_dsn(&format!("pathlit_{tag}"));
     let store = TempStore(dsn.clone());
-    kvlanglayout::ffi::remove_test_store(&dsn);
+    pathlanglayout::ffi::remove_test_store(&dsn);
 
     let mut kv = Kv::conn(&dsn);
     init_dirs(&mut kv).unwrap();
@@ -37,9 +37,9 @@ fn unquoted_path_write_is_kept() {
 #[test]
 fn quoted_path_in_write_slot_is_rejected() {
     
-    let bin = env!("CARGO_BIN_EXE_kvlanglayout");
+    let bin = env!("CARGO_BIN_EXE_pathlanglayout");
     let file = std::env::temp_dir().join(format!(
-        "kvlanglayout_pathlit_cli_{}.kv",
+        "pathlanglayout_pathlit_cli_{}.kv",
         std::process::id()
     ));
     std::fs::write(
@@ -47,12 +47,12 @@ fn quoted_path_in_write_slot_is_rejected() {
         "rwfunc f() -> () {\n    42 -> \"/tmp/pathlit/a\"\n}\n",
     )
     .unwrap();
-    let dsn = kvlanglayout::ffi::test_dsn(&format!("pathlit_cli_{}", std::process::id()));
+    let dsn = pathlanglayout::ffi::test_dsn(&format!("pathlit_cli_{}", std::process::id()));
     let out = Command::new(bin)
         .arg(&file)
         .arg(&dsn)
         .output()
-        .expect("run kvlanglayout");
+        .expect("run pathlanglayout");
     assert!(!out.status.success(), "引号路径写槽应被拒绝");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -60,7 +60,7 @@ fn quoted_path_in_write_slot_is_rejected() {
         "诊断文本不符：{err}"
     );
     let _ = std::fs::remove_file(&file);
-    kvlanglayout::ffi::remove_test_store(&dsn);
+    pathlanglayout::ffi::remove_test_store(&dsn);
 }
 
 #[test]
@@ -121,9 +121,9 @@ fn quoted_string_assignment_is_fine() {
 #[test]
 fn raw_quoted_path_in_write_slot_is_rejected() {
     
-    let bin = env!("CARGO_BIN_EXE_kvlanglayout");
+    let bin = env!("CARGO_BIN_EXE_pathlanglayout");
     let file = std::env::temp_dir().join(format!(
-        "kvlanglayout_pathlit_raw_{}.kv",
+        "pathlanglayout_pathlit_raw_{}.kv",
         std::process::id()
     ));
     std::fs::write(
@@ -131,12 +131,12 @@ fn raw_quoted_path_in_write_slot_is_rejected() {
         "rwfunc f() -> () {\n    42 -> r\"/tmp/pathlit/c\"\n}\n",
     )
     .unwrap();
-    let dsn = kvlanglayout::ffi::test_dsn(&format!("pathlit_raw_{}", std::process::id()));
+    let dsn = pathlanglayout::ffi::test_dsn(&format!("pathlit_raw_{}", std::process::id()));
     let out = Command::new(bin)
         .arg(&file)
         .arg(&dsn)
         .output()
-        .expect("run kvlanglayout");
+        .expect("run pathlanglayout");
     assert!(!out.status.success(), "原始串写槽应被拒绝");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -144,7 +144,7 @@ fn raw_quoted_path_in_write_slot_is_rejected() {
         "原始串诊断文本不符：{err}"
     );
     let _ = std::fs::remove_file(&file);
-    kvlanglayout::ffi::remove_test_store(&dsn);
+    pathlanglayout::ffi::remove_test_store(&dsn);
 }
 
 #[test]

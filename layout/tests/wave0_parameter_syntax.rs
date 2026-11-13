@@ -17,12 +17,12 @@ impl TempDir {
 }
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_kvlanglayout")
+    env!("CARGO_BIN_EXE_pathlanglayout")
 }
 
 fn temp_dir(tag: &str) -> TempDir {
     let dir =
-        std::env::temp_dir().join(format!("kvlanglayout_wave0_{}_{}", tag, std::process::id()));
+        std::env::temp_dir().join(format!("pathlanglayout_wave0_{}_{}", tag, std::process::id()));
     
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();

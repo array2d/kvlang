@@ -1,14 +1,14 @@
 
 #include "engine/execution_window.h"
-#include "contract/kvspace_interface.h"
+#include "contract/pathspace_interface.h"
 #include "contract/diagnostic_band.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <kvlang/xvalue.h>
-#include <kvspace/kvspace_xvalue.h>
+#include <pathlang/xvalue.h>
+#include <pathspace/pathspace_xvalue.h>
 
 #include "binrwir/binvthread_frame.h"
 #include "binrwir/frame_bindings.h"
@@ -87,7 +87,7 @@ static runtimec_program_counter_t runtimec_execution_window_make_program_counter
 }
 
 static runtimec_status_t runtimec_execution_window_materialize_parameter_pointer(
-    runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
+    runtimec_pathspace_access_t *host, const runtimec_snapshot_t *snapshot,
     const runtimec_execution_window_request_t *request,
     const binrwir_binfunc_t *program, const runtimec_string_view_t *parameter_type,
     uint32_t ordinal, const runtimec_string_view_t *caller_key,
@@ -120,7 +120,7 @@ static runtimec_status_t runtimec_execution_window_materialize_parameter_pointer
     if (langtype_text[0] != '*') {
         return RUNTIMEC_STATUS_SUCCESS;
     }
-    if (kvlangXvalueHeadNewPtr(
+    if (pathlangXvalueHeadNewPtr(
             (const uint8_t *)caller_key->data, (uint32_t)caller_key->size,
             langtype_text, &wire, &wire_size) != 0 ||
         wire == NULL || wire_size > UINT32_MAX) {
@@ -128,7 +128,7 @@ static runtimec_status_t runtimec_execution_window_materialize_parameter_pointer
         return RUNTIMEC_STATUS_ERROR;
     }
     message[0] = '\0';
-    if (!runtimec_kvspace_write_wire(host->handle, slot_key_text, wire,
+    if (!runtimec_pathspace_write_wire(host->handle, slot_key_text, wire,
                                    (uint32_t)wire_size, message,
                                    sizeof(message))) {
         free(wire);
@@ -147,7 +147,7 @@ static runtimec_status_t runtimec_execution_window_materialize_parameter_pointer
 #define RUNTIMEC_EXECUTION_WINDOW_KEY_CAPACITY 256U
 
 static runtimec_status_t runtimec_execution_window_bind_slot(
-    runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
+    runtimec_pathspace_access_t *host, const runtimec_snapshot_t *snapshot,
     binrwir_frame_bindings_t *bindings, uint16_t binding_slot,
     runtimec_string_view_t key_text, uint64_t *generation_in_out,
     runtimec_execution_window_diagnostic_t *output_detail, runtimec_error_t *error) {
@@ -156,7 +156,7 @@ static runtimec_status_t runtimec_execution_window_bind_slot(
     const runtimec_key_view_t slot_key =
         runtimec_key_view_make(key_text.data, key_text.size);
     runtimec_status_t status =
-        runtimec_kvspace_access_resolve_frame_xvalue_address(
+        runtimec_pathspace_access_resolve_frame_xvalue_address(
             host, snapshot, slot_key, &xvalue_address, &generation, error);
 
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -185,7 +185,7 @@ static runtimec_status_t runtimec_execution_window_bind_slot(
 }
 
 static runtimec_status_t runtimec_execution_window_materialize_argument(
-    runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
+    runtimec_pathspace_access_t *host, const runtimec_snapshot_t *snapshot,
     const runtimec_execution_window_request_t *request,
     const runtimec_argument_description_t *description, size_t ordinal,
     char *scratch, size_t scratch_capacity, runtimec_string_view_t *output_key,
@@ -231,7 +231,7 @@ static runtimec_status_t runtimec_execution_window_materialize_argument(
             return RUNTIMEC_STATUS_INVALID;
         }
         
-        if (runtimec_kvspace_access_write(
+        if (runtimec_pathspace_access_write(
                 host, snapshot,
                 runtimec_key_view_make(scratch, strlen(scratch)),
                 runtimec_bytes_view_make(description->literal_bytes.data,
@@ -253,7 +253,7 @@ static runtimec_status_t runtimec_execution_window_materialize_argument(
             return RUNTIMEC_STATUS_INVALID;
         }
         
-        if (runtimec_kvspace_access_ensure_zero_value(
+        if (runtimec_pathspace_access_ensure_zero_value(
                 host, snapshot,
                                     runtimec_key_view_make(description->key.data,
                                                            description->key.size),
@@ -273,7 +273,7 @@ static runtimec_status_t runtimec_execution_window_materialize_argument(
 }
 
 static runtimec_status_t runtimec_execution_window_bind_parameters(
-    runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
+    runtimec_pathspace_access_t *host, const runtimec_snapshot_t *snapshot,
     const binrwir_binfunc_t *program, const runtimec_execution_window_request_t *request,
     binrwir_frame_bindings_t *bindings, uint64_t *output_generation,
     runtimec_execution_window_diagnostic_t *output_detail, runtimec_error_t *error) {
@@ -380,7 +380,7 @@ static runtimec_status_t runtimec_execution_window_bind_parameters(
 }
 
 static runtimec_status_t runtimec_execution_window_operation_name(
-    runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
+    runtimec_pathspace_access_t *host, const runtimec_snapshot_t *snapshot,
     const char *function_path, uint32_t source_program_counter,
     char *output_key, size_t key_capacity,
     runtimec_string_view_t *output_operation, runtimec_error_t *error) {
@@ -396,7 +396,7 @@ static runtimec_status_t runtimec_execution_window_operation_name(
     memset(&buffer, 0, sizeof(buffer));
     buffer.data = storage;
     buffer.capacity = sizeof(storage);
-    runtimec_status_t status = runtimec_kvspace_access_read(
+    runtimec_status_t status = runtimec_pathspace_access_read(
         host, snapshot,
         runtimec_key_view_make(output_key, (size_t)key_length), &buffer, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -428,7 +428,7 @@ static runtimec_string_view_t runtimec_execution_window_persistent_status(
 }
 
 static runtimec_status_t runtimec_execution_window_commit_checkpoint(
-    runtimec_session_t *session, runtimec_kvspace_access_t *host,
+    runtimec_session_t *session, runtimec_pathspace_access_t *host,
     const runtimec_snapshot_t *snapshot,
     const runtimec_execution_window_request_t *request,
     const binrwir_execution_exit_t *execution_exit, runtimec_error_t *error) {
@@ -476,11 +476,11 @@ static runtimec_status_t runtimec_execution_window_commit_checkpoint(
     checkpoint.persistent_status = runtimec_execution_window_persistent_status(
         execution_exit->kind, request->stack_identifier);
     checkpoint.outcome = execution_exit->status;
-    return runtimec_kvspace_access_checkpoint(host, &checkpoint, error);
+    return runtimec_pathspace_access_checkpoint(host, &checkpoint, error);
 }
 
 static runtimec_status_t runtimec_execution_window_materialize_locals(
-    runtimec_kvspace_access_t *host, const runtimec_snapshot_t *snapshot,
+    runtimec_pathspace_access_t *host, const runtimec_snapshot_t *snapshot,
     const binrwir_binfunc_t *program,
     const runtimec_execution_window_request_t *request,
     binrwir_frame_bindings_t *bindings, size_t binding_capacity,
@@ -502,7 +502,7 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
         return RUNTIMEC_STATUS_INVALID;
     }
     
-    status = runtimec_kvspace_access_frame_generation(
+    status = runtimec_pathspace_access_frame_generation(
         host, snapshot, runtimec_key_view_make(request->frame_path.data,
                                                request->frame_path.size),
         generation_in_out, error);
@@ -585,7 +585,7 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
         if (binrwir_symbol_name_is_member(name)) {
             continue;
         }
-        if (!runtimec_kvspace_access_langtype_has_fixed_zero_width(langtype)) {
+        if (!runtimec_pathspace_access_langtype_has_fixed_zero_width(langtype)) {
             continue;
         }
         key_size = request->frame_path.size + 1U + name.size;
@@ -605,7 +605,7 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
 
         const runtimec_key_view_t slot_key =
             runtimec_key_view_make(key_text, key_size);
-        status = runtimec_kvspace_access_ensure_zero_value(
+        status = runtimec_pathspace_access_ensure_zero_value(
             host, snapshot, slot_key,
                                          langtype, error);
         if (status == RUNTIMEC_STATUS_SUCCESS) {
@@ -623,7 +623,7 @@ static runtimec_status_t runtimec_execution_window_materialize_locals(
             }
             if (status == RUNTIMEC_STATUS_SUCCESS) {
                 status =
-                    runtimec_kvspace_access_resolve_frame_xvalue_address(
+                    runtimec_pathspace_access_resolve_frame_xvalue_address(
                         host, snapshot, slot_key, &xvalue_address,
                     &generation, error);
             }
@@ -683,7 +683,7 @@ static runtimec_status_t runtimec_execution_window_find_instruction(
 
 static runtimec_status_t runtimec_execution_window_compile_and_insert(
     const runtimec_session_runtime_components_t *components,
-    runtimec_kvspace_access_t *host, const runtimec_execution_window_request_t *request,
+    runtimec_pathspace_access_t *host, const runtimec_execution_window_request_t *request,
     const runtimec_snapshot_t *snapshot,
     const runtimec_compilation_repository_key_t *key,
     runtimec_compilation_repository_lease_t *output_lease,
@@ -693,7 +693,7 @@ static runtimec_status_t runtimec_execution_window_compile_and_insert(
     binrwir_compilation_t *compilation = NULL;
     runtimec_status_t status;
 
-    encode_request.kvspace_access = host;
+    encode_request.pathspace_access = host;
     encode_request.function_path = request->function_path;
     encode_request.expected_snapshot = *snapshot;
     status = vmkv_encode(components->vmkv_encoder, &encode_request, &program,
@@ -740,7 +740,7 @@ static runtimec_status_t runtimec_execution_window_compile_and_insert(
 runtimec_status_t runtimec_execution_window_execute(
     runtimec_session_t *session, const runtimec_execution_window_request_t *request,
     runtimec_execution_window_result_t *output_result, runtimec_error_t *error) {
-    runtimec_kvspace_access_t *host = NULL;
+    runtimec_pathspace_access_t *host = NULL;
     runtimec_session_runtime_components_t components;
     runtimec_snapshot_t snapshot;
     runtimec_compilation_repository_key_t key;
@@ -765,7 +765,7 @@ runtimec_status_t runtimec_execution_window_execute(
     bool lease_held = false;
     bool frame_ready = false;
     
-    void *kvspace_handle = NULL;
+    void *pathspace_handle = NULL;
     runtimec_status_t status;
 
     if (output_result == NULL) {
@@ -791,7 +791,7 @@ runtimec_status_t runtimec_execution_window_execute(
             RUNTIMEC_EXECUTION_WINDOW_DIAG_INVALID_REQUEST,
             "invalid execution window request");
     }
-    if (runtimec_session_get_kvspace_access(session, &host) !=
+    if (runtimec_session_get_pathspace_access(session, &host) !=
             RUNTIMEC_STATUS_SUCCESS ||
         host == NULL ||
         runtimec_session_get_runtime_components(session, &components) !=
@@ -803,12 +803,12 @@ runtimec_status_t runtimec_execution_window_execute(
             "host services lack a capability this route requires");
     }
     
-    if (runtimec_session_get_kvspace_handle(session, &kvspace_handle) !=
+    if (runtimec_session_get_pathspace_handle(session, &pathspace_handle) !=
         RUNTIMEC_STATUS_SUCCESS) {
         return runtimec_execution_window_fail(
             output_result, error, RUNTIMEC_STATUS_INVALID,
             RUNTIMEC_EXECUTION_WINDOW_DIAG_INVALID_REQUEST,
-            "cannot read the kvspace handle from the session");
+            "cannot read the pathspace handle from the session");
     }
     if (runtimec_session_get_frame_state(session, &frame_state_table) !=
             RUNTIMEC_STATUS_SUCCESS ||
@@ -823,7 +823,7 @@ runtimec_status_t runtimec_execution_window_execute(
     snapshot.contract_version = runtimec_contract_version();
     snapshot.function_key =
         runtimec_key_view_make(request->function_path.data, request->function_path.size);
-    status = runtimec_kvspace_access_source_revision(
+    status = runtimec_pathspace_access_source_revision(
         host, snapshot.function_key,
                                    &snapshot.source_revision, error);
     if (status != RUNTIMEC_STATUS_SUCCESS) {
@@ -912,7 +912,7 @@ runtimec_status_t runtimec_execution_window_execute(
         goto release_lease;
     }
 
-    status = runtimec_kvspace_access_ensure_frame(
+    status = runtimec_pathspace_access_ensure_frame(
         host, &snapshot,
         runtimec_key_view_make(request->frame_path.data,
                                request->frame_path.size),
@@ -925,7 +925,7 @@ runtimec_status_t runtimec_execution_window_execute(
         goto release_lease;
     }
     
-    status = runtimec_kvspace_access_frame_generation(
+    status = runtimec_pathspace_access_frame_generation(
         host, &snapshot,
         runtimec_key_view_make(request->frame_path.data,
                                request->frame_path.size),
@@ -1004,7 +1004,7 @@ runtimec_status_t runtimec_execution_window_execute(
         goto release_frame_state;
     }
     
-    frame.kvspace_access = host;
+    frame.pathspace_access = host;
     frame.snapshot = snapshot;
     
     frame.stack_identifier = request->stack_identifier;
@@ -1023,7 +1023,7 @@ runtimec_status_t runtimec_execution_window_execute(
     } else {
         status = vmbin_execute(compilation_view.canonical_program,
                                compilation_view.execution_plan, &frame,
-                               components.builtin_registry, kvspace_handle, NULL,
+                               components.builtin_registry, pathspace_handle, NULL,
                                &execution_exit);
     }
     output_result->execution_exit = execution_exit;
@@ -1060,7 +1060,7 @@ runtimec_status_t runtimec_execution_window_execute(
                 runtimec_execution_window_persistent_status(
                     execution_exit.kind, request->stack_identifier);
             handoff_request.checkpoint.outcome = execution_exit.status;
-            status = runtimec_kvspace_access_handoff(
+            status = runtimec_pathspace_access_handoff(
                 host, &handoff_request, error);
         }
         

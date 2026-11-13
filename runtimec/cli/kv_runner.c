@@ -1,7 +1,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "contract/kvspace_interface.h"
+#include "contract/pathspace_interface.h"
 #include "binrwir/execution_exit.h"
 #include "binrwir/instruction.h"
 #include "binrwir/frame_bindings.h"
@@ -13,7 +13,7 @@
 #include "engine/session.h"
 #include "engine/frame_driver.h"
 
-#include "contract/kvspace_access.h"
+#include "contract/pathspace_access.h"
 #include "vmkv/encoder.h"
 #include "vmkv/rwir_manifest.h"
 
@@ -243,8 +243,8 @@ typedef struct runner_environment {
     void *layout_library;
     layout_file_function_t layout_file;
     
-    void *kvspace_handle;
-    runtimec_kvspace_access_t *kvspace_access;
+    void *pathspace_handle;
+    runtimec_pathspace_access_t *pathspace_access;
     runtimec_session_t *session;
     
     frame_driver_t frame_driver;
@@ -255,7 +255,7 @@ typedef struct runner_environment {
 
 static bool environment_open(runner_environment_t *environment,
                              const char *layout_path,
-                             const char *kvspace_path) {
+                             const char *pathspace_path) {
     memset(environment, 0, sizeof(*environment));
     environment->layout_library = dlopen(layout_path, RTLD_NOW | RTLD_LOCAL);
     if (environment->layout_library == NULL) {
@@ -264,12 +264,12 @@ static bool environment_open(runner_environment_t *environment,
         return false;
     }
     environment->layout_file = (layout_file_function_t)(uintptr_t)dlsym(
-        environment->layout_library, "kvlangLayoutFile");
+        environment->layout_library, "pathlangLayoutFile");
     if (environment->layout_file == NULL) {
-        fprintf(stderr, "SKIP: layout library has no kvlangLayoutFile\n");
+        fprintf(stderr, "SKIP: layout library has no pathlangLayoutFile\n");
         return false;
     }
-    (void)kvspace_path;
+    (void)pathspace_path;
     return true;
 }
 
@@ -302,21 +302,21 @@ static bool case_store_open(runner_environment_t *environment,
     }
     snprintf(environment->data_source, sizeof(environment->data_source),
              "shm://%s/store.shm", environment->directory);
-    environment->kvspace_handle = kvspaceConnect(environment->data_source);
-    if (environment->kvspace_handle == NULL) {
+    environment->pathspace_handle = pathspaceConnect(environment->data_source);
+    if (environment->pathspace_handle == NULL) {
         fprintf(stderr, "case store: cannot connect %s\n",
                 environment->data_source);
         return false;
     }
-    runtimec_kvspace_access_request_t request = {
+    runtimec_pathspace_access_request_t request = {
         .allocator = {.context = NULL,
                       .allocate = test_allocate,
                       .deallocate = test_deallocate},
-        .borrowed_kvspace_handle = environment->kvspace_handle,
+        .borrowed_pathspace_handle = environment->pathspace_handle,
         .instance_identifier = UINT64_C(1),
     };
-    if (runtimec_kvspace_access_create(&request,
-                                       &environment->kvspace_access,
+    if (runtimec_pathspace_access_create(&request,
+                                       &environment->pathspace_access,
                                        &error) != RUNTIMEC_STATUS_SUCCESS) {
         fprintf(stderr, "case store: adapter create failed\n");
         return false;
@@ -328,7 +328,7 @@ static bool case_store_open(runner_environment_t *environment,
     options.allocator.allocate = runtimec_allocate;
     options.allocator.deallocate = runtimec_deallocate;
     
-    options.kvspace_handle = environment->kvspace_handle;
+    options.pathspace_handle = environment->pathspace_handle;
     options.compilation_cache_capacity = 64U;
     
     options.machine_code_capacity = 0U;
@@ -357,7 +357,7 @@ static bool case_store_open(runner_environment_t *environment,
             options.extension_count = 1U;
         }
     }
-    if (runtimec_session_create(environment->kvspace_access, &options,
+    if (runtimec_session_create(environment->pathspace_access, &options,
                                 &environment->session,
                                 &error) != RUNTIMEC_STATUS_SUCCESS) {
         fprintf(stderr, "case store: session create failed: status=%d %s\n",
@@ -382,19 +382,19 @@ static runtimec_status_t case_store_close(runner_environment_t *environment) {
         }
         environment->session = NULL;
     }
-    if (environment->kvspace_handle != NULL) {
+    if (environment->pathspace_handle != NULL) {
         runtimec_error_t error;
         
-        if (environment->kvspace_access != NULL) {
-            if (runtimec_kvspace_access_destroy(environment->kvspace_access,
+        if (environment->pathspace_access != NULL) {
+            if (runtimec_pathspace_access_destroy(environment->pathspace_access,
                                                 &error) !=
                 RUNTIMEC_STATUS_SUCCESS) {
                 status = RUNTIMEC_STATUS_ERROR;
             }
-            environment->kvspace_access = NULL;
+            environment->pathspace_access = NULL;
         }
-        kvspaceClose(environment->kvspace_handle);
-        environment->kvspace_handle = NULL;
+        pathspaceClose(environment->pathspace_handle);
+        environment->pathspace_handle = NULL;
     }
     if (environment->directory[0] != '\0') {
         remove_case_store_files(environment->directory);
@@ -498,13 +498,13 @@ static void operation_name_at(runner_environment_t *environment,
     buffer.capacity = sizeof(storage);
     runtimec_error_t error;
     memset(&error, 0, sizeof(error));
-    if (runtimec_kvspace_access_read(environment->kvspace_access, snapshot,
+    if (runtimec_pathspace_access_read(environment->pathspace_access, snapshot,
                                    runtimec_key_view_from_c_string(key),
                                    &buffer, &error) != RUNTIMEC_STATUS_SUCCESS) {
         return;
     }
     
-    const size_t head = KVSPACE_XVALUE_HEAD_LEN;
+    const size_t head = PATHSPACE_XVALUE_HEAD_LEN;
     if (buffer.size <= head + 5U) {
         return;
     }
@@ -940,7 +940,7 @@ int main(int argument_count, char **arguments) {
     if (positional_count != 3U) {
         fprintf(stderr,
                 "usage: kv_runner [--operators=a,b] [--list-outcomes] "
-                "<corpus-dir> <layout-lib> <kvspace-lib>\n");
+                "<corpus-dir> <layout-lib> <pathspace-lib>\n");
         return 2;
     }
     const char *corpus = positional[0];
@@ -1170,7 +1170,7 @@ int main(int argument_count, char **arguments) {
             runtimec_error_t encode_error;
             memset(&encode_request, 0, sizeof(encode_request));
             memset(&encode_error, 0, sizeof(encode_error));
-            encode_request.kvspace_access = environment.kvspace_access;
+            encode_request.pathspace_access = environment.pathspace_access;
             encode_request.function_path =
                 runtimec_string_view_from_c_string(function_path);
             encode_request.expected_snapshot.contract_version =
@@ -1183,8 +1183,8 @@ int main(int argument_count, char **arguments) {
             
             encode_request.expected_snapshot.source_position_text =
                 runtimec_string_view_from_c_string("[1,0]");
-            if (runtimec_kvspace_access_source_revision(
-                    environment.kvspace_access,
+            if (runtimec_pathspace_access_source_revision(
+                    environment.pathspace_access,
                     encode_request.expected_snapshot.function_key,
                     &encode_request.expected_snapshot.source_revision,
                     &encode_error) != RUNTIMEC_STATUS_SUCCESS) {

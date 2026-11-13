@@ -1,5 +1,5 @@
 flowchart LR
-  subgraph RWIR["RWIR plaintext in kvspace"]
+  subgraph RWIR["RWIR plaintext in pathspace"]
     OPERATION_NAME["operation name"]
     READ_PARAMETER["Read parameter<br/>type plus name plus key"]
     WRITE_PARAMETER["Write parameter<br/>type plus name plus key"]
@@ -14,7 +14,7 @@ flowchart LR
 
   VMKV_VALIDATE["vmkv<br/>validate RWIR and request static key dereference"]
   HOST["host<br/>dereference static key to nonzero uint64 XValue base<br/>never choose body offset"]
-  XVALUE["kvspace XValue<br/>64-bit base plus fixed 8-byte head"]
+  XVALUE["pathspace XValue<br/>64-bit base plus fixed 8-byte head"]
   VMKV_DERIVE["vmkv only<br/>compute argaddr = xvalue_address + 8<br/>with overflow check"]
 
   subgraph BINRWIR["Process-local BinRWIR"]
@@ -23,7 +23,7 @@ flowchart LR
     WRITE_ARGUMENT["Write argidx plus uint64 argaddr"]
   end
 
-  BODY["one authoritative kvspace V.body<br/>at XValue base + 8<br/>same nonzero 64-bit argaddr"]
+  BODY["one authoritative pathspace V.body<br/>at XValue base + 8<br/>same nonzero 64-bit argaddr"]
   VMBIN["vmbin<br/>direct load and store<br/>no value cache or register file"]
   JIT["internal JIT current instruction<br/>speculative register and spill state<br/>alias reads observe speculative writes"]
   COMPLETION{"Logical instruction<br/>fully completed?"}
