@@ -1,6 +1,7 @@
-/* kvlangxvalue —— kvlang 语言层 XValue 的唯一实现文件。
+/* kvlangxvalue —— kvlang 语言层 XValue 的构造与 wire 实现。
  *
- * 一个头、一个 C：wire 构造、强类型构造器、坐标比较、kind 串查询。
+ * 一个公共头（kvlangxvalue.h）+ 若干实现文件：这里放 wire 构造、强类型构造器、
+ * 坐标比较、kind 串查询；langtype 解析、值与文本、编码与浮点格式化在各自的 .c。
  * 所有值都**直接落在 kvspace 里**：`kvlangxvalueNew(handle, key, …)` 按 key
  * 分配并返回映射内的 wire 指针，WriteBody/WriteLangtype 原地补齐；
  * 不再有堆缓冲、不再有 free。字节布局全部委托给 kvspace_xvalue.h 的 head 访问器。
@@ -37,9 +38,7 @@ uint8_t *kvlangxvalueNew(void *handle, const char *key, uint64_t body_len,
     if (!handle || !key)
         return NULL;
     uint64_t offset = 0;
-    char error[256] = {0};
-    const int status = kvspaceRealloc(handle, key, body_len, attr_len, &offset,
-                                      error, (uint32_t)sizeof error);
+    const int status = kvspaceRealloc(handle, key, body_len, attr_len, &offset);
     if (status != KVSPACE_OK)
         return NULL;
     uint8_t *base = kvspaceXvalueInProcessAddress(handle);
@@ -129,11 +128,30 @@ static int is_base_langtype(const char *langtype) {
     return 0;
 }
 
-/* `[]T`：BufferArray 只收基础类型元素的数组。内部函数，不导出。 */
+/* `[]T` 或 `[N]T`：BufferArray 收**长度已定或待定**的缓冲数组，元素必须是
+   基础数据类型。维度段允许十进制数字、逗号与负号（`[1,-1]` 表示长度未定），
+   两者都不改变元素宽度。内部函数，不导出。 */
 static int is_buffer_array_langtype(const char *langtype) {
-    if (!langtype || langtype[0] != '[' || langtype[1] != ']')
+    if (!langtype || langtype[0] != '[')
         return 0;
-    return is_base_langtype(langtype + 2);
+    const char *p = langtype + 1;
+    int digits = 0;
+    for (; *p && *p != ']'; p++) {
+        if (*p >= '0' && *p <= '9') {
+            digits = 1;
+        } else if (*p == ',') {
+            if (!digits) return 0;
+            digits = 0;
+        } else if (*p != '-' && *p != '.' && *p != '?' && *p != '*' &&
+                   *p != '+') {
+            /* 轴量词：语言文法里 dims 允许 integer | . | ? | * | +，缓冲数组
+               只借它表达「长度已定/待定」，不自己发明更窄的规则。 */
+            return 0;
+        }
+    }
+    if (*p != ']')
+        return 0;
+    return is_base_langtype(p + 1);
 }
 
 /* 基础类型里的紧凑数组元素：去掉变长的 char/utf8，char/utf32、char/ascii
@@ -277,79 +295,6 @@ uint8_t *kvlangXvalueNewFloat64(void *handle, const char *key, double v,
     for (int i = 0; i < 8; i++)
         raw[i] = (uint8_t)(bits >> (8 * i));
     return kvlangXvalueNewT(handle, key, raw, 8, langtype);
-}
-
-/* ── 坐标段工具（cmp_coord 的唯一实现）（原 coord.c）────────────────────────────────────────── */
-
-/* 坐标段工具：`[1,2]` 这类成员名的判定与比较。
- *
- * 这是**唯一一份** `cmp_coord`。存储层（`kvspaceList`）按契约返回后端顺序、不排序；
- * 需要坐标序的调用方（runtimec / layout / CLI）一律走这里，不各写一套——两套比较器
- * 迟早对「小数坐标 / 字符串坐标 / 目录尾斜杠」这类边角判不同，症状是「同一个目录，
- * 两个算子取到不同的第 i 项」。 */
-
-
-int kvlangCoordIsCoord(const char *name) {
-    if (!name || name[0] != '[')
-        return 0;
-    size_t n = strlen(name);
-    if (n < 3 || name[n - 1] != ']')
-        return 0;
-    for (size_t i = 1; i + 1 < n; i++)
-        if (name[i] == '[' || name[i] == ']')
-            return 0;
-    return 1;
-}
-
-/* Parse integer coordinates; return -1 on mismatch. */
-int kvlangParseCoord(const char *name, int64_t *coords, int maxn) {
-    if (!name || name[0] != '[')
-        return -1;
-    int n = 0;
-    int64_t cur = 0;
-    bool has = false;
-    for (const char *p = name + 1; *p; p++) {
-        if (*p >= '0' && *p <= '9') {
-            cur = cur * 10 + (*p - '0');
-            has = true;
-        } else if (*p == ',') {
-            if (!has || n >= maxn)
-                return -1;
-            coords[n++] = cur;
-            cur = 0;
-            has = false;
-        } else if (*p == ']') {
-            if (!has || n >= maxn)
-                return -1;
-            coords[n++] = cur;
-            return (p[1] == '\0') ? n : -1;
-        } else {
-            return -1;
-        }
-    }
-    return -1;
-}
-
-int kvlangCoordCmp(const char *a, const char *b) {
-    int ia = kvlangCoordIsCoord(a), ib = kvlangCoordIsCoord(b);
-    if (!ia && !ib)
-        return strcmp(a, b);
-    if (!ia)
-        return 1; /* 非坐标段排后 */
-    if (!ib)
-        return -1;
-    int64_t ca[8], cb[8];
-    int na = kvlangParseCoord(a, ca, 8);
-    int nb = kvlangParseCoord(b, cb, 8);
-    if (na < 0 || nb < 0)
-        return strcmp(a, b); /* 含小数/字符串坐标 → 字典序 */
-    for (int i = 0; i < na && i < nb; i++) {
-        if (ca[i] != cb[i])
-            return ca[i] < cb[i] ? -1 : 1;
-    }
-    if (na != nb)
-        return na < nb ? -1 : 1;
-    return 0;
 }
 
 /* ── 语言层 kind 串常量的运行期查询（原 const.c）────────────────────────────────────────── */

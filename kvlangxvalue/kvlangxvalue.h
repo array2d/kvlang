@@ -10,12 +10,17 @@
  *     **不定义任何字节偏移**——偏移、长度、越界检查全部在字节层头里；
  *   - 本头只补语言层才知道的部分：哪个 tag 是类型、构造器语义、坐标比较、kind 串。
  *
- * 源码与构建：`kvlangxvalue/{xvalue,codec,coord,const}.c`，构建入口同目录
- * `CMakeLists.txt`（静态库 libkvlang_xvalue.a，随 layout/runtimec/byteseek 编入）。
+ * 源码与构建：本头是**唯一公共头**；实现分散在同目录的各个 .c 里（构造器与 wire、
+ * langtype 解析、值与文本、char 编码、浮点格式化、坐标比较、kind 常量）。构建入口
+ * 同目录 `CMakeLists.txt`，产物是共享库 `libkvlang_xvalue.so`。
  */
 
 #ifndef KVLANG_KVLANGXVALUE_H
 #define KVLANG_KVLANGXVALUE_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #include <kvspace/kvspace_xvalue.h>
 
@@ -102,9 +107,9 @@ int kvlangxvalueWriteLangtype(uint8_t *wire, uint64_t body_len, char prefix,
 uint8_t *kvlangXvalueNewT(void *handle, const char *key,
                                const uint8_t *raw, uint32_t raw_len,
                                const char *langtype);
-/* `[]T` 数组，T 只允许基础数据类型（bool、int8..int64、uint8..uint64、
-   float32、float64、char/utf8|utf32|ascii）；其它 langtype 返回 NULL。
-   判定是内部的，不导出。 */
+/* 缓冲数组：`[]T`（长度待定）或 `[N]T`（长度已定，N 可含 `-1` 标记）；
+   T 只允许基础数据类型（bool、int8..int64、uint8..uint64、float32、float64、
+   char/utf8|utf32|ascii）。其它 langtype 返回 NULL。判定是内部的，不导出。 */
 uint8_t *kvlangXvalueNewBufferArray(void *handle, const char *key,
                                     const uint8_t *data, uint64_t data_len,
                                     const char *langtype);
@@ -143,14 +148,40 @@ uint8_t *kvlangXvalueNewInt64(void *handle, const char *key, int64_t v,
 uint8_t *kvlangXvalueNewFloat64(void *handle, const char *key, double v,
                                 const char *langtype);
 
-/* ══ 四、坐标段工具（coord.c）════════════════════════════════════════ */
+/* ══ 三·五、值与文本（value_text.c）══════════════════════════════════
+ *
+ * 值与文本之间**唯一的转换点**。只覆盖有天然文本形态的类型：整数、浮点、bool、
+ * `char/<enc>`、`[]char/<enc>`；Ptr / map / struct / 定长数组没有唯一文本形态，
+ * 一律失败——不猜格式。 */
 
-/* `cmp_coord` 是「排序上移」后的共享比较器：存储层只给后端顺序的名字，
- * 排序由上层做，而**只能有一份比较器**——runtimec/layout/CLI 各写一套就是
- * 让同一排序在不同实现里漂移。这三个函数就是那一份。 */
-int kvlangCoordIsCoord(const char *name);
-int kvlangParseCoord(const char *name, int64_t *coords, int maxn);
-int kvlangCoordCmp(const char *a, const char *b);
+typedef enum kvlangXvalueTextFailure {
+    KVLANG_XVALUE_TEXT_OK = 0,
+    KVLANG_XVALUE_TEXT_BAD_LANGTYPE,       /* langtype 语法畸形 */
+    KVLANG_XVALUE_TEXT_UNSUPPORTED_TYPE,   /* 形态合法但没有唯一文本形态 */
+    KVLANG_XVALUE_TEXT_BAD_ESCAPE_FORMAT,  /* 文本不是该类型的合法表示 */
+    KVLANG_XVALUE_TEXT_OUT_OF_RANGE,       /* 数值超出该类型表示范围 */
+    KVLANG_XVALUE_TEXT_BUFFER_TOO_SMALL    /* 输出缓冲装不下；不截断 */
+} kvlangXvalueTextFailure;
+
+/* 文本 → body。`output` 为 NULL 且 capacity 为 0 时只问所需长度。
+   整数按小端定宽；bool 写 1 字节 0/1；char/utf32 写码点序列（4 字节小端）；
+   char/utf8 写 UTF-8 字节；char/ascii 只接受 ASCII。 */
+bool kvlangXvalueTextToBytes(const char *langtype, size_t langtype_length,
+                             const char *value_text, size_t value_text_length,
+                             uint8_t *output, size_t output_capacity,
+                             size_t *output_length,
+                             kvlangXvalueTextFailure *failure);
+
+/* body → 文本，与上面严格互逆（浮点走最短往返表示，文本可能归一化）。
+   `output` 为 NULL 时只问长度；成功时输出以 NUL 结尾，长度不含 NUL。 */
+bool kvlangXvalueTextFromBytes(const char *langtype, size_t langtype_length,
+                               const uint8_t *body, size_t body_length,
+                               char *output, size_t output_capacity,
+                               size_t *output_length,
+                               kvlangXvalueTextFailure *failure);
+
+/* 失败原因的可读文本；不带句号。 */
+const char *kvlangXvalueTextFailureText(kvlangXvalueTextFailure failure);
 
 /* ══ 五、kind 串常量（const.c）══════════════════════════════════════ */
 
@@ -176,6 +207,7 @@ int kvlangCoordCmp(const char *a, const char *b);
 #define KVLANG_KIND_SCOPE      "scope"
 #define KVLANG_KIND_TIME       "time"
 #define KVLANG_KIND_DURATION   "duration"
+#define KVLANG_RUNTIME_MEMBER_SEP "\xE2\x80\xA5"
 
 #define KVLANG_KV(X) \
     X(KVLANG_KIND_NONE) \
@@ -199,7 +231,8 @@ int kvlangCoordCmp(const char *a, const char *b);
     X(KVLANG_KIND_DEF_RWIR) \
     X(KVLANG_KIND_SCOPE) \
     X(KVLANG_KIND_TIME) \
-    X(KVLANG_KIND_DURATION)
+    X(KVLANG_KIND_DURATION) \
+    X(KVLANG_RUNTIME_MEMBER_SEP)
 
 /* 运行期查询：kvlangConstLanguage("KVLANG_KIND_MAP") -> "stringkeymap"。
  * 供 Go/Python/Rust 扩展经 C ABI 取常量，避免硬编码。 */

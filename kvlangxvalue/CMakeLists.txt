@@ -4,14 +4,18 @@ project(kvlang_xvalue LANGUAGES C)
 # kvlang 语言层的 XValue 库：把 langtype（tag 1）、构造器、坐标比较器从 kvspace
 # 搬出来，kvspace 只留字节层与存储 ABI。
 #
-# 一个头、一个 C：kvlangxvalue.h + kvlangxvalue.c（原 xvalue/codec/coord/const 合并至此）。
+# 一个公共头：kvlangxvalue.h。实现分在多个 .c 里（构造器与 wire、langtype 解析、
+# 值与文本、char 编码、浮点格式化、坐标比较、kind 常量），全部编进同一个共享库。
 #
 # **共享库**：语言层的 XValue 语义以 .so 提供，layout/runtimec/byteseek 动态链接；
 # 运行期靠 rpath 解析，不装系统目录。
 set(KVLANG_XVALUE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
 add_library(kvlang_xvalue SHARED
-    "${CMAKE_CURRENT_SOURCE_DIR}/kvlangxvalue.c")
+    "${CMAKE_CURRENT_SOURCE_DIR}/kvlangxvalue.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/langtype.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/value_text.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/char_codec.c")
 set_target_properties(kvlang_xvalue PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # kvspace 的字节层头（kvspace_xvalue.h）只有一个定义点。**必须是 PUBLIC**：我们的
@@ -74,6 +78,10 @@ if(NOT KVLANG_KVSPACE_LIBRARY_PATH)
 endif()
 target_link_libraries(kvlang_xvalue PUBLIC "${KVLANG_KVSPACE_LIBRARY_PATH}")
 
+# 命令行工具随语言层一起发布：它按 (langtype, 文本) 读写 XValue，属于语言层的
+# 对外窗口，不再是 runtimec 的一部分。
+add_subdirectory(kvi)
+
 include(CTest)
 if(BUILD_TESTING)
     foreach(name xvalue codec coord)
@@ -88,6 +96,8 @@ if(BUILD_TESTING)
     add_executable(xvalue_wire_golden
         "${KVLANG_XVALUE_ROOT}/tests/xvalue_wire_golden.c")
     target_link_libraries(xvalue_wire_golden PRIVATE kvlang_xvalue)
+
+    add_subdirectory(test)
 endif()
 
 install(TARGETS kvlang_xvalue LIBRARY DESTINATION lib)
