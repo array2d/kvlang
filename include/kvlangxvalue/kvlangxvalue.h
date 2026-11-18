@@ -1,29 +1,191 @@
-/*
- * 组件：kvlangxvalue/value_text — 实现。判据全在头注释里，这里只写「怎么映射」。
- */
 
-#include "kvlangxvalue.h"
+#ifndef KVLANG_KVLANGXVALUE_H
+#define KVLANG_KVLANGXVALUE_H
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include <kvspace/kvspace_xvalue.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define KVLANG_XVALUE_ATTR_TAG_LANGTYPE 1u
+
+static inline uint16_t kvlangXvalueAttrLangtype(const uint8_t *wire,
+                                                const uint8_t **out) {
+    if (out)
+        *out = NULL;
+    const kvspaceXvalueHead *h = (const kvspaceXvalueHead *)(const void *)wire;
+    const uint64_t total = kvspaceXvalueHeadTotalLen(h);
+    if (total == 0)
+        return 0;
+    const uint8_t *langtype = NULL;
+    uint16_t langtype_len = 0;
+    if (kvspaceXvalueGetAttr(wire, total, KVLANG_XVALUE_ATTR_TAG_LANGTYPE,
+                             &langtype, &langtype_len) != 0)
+        return 0;
+    if (out)
+        *out = langtype;
+    return langtype_len;
+}
+
+static inline uint16_t kvlangXvalueAttrLangtypeBounded(const uint8_t *wire,
+                                                       uint64_t wire_len,
+                                                       const uint8_t **out) {
+    if (out)
+        *out = NULL;
+    const uint8_t *langtype = NULL;
+    uint16_t langtype_len = 0;
+    if (kvspaceXvalueGetAttr(wire, wire_len, KVLANG_XVALUE_ATTR_TAG_LANGTYPE,
+                             &langtype, &langtype_len) != 0)
+        return 0;
+    if (out)
+        *out = langtype;
+    return langtype_len;
+}
+
+uint8_t *kvlangxvalueNew(void *handle, const char *key, uint64_t body_len,
+                         uint16_t attr_len);
+
+int kvlangxvalueWriteBody(uint8_t *wire, const uint8_t *body,
+                          uint64_t body_len);
+
+int kvlangxvalueWriteLangtype(uint8_t *wire, uint64_t body_len, char prefix,
+                              const char *langtype);
+
+uint8_t *kvlangXvalueNewT(void *handle, const char *key,
+                               const uint8_t *raw, uint32_t raw_len,
+                               const char *langtype);
+
+uint8_t *kvlangXvalueNewBufferArray(void *handle, const char *key,
+                                    const uint8_t *data, uint64_t data_len,
+                                    const char *langtype);
+
+uint8_t *kvlangXvalueNewCompactArray(void *handle, const char *key,
+                                     const uint64_t *dims, uint32_t ndim,
+                                     const uint8_t *raw, uint64_t raw_len,
+                                     const char *langtype);
+uint8_t *kvlangXvalueNewPtr(void *handle, const char *key,
+                            const uint8_t *path, uint32_t path_len,
+                            const char *langtype);
+uint8_t *kvlangXvalueNewCode(void *handle, const char *key,
+                             const uint8_t *body, uint64_t body_len,
+                             const char *langtype);
+
+uint8_t *kvlangXvalueHeadReserve(void *handle, const char *key,
+                                 uint64_t body_len, const char *langtype);
+
+uint8_t *kvlangXvalueNewPtrFromKindexpr(void *handle, const char *key,
+                                        const char *target_kindexpr,
+                                        const char *target);
+uint8_t *kvlangXvalueNewChar(void *handle, const char *key,
+                             const uint8_t *bytes, uint32_t len,
+                             const char *langtype);
+uint8_t *kvlangXvalueNewBool(void *handle, const char *key, uint8_t v,
+                             const char *langtype);
+uint8_t *kvlangXvalueNewInt64(void *handle, const char *key, int64_t v,
+                              const char *langtype);
+uint8_t *kvlangXvalueNewFloat64(void *handle, const char *key, double v,
+                                const char *langtype);
+
+typedef enum kvlangXvalueTextFailure {
+    KVLANG_XVALUE_TEXT_OK = 0,
+    KVLANG_XVALUE_TEXT_BAD_LANGTYPE,
+    KVLANG_XVALUE_TEXT_UNSUPPORTED_TYPE,
+    KVLANG_XVALUE_TEXT_BAD_ESCAPE_FORMAT,
+    KVLANG_XVALUE_TEXT_OUT_OF_RANGE,
+    KVLANG_XVALUE_TEXT_BUFFER_TOO_SMALL
+} kvlangXvalueTextFailure;
+
+bool kvlangXvalueTextToBytes(const char *langtype, size_t langtype_length,
+                             const char *value_text, size_t value_text_length,
+                             uint8_t *output, size_t output_capacity,
+                             size_t *output_length,
+                             kvlangXvalueTextFailure *failure);
+
+bool kvlangXvalueTextFromBytes(const char *langtype, size_t langtype_length,
+                               const uint8_t *body, size_t body_length,
+                               char *output, size_t output_capacity,
+                               size_t *output_length,
+                               kvlangXvalueTextFailure *failure);
+
+const char *kvlangXvalueTextFailureText(kvlangXvalueTextFailure failure);
+
+#define KVLANG_KIND_NONE       "None"
+#define KVLANG_KIND_BOOL       "bool"
+#define KVLANG_KIND_INT8       "int8"
+#define KVLANG_KIND_INT16      "int16"
+#define KVLANG_KIND_INT32      "int32"
+#define KVLANG_KIND_INT64      "int64"
+#define KVLANG_KIND_UINT8      "uint8"
+#define KVLANG_KIND_UINT16     "uint16"
+#define KVLANG_KIND_UINT32     "uint32"
+#define KVLANG_KIND_UINT64     "uint64"
+#define KVLANG_KIND_FLOAT32    "float32"
+#define KVLANG_KIND_FLOAT64    "float64"
+#define KVLANG_KIND_CHAR       "char/utf32"
+#define KVLANG_KIND_CHAR_UTF8  "char/utf8"
+#define KVLANG_KIND_CHAR_ASCII "char/ascii"
+#define KVLANG_KIND_MAP        "stringkeymap"
+#define KVLANG_KIND_RWIR       "rwir"
+#define KVLANG_KIND_RWFUNC     "rwfunc"
+#define KVLANG_KIND_DEF_RWIR   "def rwir"
+#define KVLANG_KIND_SCOPE      "scope"
+#define KVLANG_KIND_TIME       "time"
+#define KVLANG_KIND_DURATION   "duration"
+#define KVLANG_RUNTIME_MEMBER_SEP "\xE2\x80\xA5"
+
+#define KVLANG_KV(X) \
+    X(KVLANG_KIND_NONE) \
+    X(KVLANG_KIND_BOOL) \
+    X(KVLANG_KIND_INT8) \
+    X(KVLANG_KIND_INT16) \
+    X(KVLANG_KIND_INT32) \
+    X(KVLANG_KIND_INT64) \
+    X(KVLANG_KIND_UINT8) \
+    X(KVLANG_KIND_UINT16) \
+    X(KVLANG_KIND_UINT32) \
+    X(KVLANG_KIND_UINT64) \
+    X(KVLANG_KIND_FLOAT32) \
+    X(KVLANG_KIND_FLOAT64) \
+    X(KVLANG_KIND_CHAR) \
+    X(KVLANG_KIND_CHAR_UTF8) \
+    X(KVLANG_KIND_CHAR_ASCII) \
+    X(KVLANG_KIND_MAP) \
+    X(KVLANG_KIND_RWIR) \
+    X(KVLANG_KIND_RWFUNC) \
+    X(KVLANG_KIND_DEF_RWIR) \
+    X(KVLANG_KIND_SCOPE) \
+    X(KVLANG_KIND_TIME) \
+    X(KVLANG_KIND_DURATION) \
+    X(KVLANG_RUNTIME_MEMBER_SEP)
+
+const char *kvlangConstLanguage(const char *name);
+
+#ifdef KVLANG_XVALUE_IMPLEMENTATION
+#include "langtype.h"
+#include "char_codec.h"
+
 
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* ── 往返域：决定用哪种类型判「读回来还是同一个值」────────────── */
 typedef enum kvlangXvalueFloatDomain {
-    KVLANG_XVALUE_FLOAT_DOMAIN_FLOAT32 = 0, /* strtof */
-    KVLANG_XVALUE_FLOAT_DOMAIN_FLOAT64 = 1  /* strtod */
+    KVLANG_XVALUE_FLOAT_DOMAIN_FLOAT32 = 0,
+    KVLANG_XVALUE_FLOAT_DOMAIN_FLOAT64 = 1
 } kvlangXvalueFloatDomain;
 
 #include "char_codec.h"
 #include "langtype.h"
 
-/* 浮点 → 文本（原 float_format 组件，只有一个调用方，合并在本文件）。 */
 static bool float_shortest(double value, kvlangXvalueFloatDomain domain,
                            char *output, size_t capacity,
                            size_t *output_length);
-
-/* ── 小工具 ─────────────────────────────────────────────────────────── */
 
 static void write_little_endian(uint8_t *output, uint64_t value, uint32_t width) {
     for (uint32_t index = 0; index < width; index++) {
@@ -50,9 +212,6 @@ static bool fail(kvlangXvalueTextFailure *failure,
     return false;
 }
 
-/* ── 整数文本 ↔ 字节 ───────────────────────────────────────────────── */
-
-/* 有符号整数：宽度由 langtype 给，范围检查是判据的一部分（300 当 int8 是错的）。 */
 static bool signed_to_bytes(uint32_t width, kvlangXvalueStringView text,
                             uint8_t *output, size_t capacity,
                             size_t *output_length,
@@ -68,7 +227,7 @@ static bool signed_to_bytes(uint32_t width, kvlangXvalueStringView text,
     if (end == buffer || *end != '\0' || errno == ERANGE) {
         return fail(failure, KVLANG_XVALUE_TEXT_BAD_ESCAPE_FORMAT, output_length);
     }
-    /* 范围：width 字节有符号。int64 走 else 分支避开未定义移位。 */
+
     if (width < 8) {
         const long long limit = 1LL << (width * 8 - 1);
         if (value < -limit || value >= limit) {
@@ -102,7 +261,7 @@ static bool unsigned_to_bytes(uint32_t width, kvlangXvalueStringView text,
         snprintf(buffer, sizeof buffer, "%.*s", (int)text.size, text.data) < 0) {
         return fail(failure, KVLANG_XVALUE_TEXT_BAD_ESCAPE_FORMAT, output_length);
     }
-    /* 负号一律拒绝：strtoull 会把 "-1" 静默转成最大值。 */
+
     if (buffer[0] == '-') {
         return fail(failure, KVLANG_XVALUE_TEXT_OUT_OF_RANGE, output_length);
     }
@@ -136,8 +295,7 @@ static bool unsigned_to_bytes(uint32_t width, kvlangXvalueStringView text,
 static bool bool_to_bytes(kvlangXvalueStringView text, uint8_t *output,
                           size_t capacity, size_t *output_length,
                           kvlangXvalueTextFailure *failure) {
-    /* bool 的文本形态只有 true/false —— 不接受 1/0：那是 int8 的写法，
-       两套写法会让「同一个值」有两个来源。 */
+
     uint8_t value = 0;
     if (text.size == 4 && memcmp(text.data, "true", 4) == 0) {
         value = 1;
@@ -163,8 +321,6 @@ static bool bool_to_bytes(kvlangXvalueStringView text, uint8_t *output,
     }
     return true;
 }
-
-/* ── 浮点文本 ↔ 字节 ───────────────────────────────────────────────── */
 
 static bool float_to_bytes(kvlangXvalueStringView text, uint32_t width,
                            uint8_t *output, size_t capacity,
@@ -208,9 +364,6 @@ static bool float_to_bytes(kvlangXvalueStringView text, uint32_t width,
     return true;
 }
 
-/* ── 字符 / 字符串 ─────────────────────────────────────────────────── */
-
-/* 按编码把一段文本写成 body。utf8 原样；utf32 转码点序列；ascii 校验后原样。 */
 static bool characters_to_bytes(kvlangXvalueCharEncoding encoding,
                                 kvlangXvalueStringView text, uint8_t *output,
                                 size_t capacity, size_t *output_length,
@@ -252,10 +405,10 @@ static bool characters_to_bytes(kvlangXvalueCharEncoding encoding,
         if (capacity < text.size) {
             return fail(failure, KVLANG_XVALUE_TEXT_BUFFER_TOO_SMALL, output_length);
         }
-        /* UTF-8 输入必须自洽：不校验就会把畸形字节当成合法值存进去。 */
+
         {
             size_t checked = 0;
-            /* 用反向转换做校验：目标缓冲给足 text.size 个码点够用。 */
+
             uint8_t *scratch = (uint8_t *)malloc(text.size * 4U + 4U);
             if (scratch == NULL) {
                 return fail(failure, KVLANG_XVALUE_TEXT_BUFFER_TOO_SMALL,
@@ -277,7 +430,7 @@ static bool characters_to_bytes(kvlangXvalueCharEncoding encoding,
         }
         return true;
     case KVLANG_XVALUE_CHAR_ENCODING_UTF32: {
-        /* 先把 UTF-8 文本转成码点，再按 4 字节小端摊开。 */
+
         uint8_t *codepoints = (uint8_t *)malloc(text.size * 4U + 4U);
         if (codepoints == NULL) {
             return fail(failure, KVLANG_XVALUE_TEXT_BUFFER_TOO_SMALL, output_length);
@@ -317,8 +470,6 @@ static bool characters_to_bytes(kvlangXvalueCharEncoding encoding,
     return fail(failure, KVLANG_XVALUE_TEXT_UNSUPPORTED_TYPE, output_length);
 }
 
-/* ── 文本 → body（主入口）─────────────────────────────────────────── */
-
 static bool text_to_bytes_impl(kvlangXvalueStringView langtype,
                                   kvlangXvalueStringView value_text,
                                   uint8_t *output, size_t output_capacity,
@@ -335,7 +486,6 @@ static bool text_to_bytes_impl(kvlangXvalueStringView langtype,
     kvlangXvalueLangtype parsed;
     kvlangXvalueLangtypeParse(langtype, &parsed);
 
-    /* 标量：宽度与符号性来自解析结果，文本解释按它走。 */
     if (parsed.form == KVLANG_XVALUE_FORM_SCALAR) {
         switch (parsed.scalar) {
         case KVLANG_XVALUE_SCALAR_SIGNED_INTEGER:
@@ -356,19 +506,14 @@ static bool text_to_bytes_impl(kvlangXvalueStringView langtype,
         return fail(failure, KVLANG_XVALUE_TEXT_BAD_LANGTYPE, output_length);
     }
 
-    /* 字符：单字符与字符串共用编码，区别只在语义（这里都按字节写）。 */
     if (parsed.form == KVLANG_XVALUE_FORM_CHARACTER ||
         parsed.form == KVLANG_XVALUE_FORM_STRING) {
         return characters_to_bytes(parsed.char_encoding, value_text, output,
                                    output_capacity, output_length, failure);
     }
 
-    /* 其余形态（ARRAY 定长 / TUPLE / MAPPING / UNRECOGNIZED）没有唯一文本形态。
-       **不猜格式**——猜出来的格式会被当成标准，然后所有人跟着用。 */
     return fail(failure, KVLANG_XVALUE_TEXT_UNSUPPORTED_TYPE, output_length);
 }
-
-/* ── body → 文本（主入口）─────────────────────────────────────────── */
 
 static bool finish_text(const char *source, size_t length, char *output,
                         size_t capacity, size_t *output_length,
@@ -419,7 +564,7 @@ static bool text_from_bytes_impl(kvlangXvalueStringView langtype,
             }
             const uint64_t raw = read_little_endian(body_data, parsed.scalar_width);
             int64_t value = (int64_t)raw;
-            /* 符号扩展：宽度不足 8 时把高位补成符号位。 */
+
             if (parsed.scalar_width < 8) {
                 const uint32_t shift = 64U - parsed.scalar_width * 8U;
                 value = ((int64_t)(raw << shift)) >> shift;
@@ -488,7 +633,7 @@ static bool text_from_bytes_impl(kvlangXvalueStringView langtype,
         switch (parsed.char_encoding) {
         case KVLANG_XVALUE_CHAR_ENCODING_UTF8:
         case KVLANG_XVALUE_CHAR_ENCODING_ASCII:
-            /* 两种编码的字节就是文本本身；ASCII 已在写入时校验过。 */
+
             return finish_text((const char *)body_data, body_size, output,
                                output_capacity, output_length, failure);
         case KVLANG_XVALUE_CHAR_ENCODING_UTF32: {
@@ -501,14 +646,12 @@ static bool text_from_bytes_impl(kvlangXvalueStringView langtype,
                     return fail(failure, KVLANG_XVALUE_TEXT_BUFFER_TOO_SMALL,
                                 output_length);
                 }
-                /* UTF-8 最长 4 字节/码点，给上界即可。 */
+
                 *output_length = body_size;
                 return true;
             }
             size_t encoded = 0;
-            /* 编码器**不写** NUL 结尾（见 char_codec.h：那个字节留给调用方），
-               所以这里必须自己补——不补的话读回的是缓冲区里的陈旧尾巴，
-               看起来像「值多出几个字符」。 */
+
             if (!kvlangXvalueCharUtf32ToUtf8(body_data, body_size, output,
                                              output_capacity, &encoded)) {
                 return fail(failure, KVLANG_XVALUE_TEXT_BUFFER_TOO_SMALL,
@@ -551,11 +694,6 @@ const char *kvlangXvalueTextFailureText(kvlangXvalueTextFailure failure) {
     return "未知失败";
 }
 
-/* ── 公共 ABI：裸指针入口 ──────────────────────────────────────────────
- *
- * 对外只有这一种形态：调用方给指针与长度，不引入 view 类型；内部实现仍是 view。
- * 裸指针让 Go/Python/Rust 绑定不必理解 C 结构体布局。 */
-
 bool kvlangXvalueTextToBytes(const char *langtype, size_t langtype_length,
                              const char *value_text, size_t value_text_length,
                              uint8_t *output, size_t output_capacity,
@@ -578,61 +716,16 @@ bool kvlangXvalueTextFromBytes(const char *langtype, size_t langtype_length,
         output_length, failure);
 }
 
-/*
- * ── 浮点值 → 文本（原 float_format 组件，唯一调用方就在这里，已并入本文件）
- * 作用：最短往返表示。按**三件正交的事**分段实现。
- * 约束：纯函数、不分配；缓冲不足返回 false 且不写部分内容。
- *
- * ── 为什么分三段，而不是「%.*g 之后再判断要不要改」────────────────────
- *
- * 浮点文本化是三个**互相独立**的维度，各自有各自的判据来源：
- *
- *   | 维度       | 决定什么            | 谁定                        |
- *   |------------|---------------------|-----------------------------|
- *   | 最短往返   | 有效数字几位        | 值本身（按宽度定往返域）    |
- *   | 定点/指数  | `100.0` vs `1e+02`  | 阈值 `[1e-4, 1e16)`         |
- *   | `.0` 规则  | `12` vs `12.0`      | 整数形态必须有小数点        |
- *
- * 把它们压进一个 `%.*g` 再打补丁，就是**把三维问题压回一维**——`%g` 一位参数
- * 同时决定有效数字位数与定点/指数切换，两者没法分开调。所以这里让 `%g` 完全
- * 不参与判断：先用 `%.*e` 拿到「有效数字串 + 十进制指数」这一份中性数据，
- * 再由三段各自决定输出形态。
- */
-
-
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* double 的十进制往返上限是 16 位小数（= 17 位有效数字）；float 是 8 位（9 位有效）。 */
 #define KVLANG_XVALUE_FLOAT_FORMAT_MAX_FRACTION_DIGITS 17
 
-/*
- * 定点与指数的分界：十进制指数落在 **[EXPONENT_FIXED_MIN, EXPONENT_FIXED_MAX)**
- * 时用定点，之外用指数。
- *
- * 这两个数是**语言行为，不是实现细节**：`100.0` 打 `100.0` 还是 `1e+02` 会被
- * 用户直接看到。阈值取 Python `repr` 的那一对。
- *
- * **与宽度无关**：float32 与 float64 用同一对阈值。理由是这两个数回答的是
- * 「人类怎么读这个量级」，不是「这个值占几个字节」——float32 的 `1e16`
- * 与 float64 的 `1e16` 在读者眼里是同一个量级。下一个人不要以为它们是从
- * 宽度推出来的。
- */
 #define KVLANG_XVALUE_FLOAT_FORMAT_FIXED_EXPONENT_MIN (-4)
 #define KVLANG_XVALUE_FLOAT_FORMAT_FIXED_EXPONENT_MAX 16
 
-/*
- * 非有限值写死。
- *
- * **不调 `%g`**：NaN 的符号位在 IEEE 754 里未指定，`printf` 的输出因此依赖平台
- * 与优化级别——`0.0/0.0` 可能得到 `nan` 也可能得到 `-nan`。那违反「同输入同输出」，
- * 而且测不出来：两次跑恰好相同是常态，坏的那次看起来像偶然。
- *
- * `inf` 虽然能被 `%g` 正确打印，也一并走这里——判据是「非有限值不做十进制往返」，
- * 比「inf 恰好能往返」更稳。
- */
 static bool kvlangxvalue_float_format_non_finite(double value, char *output,
                                              size_t capacity,
                                              size_t *output_length) {
@@ -641,7 +734,7 @@ static bool kvlangxvalue_float_format_non_finite(double value, char *output,
     if (!isnan(value) && !isinf(value)) {
         return false;
     }
-    /* NaN 的符号位无意义：`nan` 与 `-nan` 是同一个值，输出必须相同。 */
+
     if (isnan(value)) {
         text = "nan";
     } else {
@@ -660,16 +753,6 @@ static bool kvlangxvalue_float_format_non_finite(double value, char *output,
     return true;
 }
 
-/*
- * ── 第一段：最短往返 ──────────────────────────────────────────────────
- *
- * 只回答「有效数字要几位」。产出两份中性数据：
- *   `digits` —— 有效数字串（不含小数点，如 `"1234567890123"`）；
- *   `exponent` —— 十进制指数（值 = 0.digits × 10^(exponent+1)，即首位数字的权重）。
- *
- * **往返域由 `domain` 决定，不由参数类型决定**：`value` 恒是 double，但 float32
- * 值的往返判据必须是 `strtof`——否则会打出那些在 float32 里根本不存在的尾数。
- */
 static bool kvlangXvalueFloatShortest_digits(
     double value, kvlangXvalueFloatDomain domain, char *digits,
     size_t digits_capacity, int *exponent, bool *negative) {
@@ -693,13 +776,9 @@ static bool kvlangXvalueFloatShortest_digits(
         if (!found) {
             continue;
         }
-        /* `%.*e` 恒形如 `d[.ddd]e±xx`：整数部分一位，之后是 '.' 与小数、再是 'e'。 */
+
         {
-            /*
-             * `%.*e` 对负值形如 `-1.23e+02`：**负号在最前面**，不在有效数字里。
-             * 有效数字从 `sign` 之后开始——把负号当首位数字，会拼出 `-.0` 这种串
-             * （实测过一次：所有负值的输出全错）。
-             */
+
             const char *sign = candidate[0] == '-' ? candidate + 1 : candidate;
 
             *negative = candidate[0] == '-';
@@ -727,11 +806,10 @@ static bool kvlangXvalueFloatShortest_digits(
         }
         return true;
     }
-    /* 17 位小数都读不回来，说明实现有错——不降级、不猜。 */
+
     return false;
 }
 
-/* 去掉有效数字串尾部的零；保留至少一位（`1000` → `1`）。 */
 static void kvlangxvalue_float_format_trim_digits(char *digits) {
     size_t length = strlen(digits);
 
@@ -741,25 +819,11 @@ static void kvlangxvalue_float_format_trim_digits(char *digits) {
     }
 }
 
-/*
- * ── 第二段：定点还是指数 ──────────────────────────────────────────────
- *
- * 纯阈值判断，只看十进制指数。**与值、与宽度都无关**——这是它能被单独写一段的
- * 原因：判据只依赖 `exponent` 一个整数。
- */
 static bool kvlangxvalue_float_format_use_fixed(int exponent) {
     return exponent >= KVLANG_XVALUE_FLOAT_FORMAT_FIXED_EXPONENT_MIN &&
            exponent < KVLANG_XVALUE_FLOAT_FORMAT_FIXED_EXPONENT_MAX;
 }
 
-/*
- * ── 第三段：拼串 ──────────────────────────────────────────────────────
- *
- * 输入是前两段的产物（有效数字 + 指数 + 用不用定点），输出最终文本。
- * 三段里只有这一段接触输出缓冲。
- */
-
-/* 指数形态：`d[.ddd]e±XX`，指数至少两位（`1e+02`、`5e-324`）。 */
 static bool kvlangxvalue_float_format_write_exponential(const char *digits,
                                                     int exponent,
                                                     bool negative, char *output,
@@ -783,7 +847,7 @@ static bool kvlangxvalue_float_format_write_exponential(const char *digits,
     {
         const size_t digits_length = strlen(digits);
         const size_t tail_length = (size_t)written;
-        const size_t separated = digits[1] != '\0' ? 1U : 0U; /* '.' */
+        const size_t separated = digits[1] != '\0' ? 1U : 0U;
         const size_t sign_length = negative ? 1U : 0U;
         const size_t total = sign_length + digits_length + separated + tail_length;
 
@@ -812,13 +876,6 @@ static bool kvlangxvalue_float_format_write_exponential(const char *digits,
     return true;
 }
 
-/*
- * 定点形态：按指数把小数点放在正确位置，缺位补零。
- *
- * 同时承担 `.0` 规则：**整数形态必须带小数点**，否则 `12` 会被读成 int64。
- * 这条判据是「值的 kind 是浮点」，在拼串这一步落地——所以 `.0` 不是独立一段，
- * 它只在这一段里多写两个字符。
- */
 static bool kvlangxvalue_float_format_write_fixed(const char *digits, int exponent,
                                               bool negative, char *output,
                                               size_t capacity,
@@ -835,7 +892,6 @@ static bool kvlangxvalue_float_format_write_fixed(const char *digits, int expone
                                       ? digits_length - integral
                                       : 0U;
 
-        /* 整数形态补 `.0`；否则写小数部分。 */
         total = sign_length + integral +
                 (fractional != 0U ? 1U + fractional : 2U);
     } else {
@@ -843,10 +899,7 @@ static bool kvlangxvalue_float_format_write_fixed(const char *digits, int expone
 
         total = sign_length + 2U + leading_zeros + digits_length;
     }
-    /*
-     * **先算总长、够才写**：先写一部分再发现放不下，会在输出里留下半个结果，
-     * 而调用方只看返回值的话不知道缓冲已被污染。契约要求「不足即失败且不写部分」。
-     */
+
     if (total >= capacity) {
         return false;
     }
@@ -868,7 +921,7 @@ static bool kvlangxvalue_float_format_write_fixed(const char *digits, int expone
             memcpy(output + cursor, digits + integral, fractional);
             cursor += fractional;
         } else {
-            /* 整数形态：补 `.0`，否则读者分不出这是浮点。 */
+
             output[cursor++] = '.';
             output[cursor++] = '0';
         }
@@ -903,21 +956,21 @@ static bool float_shortest(double value, kvlangXvalueFloatDomain domain,
     if (capacity == 0U) {
         return false;
     }
-    /* 第零步：非有限值不走十进制往返，直接写死。 */
+
     if (kvlangxvalue_float_format_non_finite(value, output, capacity,
                                          output_length)) {
         return true;
     }
-    /* 第一段：最短往返 → 有效数字 + 指数。 */
+
     if (!kvlangXvalueFloatShortest_digits(value, domain, digits,
                                                sizeof(digits), &exponent,
                                                &negative)) {
         return false;
     }
     kvlangxvalue_float_format_trim_digits(digits);
-    /* 第二段：阈值决定形态。 */
+
     if (kvlangxvalue_float_format_use_fixed(exponent)) {
-        /* 第三段：拼串（含 `.0` 规则）。 */
+
         return kvlangxvalue_float_format_write_fixed(digits, exponent, negative,
                                                   output, capacity,
                                                   output_length);
@@ -926,3 +979,289 @@ static bool float_shortest(double value, kvlangXvalueFloatDomain domain,
                                                     output, capacity,
                                                     output_length);
 }
+
+
+#include <kvspace/kvspace.h>
+
+#include <limits.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+static uint64_t langtype_payload_len(const char *langtype, char prefix) {
+    const uint64_t text = langtype ? (uint64_t)strlen(langtype) : 0;
+    return text + (prefix ? 1u : 0u);
+}
+
+static uint64_t langtype_attr_len(const char *langtype, char prefix) {
+    const uint64_t payload = langtype_payload_len(langtype, prefix);
+    return payload ? 3 + payload : 0;
+}
+
+uint8_t *kvlangxvalueNew(void *handle, const char *key, uint64_t body_len,
+                         uint16_t attr_len) {
+    if (!handle || !key)
+        return NULL;
+    uint64_t offset = 0;
+    const int status = kvspaceRealloc(handle, key, body_len, attr_len, &offset);
+    if (status != KVSPACE_OK)
+        return NULL;
+    uint8_t *base = kvspaceXvalueInProcessAddress(handle);
+    if (!base)
+        return NULL;
+    uint8_t *wire = base + offset;
+    kvspaceXvalueHead head = {.padding = {0u, 0u, 0u, 0u, 0u, 0u}};
+    kvspaceXvalueHeadSetLen(&head, body_len);
+    kvspaceXvalueHeadSetAttrsLen(&head, attr_len);
+    memcpy(wire, &head, sizeof head);
+    return wire;
+}
+
+int kvlangxvalueWriteBody(uint8_t *wire, const uint8_t *body,
+                          uint64_t body_len) {
+    if (!wire)
+        return -1;
+    const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)(const void *)wire;
+    if (kvspaceXvalueHeadLen(head) != body_len)
+        return -1;
+    if (body && body_len)
+        memcpy(wire + KVSPACE_XVALUE_HEAD_LEN, body, (size_t)body_len);
+    return 0;
+}
+
+int kvlangxvalueWriteLangtype(uint8_t *wire, uint64_t body_len, char prefix,
+                              const char *langtype) {
+    if (!wire)
+        return -1;
+    const kvspaceXvalueHead *head = (const kvspaceXvalueHead *)(const void *)wire;
+    if (kvspaceXvalueHeadLen(head) != body_len)
+        return -1;
+    const uint64_t payload = langtype_payload_len(langtype, prefix);
+    const uint64_t attr_len = payload ? 3 + payload : 0;
+    if (kvspaceXvalueHeadAttrsLen(head) != attr_len)
+        return -1;
+    if (attr_len == 0)
+        return 0;
+    uint8_t *record = wire + KVSPACE_XVALUE_HEAD_LEN + body_len;
+    record[0] = KVLANG_XVALUE_ATTR_TAG_LANGTYPE;
+    record[1] = (uint8_t)payload;
+    record[2] = (uint8_t)(payload >> 8);
+    uint64_t at = 3;
+    if (prefix)
+        record[at++] = (uint8_t)prefix;
+    const uint64_t text = langtype ? (uint64_t)strlen(langtype) : 0;
+    if (text)
+        memcpy(record + at, langtype, (size_t)text);
+    return 0;
+}
+
+uint8_t *kvlangXvalueNewT(void *handle, const char *key,
+                          const uint8_t *raw, uint32_t raw_len,
+                          const char *langtype) {
+    const uint64_t attr_len = langtype_attr_len(langtype, 0);
+    if (attr_len > UINT16_MAX)
+        return NULL;
+    uint8_t *wire = kvlangxvalueNew(handle, key, raw_len, (uint16_t)attr_len);
+    if (!wire)
+        return NULL;
+    if (kvlangxvalueWriteBody(wire, raw, raw_len) != 0 ||
+        kvlangxvalueWriteLangtype(wire, raw_len, 0, langtype) != 0)
+        return NULL;
+    return wire;
+}
+
+static int is_base_langtype(const char *langtype) {
+    static const char *const base[] = {
+        "bool",   "int8",      "int16",     "int32",     "int64",
+        "uint8",  "uint16",    "uint32",    "uint64",    "float32",
+        "float64", "char/utf8", "char/utf32", "char/ascii",
+    };
+    if (!langtype)
+        return 0;
+    for (size_t i = 0; i < sizeof base / sizeof base[0]; i++)
+        if (strcmp(langtype, base[i]) == 0)
+            return 1;
+    return 0;
+}
+
+static int is_buffer_array_langtype(const char *langtype) {
+    if (!langtype || langtype[0] != '[')
+        return 0;
+    const char *p = langtype + 1;
+    int digits = 0;
+    for (; *p && *p != ']'; p++) {
+        if (*p >= '0' && *p <= '9') {
+            digits = 1;
+        } else if (*p == ',') {
+            if (!digits) return 0;
+            digits = 0;
+        } else if (*p != '-' && *p != '.' && *p != '?' && *p != '*' &&
+                   *p != '+') {
+
+            return 0;
+        }
+    }
+    if (*p != ']')
+        return 0;
+    return is_base_langtype(p + 1);
+}
+
+static int is_compact_array_element_langtype(const char *langtype) {
+    return is_base_langtype(langtype) && strcmp(langtype, "char/utf8") != 0;
+}
+
+static int is_compact_array_langtype(const char *langtype) {
+    if (!langtype || langtype[0] != '[')
+        return 0;
+    const char *p = langtype + 1;
+    int dimension_count = 0;
+    int digits = 0;
+    for (; *p && *p != ']'; p++) {
+        if (*p >= '0' && *p <= '9') {
+            digits = 1;
+        } else if (*p == ',' && digits) {
+            dimension_count++;
+            digits = 0;
+        } else {
+            return 0;
+        }
+    }
+    if (*p != ']' || !digits)
+        return 0;
+    dimension_count++;
+    if (dimension_count > 64)
+        return 0;
+    return is_compact_array_element_langtype(p + 1);
+}
+
+uint8_t *kvlangXvalueNewBufferArray(void *handle, const char *key,
+                                    const uint8_t *data, uint64_t data_len,
+                                    const char *langtype) {
+    if (!is_buffer_array_langtype(langtype))
+        return NULL;
+    if (data_len > UINT32_MAX || (data_len && !data))
+        return NULL;
+    return kvlangXvalueNewT(handle, key, data, (uint32_t)data_len, langtype);
+}
+
+uint8_t *kvlangXvalueNewCompactArray(void *handle, const char *key,
+                                     const uint64_t *dims, uint32_t ndim,
+                                     const uint8_t *raw, uint64_t raw_len,
+                                     const char *langtype) {
+
+    if (!dims || ndim == 0 || ndim > 64)
+        return NULL;
+    if (!is_compact_array_langtype(langtype))
+        return NULL;
+    if (raw_len > UINT32_MAX || (raw_len && !raw))
+        return NULL;
+    return kvlangXvalueNewT(handle, key, raw, (uint32_t)raw_len, langtype);
+}
+
+uint8_t *kvlangXvalueNewPtr(void *handle, const char *key,
+                            const uint8_t *path, uint32_t path_len,
+                            const char *langtype) {
+    if (path_len && !path)
+        return NULL;
+    if (langtype && (langtype[0] == '*' || langtype[0] == '@'))
+        return NULL;
+    const size_t text = langtype ? strlen(langtype) : 0;
+    char *want = (char *)malloc(text + 2);
+    if (!want)
+        return NULL;
+    want[0] = '*';
+    if (text)
+        memcpy(want + 1, langtype, text);
+    want[text + 1] = '\0';
+    uint8_t *wire = kvlangXvalueNewT(handle, key, path, path_len, want);
+    free(want);
+    return wire;
+}
+
+uint8_t *kvlangXvalueNewCode(void *handle, const char *key,
+                             const uint8_t *body, uint64_t body_len,
+                             const char *langtype) {
+    if (body_len > UINT32_MAX || (body_len && !body))
+        return NULL;
+    return kvlangXvalueNewT(handle, key, body, (uint32_t)body_len, langtype);
+}
+
+uint8_t *kvlangXvalueHeadReserve(void *handle, const char *key,
+                                 uint64_t body_len, const char *langtype) {
+
+    if (body_len > UINT32_MAX)
+        return NULL;
+    return kvlangXvalueNewT(handle, key, NULL, (uint32_t)body_len, langtype);
+}
+
+uint8_t *kvlangXvalueNewPtrFromKindexpr(void *handle, const char *key,
+                                        const char *target_kindexpr,
+                                        const char *target) {
+    if (!target_kindexpr || !target)
+        return NULL;
+
+    if (strcmp(target_kindexpr, "any") == 0)
+        return NULL;
+
+    if (*target == '\0')
+        return NULL;
+
+    return kvlangXvalueNewPtr(handle, key, (const uint8_t *)target,
+                              (uint32_t)strlen(target), target_kindexpr);
+}
+
+uint8_t *kvlangXvalueNewChar(void *handle, const char *key,
+                             const uint8_t *bytes, uint32_t len,
+                             const char *langtype) {
+    if (len && !bytes)
+        return NULL;
+
+    return kvlangXvalueNewT(handle, key, bytes, len, langtype);
+}
+
+uint8_t *kvlangXvalueNewBool(void *handle, const char *key, uint8_t v,
+                             const char *langtype) {
+    uint8_t b = v ? 1 : 0;
+    return kvlangXvalueNewT(handle, key, &b, 1, langtype);
+}
+
+uint8_t *kvlangXvalueNewInt64(void *handle, const char *key, int64_t v,
+                              const char *langtype) {
+    uint8_t raw[8];
+    for (int i = 0; i < 8; i++)
+        raw[i] = (uint8_t)((uint64_t)v >> (8 * i));
+    return kvlangXvalueNewT(handle, key, raw, 8, langtype);
+}
+
+uint8_t *kvlangXvalueNewFloat64(void *handle, const char *key, double v,
+                                const char *langtype) {
+    uint64_t bits;
+    memcpy(&bits, &v, sizeof bits);
+    uint8_t raw[8];
+    for (int i = 0; i < 8; i++)
+        raw[i] = (uint8_t)(bits >> (8 * i));
+    return kvlangXvalueNewT(handle, key, raw, 8, langtype);
+}
+
+const char *kvlangConstLanguage(const char *name) {
+    static const struct { const char *key; const char *val; } table[] = {
+#define KVLANG_CONST_ENTRY(name) { #name, name },
+        KVLANG_KV(KVLANG_CONST_ENTRY)
+#undef KVLANG_CONST_ENTRY
+    };
+    if (!name)
+        return NULL;
+    for (size_t i = 0; i < sizeof table / sizeof table[0]; i++)
+        if (strcmp(table[i].key, name) == 0)
+            return table[i].val;
+    return NULL;
+}
+#endif
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

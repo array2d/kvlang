@@ -1,8 +1,3 @@
-/*
- * 06_multiprocess — A 进程写，B 进程读，共享 file-backed mmap（shm:// 后端）
- *
- * 用法: ./06_multiprocess /tmp/kv.shm
- */
 
 #include "common.h"
 #include <stdio.h>
@@ -18,7 +13,7 @@ static int writer(const char *path, int64_t seed) {
     int errors = 0;
     void *kv = kv_open_shm(path);
     if (!kv) { printf("FAIL: writer open\n"); return 1; }
-    kvspaceMkindex(kv, "/mp/", NULL, 0);
+    kvspaceMkindex(kv, "/mp/");
 
     printf("[writer] round 1: write %d ints\n", N_KEYS);
     for (int i = 0; i < N_KEYS; i++) {

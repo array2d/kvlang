@@ -1,9 +1,4 @@
-#!/bin/sh
-# 组件：test/cli —— kvspace-cli 的端到端契约。
-#
-#   cli_test.sh <kvspace-cli 路径> <临时 shm 路径>
-#
-# 断言的是命令行能看到的行为：值的读写往返、类型沿用、失败退出码。
+
 set -u
 
 CLI=$1
@@ -33,7 +28,6 @@ check_exit() {
     fi
 }
 
-# ── 写入 + 读回：每种高级类型都要原样读出 ──────────────────────────
 "$CLI" newT /int64 int64 42 >/dev/null
 check_output "int64" "int64	42" "$("$CLI" readT /int64)"
 
@@ -49,11 +43,9 @@ check_output "utf8" "[]char/utf8	hello" "$("$CLI" readT /utf8)"
 "$CLI" newT /utf32 '[]char/utf32' 中a >/dev/null
 check_output "utf32" "[]char/utf32	中a" "$("$CLI" readT /utf32)"
 
-# ── writeT 沿用目标已有的类型，不猜 ────────────────────────────────
 "$CLI" writeT /int64 123456 >/dev/null
 check_output "writeT 沿用 int64" "int64	123456" "$("$CLI" readT /int64)"
 
-# ── 失败面：值非法是失败，不是「写进去一个别的值」 ─────────────────
 "$CLI" newT /bad int8 300 >/dev/null 2>&1
 check_exit "int8 越界" 1 $?
 
@@ -69,14 +61,12 @@ check_exit "key 不存在" 3 $?
 "$CLI" bogus >/dev/null 2>&1
 check_exit "未知命令" 2 $?
 
-# ── list：后端顺序必须被排成坐标序 ──────────────────────────────────
 "$CLI" newT /list/b int8 1 >/dev/null
 "$CLI" newT /list/a int8 1 >/dev/null
 "$CLI" newT /list/'[10]' int8 1 >/dev/null
 "$CLI" newT /list/'[2]' int8 1 >/dev/null
 check_output "list 排序" "$(printf '[2]\n[10]\na\nb')" "$("$CLI" list /list/)"
 
-# ── print：/lib 下的代码值要能直接看 ────────────────────────────────
 "$CLI" newT /lib/demo·f '[]char/utf8' hello >/dev/null
 check_output "print 文本 body" \
     "$(printf 'langtype=[]char/utf8\nbodylen=5\nhello')" \
@@ -92,7 +82,6 @@ case $bin_first in
     ;;
 esac
 
-# ── 元数据：head 的 bodylen 等于该类型的字节宽度 ───────────────────
 head_line=$("$CLI" head /int64)
 case $head_line in
 bodylen=8*) ;;

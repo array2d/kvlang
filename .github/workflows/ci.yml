@@ -2,7 +2,6 @@ name: ci
 on: [push, pull_request, repository_dispatch]
 jobs:
   # #622 阶段 0：runtimec（C11 新底座）独立构建与门禁。
-  # 与 test-* / typed-debug / single 完全解耦：只构建 kvspace + kvlang/xvalue,
   # 不碰 runtimec2、不跑 tutorial，所以现有红灯不会污染本 job 的判读。
   runtimec:
     runs-on: ubuntu-latest
@@ -34,18 +33,15 @@ jobs:
           cmake --build build -j"$(nproc)"
           mkdir -p "$GITHUB_WORKSPACE/lib"
           cp -P build/libkvspace.so* "$GITHUB_WORKSPACE/lib/"
-      # 语言层静态库：runtimec 的构造器（kvlangXvalueHeadNew*）从这里来，
-      # 配置期查 `kvlang/lib/libkvlang_xvalue.a`。显式传 kvspace 的 include 与 lib
-      # 目录——xvalue 的 CMake 没有兄弟目录默认值（G11）。
-      - name: 构建 kvlang/xvalue
+      - name: 构建 kvlangxvalue
         run: |
           set -euo pipefail
-          cmake -S xvalue -B build/xvalue -DCMAKE_BUILD_TYPE=Release \
+          cmake -S kvlangxvalue -B build/kvlangxvalue -DCMAKE_BUILD_TYPE=Release \
                 -DBUILD_TESTING=OFF \
                 -DKVLANG_KVSPACE_INCLUDE_DIRECTORY="$RUNNER_TEMP/kvspace/include" \
                 -DKVLANG_KVSPACE_LIB_DIRECTORY="$PWD/lib"
-          cmake --build build/xvalue -j"$(nproc)"
-          cp build/xvalue/libkvlang_xvalue.a lib/
+          cmake --build build/kvlangxvalue -j"$(nproc)"
+          cp -P build/kvlangxvalue/libkvlang_xvalue.so* lib/
       - name: 守卫：runtimec 不得依赖 runtimec2 / runtime
         run: |
           set -euo pipefail
@@ -301,34 +297,31 @@ jobs:
           mkdir -p lib
           cp -P "$kvroot/build/libkvspace.so"* lib/
 
-      # 语言层静态库：装到 kvlang/lib/libkvlang_xvalue.a —— tutorial-c 与两套
-      # bindings 的默认路径都是那里。
-      - name: 构建 kvlang/xvalue
+      - name: 构建 kvlangxvalue
         run: |
           set -euo pipefail
-          cmake -S xvalue -B build/xvalue -DCMAKE_BUILD_TYPE=Release \
+          cmake -S kvlangxvalue -B build/kvlangxvalue -DCMAKE_BUILD_TYPE=Release \
                 -DBUILD_TESTING=ON \
                 -DKVLANG_KVSPACE_INCLUDE_DIRECTORY="$RUNNER_TEMP/kvspace/include" \
                 -DKVLANG_KVSPACE_LIB_DIRECTORY="$PWD/lib"
-          cmake --build build/xvalue -j"$(nproc)"
+          cmake --build build/kvlangxvalue -j"$(nproc)"
 
-      - name: xvalue 单元测试（3 条）
+      - name: kvlangxvalue 单元测试
         run: |
           set -euo pipefail
-          ctest --test-dir build/xvalue --output-on-failure
+          ctest --test-dir build/kvlangxvalue --output-on-failure
           # ctest 找不到测试时退出码为 0，与「全过」不可区分。
-          n=$(ctest --test-dir build/xvalue -N | grep -cE "^ *Test +#")
+          n=$(ctest --test-dir build/kvlangxvalue -N | grep -cE "^ *Test +#")
           echo "ctest 发现 $n 个测试"
           test "$n" -gt 0
 
-      # tutorial-c 与 bindings 都默认去 kvlang/lib 找 .a，故先装一份。
-      - name: 安装 libkvlang_xvalue.a
+      - name: 安装 libkvlang_xvalue.so
         run: |
           set -euo pipefail
-          cmake --install build/xvalue --prefix "$RUNNER_TEMP/xvalue-install"
+          cmake --install build/kvlangxvalue --prefix "$RUNNER_TEMP/kvlangxvalue-install"
           mkdir -p lib
-          cp "$RUNNER_TEMP/xvalue-install/lib/libkvlang_xvalue.a" lib/
-          ls -l lib/libkvlang_xvalue.a
+          cp -P "$RUNNER_TEMP/kvlangxvalue-install/lib/libkvlang_xvalue.so"* lib/
+          ls -l lib/libkvlang_xvalue.so*
 
       - name: tutorial-c（C/C++/Python/Rust 直调，11 条）
         run: |
@@ -366,7 +359,6 @@ jobs:
           rustflags = [
             "-L", "native=$PWD/../../lib",
             "-C", "link-arg=-Wl,-rpath,$PWD/../../lib",
-            "-C", "link-arg=$PWD/../../lib/libkvlang_xvalue.a",
           ]
           EOF2
           out=$(cargo test --release 2>&1) || { echo "$out"; exit 1; }

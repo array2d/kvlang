@@ -1,6 +1,6 @@
 #include <kvspace/kvspace.h>
 #include <kvspace/kvspace_xvalue.h>
-#include "kvlangxvalue.h"
+#include <kvlangxvalue/kvlangxvalue.h>
 
 #include <stdint.h>
 #include <stdio.h>
@@ -28,7 +28,6 @@ static const char *next_key(void) {
     return buffer;
 }
 
-/* 校验 head 与 attr 区：bodylen/attrslen/padding 正确，langtype 记录与 lt 一致。 */
 static int attr_ok(const uint8_t *value, uint64_t len, uint64_t body_len,
                    const char *langtype) {
     size_t lt = strlen(langtype);
@@ -129,14 +128,13 @@ int main(void) {
             (const kvspaceXvalueHead *)(const void *)value);
         kvspaceXvalueHead h;
         memcpy(&h, value, sizeof h);
-        /* langtype 记录带 `*` 前缀：record = "*int64"（6 字节）。 */
+
         CHECK(len == KVSPACE_XVALUE_HEAD_LEN + 2 + 3 + 6, "ptr len");
         CHECK(kvspaceXvalueHeadLen(&h) == 2, "ptr bodylen");
         CHECK(memcmp(value + KVSPACE_XVALUE_HEAD_LEN, "/x", 2) == 0, "ptr body");
         CHECK(attr_ok(value, len, 2, "*int64"), "ptr attr");
     }
 
-    /* 空 kindexpr = 不约束：Ptr 目标允许为空；`any` 不是类型名，创建即拒。 */
     value = kvlangXvalueNewPtrFromKindexpr(store, next_key(), "", "/x");
     CHECK(value != NULL, "ptr empty kindexpr");
     if (value) {

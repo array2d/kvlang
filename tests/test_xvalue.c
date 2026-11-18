@@ -1,6 +1,6 @@
 #include <kvspace/kvspace.h>
 #include <kvspace/kvspace_xvalue.h>
-#include "kvlangxvalue.h"
+#include <kvlangxvalue/kvlangxvalue.h>
 
 #include <stdint.h>
 #include <stdio.h>
@@ -23,7 +23,6 @@ static unsigned key_sequence;
         }                                                                      \
     } while (0)
 
-/* 每个构造点一个独立的 key：值直接落在 kvspace 里，复用 key 会覆盖前一个值。 */
 static const char *next_key(void) {
     static char buffer[32];
     snprintf(buffer, sizeof buffer, "/test/%u", key_sequence++);
@@ -34,7 +33,6 @@ static uint64_t wire_total(const uint8_t *wire) {
     return kvspaceXvalueHeadTotalLen((const kvspaceXvalueHead *)(const void *)wire);
 }
 
-/* 校验 head、body、langtype、有效长度。lt 是构造后的完整 langtype（含 *）。 */
 static int value_ok(const uint8_t *v, uint64_t total, uint64_t body_len,
                     const char *lt) {
     size_t want = strlen(lt);
@@ -77,7 +75,6 @@ static void test_scalar(void) {
     if (wire)
         CHECK(value_ok(wire, wire_total(wire), 8, ""), "no-langtype empty attr");
 
-    /* NewT 允许 NULL body（零填，Reserve 语义）；拒绝由各类型构造器做。 */
 }
 
 static void test_slack(void) {
@@ -99,13 +96,34 @@ static void test_slack(void) {
 
     CHECK(kvlangXvalueNewBufferArray(store, next_key(), NULL, 1, "[]uint8") == NULL,
           "buffer NULL body rejected");
-    /* 只收 []基础类型：非数组/未知元素类型一律拒绝。 */
+
+    uint8_t *sized = kvlangXvalueNewBufferArray(store, next_key(), hi, sizeof hi,
+                                                "[2]char/utf8");
+    CHECK(sized != NULL, "buffer accepts [N]T");
+    if (sized)
+        CHECK(value_ok(sized, wire_total(sized), sizeof hi, "[2]char/utf8"),
+              "buffer [N]T attr");
+    uint8_t *open = kvlangXvalueNewBufferArray(store, next_key(), hi, sizeof hi,
+                                               "[1,-1]char/utf8");
+    CHECK(open != NULL, "buffer accepts [1,-1]T");
+
     CHECK(kvlangXvalueNewBufferArray(store, next_key(), hi, sizeof hi, "int64") ==
               NULL,
           "buffer rejects non-array langtype");
     CHECK(kvlangXvalueNewBufferArray(store, next_key(), hi, sizeof hi,
                                      "[]Point") == NULL,
           "buffer rejects unknown element type");
+    CHECK(kvlangXvalueNewBufferArray(store, next_key(), hi, sizeof hi,
+                                     "[a]int64") == NULL,
+          "buffer rejects malformed dims");
+
+    uint8_t *quantified = kvlangXvalueNewBufferArray(store, next_key(), hi,
+                                                     sizeof hi, "[?]char/utf8");
+    CHECK(quantified != NULL, "buffer accepts [?]T");
+    if (quantified)
+        CHECK(value_ok(quantified, wire_total(quantified), sizeof hi,
+                       "[?]char/utf8"),
+              "buffer [?]T attr");
 }
 
 static void test_tensor(void) {
@@ -126,7 +144,7 @@ static void test_tensor(void) {
     CHECK(kvlangXvalueNewCompactArray(store, next_key(), dims, 0, raw,
                                       sizeof raw, "") == NULL,
           "compact ndim=0 rejected");
-    /* 变长 char/utf8 拒绝；定宽 char/utf32、char/ascii 保留。 */
+
     CHECK(kvlangXvalueNewCompactArray(store, next_key(), dims, 2, raw,
                                       sizeof raw, "[2,3]char/utf8") == NULL,
           "compact rejects char/utf8 element");
@@ -221,7 +239,6 @@ static void test_padding_rejected(void) {
     }
 }
 
-/* tag 2（旧 reallen）已删除：attr 区出现 tag 2 必须拒绝，且与位置无关。 */
 static void test_tag_two_position_independent(void) {
     const uint8_t lt_data[] = "[]char/utf8";
     const uint16_t lt_len = (uint16_t)(sizeof lt_data - 1);
@@ -317,6 +334,14 @@ static void test_attrslen_limit(void) {
     free(lt);
 }
 
+static void test_const_language(void) {
+    const char *runtime_member = kvlangConstLanguage("KVLANG_RUNTIME_MEMBER_SEP");
+    CHECK(runtime_member != NULL && strcmp(runtime_member, "\xE2\x80\xA5") == 0,
+          "KVLANG_RUNTIME_MEMBER_SEP");
+    CHECK(kvlangConstLanguage("KVSPACE_RUNTIME_MEMBER_SEP") == NULL,
+          "storage runtime member separator must not be in language table");
+}
+
 int main(void) {
     snprintf(store_path, sizeof store_path, "shm:///tmp/kvlangxvalue-test-%ld",
              (long)getpid());
@@ -332,6 +357,7 @@ int main(void) {
         return 1;
     }
 
+    test_const_language();
     test_scalar();
     test_slack();
     test_tensor();
