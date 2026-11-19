@@ -1,7 +1,7 @@
 //! builtin 辅助（对齐 rwir/builtin 中 lower/layout 依赖的部分：
 //! NumOp/IsNumKind/WiderNumKind/OpKind/TryParseNumber）。
 
-use super::ffi;
+
 
 // ── 数值 kind 工具 ───────────────────────────────────────────────────
 
@@ -152,33 +152,31 @@ pub fn num_op(opcode: &str) -> bool {
 
 // ── 字面量解析 ───────────────────────────────────────────────────────
 
-/// 数值字面量 wire + langtype（attr key 精确匹配 wire 的 kind）。
-/// Returns `Err` on kvspace codec failure and `Ok(None)` for non-numeric tokens.
-pub fn try_parse_number(s: &str) -> Result<Option<(Vec<u8>, &'static str)>, String> {
-    if s.is_empty() {
-        return Ok(None);
+/// 数值字面量的 langtype（**纯函数，不碰 store**）。
+///
+/// 与 [`number_body`] 成对使用：先定类型，再由调用方在**拿到 key 之后**构造值。
+/// 分成两个纯函数是为了让「类型判定」与「写值」解耦——新 ABI 的构造器要 (handle, key)，
+/// 而类型判定不需要它们。
+pub fn number_langtype(s: &str) -> &'static str {
+    if s.parse::<i64>().is_ok() {
+        return "int64";
     }
-    let c0 = s.as_bytes()[0];
-    let is_digit = c0.is_ascii_digit();
-    let is_neg = c0 == b'-' && s.len() >= 2 && s.as_bytes()[1].is_ascii_digit();
-    if !is_digit && !is_neg {
-        return Ok(None);
+    let c0 = s.as_bytes().first().copied().unwrap_or(0);
+    if c0 != b'-' && !s.contains('.') && !s.contains('e') && !s.contains('E')
+        && s.parse::<u64>().is_ok()
+    {
+        return "uint64";
     }
-    if let Ok(i) = s.parse::<i64>() {
-        return Ok(Some((ffi::new_int64(i)?, "int64")));
+    "float64"
+}
+
+/// 数值字面量的 body 字节（小端定宽），配合 [`number_langtype`] 使用。
+pub fn number_body(s: &str, langtype: &str) -> Vec<u8> {
+    match langtype {
+        "int64" => s.parse::<i64>().unwrap_or(0).to_le_bytes().to_vec(),
+        "uint64" => s.parse::<u64>().unwrap_or(0).to_le_bytes().to_vec(),
+        _ => s.parse::<f64>().unwrap_or(0.0).to_le_bytes().to_vec(),
     }
-    if c0 != b'-' && !s.contains('.') && !s.contains('e') && !s.contains('E') {
-        if let Ok(u) = s.parse::<u64>() {
-            return Ok(Some((
-                ffi::xvalue_to_wire("uint64", &u.to_le_bytes(), 1)?,
-                "uint64",
-            )));
-        }
-    }
-    if let Ok(f) = s.parse::<f64>() {
-        return Ok(Some((ffi::new_float64(f)?, "float64")));
-    }
-    Ok(None)
 }
 
 // ── 输出算子的保留 opid ──────────────────────────────────────────────
@@ -194,7 +192,7 @@ pub fn try_parse_number(s: &str) -> Result<Option<(Vec<u8>, &'static str)>, Stri
 ///
 /// ## 编号从哪来
 ///
-/// `runtimec/binrwir/instruction.h` 的保留区占用记账：
+/// opid 保留区的占用记账（保留区基由 rwir 层定义）：
 ///
 /// ```text
 /// 保留区占用记账（0xFF00–0xFFFF）：

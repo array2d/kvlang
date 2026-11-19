@@ -10,7 +10,7 @@
 //   sqrt: 12.0
 //   sqrt(√): 12.0
 rwfunc test() -> () {
-	t0:time = time·now()
+	t0:int64 = time·now()
 	10 + 3 -> add_r:int64
 	println("add:", add_r)
 
@@ -38,8 +38,8 @@ rwfunc test() -> () {
 	sqrt_r2:float64 = √(144)
 	println("sqrt(√):", sqrt_r2)
 
-	t1:time = time·now()
-	delta:time/duration = time·sub(t1, t0)
-	ns:int64 = time/duration·as_nanos(delta)
+	t1:int64 = time·now()
+	delta:int64 = t1 - t0
+	ns:int64 = delta
 	println("__bench_ns:", ns)
 }

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Reject oversized binrwir handlers.
+"""Reject oversized binir handlers.
 
 用户裁决（原话）：
 
-> 运算类的 binrwir handler 函数体，**普通类型超过 3 行需要人工审查**；
+> 运算类的 binir handler 函数体，**普通类型超过 3 行需要人工审查**；
 > **array 等复杂类型的容许稍多 2 行**（即 >5 行审查）。
 
 判据的形状：**行数不是美学，是可审查性**。一个 handler 超过几行，说明它大概率
@@ -505,7 +505,7 @@ def selftest() -> int:
             + "    return 0;\n"
             "}\n"
             "\n"
-            "static const binrwir_registry_entry_t scalar_entries[] = {\n"
+            "static const binir_registry_entry_t scalar_entries[] = {\n"
             "    {.operation_identifier = 1U,\n"
             "     .flags = 0U,\n"
             "     .handler = scalar_three},\n"
@@ -564,7 +564,7 @@ def selftest() -> int:
             + "    return v0;\n}\n"
             "static runtimec_status_t thin_handler(void) {\n"
             "    return thin_logic();\n}\n"
-            "static const binrwir_registry_entry_t thin_entries[] = {\n"
+            "static const binir_registry_entry_t thin_entries[] = {\n"
             "    {.operation_identifier = 1U, .flags = 0U, .handler = thin_handler},\n"
             "};\n", encoding="utf-8")
         # ② 宏形态：宏名不在 definitions 里，逻辑函数 20 行 → 必须红。
@@ -573,14 +573,14 @@ def selftest() -> int:
             + "".join(f"    int m{i} = {i};\n" for i in range(19))
             + "    return m0;\n}\n"
             "VMBIN_HANDLER_UNARY_TYPED(macro_handler, macro_logic, int64, int64)\n"
-            "static const binrwir_registry_entry_t macro_entries[] = {\n"
+            "static const binir_registry_entry_t macro_entries[] = {\n"
             "    {.operation_identifier = 2U, .flags = 0U, .handler = macro_handler},\n"
             "};\n", encoding="utf-8")
         # ③ 合法：逻辑 1~3 行 → 必须绿。
         (handlers / "fine.c").write_text(
             "static runtimec_status_t fine_logic(void) {\n"
             "    return 0;\n}\n"
-            "static const binrwir_registry_entry_t fine_entries[] = {\n"
+            "static const binir_registry_entry_t fine_entries[] = {\n"
             "    {.operation_identifier = 3U, .flags = 0U, .handler = fine_logic},\n"
             "};\n", encoding="utf-8")
 
@@ -666,7 +666,7 @@ def selftest() -> int:
             "    return shared_logic();\n}\n"
             "static runtimec_status_t shared_two(void) {\n"
             "    return shared_logic();\n}\n"
-            "static const binrwir_registry_entry_t shared_entries[] = {\n"
+            "static const binir_registry_entry_t shared_entries[] = {\n"
             "    {.operation_identifier = 1U, .flags = 0U, .handler = shared_one},\n"
             "    {.operation_identifier = 2U, .flags = 0U, .handler = shared_two},\n"
             "};\n", encoding="utf-8")

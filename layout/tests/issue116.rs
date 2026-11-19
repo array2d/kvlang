@@ -66,12 +66,7 @@ fn fresh_kv() -> (TempStore, Kv) {
     // 裸名必须有声明来源：运行时 boot 会发布这些内建的 /lib/<op> def rwir，
     // 测试直接在空 store 上布局源码，按同样形状补声明（变参）。
     for op in ["println", "print", "cerr"] {
-        kv.set(&[(
-            format!("/lib/{op}"),
-            kvkind::KIND_DEF_RWIR.to_string(),
-            kvkind::new_defrwir(1, 0, true).unwrap(),
-        )])
-        .unwrap();
+        kvkind::new_defrwir(&mut kv, &format!("/lib/{op}"), 1, 0, true).unwrap();
     }
     let store = TempStore {
         dir: dsn.trim_start_matches("shm://").to_string(),
@@ -84,7 +79,7 @@ fn children_of(kv: &mut Kv, dir: &str) -> Vec<String> {
 }
 
 fn is_terminator_op(op: &str) -> bool {
-    matches!(op, "return" | "goto" | "br")
+    matches!(op, "return" | "goto" | "branch")
 }
 
 fn parse_coord(name: &str) -> Option<(i32, i32)> {
@@ -229,36 +224,52 @@ fn assert_single_plane(kv: &mut Kv, fn_: &str) {
     );
 }
 
+/// 跳转目标的表示**两族不同**，判据必须分开：
+///   - `goto` 只写一个目标，落成 `int64` 的 irseq；
+///   - `branch` 写作 `读条件 + 两个目标名`，两个目标是 `‥labels/` 的**名字**（`rwir` 槽），
+///     不是 irseq——能力表 `rwir branch(bool #condition, int32 #taken_s0, int32 #not_taken_s0)`
+///     的 s0 是编译期对齐用的指令序号，盘上记的是名字，由 `‥labels/` 提供映射。
 fn assert_jumps_are_int64(kv: &mut Kv, fn_: &str, p: &BTreeMap<i32, Inst>) {
+    let labels = labels_of(kv, fn_);
     let mut saw = false;
     for (n, inst) in p {
-        if inst.op != "goto" && inst.op != "br" {
+        if inst.op != "goto" && inst.op != "branch" {
             continue;
         }
         saw = true;
         let prefix = format!("/lib/{fn_}/");
-        let cols: &[i32] = if inst.op == "goto" { &[-1] } else { &[-2, -3] };
-        for col in cols {
-            let key = format!("{prefix}[{n},{col}]");
+        if inst.op == "goto" {
+            let key = format!("{prefix}[{n},-1]");
             let v = kv.get_one(&key);
             let lt = kv.langtype_of(&key);
             assert_eq!(
                 kvkind::kind(&v, &lt),
                 "int64",
-                "{fn_} [{n},{col}] {} {}",
-                inst.op,
+                "{fn_} [{n},-1] goto {}",
                 kvkind::display(&v, &lt)
             );
             let irseq: i32 = slot_text(&v, &lt).parse().unwrap();
-            assert!(irseq >= 1, "{fn_} [{n}] {} target {irseq} < 1", inst.op);
+            assert!(irseq >= 1, "{fn_} [{n}] goto target {irseq} < 1");
+            assert!(p.contains_key(&irseq), "{fn_} [{n}] goto -> missing {irseq}");
+            continue;
+        }
+        for col in [-2, -3] {
+            let key = format!("{prefix}[{n},{col}]");
+            let v = kv.get_one(&key);
+            let lt = kv.langtype_of(&key);
+            let name = slot_text(&v, &lt);
+            let irseq = labels
+                .get(&name)
+                .copied()
+                .unwrap_or_else(|| panic!("{fn_} [{n},{col}] branch target {name:?} 不在 ‥labels"));
+            assert!(irseq >= 1, "{fn_} [{n},{col}] branch target {name} -> {irseq} < 1");
             assert!(
                 p.contains_key(&irseq),
-                "{fn_} [{n}] {} -> missing {irseq}",
-                inst.op
+                "{fn_} [{n},{col}] branch target {name} -> missing {irseq}"
             );
         }
     }
-    assert!(saw, "{fn_}: no goto/br in\n{}", dump_ir(p));
+    assert!(saw, "{fn_}: no goto/branch in\n{}", dump_ir(p));
 }
 
 fn assert_no_scope_opcode(p: &BTreeMap<i32, Inst>, fn_: &str) {
@@ -388,31 +399,30 @@ fn br_true_false_are_int64() {
     )
     .unwrap();
     let children = children_of(&mut kv, "/lib/f/");
-    let mut saw_br = false;
+    let labels = labels_of(&mut kv, "f");
+    let mut saw_branch = false;
     for c in &children {
         let Some(row) = parse_row(c) else { continue };
-        if sig(&kv.get_one(&format!("/lib/f/[{row},0]"))) != "br" {
+        if sig(&kv.get_one(&format!("/lib/f/[{row},0]"))) != "branch" {
             continue;
         }
-        let tk = format!("/lib/f/[{row},-2]");
-        let fk = format!("/lib/f/[{row},-3]");
-        let t = kv.get_one(&tk);
-        let f = kv.get_one(&fk);
-        assert_eq!(
-            kvkind::kind(&t, &kv.langtype_of(&tk)),
-            "int64",
-            "br true {}",
-            kvkind::display(&t, &kv.langtype_of(&tk))
-        );
-        assert_eq!(
-            kvkind::kind(&f, &kv.langtype_of(&fk)),
-            "int64",
-            "br false {}",
-            kvkind::display(&f, &kv.langtype_of(&fk))
-        );
-        saw_br = true;
+        // 条件（列 -1）是产生条件的那个槽的引用，槽文本是 `名字\0类型`，类型必须是 bool；
+        // 两个目标（列 -2/-3）是 `‥labels/` 里的名字。
+        let ck = format!("/lib/f/[{row},-1]");
+        let cond = sig(&kv.get_one(&ck));
+        let cond_type = cond.rsplit('\0').next().unwrap_or("");
+        assert_eq!(cond_type, "bool", "branch condition {cond:?}");
+        for col in [-2, -3] {
+            let key = format!("/lib/f/[{row},{col}]");
+            let name = sig(&kv.get_one(&key));
+            assert!(
+                labels.contains_key(&name),
+                "branch target {name:?} 不在 ‥labels（列 {col}）"
+            );
+        }
+        saw_branch = true;
     }
-    assert!(saw_br, "no br in {children:?}");
+    assert!(saw_branch, "no branch in {children:?}");
 }
 
 #[test]
@@ -431,7 +441,7 @@ fn abs_if_is_numbered_jumps() {
         .filter(|(n, _)| **n > 0)
         .map(|(_, i)| i.op.as_str())
         .collect();
-    assert!(ops.contains(&"br"), "abs missing br:\n{ir}");
+    assert!(ops.contains(&"branch"), "abs missing branch:\n{ir}");
     assert!(ops.contains(&"goto"), "abs missing goto:\n{ir}");
     assert!(ops.contains(&"return"), "abs missing return:\n{ir}");
     assert!(!ops.contains(&"call"), "abs if lowered to call:\n{ir}");
@@ -578,7 +588,7 @@ fn for_is_br_goto_single_plane() {
         labs.keys().any(|k| k.contains("_for_")),
         "for labels={labs:?}"
     );
-    assert!(p.values().any(|i| i.op == "br"), "for missing br:\n{ir}");
+    assert!(p.values().any(|i| i.op == "branch"), "for missing branch:\n{ir}");
     assert!(
         !p.values().any(|i| i.op == "call"
             && i.reads
@@ -598,10 +608,10 @@ fn nested_if_while_single_plane() {
     let p = plane(&mut kv, "f");
     assert_jumps_are_int64(&mut kv, "f", &p);
     assert_no_scope_opcode(&p, "f");
-    let brs = p.values().filter(|i| i.op == "br").count();
+    let brs = p.values().filter(|i| i.op == "branch").count();
     assert!(
         brs >= 2,
-        "nested if+while should have >=2 br, got {brs}:\n{}",
+        "nested if+while should have >=2 branch, got {brs}:\n{}",
         dump_ir(&p)
     );
 }

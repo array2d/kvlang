@@ -12,10 +12,10 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={lib}");
     println!("cargo:rustc-link-lib=dylib=kvspace");
-    // 语言层的 wire 构造器（kvlangXvalueHeadNew* / kvlangXvalueNew*）：TASK-082 从
+    // 语言层的 wire 构造器（kvlangXvalueNew*）：TASK-082 从
     // libkvspace 搬到 kvlang 自己的静态库。静态库由 kvlang/xvalue 构建产出，
     // 落在 repo 的 lib/ 里（make kvspace-libs 会顺带重出）。
-    println!("cargo:rustc-link-lib=static=kvlang_xvalue");
+    println!("cargo:rustc-link-lib=dylib=kvlang_xvalue");
     // 字节层 `kvspaceXvalueGetAttr` / `HeadEffectiveLen` 仍在 libkvspace，无需额外库。
 
     let origin = if cfg!(target_os = "macos") {

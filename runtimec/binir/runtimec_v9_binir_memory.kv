@@ -1,0 +1,23 @@
+// 组件：binir/runtimec_v9_binir_memory
+// 作用：v9 的 binir 指令——字节拷贝与 key→偏移、创建/调整、释放，一行一条。
+// 生成：由 generate_v9_binir.py 从 ../rwir/runtimec_rwircap.kv 展开，勿手改。
+// 操作数：二进制指针，按所指值的宽度写 uint8（1 字节）/ [N]uint8（N=2、4、8）/
+//       []uint8（变长字节）；不写 *，binir 没有 langtype。
+// 命名：<算子>_<payload 类型序列>，同型也写全；payload 顺序 = 声明顺序（读在前、写在后），
+//       bin 层不再区分读写；opid 见 runtimec_v9_binir_opids.yml。
+//       opid 是 runtimec 私有编号，从 1 按产物顺序递增。
+// 规模：6 条。
+
+// 只在 binir 存在的指令：
+//   C·memcpy —— rwir 的 concat、copy、string·slice 编译到此，都是字节拷贝
+//   C·memmove —— 重叠拷贝：inplace 写自身、容器内搬移元素
+//   C·memset —— 填充：新槽清零、单字节重复填充
+//   C·memcmp —— rwir 的 string·cmp 编译到此
+//   kvspace·realloc —— 唯一写原语：key 不存在就创建，存在就调整容量
+//   kvspace·free —— 删除 key 的值并释放 box
+binir C·memcpy([8]uint8 #src, [8]uint8 #byte_count, [8]uint8 #dest)
+binir C·memmove([8]uint8 #src, [8]uint8 #byte_count, [8]uint8 #dest)
+binir C·memset(uint8 #value, [8]uint8 #byte_count, [8]uint8 #dest)
+binir C·memcmp([8]uint8 #left, [8]uint8 #right, [8]uint8 #byte_count, [4]uint8 #order)
+binir kvspace·realloc([]uint8 #key, [8]uint8 #body_length, [8]uint8 #attr_length, [8]uint8 #value_offset)
+binir kvspace·free([]uint8 #key)

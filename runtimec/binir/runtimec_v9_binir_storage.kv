@@ -1,0 +1,23 @@
+// 组件：binir/runtimec_v9_binir_storage
+// 作用：v9 的 binir 指令——存储，一行一条。
+// 生成：由 generate_v9_binir.py 从 ../rwir/runtimec_rwircap.kv 展开，勿手改。
+// 操作数：二进制指针，按所指值的宽度写 uint8（1 字节）/ [N]uint8（N=2、4、8）/
+//       []uint8（变长字节）；不写 *，binir 没有 langtype。
+// 命名：<算子>_<payload 类型序列>，同型也写全；payload 顺序 = 声明顺序（读在前、写在后），
+//       bin 层不再区分读写；opid 见 runtimec_v9_binir_opids.yml。
+//       opid 是 runtimec 私有编号，从 1 按产物顺序递增。
+// 规模：14 条。
+binir kvspace·exist([]uint8 #key, uint8 #exists)
+binir kvspace·del([]uint8 #key)
+binir kvspace·deltree([]uint8 #key)
+binir kvspace·cp([]uint8 #key, []uint8 #target)
+binir kvspace·cpdir([]uint8 #key, []uint8 #target)
+binir kvspace·cplist([]uint8 #key, []uint8 #other)
+binir kvspace·listlen([]uint8 #key, [8]uint8 #count)
+binir kvspace·listat([]uint8 #key, [8]uint8 #index, []uint8 #value)
+binir kvspace·mkindex([]uint8 #key)
+binir kvspace·delextindex([]uint8 #key)
+binir kvspace·watch([]uint8 #key)
+binir xvaluehead·getlangtype([]uint8 #key, []uint8 #langtype)
+binir xvaluehead·setlangtype([]uint8 #newtype, []uint8 #key)
+binir xvaluehead·bodylen([]uint8 #key, [8]uint8 #length)

@@ -12,9 +12,9 @@ capability row 的名字，当前 0 条），两者名字相近、含义不同�
 
 | # | 路径 | 判据来源 |
 |---|---|---|
-| 1 | `binrwir_registry` 里查得到 opid 的 handler | `runtimec/vmbin/handlers/*.c` 的条目表 |
+| 1 | `binir_registry` 里查得到 opid 的 handler | `runtimec/vmbin/handlers/*.c` 的条目表 |
 | 2 | 解释器**内联分派**（不进 registry） | `vmbin/interpreter.c` 的 `switch`，只有 `=`/`goto`/`br`/`call`/`return` |
-| 3 | **编译期特化**：基础 opid 被改写成 0x8000+ | `binrwir/specialization_table.c` 第一列 |
+| 3 | **编译期特化**：基础 opid 被改写成 0x8000+ | `binir/specialization_table.c` 第一列 |
 | 4 | 名字 → opid 的映射本身存在 | `specification/rwir_alias_table.def` |
 
 第 3 条不是推断，是**实测**：探针跑 `a + b`（基础 opid 0x0002 `add`）得到 `executed`。

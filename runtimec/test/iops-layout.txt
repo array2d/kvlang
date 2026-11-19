@@ -1,0 +1,20 @@
+lib probe {
+    rwfunc iops(int64) -> (int64) {
+        *[0,1]:int64 = 0
+        i:int64 = 1
+        goto(_while_3)
+        _while_3: {
+    	_1:int64 = *[0,-1]
+    	_2:bool = le(i, _1)
+    	br(_2, _do_4, _exit_5)
+    }
+        _do_4: {
+    	_6:int64 = *[0,1]
+    	*[0,1]:int64 = add(_6, 1)
+    	i:int64 = add(i, 1)
+    	goto(_while_3)
+    }
+        _exit_5: {
+    	return
+    }
+    }

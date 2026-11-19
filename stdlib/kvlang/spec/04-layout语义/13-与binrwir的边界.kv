@@ -1,0 +1,71 @@
+// 欢迎加入kvspace世界
+lib kvlang/spec/layout语义/与binrwir的边界 {
+	r####"# 与 binrwir 的边界
+
+## layout 永远不参与 binrwir
+
+layout 的产物是 **kvspace 里的明文 rwir 树**，到 `/lib` 为止。binrwir 是它之后的阶段：
+**v9 编译器**把明文 rwir 编译成 `/lib/<pkg>·<func>.bin` 的 8 字节格序列，**runtime**
+解码执行。
+
+```
+layout →（kvspace 明文 rwir）→ v9 →（binrwir .bin）→ runtime
+```
+
+## rwir 与 binrwir 对比
+
+| 维度 | **rwir** | **binrwir** |
+|---|---|---|
+| 定位 | kvlang 执行的核心语义 | runtimec 专属的加速指令 |
+| 生产者 | layout | v9 |
+| 存储 | kvspace 明文树（`/lib`） | 二进制 `.bin`（`/lib/<pkg>·<func>.bin`） |
+| 类型 | 有 langtype：并集 `T1\|T2`、指针 `*T`、容器 | **没有 langtype**；操作数只写所指值的字节宽度：`uint8` / `[N]uint8`（N=2/4/8）/ `[]uint8` |
+| 参数风格 | 读写参：`a:T, b:T -> c:T` | **同样的读写参风格** |
+| 操作数 | key、值、langtype | 64 位地址（进程内、不透明、不可持久化） |
+| 消费者 | kvlang 执行核心语义 | runtimec（解释器 / JIT） |
+| 可读性 | 人可读、可从 kvspace 恢复 | 8 字节格，只有 opid 与字 |
+
+两层的根差别只有一条：**rwir 有类型，binrwir 没有**。没有类型，操作数就只能是
+二进制指针，声明里只写它所指值的字节宽度（`uint8` / `[N]uint8` / `[]uint8`），
+精度由 opcode 自己带；读写参风格则原样保留。
+
+**操作数不写 `*`。** `*T` 是 kvlang 指针——以 key 路径表示的目标引用，body 是 key；
+binrwir 的操作数是二进制指针（64 位进程地址），kvlang 源码不表达它，也不允许手写
+（[[ptr]]）。
+
+layout 在这条线的最左边，**在 v9 之前结束**。它不生成、不读取、不嵌入 binrwir 的任何
+产物：不产出 `.bin`，不解析操作数格，不 include `runtimec/binrwir/` 下的任何头或数据。
+
+## 为什么
+
+**binrwir 没有类型；rwir 有类型。** 这一条决定了两层不能互相看见：
+
+- **rwir** 是 kvlang 的通用明文指令：`langtype`、并集 `T1|T2`、指针 `*T`、容器
+  `[n]T` / `[]T` / `'K'T` 都在这一层；
+- **binrwir** 一格 8 字节，没有类型，操作数字是二进制指针（64 位地址），声明里按所指值的
+  字节宽度写成 `uint8` / `[N]uint8` / `[]uint8`。类型在
+  v9 编译时已被消化干净，字节层不存在 langtype。
+
+layout 一旦看见 binrwir，只会发生两件坏事之一：
+
+1. 把 langtype 带进字节层——「binrwir 没有类型」当场失效；
+2. 把字节格式带进 layout——layout 从「只做布局」变成「半个编译器」。
+
+两种都不允许。所以判据是**结构性的**：layout 的构建输入里不得出现 `runtimec/binrwir/`
+的任何路径，任何形式（源码 include、`include_str!`、构建脚本读取）都不行。
+
+## 地址解析属于 binrwir
+
+把 key 解析成**进程内 64 位地址**的动作（`resolveprocessaddress`）只属于 binrwir：操作数字就是
+这个地址，执行器拿到它直接访存。解析在 v9 的载入/编译期完成，一个 key 只解析一次。
+
+**它不提供给 kvlang 上层。** rwir 只认 key、langtype 与值；一个 64 位偏移量对 kvlang 没有意义，
+上层看不到地址，也不需要看到。这与「layout 永远不参与 binrwir」是同一条边界的另一面：layout
+产出的 rwir 里没有地址，地址从 v9 开始才存在。
+
+## 与 rwir 数据的关系
+
+layout 可以读 **rwir 层**的数据（`/lib` 明文、`def rwir` 签名、`stdlib` 声明）——那是它
+自己的输入面。它读不到、也不需要读 binrwir 层的东西。两层之间只有 v9 一道编译边界。
+	"#### -> /lib/kvlang/spec/layout语义/与binrwir的边界
+}

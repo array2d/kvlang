@@ -155,8 +155,9 @@ fn map_new_stays_two_reads_two_slots() {
         "lib p {\n\trwfunc m() -> () {\n\t\ta:'int64'int64 = {1 2}\n\t}\n}\n",
     );
     assert_counts_match(&mut kv, "/lib/p·m", "map·new");
-    assert_eq!(declared_counts(&mut kv, "/lib/p·m", 1), (2, 1));
-    assert_eq!(count_slots(&mut kv, "/lib/p·m", 1), (2, 1));
+    // `map·new` 只建空根（nr=0），元素走成员写——见 container_literal 的同一条注释。
+    assert_eq!(declared_counts(&mut kv, "/lib/p·m", 1), (0, 1));
+    assert_eq!(count_slots(&mut kv, "/lib/p·m", 1), (0, 1));
 }
 
 /// 判据的自检：故意把计数头读错位置必须被发现，否则上面几条断言无法证明
@@ -171,10 +172,10 @@ fn the_check_detects_a_mismatch_when_one_is_introduced() {
 
     // 直接改写 kvspace 里 opcode 槽的读参计数 5 → 3：模拟「声明数与槽数不符」。
     let key = "/lib/p·f/[1,0]";
+    // 直接改写 kvspace 里的 wire（head 之后的前 2 字节是 nr）：模拟「声明数与槽数不符」。
+    // 新 ABI 下没有 `Kv::set`，所以走「取映射地址 → 就地改」这条唯一的写路。
     let langtype = kv.langtype_of(key);
-    let mut mutated = kv.get_one(key);
-    mutated[16..18].copy_from_slice(&3u16.to_le_bytes());
-    kv.set(&[(key.to_string(), langtype, mutated)]).unwrap();
+    kv.patch_body_u16(key, 0, 3).unwrap();
 
     assert_eq!(declared_counts(&mut kv, "/lib/p·f", 1), (3, 1));
     assert_eq!(count_slots(&mut kv, "/lib/p·f", 1), (5, 1));

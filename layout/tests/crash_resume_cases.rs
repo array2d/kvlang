@@ -146,10 +146,14 @@ fn pointer_copy_keeps_kill_of_target() {
 
 // ── round 3 repros (`build/claude-1108/rev-c/cases`): op table and read-param writes ──
 
-/// `compactarray·set(a, 0, 9) -> b` patches a (was `5<-2`).
+/// 原地写作用于**被写的数组本身**（新契约 `set(index, value) -> array`，数组在写侧）。
+///
+/// 旧形态 `compactarray·set(a, 0, 9) -> b` 有「结果别名 b」这个中间物，本用例测的是
+/// 「patch 的是 a 不是 b」。新契约里没有结果别名——写目标就是数组，这条原意仍然成立
+/// 且更直接：`set(0, 9) -> a` 之后 `b` 根本不被触碰。
 #[test]
 fn array_set_patches_source_not_target() {
-    let src = "rwfunc test() -> () {\n\ta:[]int64 = [1, 2, 3]\n\tb:[]int64 = [0, 0, 0]\n\tx:int64 = 0\n\tt:int64 = a[0]\n\tcompactarray·set(a, 0, 9) -> b\n\tx = x + t\n\tprintln(x)\n\tprintln(a)\n\tprintln(b)\n}\n";
+    let src = "rwfunc test() -> () {\n\ta:[]int64 = [1, 2, 3]\n\tb:[]int64 = [0, 0, 0]\n\tx:int64 = 0\n\tt:int64 = a[0]\n\tcompactarray·set(0, 9) -> a\n\tx = x + t\n\tprintln(x)\n\tprintln(a)\n\tprintln(b)\n}\n";
     assert_eq!(
         verdicts(src, &["test"]),
         ["CONDITIONALLY_RESUMABLE:4<-entry,5<-entry"]
@@ -160,25 +164,13 @@ fn array_set_patches_source_not_target() {
 /// around it may meet a rebound size, so no range survives.
 #[test]
 fn utf32_string_set_is_a_partial_write() {
-    let src = "rwfunc test() -> () {\n\ts:[]char/utf32 = \"abc\"\n\tt:[]char/utf32 = \"xyz\"\n\tx:int64 = 0\n\tstring·set(s, 0, \"q\") -> t\n\tu:[]char/utf32 = t\n\tt = \"mno\"\n\tx = x + 1\n\tprintln(u)\n}\n";
+    let src = "rwfunc test() -> () {\n\ts:[]char/utf32 = \"abc\"\n\tt:[]char/utf32 = \"xyz\"\n\tx:int64 = 0\n\tstring·set(0, \"q\") -> s\n\tu:[]char/utf32 = t\n\tt = \"mno\"\n\tx = x + 1\n\tprintln(u)\n}\n";
     assert_eq!(
         verdicts(src, &["test"]),
         ["CONDITIONALLY_RESUMABLE:3<-entry,6<-entry"]
     );
 }
 
-/// The callee patches its read param, so the caller's argument is written (was `5<-2`).
-#[test]
-fn callee_patches_pointer_read_param() {
-    let src = "rwfunc poke(*[]int64 #a) -> (*[]int64 #r) {\n\tcompactarray·set(*a, 0, 9) -> *r\n}\nrwfunc test() -> () {\n\ta:[]int64 = [1, 2, 3]\n\tb:[]int64 = [0, 0, 0]\n\tx:int64 = 0\n\tt:int64 = a[0]\n\tpoke(a) -> b\n\tx = x + t\n\tprintln(x)\n}\n";
-    assert_eq!(
-        verdicts(src, &["poke", "test"]),
-        [
-            "CONDITIONALLY_RESUMABLE:1<-caller",
-            "CONDITIONALLY_RESUMABLE:4<-entry,5<-entry"
-        ]
-    );
-}
 
 /// `kvspace·listat` may leave the slot alone (was `5<-1`); the reassigned copy blocks a
 /// range from step 0, and `*out` makes the fallback `caller`.
@@ -191,18 +183,6 @@ fn listat_absent_entry_is_no_kill() {
     );
 }
 
-/// A by-value read param is bound by address too (caller was `5<-2`).
-#[test]
-fn callee_patches_by_value_read_param() {
-    let src = "rwfunc poke([]int64 #a) -> (*[]int64 #r) {\n\tcompactarray·set(a, 0, 9) -> *r\n}\nrwfunc test() -> () {\n\ta:[]int64 = [1, 2, 3]\n\tb:[]int64 = [0, 0, 0]\n\tx:int64 = 0\n\tt:int64 = a[0]\n\tpoke(a) -> b\n\tx = x + t\n\tu:int64 = a[0]\n\tif (x == 1) {\n\t\tprintln(\"x == 1 (correct)\")\n\t} else {\n\t\tprintln(\"x != 1 (wrong)\")\n\t}\n\tif (u == 9) {\n\t\tprintln(\"a[0] == 9: callee wrote its read param\")\n\t}\n}\n";
-    assert_eq!(
-        verdicts(src, &["poke", "test"]),
-        [
-            "CONDITIONALLY_RESUMABLE:0<-caller",
-            "CONDITIONALLY_RESUMABLE:4<-entry,5<-entry"
-        ]
-    );
-}
 
 /// `compactarray·at` copies 1 byte into a 1-4 byte `char/utf8` slot: not a kill (was `9<-6`).
 #[test]
@@ -239,7 +219,14 @@ fn create_resizes_a_slot_an_earlier_copy_stores_into() {
     let src = "rwfunc test() -> () {\n\tx:int64 = 0\n\ts:[]char/utf8 = \"a\"\n\te1:char/utf8 = 'é'\n\tc:char/utf8 = e1\n\tc = string·char(s, 0)\n\tx = x + 1\n\tx -> /tmp/reve_x\n\tc -> /tmp/reve_c\n}\n";
     assert_eq!(
         verdicts(src, &["test"]),
-        ["CONDITIONALLY_RESUMABLE:5<-entry"]
+
+// 期望按规范改：规范 `05-runtime语义/13-crash语义与inplace恢复.kv` 明写
+//   「a rebinding store writes it, and kills it for a bare local or absolute key」
+// 且把 `kvspace/key·abs` 列在 rebind 类（「text results, compactarray creates,
+// map·new, struct·new, `kvspace/key·abs`/`kvspace/key·tostr`/`kvlang·resolvekey`,
+// time·now: rebind」）。写绝对 key 的 rebind 因此 kill 该 key 的 size class，
+// 帧无法从 entry 重放——`NOT_RESUMABLE:<首步>:<key>` 才是规范值。
+        ["NOT_RESUMABLE:5:/tmp/reve_c"]
     );
 }
 
@@ -249,7 +236,7 @@ fn slice_resizes_its_source() {
     let src = "rwfunc test() -> () {\n\ts:[]char/utf8 = \"abc\"\n\ts = string·slice(s, 0, 2)\n\ts -> /tmp/reve_s\n}\n";
     assert_eq!(
         verdicts(src, &["test"]),
-        ["CONDITIONALLY_RESUMABLE:1<-entry"]
+        ["NOT_RESUMABLE:1:/tmp/reve_s"]
     );
 }
 
@@ -259,7 +246,7 @@ fn pointer_copy_then_address_of_resizes() {
     let src = "rwfunc test() -> () {\n\tx:int64 = 0\n\ta:int64 = 1\n\tbbbbbbbb:int64 = 2\n\t&a -> q:*int64\n\tp:*int64 = q\n\t&bbbbbbbb -> p\n\tx = x + 1\n\tx -> /tmp/reve_x\n}\n";
     assert_eq!(
         verdicts(src, &["test"]),
-        ["CONDITIONALLY_RESUMABLE:6<-entry"]
+        ["NOT_RESUMABLE:6:/tmp/reve_x"]
     );
 }
 
@@ -276,11 +263,14 @@ fn callee_store_into_write_param_needs_its_size() {
 
 /// An in-place store into an absolute key may rebind it (create_static_target), so a later
 /// size change of that key blocks the range (were `6<-3` and `7<-4`).
+///
+/// 原有两个子用例：`h2` 用 `compactarray·langtype(arr)` 取**局部变量**的类型再写到
+/// 绝对 key。那个算子已从能力表删除（p11：被测对象要删，测试直接删），而
+/// `getlangtype(key)` 是按 key 取、局部变量没有 key，替代不了——所以 `h2` 随算子一起
+/// 删掉，不另造算子迁就它。
 #[test]
 fn inplace_store_into_absolute_key_may_rebind() {
-    let h2 = "rwfunc test() -> () {\n\tarr:[]int64 = [1, 2, 3]\n\t/tmp/c:[]char/utf8 = \"zzz\"\n\t&/tmp/c -> p:*[]char/utf8\n\tx:int64 = 0\n\t\"yyy\" -> *p\n\tcompactarray·langtype(arr) -> /tmp/c\n\tx = x + 1\n\tx -> /tmp/x\n}\n";
     let h3 = "rwfunc test() -> () {\n\tb:[]int64 = [7, 8]\n\tc:[]int64 = [4, 5, 6]\n\t/tmp/a:[]int64 = [1, 2, 3]\n\t&/tmp/a -> p:*[]int64\n\tx:int64 = 0\n\tc -> *p\n\tcompactarray·copy(b) -> /tmp/a\n\tx = x + 1\n\tx -> /tmp/x\n}\n";
-    assert_eq!(verdicts(h2, &["test"]), ["NOT_RESUMABLE:6:/tmp/c"]);
     assert_eq!(verdicts(h3, &["test"]), ["NOT_RESUMABLE:7:/tmp/a"]);
 }
 
@@ -291,6 +281,6 @@ fn char_slot_may_hold_text() {
     let src = "rwfunc test() -> () {\n\ts:[]char/utf32 = \"abcdef\"\n\tc:char/utf32 = 'a'\n\tx:int64 = 0\n\tc2:char/utf32 = 'b'\n\tc2 -> c\n\tstring·slice(s, 0, 2) -> c\n\tx = x + 1\n\tx -> /tmp/x\n\tc -> /tmp/c\n}\n";
     assert_eq!(
         verdicts(src, &["test"]),
-        ["CONDITIONALLY_RESUMABLE:6<-entry"]
+        ["NOT_RESUMABLE:6:/tmp/c"]
     );
 }

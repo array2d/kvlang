@@ -261,49 +261,49 @@ fn counts_body(nr: i32, nw: i32, dynamic: bool) -> Result<Vec<u8>, String> {
     Ok(raw)
 }
 
-pub fn new_rwir(nr: i32, nw: i32, sig: &str) -> Result<Vec<u8>, String> {
+pub fn new_rwir(kv: &mut ffi::Kv, key: &str, nr: i32, nw: i32, sig: &str) -> Result<(), String> {
     let mut raw = counts_body(nr, nw, false)?;
     raw.extend_from_slice(sig.as_bytes());
-    ffi::xvalue_to_wire(KIND_RWIR, &raw, 1)
+    ffi::xvalue_to_wire(kv, key, KIND_RWIR, &raw, 1, KIND_RWIR)
 }
 
-pub fn new_rwfunc_call(nr: i32, nw: i32, sig: &str) -> Result<Vec<u8>, String> {
+pub fn new_rwfunc_call(kv: &mut ffi::Kv, key: &str, nr: i32, nw: i32, sig: &str) -> Result<(), String> {
     let mut raw = counts_body(nr, nw, false)?;
     raw.extend_from_slice(sig.as_bytes());
-    ffi::xvalue_to_wire(KIND_RWFUNC, &raw, 1)
+    ffi::xvalue_to_wire(kv, key, KIND_RWFUNC, &raw, 1, KIND_RWFUNC)
 }
 
-pub fn new_typed_rwir(name: &str, langtype: &str) -> Result<Vec<u8>, String> {
+pub fn new_typed_rwir(kv: &mut ffi::Kv, key: &str, name: &str, langtype: &str) -> Result<(), String> {
     let mut raw = counts_body(0, 0, false)?;
     raw.extend_from_slice(name.as_bytes());
     raw.push(0);
     raw.extend_from_slice(langtype.as_bytes());
-    ffi::xvalue_to_wire(KIND_RWIR, &raw, 1)
+    ffi::xvalue_to_wire(kv, key, KIND_RWIR, &raw, 1, KIND_RWIR)
 }
 
 /// def rwir 路由头：仅计数头，无参数载荷。各参数落 [0,x] 签名行槽（def langtype）。
-pub fn new_defrwir(nr: i32, nw: i32, dynamic: bool) -> Result<Vec<u8>, String> {
-    ffi::xvalue_to_wire(KIND_DEF_RWIR, &counts_body(nr, nw, dynamic)?, 1)
+pub fn new_defrwir(kv: &mut ffi::Kv, key: &str, nr: i32, nw: i32, dynamic: bool) -> Result<(), String> {
+    ffi::xvalue_to_wire(kv, key, KIND_DEF_RWIR, &counts_body(nr, nw, dynamic)?, 1, KIND_DEF_RWIR)
 }
 
 /// `inplace` mark appended to a write param's langtype, mirroring `inplace *T #name`.
 pub const INPLACE_SUFFIX: &str = " inplace";
 
 /// 签名行 [0,x] 槽：一个参数的类型定义，body=该参数完整 langtype 串。
-pub fn new_def_langtype(langtype: &str) -> Result<Vec<u8>, String> {
-    ffi::xvalue_to_wire(KIND_DEF_LANGTYPE, langtype.as_bytes(), 1)
+pub fn new_def_langtype(kv: &mut ffi::Kv, key: &str, langtype: &str) -> Result<(), String> {
+    ffi::xvalue_to_wire(kv, key, KIND_DEF_LANGTYPE, langtype.as_bytes(), 1, KIND_DEF_LANGTYPE)
 }
 
 /// def rwir write slot `[0,+x]`, with an optional ` inplace` suffix (idempotent).
-pub fn new_def_langtype_with_inplace(langtype: &str, inplace: bool) -> Result<Vec<u8>, String> {
+pub fn new_def_langtype_with_inplace(kv: &mut ffi::Kv, key: &str, langtype: &str, inplace: bool) -> Result<(), String> {
     let clean = langtype.strip_suffix(INPLACE_SUFFIX).unwrap_or(langtype);
     if inplace {
         let mut raw = String::with_capacity(clean.len() + INPLACE_SUFFIX.len());
         raw.push_str(clean);
         raw.push_str(INPLACE_SUFFIX);
-        ffi::xvalue_to_wire(KIND_DEF_LANGTYPE, raw.as_bytes(), 1)
+        ffi::xvalue_to_wire(kv, key, KIND_DEF_LANGTYPE, raw.as_bytes(), 1, KIND_DEF_LANGTYPE)
     } else {
-        new_def_langtype(clean)
+        new_def_langtype(kv, key, clean)
     }
 }
 
@@ -325,13 +325,13 @@ pub fn def_langtype_full(data: &[u8]) -> Option<(String, bool)> {
 
 /// rwfunc/rwir 参数定义键（点后缀 `.[0,±k]`）：body 只存 langtype（可带 ` inplace`
 /// 尾缀），**不存名字**——名字是源码注释（`#name`），到 kvspace 没有意义。
-pub fn new_def_param(langtype: &str) -> Result<Vec<u8>, String> {
-    new_def_param_with_inplace(langtype, false)
+pub fn new_def_param(kv: &mut ffi::Kv, key: &str, langtype: &str) -> Result<(), String> {
+    new_def_param_with_inplace(kv, key, langtype, false)
 }
 
 /// 写参定义键 body：`langtype[ inplace]`。
-pub fn new_def_param_with_inplace(langtype: &str, inplace: bool) -> Result<Vec<u8>, String> {
-    new_def_langtype_with_inplace(langtype, inplace)
+pub fn new_def_param_with_inplace(kv: &mut ffi::Kv, key: &str, langtype: &str, inplace: bool) -> Result<(), String> {
+    new_def_langtype_with_inplace(kv, key, langtype, inplace)
 }
 
 /// 参数定义键 body `langtype[ inplace]` -> (langtype, inplace)。
@@ -339,18 +339,18 @@ pub fn def_param_full(data: &[u8]) -> Option<(String, bool)> {
     def_langtype_full(data)
 }
 
-pub fn new_struct() -> Result<Vec<u8>, String> {
-    ffi::xvalue_to_wire(KIND_DEF_STRUCT, &[], 1)
+pub fn new_struct(kv: &mut ffi::Kv, key: &str) -> Result<(), String> {
+    ffi::xvalue_to_wire(kv, key, KIND_DEF_STRUCT, &[], 1, KIND_DEF_STRUCT)
 }
 
 // ── kvlang 自有 kind：rwfunc ────────────────────────────────────────
 //
-pub fn new_rwfunc_dir() -> Result<Vec<u8>, String> {
-    ffi::xvalue_to_wire(KIND_RWFUNC, &[], 1)
+pub fn new_rwfunc_dir(kv: &mut ffi::Kv, key: &str) -> Result<(), String> {
+    ffi::xvalue_to_wire(kv, key, KIND_RWFUNC, &[], 1, KIND_RWFUNC)
 }
 
-pub fn new_rwfunc_anchor(nr: i32, nw: i32, dynamic: bool) -> Result<Vec<u8>, String> {
-    ffi::xvalue_to_wire(KIND_RWFUNC, &counts_body(nr, nw, dynamic)?, 1)
+pub fn new_rwfunc_anchor(kv: &mut ffi::Kv, key: &str, nr: i32, nw: i32, dynamic: bool) -> Result<(), String> {
+    ffi::xvalue_to_wire(kv, key, KIND_RWFUNC, &counts_body(nr, nw, dynamic)?, 1, KIND_RWFUNC)
 }
 
 /// rwfunc body 访问器（layout 读回签名时用）。

@@ -1,0 +1,8 @@
+[package]
+name = "kvi"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "kvi"
+path = "src/main.rs"

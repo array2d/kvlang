@@ -39,6 +39,14 @@ fn known_kind(k: &str) -> bool {
             | "char/utf8"
             | "char/ascii"
             | "stringkeymap"
+            // `ptr` = 「任意指针」的类型标记，用于签名里表达「这一槽收指针」而不约束
+            // 指针目标（`string·cmp` 的 `[]char/utf8|…|ptr` 就是这种用法）。
+            //
+            // 必须登记在这里，否则 `expand_struct_refs` 会把它当 structref 糖展开成
+            // `/lib/ptr` —— 于是参数被 `is_value_container_ty` 判成容器，报
+            // 「值复制参数只能是字符串、数值或 bool」。错误文案里那个 `*/lib/ptr`
+            // 就是这个展开的痕迹。
+            | "ptr"
             | "rwir"
             | "rwfunc"
             | "scope"

@@ -1,8 +1,3 @@
-/*
- * 05_integrity — 数据完整性压力测试（统一 kvspace* ABI，shm:// 后端）
- *
- * 写入大量随机数据，读回校验。多轮增删改混合操作。
- */
 
 #include "common.h"
 #include <stdio.h>
@@ -48,7 +43,7 @@ int main(void) {
 
     void *kv = kv_open_shm(path);
     if (!kv) { printf("FAIL: open\n"); return 1; }
-    kvspaceMkindex(kv, "/it/", NULL, 0);
+    kvspaceMkindex(kv, "/it/");
 
     srand((unsigned)time(NULL));
     char keys[N_KEYS][64];

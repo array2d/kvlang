@@ -12,12 +12,8 @@ fn seed_builtins(dsn: &str) {
     let mut kv = kvlanglayout::Kv::conn(dsn);
     kvlanglayout::init_dirs(&mut kv).unwrap();
     for op in ["println", "print", "cerr"] {
-        kv.set(&[(
-            format!("/lib/{op}"),
-            kvlanglayout::kvkind::KIND_DEF_RWIR.to_string(),
-            kvlanglayout::kvkind::new_defrwir(1, 0, true).unwrap(),
-        )])
-        .unwrap();
+        kvlanglayout::kvkind::new_defrwir(&mut kv, &format!("/lib/{op}"), 1, 0, true)
+            .unwrap();
     }
 }
 

@@ -126,9 +126,8 @@ const OPAQUE: OpSpec = OpSpec {
     ..spec(WriteMode::Partial, Store::Both)
 };
 
-/// Verified ops, keyed by catalog row name (`rwir_catalog.def`); surface names reach a row
-/// through `rwir_alias_table.def`. Handlers live in `runtimec/vmbin/handlers/`.
-/// Rows absent here, and any other rwir, fall to [`unverified`].
+/// Verified ops, keyed by the rwir name in `runtimec/rwir/runtimec_rwircap.kv`.
+/// Names absent here, and any other rwir, fall to [`unverified`].
 pub const OP_TABLE: &[(&str, OpSpec)] = &[
     /* interpreter.c execute_copy: write_body, or write_whole_value for a bound path. */
     ("copy", spec(WriteMode::Whole, Store::Both)),
@@ -163,30 +162,19 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
     ("or", WHOLE),
     ("not", WHOLE),
     ("cast", WHOLE),
-    ("concat", WHOLE),
-    ("streq", WHOLE),
-    ("streq·not", WHOLE),
-    ("ptreq", WHOLE),
-    ("ptreq·not", WHOLE),
     ("bool·eq", WHOLE),
     ("bool·neq", WHOLE),
-    ("nonnull", WHOLE),
-    ("nonnull·not", WHOLE),
     /* scalar.c debugger: writes ‥status and yields. */
-    ("debugger", OPAQUE),
     /* container.c: creates go through write_new_value (map·new keeps old members, which
      * container slots tolerate because they never kill); copy, langtype, numel, dim and
      * bodylen store in place. */
     ("compactarray·new", CREATE),
     ("compactarray·fill", CREATE),
-    ("compactarray·newslice", CREATE),
     ("compactarray·newreshape", CREATE),
-    ("compactarray·newreinterpret", CREATE),
     ("compactarray·copy", WHOLE),
     ("compactarray·numel", WHOLE),
     ("compactarray·dim", WHOLE),
     ("compactarray·bodylen", WHOLE),
-    ("compactarray·langtype", WHOLE),
     /* `_ARRAY_INDEX` copies one element into the bound write slot. */
     ("compactarray·at", spec(WriteMode::Element, Store::InPlace)),
     /* `_ARRAY_INDEX_WRITE` patches read operand 0 and never writes the write slot. */
@@ -209,10 +197,7 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
     ),
     /* langtype.c: write_body. */
     ("compactarray·parselangtype", WHOLE),
-    ("xv·parselangtype", WHOLE),
     /* scatter.c: members are separate keys under the base. */
-    ("scatterarray·new", CREATE),
-    ("scatterarray·len", HEAP_READ),
     (
         "scatterarray·at",
         OpSpec {
@@ -237,9 +222,6 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
             ..HEAP_WRITE
         },
     ),
-    ("scatterarray·newscatter", HEAP_RW_CREATE),
-    ("scatterarray·newcompact", HEAP_RW_CREATE),
-    ("scatterarray·slice", HEAP_RW_CREATE),
     /* string.c, handler_call_text.h: text results are creates, scalar results in place;
      * set patches utf32 in place and rebuilds utf8 (`SET_BY_ENCODING`). */
     ("string·set", spec(WriteMode::Partial, Store::Both)),
@@ -263,30 +245,11 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
             ..CREATE
         },
     ),
-    ("time·sub", WHOLE),
-    ("time·add", WHOLE),
-    ("time·before", WHOLE),
-    ("time·after", WHOLE),
-    ("time/duration·nanos", WHOLE),
-    ("time/duration·millis", WHOLE),
-    ("time/duration·seconds", WHOLE),
-    ("time/duration·minutes", WHOLE),
-    ("time/duration·hours", WHOLE),
-    ("time/duration·as_nanos", WHOLE),
-    ("time/duration·as_millis", WHOLE),
-    ("time/duration·as_seconds", WHOLE),
-    ("time/duration·as_minutes", WHOLE),
-    ("time/duration·as_hours", WHOLE),
-    ("time/duration·add", WHOLE),
-    ("time/duration·sub", WHOLE),
-    ("time/duration·before", WHOLE),
-    ("time/duration·after", WHOLE),
     /* host.c: listlen, listat, random and pc store in place (listat only when the entry
      * exists); key·* are creates. */
     ("kvspace·del", HEAP_WRITE),
     ("kvspace·deltree", HEAP_WRITE),
     ("kvspace·mkindex", HEAP_WRITE),
-    ("kvspace·extindex", HEAP_WRITE),
     ("kvspace·delextindex", HEAP_WRITE),
     (
         "kvspace·cp",
@@ -318,8 +281,8 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
         },
     ),
     ("kvspace·watch", OPAQUE),
-    ("kvspace/key·abs", CREATE),
-    ("kvspace/key·tostr", CREATE),
+    ("key·abs", CREATE),
+    ("key·tostr", CREATE),
     (
         "kvlang·resolvekey",
         OpSpec {
@@ -355,56 +318,37 @@ pub const fn unverified() -> OpSpec {
     }
 }
 
-const CATALOG: &str = include_str!("../../runtimec/specification/rwir_catalog.def");
-const ALIASES: &str = include_str!("../../runtimec/specification/rwir_alias_table.def");
-
-/// First quoted string and the trailing `RUNTIMEC_RWIR_*` identifier of a `.def` row.
-fn def_row(line: &str, macro_name: &str) -> Option<(String, String)> {
-    let rest = line.trim().strip_prefix(macro_name)?.strip_prefix('(')?;
-    let open = rest.find('"')?;
-    let close = open + 1 + rest[open + 1..].find('"')?;
-    let quoted = rest[open + 1..close].to_string();
-    let ident = rest
-        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .filter(|w| w.starts_with("RUNTIMEC_RWIR_"))
-        .last()?
-        .to_string();
-    Some((quoted, ident))
-}
+const CATALOG: &str = include_str!("../../runtimec/rwir/runtimec_rwircap.kv");
 
 /// Surface name -> catalog row names (alias row plus specialization rows).
 fn surface_rows() -> &'static HashMap<String, Vec<String>> {
     static ROWS: std::sync::OnceLock<HashMap<String, Vec<String>>> = std::sync::OnceLock::new();
     ROWS.get_or_init(|| {
-        let mut row_name: HashMap<String, String> = HashMap::new();
-        for line in CATALOG.lines() {
-            let t = line.trim();
-            let Some(rest) = t.strip_prefix("RUNTIMEC_RWIR_OPERATION(") else {
-                continue;
-            };
-            let Some((ident, tail)) = rest.split_once(',') else {
-                continue;
-            };
-            if let Some(name) = tail.split('"').nth(1) {
-                row_name.insert(ident.trim().to_string(), name.to_string());
-            }
-        }
+        // 唯一能力清单是 `runtimec/rwir/runtimec_rwircap.kv`：一行一条 `rwir <name>(...)`。
+        // 别名到行的收敛此前依赖能力表的行标识符；那份表已并入本文件，故按名字直取。
         let mut rows: HashMap<String, Vec<String>> = HashMap::new();
-        for line in ALIASES.lines() {
-            let row = def_row(line, "RUNTIMEC_RWIR_ALIAS")
-                .or_else(|| def_row(line, "RUNTIMEC_RWIR_SPECIALIZATION"));
-            if let Some((surface, ident)) = row {
-                if let Some(name) = row_name.get(&ident) {
-                    rows.entry(surface).or_default().push(name.clone());
-                }
-            }
+        for line in CATALOG.lines() {
+            let Some(rest) = line.trim().strip_prefix("rwir ") else {
+                continue;
+            };
+            let Some((name, _)) = rest.split_once('(') else {
+                continue;
+            };
+            rows.insert(name.to_string(), vec![name.to_string()]);
         }
         rows
     })
 }
 
 /// Verified behavior of `name`, merged over every row it may resolve to; None = unverified.
+///
+/// 入口先过 [`crate::symbol::semantic_rwir_name`]：调用方可能拿的是源码字形
+/// （`flat()` 的产物、测试直接写的 `"="`/`"br"`），而能力清单按语义名登记。
+/// 映射放在**这里**而不是改 `flat()`——`flat()` 要用于显示与回写源码，
+/// 语义名会把「规范形态」和「用户写法」混在一起。
 pub fn op_spec(name: &str) -> Option<OpSpec> {
+    let name = crate::symbol::semantic_rwir_name(name);
+    let name = name.as_str();
     if OUTPUT_OPS.contains(&name) {
         return Some(NO_WRITE);
     }
@@ -909,7 +853,8 @@ fn parse_step(input: &StepInput, ctx: &Ctx, addr_taken: &mut BTreeSet<String>) -
             step.control = true;
             &[]
         }
-        "br" => {
+        // `input.op` 已过 `semantic_rwir_name`，分支的规范名是 `branch`（能力表登记名）。
+        "branch" => {
             step.control = true;
             &input.reads[..input.reads.len().min(1)]
         }
@@ -925,7 +870,7 @@ fn parse_step(input: &StepInput, ctx: &Ctx, addr_taken: &mut BTreeSet<String>) -
      * 后来 `resolveptr` 改名 `kvlang·resolvekey`（语义没变，仍是 base + 键值 → 位置）。
      * 之所以还并在这里：判据是「产出一个地址而不是值」，与命名族无关。
      * 看到两个不同前缀并排别当成手滑——是改名留下的痕迹。 */
-    let address_of = matches!(input.op.as_str(), "kvspace/key·abs" | "kvlang·resolvekey");
+    let address_of = matches!(input.op.as_str(), "key·abs" | "kvlang·resolvekey");
     let patches = spec.map_or(0, |s| s.patches);
     for (i, read) in reads.iter().enumerate() {
         match parse_operand(read, ctx) {
@@ -1701,12 +1646,15 @@ mod tests {
     use super::*;
 
     fn s(op: &str, reads: &[&str], writes: &[&str]) -> StepInput {
-        let callee = match op {
-            "" | "goto" | "br" | "return" => Callee::None,
+        // 与生产路径同一条映射：测试写字形（`"br"`/`"="`），分析的规范名是语义名。
+        // 不经映射就会出现「生产看 branch、测试看 br」两条真相。
+        let canonical = crate::symbol::semantic_rwir_name(op);
+        let callee = match canonical.as_str() {
+            "" | "goto" | "branch" | "return" => Callee::None,
             other => op_spec(other).map_or(Callee::Unverified(other.to_string()), Callee::Op),
         };
         StepInput {
-            op: op.to_string(),
+            op: canonical,
             reads: reads.iter().map(|x| x.to_string()).collect(),
             writes: writes.iter().map(|x| x.to_string()).collect(),
             write_types: Vec::new(),
@@ -1771,7 +1719,7 @@ mod tests {
             ];
             if extra_heap {
                 steps.push(s("=", &["\"q"], &["t"]));
-                steps.push(s("kvspace/key·abs", &["t"], &["_p"]));
+                steps.push(s("key·abs", &["t"], &["_p"]));
                 steps.push(s("=", &["\"r"], &["*_p"]));
             }
             steps.push(s("return", &[], &[]));
@@ -2322,7 +2270,7 @@ mod tests {
             vec![],
             vec![],
             vec![
-                s("kvspace/key·abs", &["x"], &["p"]),
+                s("key·abs", &["x"], &["p"]),
                 s("goto", &["L"], &[]),
                 s("=", &["0"], &["z"]),
                 s("=", &["x"], &["t"]),
@@ -2468,8 +2416,8 @@ mod tests {
     fn op_table_matches_catalog_and_corpus() {
         let rows: BTreeSet<String> = CATALOG
             .lines()
-            .filter_map(|l| l.trim().strip_prefix("RUNTIMEC_RWIR_OPERATION("))
-            .filter_map(|r| r.split('"').nth(1).map(str::to_string))
+            .filter_map(|l| l.trim().strip_prefix("rwir "))
+            .filter_map(|r| r.split_once('(').map(|(name, _)| name.to_string()))
             .collect();
         for (name, _) in OP_TABLE {
             assert!(rows.contains(*name), "{name} is not a catalog row");
@@ -2516,7 +2464,7 @@ mod tests {
             "int32",
             "int64",
             "int8",
-            "kvspace/key·abs",
+            "key·abs",
             "kvlang·resolvekey",
             "kvspace·cp",
             "kvspace·cpdir",

@@ -1,0 +1,58 @@
+lib probe {
+    rwfunc hash(int64) -> (int64) {
+        h:'[int64]'int64 = {}
+        i:int64 = 0
+        goto(_while_15)
+        _while_15: {
+    	_13:int64 = *[0,-1]
+    	_14:bool = lt(i, _13)
+    	br(_14, _do_16, _exit_17)
+    }
+        _do_16: {
+    	k0:int64 = mul(i, 2654435761)
+    	key:int64 = mod(k0, 100003)
+    	_p1:*int64 = kvlang·resolvekey(h, key)
+    	*_p1:int64 = i
+    	i:int64 = add(i, 1)
+    	goto(_while_15)
+    }
+        _exit_17: {
+    	sum:int64 = 0
+    	*[0,1]:int64 = 0
+    	i:int64 = 0
+    	goto(_while_3)
+    }
+        _while_3: {
+    	_1:int64 = *[0,-1]
+    	_2:bool = lt(i, _1)
+    	br(_2, _do_4, _exit_5)
+    }
+        _do_4: {
+    	k0:int64 = mul(i, 2654435761)
+    	key:int64 = mod(k0, 100003)
+    	_6:*int64 = kvlang·resolvekey(h, key)
+    	ex:bool = *_6 != 
+    	goto(_if_7)
+    }
+        _exit_5: {
+    	return
+    }
+        _if_7: {
+    	br(ex, _then_8, _else_9)
+    }
+        _then_8: {
+    	_11:int64 = *[0,1]
+    	*[0,1]:int64 = add(_11, 1)
+    	_12:*int64 = kvlang·resolvekey(h, key)
+    	v:int64 = *_12
+    	sum:int64 = add(sum, v)
+    	goto(_merge_10)
+    }
+        _else_9: {
+    	goto(_merge_10)
+    }
+        _merge_10: {
+    	i:int64 = add(i, 1)
+    	goto(_while_3)
+    }
+    }

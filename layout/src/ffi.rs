@@ -14,7 +14,6 @@ extern "C" {
     fn kvspaceConnect(dsn: *const c_char) -> Handle;
     fn kvspaceClose(h: Handle);
     /// codec 产出为 frontend malloc 缓冲，调用方以 libc free 释放（无 kvspaceBytesFree）。
-    fn free(p: *mut c_void);
 
     // 新存储 ABI：读走 Resolve + 进程内基址，写走 Realloc + 直写，枚举走 Listlen + List。
     // 旧 ABI 的 Get/SetValue/Del/ListLen/ListAt/DelTree 已从库里删除，不再声明。
@@ -24,16 +23,6 @@ extern "C" {
         h: Handle,
         key: *const c_char,
         parent_key_anchor: u64,
-        out_value_offset: *mut u64,
-        err: *mut c_char,
-        err_cap: u32,
-    ) -> c_int;
-    /// 唯一写原语：不存在则创建（清零），存在则调整容量。
-    fn kvspaceRealloc(
-        h: Handle,
-        key: *const c_char,
-        body_length: u64,
-        attr_length: u64,
         out_value_offset: *mut u64,
         err: *mut c_char,
         err_cap: u32,
@@ -65,70 +54,71 @@ extern "C" {
     ) -> c_int;
     fn kvspaceDeltree(h: Handle, key: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
     fn kvspaceMkindex(h: Handle, path: *const c_char, err: *mut c_char, err_cap: u32) -> c_int;
-    /// 固定 16 字节 head 构造器（直接 memcpy struct + body + attr 区；langtype 空 = 空 attr）。
-    fn kvlangXvalueHeadNewNone(out: *mut *mut u8, out_len: *mut u64) -> c_int;
-    /// **没有 `storetype` 形参**：head 的 storetype 由构造器按 kind 自己定，
-    /// 调用方不再决定。签名以 `kvspace/include/kvspace/xvalue_head.h` 为准。
+    /// **新 ABI（store-bound）**：构造器直接把 wire 写进 kvspace 的映射，返回指向
+    /// 该映射的指针（借用，生命周期到该 key 下一次 Realloc/Free）；失败返回 NULL。
+    /// 形参里 `handle` 是 kvspace 句柄、`key` 是目标键——**类型与键都在构造期定死**，
+    /// 不再是「先造一串字节、事后再 set」。
     ///
-    /// 早先这里多传一个 `storetype: u8`，而新库已经改成 4 个形参——
-    /// **实参个数与形参个数不符是 UB**：Debug 构建侥幸不崩，Release 必段错误
-    /// （14:0x 实测，`kvlangXvalueHeadNewScalar` 里 SIGSEGV）。
-    fn kvlangXvalueHeadNewScalar(
+    /// 唯一事实源：`kvlangxvalue/kvlangxvalue.h`。旧的 `kvlangXvalueNewScalar`
+    /// 已不存在（改名 `NewT`）；其余七个的旧形态是
+    /// `(…, langtype, out, out_len) -> int`，新形态是
+    /// `(handle, key, …, langtype) -> uint8_t*`。**个数与语义都变了**——动态链接期
+    /// 不报错，跑到才 UB，所以这里必须与头逐字对齐。
+    fn kvlangXvalueNewT(
+        handle: *mut c_void,
+        key: *const c_char,
         raw: *const u8,
         raw_len: u32,
         langtype: *const c_char,
-        out: *mut *mut u8,
-        out_len: *mut u64,
-    ) -> c_int;
-    fn kvlangXvalueHeadNewSlack(
+    ) -> *mut u8;
+    fn kvlangXvalueNewBufferArray(
+        handle: *mut c_void,
+        key: *const c_char,
         data: *const u8,
         data_len: u64,
         langtype: *const c_char,
-        out: *mut *mut u8,
-        out_len: *mut u64,
-    ) -> c_int;
-    fn kvlangXvalueHeadNewTensor(
+    ) -> *mut u8;
+    fn kvlangXvalueNewCompactArray(
+        handle: *mut c_void,
+        key: *const c_char,
         dims: *const u64,
         ndim: u32,
         raw: *const u8,
         raw_len: u64,
         langtype: *const c_char,
-        out: *mut *mut u8,
-        out_len: *mut u64,
-    ) -> c_int;
-    fn kvlangXvalueHeadNewCode(
+    ) -> *mut u8;
+    fn kvlangXvalueNewCode(
+        handle: *mut c_void,
+        key: *const c_char,
         body: *const u8,
         body_len: u64,
         langtype: *const c_char,
-        out: *mut *mut u8,
-        out_len: *mut u64,
-    ) -> c_int;
-
+    ) -> *mut u8;
     fn kvlangXvalueNewChar(
+        handle: *mut c_void,
+        key: *const c_char,
         bytes: *const u8,
         len: u32,
         langtype: *const c_char,
-        out: *mut *mut u8,
-        out_len: *mut u32,
-    ) -> c_int;
+    ) -> *mut u8;
     fn kvlangXvalueNewBool(
+        handle: *mut c_void,
+        key: *const c_char,
         v: u8,
         langtype: *const c_char,
-        out: *mut *mut u8,
-        out_len: *mut u32,
-    ) -> c_int;
+    ) -> *mut u8;
     fn kvlangXvalueNewInt64(
+        handle: *mut c_void,
+        key: *const c_char,
         v: i64,
         langtype: *const c_char,
-        out: *mut *mut u8,
-        out_len: *mut u32,
-    ) -> c_int;
+    ) -> *mut u8;
     fn kvlangXvalueNewFloat64(
+        handle: *mut c_void,
+        key: *const c_char,
         v: f64,
         langtype: *const c_char,
-        out: *mut *mut u8,
-        out_len: *mut u32,
-    ) -> c_int;
+    ) -> *mut u8;
 }
 
 // ── 原位 head 访问（16 字节固定头：长度全在 head 里，attr 区无前缀）──
@@ -211,47 +201,25 @@ fn err_ret(buf: &mut [c_char; 256], ret: c_int) -> Result<(), String> {
     })
 }
 
-/// codec 调用：产出 frontend malloc 缓冲，拷出后以 libc free 释放。
-/// Non-zero rc or empty output is an `Err` (passing an empty `Vec` to [`Kv::set`] would delete the key).
-fn call_codec(
+/// store-bound 构造器的统一出口：调一次 C 构造器，拿回**映射内的 wire 指针**，
+/// 成功返回 `()`，失败返回错误串。
+///
+/// **不再有 `Vec<u8>`**：新 ABI 里构造器直接把 wire 写进 kvspace 的映射，返回值
+/// 是借用指针（生命周期到该 key 下一次 Realloc/Free）。旧模型的「造一串字节再
+/// `Kv::set`」在这个模型下不存在——`set` 已删。
+///
+/// `what` 只用于错误信息，指到是哪个构造器失败。
+fn call_ctor(
     what: &str,
-    f: impl FnOnce(*mut *mut u8, *mut u32) -> c_int,
-) -> Result<Vec<u8>, String> {
-    let mut out: *mut u8 = std::ptr::null_mut();
-    let mut out_len: u32 = 0;
-    let rc = f(&mut out, &mut out_len);
-    if rc != 0 || out.is_null() || out_len == 0 {
-        if !out.is_null() {
-            unsafe { free(out as *mut c_void) };
-        }
-        return Err(format!(
-            "kvspace codec {what} failed (rc={rc}, len={out_len})"
-        ));
+    key: &str,
+    f: impl FnOnce(*mut c_void, *const c_char) -> *mut u8,
+) -> Result<(), String> {
+    let ck = CString::new(key).expect("no NUL in key");
+    let wire = f(std::ptr::null_mut(), ck.as_ptr());
+    if wire.is_null() {
+        return Err(format!("kvlangxvalue {what} failed for {key:?}"));
     }
-    let bytes = unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec();
-    unsafe { free(out as *mut c_void) };
-    Ok(bytes)
-}
-
-/// 固定头构造器调用（New* 的 out_len 为 u64）：成功且 total<=u32::MAX 才转 u32。
-fn call_codec64(
-    what: &str,
-    f: impl FnOnce(*mut *mut u8, *mut u64) -> c_int,
-) -> Result<Vec<u8>, String> {
-    let mut out: *mut u8 = std::ptr::null_mut();
-    let mut out_len: u64 = 0;
-    let rc = f(&mut out, &mut out_len);
-    if rc != 0 || out.is_null() || out_len == 0 || out_len > u32::MAX as u64 {
-        if !out.is_null() {
-            unsafe { free(out as *mut c_void) };
-        }
-        return Err(format!(
-            "kvspace codec {what} failed (rc={rc}, len={out_len})"
-        ));
-    }
-    let bytes = unsafe { std::slice::from_raw_parts(out, out_len as usize) }.to_vec();
-    unsafe { free(out as *mut c_void) };
-    Ok(bytes)
+    Ok(())
 }
 
 // ── 安全句柄 ─────────────────────────────────────────────────────────
@@ -312,6 +280,14 @@ impl Kv {
         }
     }
 
+    /// kvspace 句柄，供 store-bound 构造器使用。
+    ///
+    /// 构造器签名是 `(void *handle, const char *key, …)`——句柄是**参数**，不是全局、
+    /// 不是字段缓存、不是 thread_local。谁要构造值就把 `&mut Kv` 传到哪儿。
+    pub fn handle(&self) -> Handle {
+        self.h
+    }
+
     /// Like [`Kv::conn`], but returns `Err` instead of panicking on connection failure.
     pub fn try_conn(dsn: &str) -> Result<Kv, String> {
         let c = CString::new(dsn).map_err(|_| format!("dsn contains NUL: {dsn:?}"))?;
@@ -322,100 +298,49 @@ impl Kv {
         Ok(Kv { h })
     }
 
-    /// 写多对 (key, langtype, wire)：langtype 拼入值 attr 区整体单写（无 attr key）。
-    /// wire 空字节 = None → 删该 key。8 字节空头是目录 marker 等合法值（len=0 非
-    /// None），照常写——None 语义恒空字节（[[kvlang-layout-rust]]）。
-    pub fn set(&mut self, pairs: &[(String, String, Vec<u8>)]) -> Result<(), String> {
-        for (key, lt, xvalue) in pairs {
-            // 末段含 ‥ 的 key 是系统变量本体：无类型（保留 codec 空 attr）。
-            // 前缀可含 ‥（如 /lib/‥labels/），只拦末段。
-            let last_seg = key.rsplit('/').next().unwrap_or(key);
-            /* langtype 必须在**构造期**就进 wire：head 的 attrslen 与 attr 区是
-             * 一次成形的。构造器拿不到类型时（系统变量本体、空 lt），保持它产的
-             * 空 attr（attrslen=0）。这里只做这一次拼装，且**不带任何 attr 前缀**。 */
-            let wire = if xvalue.is_empty() || lt.is_empty() || last_seg.contains('\u{2025}') {
-                xvalue.clone()
-            } else {
-                with_langtype(xvalue, lt)
-            };
-            self.set_one(key, &wire)?;
-        }
-        Ok(())
-    }
-
-    /// 写一条完整 wire（含 head + body + attr）：realloc 出空间，再把 body/attr
-    /// 从 wire 里原样搬过去，**不重写 head**——head 已由构造器成形，这里只是搬运。
+    /// 删一个 key（`None` 语义：值不存在）。
     ///
-    /// 为什么必须先查 base 再写：durable 没有进程内值区，`kvspaceRealloc` 返回
-    /// UNSUPPORTED、`kvspaceXvalueInProcessAddress` 返回 NULL。那种后端上写不了，
-    /// 必须给出可读错误而不是拿 NULL 去做指针算术。
-    fn set_one(&mut self, key: &str, xvalue: &[u8]) -> Result<(), String> {
+    /// **没有 `set` 了**：新 ABI 的构造器直接把 wire 写进映射，构造即落库，不存在
+    /// 「攒一批 (key, lt, Vec<u8>) 再一次写」的批写模型。留一个 `set` 的壳去承接
+    /// 旧的三元组，就是让旧模型借尸还魂（p5）。
+    pub fn del(&mut self, key: &str) -> Result<(), String> {
         let ck = CString::new(key).expect("no NUL in key");
         let mut err: [c_char; 256] = [0; 256];
+        let ret = unsafe { kvspaceFree(self.h, ck.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
+        if ret == 0 || ret == -2 {
+            return Ok(());
+        }
+        err_ret(&mut err, ret)
+    }
 
-        // wire 空字节 = None → 删该 key。
-        if xvalue.is_empty() {
-            let ret =
-                unsafe { kvspaceFree(self.h, ck.as_ptr(), err.as_mut_ptr(), err.len() as u32) };
-            return err_ret(&mut err, ret);
-        }
-        if xvalue.len() < 16 {
-            return Err(format!("{key}: wire shorter than 16-byte head"));
-        }
-        // head 里的两个长度就是这次要写的 body/attr 字节数，直接读，不重算。
-        let body_len = u64::from_le_bytes(xvalue[0..8].try_into().unwrap());
-        let attr_len = u16::from_le_bytes([xvalue[8], xvalue[9]]) as u64;
-        let want = 16u64
-            .checked_add(body_len)
-            .and_then(|v| v.checked_add(attr_len))
-            .ok_or_else(|| format!("{key}: wire length overflow"))?;
-        if (xvalue.len() as u64) < want {
-            return Err(format!(
-                "{key}: wire truncated (head says {want} bytes, got {})",
-                xvalue.len()
-            ));
-        }
-
+    /// 单点读：resolve 拿 offset，再从进程内基址拷出整条 wire（自持）。
+    /// 不存在 / 后端非映射 → 空字节（调用方按「没有这个值」处理）。
+    /// 就地改 body 里的一个 u16（小端）。`offset` 是 body 内偏移。
+    ///
+    /// 这是**测试专用**的「模拟畸形值」入口：新 ABI 下没有 `Kv::set` 可以塞任意字节，
+    /// 而有些测试要验「槽被外部改成不一致」时的行为。走 resolve 拿映射地址直接改，
+    /// 不重写 head——改的就是 wire 本体。
+    pub fn patch_body_u16(&mut self, key: &str, offset: usize, v: u16) -> Result<(), String> {
+        let c = CString::new(key).expect("no NUL in key");
         let mut off: u64 = 0;
+        let mut err: [c_char; 256] = [0; 256];
         let ret = unsafe {
-            kvspaceRealloc(
-                self.h,
-                ck.as_ptr(),
-                body_len,
-                attr_len,
-                &mut off,
-                err.as_mut_ptr(),
-                err.len() as u32,
-            )
+            kvspaceResolveOffset(self.h, c.as_ptr(), 0, &mut off, err.as_mut_ptr(), err.len() as u32)
         };
         if ret != 0 {
             return err_ret(&mut err, ret);
         }
         let base = unsafe { kvspaceXvalueInProcessAddress(self.h) };
         if base.is_null() {
-            return Err(format!(
-                "{key}: backend has no in-process address space (durable cannot be written \
-                 through the new ABI); write via a mapped backend"
-            ));
+            return Err(format!("{key}: backend has no in-process address space"));
         }
         unsafe {
-            let dst = base.add(off as usize + 16);
-            if body_len > 0 {
-                std::ptr::copy_nonoverlapping(xvalue[16..].as_ptr(), dst, body_len as usize);
-            }
-            if attr_len > 0 {
-                std::ptr::copy_nonoverlapping(
-                    xvalue[16 + body_len as usize..].as_ptr(),
-                    dst.add(body_len as usize),
-                    attr_len as usize,
-                );
-            }
+            let dst = base.add(off as usize + 16 + offset) as *mut u8;
+            std::ptr::copy_nonoverlapping(v.to_le_bytes().as_ptr(), dst, 2);
         }
         Ok(())
     }
 
-    /// 单点读：resolve 拿 offset，再从进程内基址拷出整条 wire（自持）。
-    /// 不存在 / 后端非映射 → 空字节（调用方按「没有这个值」处理）。
     pub fn get_one(&mut self, key: &str) -> Vec<u8> {
         let c = CString::new(key).expect("no NUL in key");
         let mut off: u64 = 0;
@@ -594,52 +519,61 @@ pub fn with_langtype(wire: &[u8], langtype: &str) -> Vec<u8> {
     out
 }
 
-/// 按 kind+body 产 wire（固定 8 字节 head + body + 空 attr 占位；真实类型由 Kv::set 按
-/// pair 的 lt 替换）。storetype 判定对齐 durable to_wire_head：char/* 与 rwir 族→SLACK、
-/// ndim>0 非容器→LARGE、其余标量→SHORT。
-pub fn xvalue_to_wire(kind: &str, raw: &[u8], array_len: i32) -> Result<Vec<u8>, String> {
+/// **kind → 构造器的唯一映射点**（in-place，构造即落库）。
+///
+/// 入参从「kind + raw → Vec<u8>」变成「kv + key + kind + raw → ()」：新 ABI 的构造函数
+/// 直接把 wire 写进 kvspace 的映射，没有中间字节串。**保留这个分派点**是为了不让
+/// `kind` 的 switch 复制到每个调用方——它是单一路径。
+///
+/// 形态选择（与旧版一致，只是改成就地写）：
+///   - 空 kind / `None` 且空 body → BufferArray（16 字节空头，零字节会被存储层拒绝）；
+///   - `char/*` → BufferArray（变长字符）；
+///   - 带 dims 且非 map 非路径 → CompactArray（定长张量）；
+///   - `rwir` / `def langtype` / 非空 `rwfunc` → NewCode（指令体）；
+///   - 其余标量 → NewT。
+pub fn xvalue_to_wire(
+    kv: &mut Kv,
+    key: &str,
+    kind: &str,
+    raw: &[u8],
+    array_len: i32,
+    langtype: &str,
+) -> Result<(), String> {
     let dims = al_to_dims(kind, array_len);
+    let h = kv.handle();
+    let ck = CString::new(key).expect("no NUL in key");
+    let lt = langtype_cstr(langtype);
     if (kind.is_empty() || kind == "None") && raw.is_empty() {
-        return call_codec64("HeadNewNone", |out, out_len| unsafe {
-            kvlangXvalueHeadNewNone(out, out_len)
+        return call_ctor("NewBufferArray", key, |_, _| unsafe {
+            kvlangXvalueNewBufferArray(h, ck.as_ptr(), std::ptr::null(), 0, lt.as_ptr())
         });
     }
-    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
     if kind == "char" || kind.starts_with("char/") {
-        return call_codec64("HeadNewSlack", |out, out_len| unsafe {
-            kvlangXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64, empty, out, out_len)
+        return call_ctor("NewBufferArray", key, |_, _| unsafe {
+            kvlangXvalueNewBufferArray(
+                h, ck.as_ptr(), raw.as_ptr(), raw.len() as u64, lt.as_ptr(),
+            )
         });
     }
-    if !dims.is_empty() && !kind.contains('·') && !kind.starts_with('/') {
+    if !dims.is_empty() && !kind.contains('\u{b7}') && !kind.starts_with('/') {
         let d: Vec<u64> = dims.iter().map(|&x| x as u64).collect();
-        return call_codec64("HeadNewTensor", |out, out_len| unsafe {
-            kvlangXvalueHeadNewTensor(
-                d.as_ptr(),
-                d.len() as u32,
-                raw.as_ptr(),
-                raw.len() as u64,
-                empty,
-                out,
-                out_len,
+        return call_ctor("NewCompactArray", key, |_, _| unsafe {
+            kvlangXvalueNewCompactArray(
+                h, ck.as_ptr(), d.as_ptr(), d.len() as u32,
+                raw.as_ptr(), raw.len() as u64, lt.as_ptr(),
             )
         });
     }
     if kind == "rwir" || kind == "def langtype" || (kind == "rwfunc" && !raw.is_empty()) {
-        return call_codec64("HeadNewCode", |out, out_len| unsafe {
-            kvlangXvalueHeadNewCode(raw.as_ptr(), raw.len() as u64, empty, out, out_len)
+        return call_ctor("NewCode", key, |_, _| unsafe {
+            kvlangXvalueNewCode(
+                h, ck.as_ptr(), raw.as_ptr(), raw.len() as u64, lt.as_ptr(),
+            )
         });
     }
-    call_codec64("HeadNewScalar", |out, out_len| unsafe {
-        kvlangXvalueHeadNewScalar(raw.as_ptr(), raw.len() as u32, empty, out, out_len)
+    call_ctor("NewT", key, |_, _| unsafe {
+        kvlangXvalueNewT(h, ck.as_ptr(), raw.as_ptr(), raw.len() as u32, lt.as_ptr())
     })
-}
-
-/// 按 wire 字节原位填 head 视图（16 字节固定头）。
-/// langtype 不在 head 的结构体视图里——调用方若已知道类型可传入；否则留空，
-/// 由 `langtype_from_wire` 从 attr 区取。
-#[inline]
-fn xh_padding_is_zero(data: &[u8]) -> bool {
-    xh_padding(data).is_some_and(|p| p.iter().all(|&byte| byte == 0))
 }
 
 /// 从一条 wire 里取 langtype 文本（attr tag 1）；没有该记录 → None。
@@ -647,7 +581,10 @@ fn xh_padding_is_zero(data: &[u8]) -> bool {
 /// attr 区自描述：`[tag:u8][len:u16][data]`，紧跟 body 之后，长度由 head 的
 /// `attrslen` 给出（**没有**独立长度前缀）。几何全部取自 head，不写偏移算术。
 pub fn wire_langtype(wire: &[u8]) -> Option<String> {
-    if wire.len() < PREFIX || !xh_padding_is_zero(wire) {
+    if wire.len() < PREFIX {
+        return None;
+    }
+    if !xh_padding(wire).is_some_and(|p| p.iter().all(|&b| b == 0)) {
         return None;
     }
     let body_len = xh_len(wire) as usize;
@@ -674,76 +611,70 @@ pub fn wire_langtype(wire: &[u8]) -> Option<String> {
     None
 }
 
-// ── 标准标量构造器 ───────────────────────────────────────────────────
+// ── 便利构造器（同样 in-place；`langtype` 在构造期给定，不许事后补 attr）──────
 
-pub fn new_char(kind: &str, s: &str) -> Result<Vec<u8>, String> {
+/// `char/<enc>` 字符串。`char/utf8` 走原始字节；`char/utf32` 每字符 4 字节小端。
+pub fn new_char(kv: &mut Kv, key: &str, kind: &str, s: &str, langtype: &str) -> Result<(), String> {
     let bytes = s.as_bytes();
     if kind == "char/utf8" {
-        return new_char_byte(bytes);
+        return new_char_byte(kv, key, bytes, langtype);
     }
-    let raw = if kind == "char/utf32" {
+    let raw: Vec<u8> = if kind == "char/utf32" {
         s.chars().flat_map(|c| (c as u32).to_le_bytes()).collect()
     } else {
         bytes.to_vec()
     };
-    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec64("HeadNewSlack", |out, out_len| unsafe {
-        kvlangXvalueHeadNewSlack(raw.as_ptr(), raw.len() as u64, empty, out, out_len)
+    let h = kv.handle();
+    let ck = CString::new(key).expect("no NUL in key");
+    let lt = langtype_cstr(langtype);
+    call_ctor("NewBufferArray", key, |_, _| unsafe {
+        kvlangXvalueNewBufferArray(h, ck.as_ptr(), raw.as_ptr(), raw.len() as u64, lt.as_ptr())
     })
 }
 
-pub fn new_char_byte(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec("NewChar", |out, out_len| unsafe {
-        kvlangXvalueNewChar(bytes.as_ptr(), bytes.len() as u32, empty, out, out_len)
+pub fn new_char_byte(kv: &mut Kv, key: &str, bytes: &[u8], langtype: &str) -> Result<(), String> {
+    let h = kv.handle();
+    let ck = CString::new(key).expect("no NUL in key");
+    let lt = langtype_cstr(langtype);
+    call_ctor("NewChar", key, |_, _| unsafe {
+        kvlangXvalueNewChar(h, ck.as_ptr(), bytes.as_ptr(), bytes.len() as u32, lt.as_ptr())
     })
 }
 
-/// 空值字面量 `None` 的 wire：长度 0 的短内联头（空 body、无 langtype，16 字节）。
-///
-/// **不是零字节**——存储层以 `invalid XValue` 拒绝零字节值（实测见
-/// `workspace/tmp/coding1/none_wire_probe.c`）。也不要手拼这 16 字节：
-/// 头布局的唯一来源是 kvspace 的 `kvlangXvalueHeadNewNone`。
-pub fn new_none() -> Result<Vec<u8>, String> {
-    call_codec64("HeadNewNone", |out, out_len| unsafe {
-        kvlangXvalueHeadNewNone(out, out_len)
+/// 空值字面量 `None`：16 字节空头（空 body、无 langtype）。
+/// **不是零字节**——存储层以 `invalid XValue` 拒绝零字节值。
+pub fn new_none(kv: &mut Kv, key: &str) -> Result<(), String> {
+    let h = kv.handle();
+    let ck = CString::new(key).expect("no NUL in key");
+    let lt = langtype_cstr("");
+    call_ctor("NewBufferArray", key, |_, _| unsafe {
+        kvlangXvalueNewBufferArray(h, ck.as_ptr(), std::ptr::null(), 0, lt.as_ptr())
     })
 }
 
-pub fn new_bool(v: bool) -> Result<Vec<u8>, String> {
-    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec("NewBool", |out, out_len| unsafe {
-        kvlangXvalueNewBool(v as u8, empty, out, out_len)
+pub fn new_bool(kv: &mut Kv, key: &str, v: bool, langtype: &str) -> Result<(), String> {
+    let h = kv.handle();
+    let ck = CString::new(key).expect("no NUL in key");
+    let lt = langtype_cstr(langtype);
+    call_ctor("NewBool", key, |_, _| unsafe {
+        kvlangXvalueNewBool(h, ck.as_ptr(), v as u8, lt.as_ptr())
     })
 }
 
-pub fn new_int64(v: i64) -> Result<Vec<u8>, String> {
-    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec("NewInt64", |out, out_len| unsafe {
-        kvlangXvalueNewInt64(v, empty, out, out_len)
+pub fn new_int64(kv: &mut Kv, key: &str, v: i64, langtype: &str) -> Result<(), String> {
+    let h = kv.handle();
+    let ck = CString::new(key).expect("no NUL in key");
+    let lt = langtype_cstr(langtype);
+    call_ctor("NewInt64", key, |_, _| unsafe {
+        kvlangXvalueNewInt64(h, ck.as_ptr(), v, lt.as_ptr())
     })
 }
 
-pub fn new_float64(v: f64) -> Result<Vec<u8>, String> {
-    let empty = EMPTY_CSTR.as_ptr() as *const c_char;
-    call_codec("NewFloat64", |out, out_len| unsafe {
-        kvlangXvalueNewFloat64(v, empty, out, out_len)
+pub fn new_float64(kv: &mut Kv, key: &str, v: f64, langtype: &str) -> Result<(), String> {
+    let h = kv.handle();
+    let ck = CString::new(key).expect("no NUL in key");
+    let lt = langtype_cstr(langtype);
+    call_ctor("NewFloat64", key, |_, _| unsafe {
+        kvlangXvalueNewFloat64(h, ck.as_ptr(), v, lt.as_ptr())
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Codec failure must return `Err` rather than an empty `Vec` (which `Kv::set` treats as key deletion).
-    #[test]
-    fn codec_failure_is_error_not_empty_value() {
-        assert!(call_codec("t", |_, _| -1).is_err());
-        assert!(call_codec64("t", |_, _| -1).is_err());
-        // `rc == 0` with empty output is also an error.
-        assert!(call_codec("t", |_, _| 0).is_err());
-        assert!(call_codec64("t", |_, _| 0).is_err());
-        let v = new_int64(7).unwrap();
-        assert_eq!(xh_body_slice(&v), 7i64.to_le_bytes());
-    }
 }

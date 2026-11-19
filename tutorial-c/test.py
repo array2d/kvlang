@@ -4,7 +4,7 @@
 路径约定（与 kvlang/xvalue/CMakeLists.txt 一致，不另造一套）：
   KVLANG_KVSPACE_INCLUDE_DIRECTORY  kvspace 仓的 include/（<kvspace/kvspace.h> 等）
   KVLANG_KVSPACE_LIB_DIRECTORY      hold libkvspace 的目录
-  KVLANG_XVALUE_LIBRARY_PATH        libkvlang_xvalue.a
+  KVLANG_XVALUE_LIBRARY_PATH        libkvlang_xvalue.so
 
 两个库缺一不可：存储 ABI 在 libkvspace，wire 构造器与 langtype 访问器在
 libkvlang_xvalue。只链一个会在链接期报 undefined symbol。
@@ -24,7 +24,7 @@ KVLANG_ROOT = ROOT.parent
 INCS = [str(KVLANG_ROOT / "include")]
 KVSPACE_INCLUDE = ""
 LIB = ""
-XVALUE_LIB = str(KVLANG_ROOT / "lib" / "libkvlang_xvalue.a")
+XVALUE_LIB = str(KVLANG_ROOT / "lib" / "libkvlang_xvalue.so")
 
 passed = 0
 failed = 0
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     ap.add_argument("--kvspace-lib", required=True,
                     help="内含 libkvspace 的目录")
     ap.add_argument("--xvalue-lib", default=XVALUE_LIB,
-                    help="libkvlang_xvalue.a 路径（默认本仓 lib/）")
+                    help="libkvlang_xvalue.so 路径（默认本仓 lib/）")
     args = ap.parse_args()
     KVSPACE_INCLUDE = args.kvspace_include
     LIB = args.kvspace_lib

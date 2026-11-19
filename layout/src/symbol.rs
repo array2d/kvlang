@@ -359,3 +359,34 @@ pub fn unicode_ops() -> &'static [String] {
             .collect()
     })
 }
+
+/// **字形 → 语义 rwir 名的唯一映射**。写盘与崩溃恢复分析各调用它一次。
+///
+/// 源码里 `a + b`、`a = b`、`br(...)` 的 `op` 存的是**字形**（parser 直接取
+/// `self.advance().value`），而 `runtimec_rwircap.kv` 是唯一能力清单、按语义名
+/// 登记（`add`、`copy`、`branch`）。两处要的是同一个名字，所以映射只有这一份——
+/// 再加一张 alias 表就是把「一份真相」拆成两份（那正是被删掉的东西）。
+///
+/// 三层顺序不能颠倒：
+///   1. `lookup` 覆盖中缀/一元字形（`+`→`add`、`==`→`eq`、`≤`→`le`…），表里 `word`
+///      恰好就是能力表中的名字，所以查表就是权威映射；
+///   2. 两个字形不在表里但能力表要求语义名：`=`→`copy`（`flat()` 对叶/成员读统一
+///      返回 `=`）、`br`→`branch`（layout 内部合成）；
+///   3. 其余（`goto`、`compactarray·new`、扩展 rwir 名）本身已是语义名，原样保留。
+///
+/// **不改 `flat()` 的返回值**：那里要用于显示与回写源码，语义名会把「一条指令的
+/// 规范形态」和「用户写法」混在一起。需要语义名的地方显式调本函数。
+pub fn semantic_rwir_name(op: &str) -> String {
+    match op {
+        "=" => "copy".to_string(),
+        "br" => "branch".to_string(),
+        glyph => {
+            let word = lookup(glyph).word;
+            if word.is_empty() {
+                glyph.to_string()
+            } else {
+                word.to_string()
+            }
+        }
+    }
+}

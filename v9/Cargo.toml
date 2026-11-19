@@ -1,0 +1,10 @@
+[package]
+name = "v9"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "v9：把 layout 产出的明文 rwir 编译成 binrwir（8 字节格）"
+
+[[bin]]
+name = "v9"
+path = "src/main.rs"

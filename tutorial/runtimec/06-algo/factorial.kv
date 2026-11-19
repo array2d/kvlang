@@ -13,11 +13,11 @@ rwfunc factorial(*int64 #n) -> (*int64 #result) {
 
 rwfunc test() -> () {
 
-	t0:time = time·now()
+	t0:int64 = time·now()
 	ans:int64 = factorial(10)
-	t1:time = time·now()
+	t1:int64 = time·now()
 	println("fact =", ans)
-	delta:time/duration = time·sub(t1, t0)
-	ns:int64 = time/duration·as_nanos(delta)
+	delta:int64 = t1 - t0
+	ns:int64 = delta
 	println("__bench_ns:", ns)
 }

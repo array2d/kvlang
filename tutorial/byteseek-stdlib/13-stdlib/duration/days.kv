@@ -5,7 +5,7 @@
 rwfunc test() -> () {
 	time/duration·as_days(time/duration·hours(48)) -> d:int64
 	println(d)
-	time/duration·days(3) -> three:time/duration
+	time/duration·days(3) -> three:int64
 	time/duration·as_days(three) -> n:int64
 	println(n)
 }
