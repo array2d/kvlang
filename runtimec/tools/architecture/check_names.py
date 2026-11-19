@@ -12,8 +12,8 @@ from pathlib import Path
 
 
 PRODUCT_DIRECTORIES = (
-    "include", "interface", "contract", "host", "binrwir", "vmkv",
-    "binrwir_compiler", "vmbin", "engine", "generated",
+    "include", "interface", "contract", "host", "binir", "vmkv",
+    "binir_compiler", "vmbin", "engine", "generated",
     "specification", "tests",
 )
 TEXT_SUFFIXES = {".c", ".h", ".cmake", ".in", ".map", ".exports", ".def"}
@@ -21,8 +21,8 @@ TEXT_SUFFIXES = {".c", ".h", ".cmake", ".in", ".map", ".exports", ".def"}
 # （routing/README.md §六之三第 2 条）。测试打印失败信息是正当的，所以这个守卫
 # 只看产品目录——`PRODUCT_DIRECTORIES` 含 tests（缩写规则要扫它），不能直接复用。
 OUTPUT_FREE_DIRECTORIES = (
-    "include", "interface", "contract", "host", "binrwir", "vmkv",
-    "binrwir_compiler", "vmbin", "engine", "generated",
+    "include", "interface", "contract", "host", "binir", "vmkv",
+    "binir_compiler", "vmbin", "engine", "generated",
 )
 # `printf(` 会把 `snprintf(` 一起匹配——写这种判据时词边界是必需品，不是讲究。
 STDOUT_WRITE_PATTERN = re.compile(
@@ -48,12 +48,12 @@ FORBIDDEN_NAMES = (
     ("old-runtime-tree", re.compile(r"(?:^|[\"<])runtime/")),
     ("old-success-name", re.compile(r"\bRUNTIMEC_STATUS_OK\b")),
     ("removed-fallback-status", re.compile(r"\bRUNTIMEC_STATUS_FALLBACK\b")),
-    ("removed-jit-execution-entry", re.compile(r"\bbinrwir_jit_try_execute\b")),
+    ("removed-jit-execution-entry", re.compile(r"\bbinir_jit_try_execute\b")),
     ("removed-runtime-deoptimization", re.compile(
-        r"\bBINRWIR_EXECUTION_EXIT_DEOPTIMIZATION\b",
+        r"\bBINIR_EXECUTION_EXIT_DEOPTIMIZATION\b",
     )),
     ("removed-runtime-retry", re.compile(
-        r"\bBINRWIR_EXECUTION_EXIT_FLAG_RETRY_LOGICAL_PROGRAM_COUNTER\b",
+        r"\bBINIR_EXECUTION_EXIT_FLAG_RETRY_LOGICAL_PROGRAM_COUNTER\b",
     )),
     ("removed-static-body-address-resolver", re.compile(
         r"\bresolve_static_value_body_address\b",
@@ -62,18 +62,18 @@ FORBIDDEN_NAMES = (
         r"\bruntimec_xvalue_address_to_value_body_address\b",
     )),
     ("alternate-jit-compilation-cache", re.compile(
-        r"\b(?:binrwir_jit_code_cache|binrwir_jit_cache_key|"
-        r"binrwir_jit_code_cache_get_or_compile)\b",
+        r"\b(?:binir_jit_code_cache|binir_jit_cache_key|"
+        r"binir_jit_code_cache_get_or_compile)\b",
     )),
-    ("binrwir-owned-plan-builder", re.compile(
-        r"\bbinrwir_execution_plan_build\b",
+    ("binir-owned-plan-builder", re.compile(
+        r"\bbinir_execution_plan_build\b",
     )),
-    ("second-jit-plan", re.compile(r"\bbinrwir_jit_plan_[A-Za-z0-9_]*\b")),
+    ("second-jit-plan", re.compile(r"\bbinir_jit_plan_[A-Za-z0-9_]*\b")),
     ("unobservable-compilation-state", re.compile(
-        r"\bBINRWIR_COMPILATION_STATE_[A-Za-z0-9_]*\b",
+        r"\bBINIR_COMPILATION_STATE_[A-Za-z0-9_]*\b",
     )),
     ("execution-time-fallback", re.compile(r"fallback", re.IGNORECASE)),
-    ("binrwir-under-vmbin", re.compile(
+    ("binir-under-vmbin", re.compile(
         r"(?:^|/)vmbin/(?:value|reference|signature|instruction|program|execution_plan)"
         r"\.(?:c|h)$",
         re.IGNORECASE,
@@ -306,11 +306,11 @@ def audit(repository_root: Path, runtimec_root: Path) -> tuple[list[Finding], in
     forbidden_directories = {
         "api": "interface",
         "compat": "delete",
-        "compiler": "binrwir_compiler",
+        "compiler": "binir_compiler",
         "docs": "documentation",
-        "jit": "binrwir_compiler/jit",
+        "jit": "binir_compiler/jit",
         "spec": "specification",
-        "vmjit": "binrwir_compiler/jit",
+        "vmjit": "binir_compiler/jit",
     }
     for forbidden_directory, replacement in forbidden_directories.items():
         path = runtimec_root / forbidden_directory

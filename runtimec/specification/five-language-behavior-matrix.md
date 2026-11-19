@@ -3,7 +3,7 @@
 <!-- runtimec-behavior-matrix-version: 2 -->
 
 本文件是 runtimec 语言行为决策的唯一事实源，不是实现进度表。任何行为进入
-`specification/`、`vmkv/`、`vmbin/` 或 `binrwir_compiler/jit/` 前，必须先在这里形成完整
+`specification/`、`vmkv/`、`vmbin/` 或 `binir_compiler/jit/` 前，必须先在这里形成完整
 决策。五种语言一致时，kvlang 遵从共同直觉；五种语言分裂时，必须明确选择
 阵营、边界样例和非法输入结果。
 
@@ -12,7 +12,7 @@
 specification manifest 条目直接失败。
 
 一个完整 decision 只能通过 `rwir_catalog.yml` 中恰好一条 myrwircap mapping 进入
-canonical BinRWIR。mapping 必须使用显式稳定 operation identifier；数组下标、文件顺序、
+canonical BinIR。mapping 必须使用显式稳定 operation identifier；数组下标、文件顺序、
 声明顺序和生成顺序都不能定义 operation identity。缺失、重复或歧义 mapping 是编译错误。
 
 | Decision | Behavior | C | Python | Rust | Go | V8/TypeScript | Agreement | kvlang decision | Boundary fixture | Invalid input | Design record |
@@ -90,7 +90,7 @@ canonical BinRWIR。mapping 必须使用显式稳定 operation identifier；数�
 6. Only then add executable semantics.
 
 进入 executable semantics 前，还必须通过
-`myrwircap-binrwir-mapping.md` 定义的集合覆盖、identifier 唯一性和签名等价检查。
+`myrwircap-binir-mapping.md` 定义的集合覆盖、identifier 唯一性和签名等价检查。
 
 Changing an established row is a language change. The same change must update fixtures and
 its issue or design record; silent reinterpretation is forbidden.

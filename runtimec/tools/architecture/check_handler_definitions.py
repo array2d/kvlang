@@ -49,15 +49,15 @@ from pathlib import Path
 #      （`RUNTIMEC_RWIR_OPERATION(SYMBOL, "名字", 0xNNNN, …)`），这是名字与 opid
 #      之间的唯一桥；
 #   3. `runtimec/vmbin/handlers/*.c` —— 各族的 `{opid, flags, handler}` 条目表，
-#      `session.c` 把它们装进 `binrwir_registry_t`。
+#      `session.c` 把它们装进 `binir_registry_t`。
 #
 # 于是判据也跟着变：**一个名字声明的 opid，必须在真正的 registry 里查得到**
-# （`binrwir_registry_find`）。这比原来的「某个同名函数存在」强——原来那版对
+# （`binir_registry_find`）。这比原来的「某个同名函数存在」强——原来那版对
 # 「函数在但没注册」是瞎的，而那正是会让算子静默走 FOREIGN 的形态。
 REGISTRY_SOURCE = Path("runtimec/rwir/myrwircaps.yml")
 CATALOG_SOURCE = Path("runtimec/rwir/rwir_catalog.yml")
 ALIAS_TABLE_SOURCE = Path("runtimec/specification/rwir_alias_table.def")
-SPECIALIZATION_TABLE = Path("runtimec/binrwir/specialization_table.c")
+SPECIALIZATION_TABLE = Path("runtimec/binir/specialization_table.c")
 HANDLER_SOURCES = Path("runtimec/vmbin/handlers")
 REGISTRY_SOURCE_GLOBS = (
     "runtimec/rwir/myrwircaps.yml",
@@ -67,7 +67,7 @@ REGISTRY_SOURCE_GLOBS = (
 # 只做**降级**检查（条目存在），不反推任何东西——见文件头「这不是计数器」。
 # 名字集合本身可由 rwir_catalog.yml 直接解析，不需要它；留着它是为了在文件被
 # 移走时报一句有方向的话，而不是笼统的「找不到」。
-PROBE_SOURCES = (Path("runtimec/binrwir/operation_identifiers.h"),)
+PROBE_SOURCES = (Path("runtimec/binir/operation_identifiers.h"),)
 
 # ── 由解释器**直接分派**、因此不该在 registry 里的算子 ──────────────────
 #
@@ -80,11 +80,11 @@ PROBE_SOURCES = (Path("runtimec/binrwir/operation_identifiers.h"),)
 # 算子豁免掉），缺陷就被藏起来；少写一个（分明是分派型却要求 handler），就是
 # 假红。上一句的 `HANDLED_INLINE` 名字取自 switch，改 switch 要同步改这里。
 HANDLED_INLINE = frozenset({
-    "=",       # BINRWIR_OPERATION_IDENTIFIER_COPY
-    "goto",    # BINRWIR_OPERATION_IDENTIFIER_GOTO
-    "br",      # BINRWIR_OPERATION_IDENTIFIER_BRANCH
-    "call",    # BINRWIR_OPERATION_IDENTIFIER_CALL
-    "return",  # BINRWIR_OPERATION_IDENTIFIER_RETURN
+    "=",       # BINIR_OPERATION_IDENTIFIER_COPY
+    "goto",    # BINIR_OPERATION_IDENTIFIER_GOTO
+    "br",      # BINIR_OPERATION_IDENTIFIER_BRANCH
+    "call",    # BINIR_OPERATION_IDENTIFIER_CALL
+    "return",  # BINIR_OPERATION_IDENTIFIER_RETURN
 })
 
 
@@ -132,7 +132,7 @@ def missing_registry_finding(root: Path) -> Finding:
 def preprocess(root: Path, source: Path, kvspace_include: Path | None = None) -> str:
     """展开一个翻译单元；行标记去掉（行号对本检查器无意义）。
 
-    include 目录按**实际布局**给：`runtimec/` 是各组件 header 的根（`binrwir/…`、
+    include 目录按**实际布局**给：`runtimec/` 是各组件 header 的根（`binir/…`、
     `vmbin/…` 都相对它），`runtimec/include` 是公共头。原来的 `runtime/` 三个
     目录已不存在，`-I` 指不到东西时 gcc 会**静默忽略**，于是宏展开不完整、
     解析出的条目变少——那正是「检查器看起来在跑，其实查了个空」的来源。
@@ -240,7 +240,7 @@ def _registry_scan(root: Path, handler_directory: Path,
         r"(?:UINT16_C\(\s*)?0x([0-9A-Fa-f]+)"
     )
     name_pattern = re.compile(
-        r"\{\s*\.operation_identifier\s*=\s*BINRWIR_OPERATION_IDENTIFIER_"
+        r"\{\s*\.operation_identifier\s*=\s*BINIR_OPERATION_IDENTIFIER_"
         r"([A-Za-z0-9_]+)"
     )
     identifiers = operation_identifier_constants(root)
@@ -259,7 +259,7 @@ def _registry_scan(root: Path, handler_directory: Path,
 def operation_identifier_constants(root: Path) -> dict[str, int]:
     """`operation_identifiers.h` 的符号 → opid。
 
-    条目表里写的是 `BINRWIR_OPERATION_IDENTIFIER_ADD` 这种宏，不是裸数字；
+    条目表里写的是 `BINIR_OPERATION_IDENTIFIER_ADD` 这种宏，不是裸数字；
     不解析这一层，「用宏写的条目」会被全部判成缺失。
     """
     path = root / PROBE_SOURCES[0]
@@ -268,7 +268,7 @@ def operation_identifier_constants(root: Path) -> dict[str, int]:
     text = path.read_text(encoding="utf-8")
     constants: dict[str, int] = {}
     for match in re.finditer(
-            r"#define\s+BINRWIR_OPERATION_IDENTIFIER_([A-Za-z0-9_]+)\s+"
+            r"#define\s+BINIR_OPERATION_IDENTIFIER_([A-Za-z0-9_]+)\s+"
             r"UINT16_C\(0x([0-9A-Fa-f]+)\)", text):
         constants[match.group(1)] = int(match.group(2), 16)
     return constants
@@ -353,7 +353,7 @@ def audit(root: Path,
                 continue
             # **第三条路：特化。** 基础 opid 的通用 handler 已按 p10「先删后增」
             # 删掉，改成按操作数静态类型组合改写成特化 opid（0x8000+），由
-            # `binrwir_binfunc_specialize` 在编译期完成。于是基础 opid 永远不进
+            # `binir_binfunc_specialize` 在编译期完成。于是基础 opid 永远不进
             # 执行路径——它「没有 handler」是**设计使然**，不是缺口。
             #
             # 实测证据：探针用例 `a + b`（opid 0x0002）跑到 executed。所以判据
@@ -365,7 +365,7 @@ def audit(root: Path,
             findings.append(Finding(
                 REGISTRY_SOURCE.as_posix(), 1, "registered-without-handler",
                 f"{surface!r}（opid 0x{code:04X}）声明由本 runtime 兑现，"
-                f"但三条路都没有：不在 binrwir_registry、不是解释器内联分派、"
+                f"但三条路都没有：不在 binir_registry、不是解释器内联分派、"
                 f"也不在特化表里",
             ))
         checked += 1
@@ -391,7 +391,7 @@ def specialized_bases(root: Path) -> set[int]:
     return {
         operation_identifier_constants(root)[match.group(1)]
         for match in re.finditer(
-            r"\{\s*BINRWIR_OPERATION_IDENTIFIER_([A-Za-z0-9_]+)\s*,", text)
+            r"\{\s*BINIR_OPERATION_IDENTIFIER_([A-Za-z0-9_]+)\s*,", text)
         if match.group(1) in operation_identifier_constants(root)
     }
 
@@ -434,15 +434,15 @@ RUNTIMEC_RWIR_ALIAS("nohandler", RUNTIMEC_RWIR_NOHANDLER)
 """
 
 SELFTEST_IDENTIFIERS = """\
-#define BINRWIR_OPERATION_IDENTIFIER_CALL UINT16_C(0x0001)
-#define BINRWIR_OPERATION_IDENTIFIER_ADD UINT16_C(0x0002)
-#define BINRWIR_OPERATION_IDENTIFIER_NOHANDLER UINT16_C(0x0099)
-#define BINRWIR_OPERATION_IDENTIFIER_SPEC UINT16_C(0x0003)
+#define BINIR_OPERATION_IDENTIFIER_CALL UINT16_C(0x0001)
+#define BINIR_OPERATION_IDENTIFIER_ADD UINT16_C(0x0002)
+#define BINIR_OPERATION_IDENTIFIER_NOHANDLER UINT16_C(0x0099)
+#define BINIR_OPERATION_IDENTIFIER_SPEC UINT16_C(0x0003)
 """
 
 SELFTEST_SPECIALIZATION = """\
-static const binrwir_specialization_row_t rows[] = {
-    {BINRWIR_OPERATION_IDENTIFIER_ADD, "int64,int64,int64", UINT16_C(0x8000)},
+static const binir_specialization_row_t rows[] = {
+    {BINIR_OPERATION_IDENTIFIER_ADD, "int64,int64,int64", UINT16_C(0x8000)},
 };
 """
 
@@ -456,14 +456,14 @@ def run_selftest() -> int:
 
     with tempfile.TemporaryDirectory(prefix="runtimec-handler-selftest-") as directory:
         root = Path(directory)
-        for name in ("runtimec/specification", "runtimec/binrwir", "runtimec/include",
+        for name in ("runtimec/specification", "runtimec/binir", "runtimec/include",
                      "runtimec/vmbin/handlers"):
             (root / name).mkdir(parents=True)
         registry = root / "runtimec/rwir/myrwircaps.yml"
         catalog = root / "runtimec/rwir/rwir_catalog.yml"
         aliases = root / "runtimec/specification/rwir_alias_table.def"
-        identifiers = root / "runtimec/binrwir/operation_identifiers.h"
-        specialization = root / "runtimec/binrwir/specialization_table.c"
+        identifiers = root / "runtimec/binir/operation_identifiers.h"
+        specialization = root / "runtimec/binir/specialization_table.c"
         handlers = root / "runtimec/vmbin/handlers/family.c"
         registry.write_text(SELFTEST_REGISTRY, encoding="utf-8")
         catalog.write_text(SELFTEST_CATALOG, encoding="utf-8")
@@ -474,7 +474,7 @@ def run_selftest() -> int:
         # `call` 走内联分派、`add` 走特化——两条都不该进 registry。
         # `nohandler` 三条路都没有 → 必须报。
         handlers.write_text(
-            "static const binrwir_registry_entry_t entries[] = {\n"
+            "static const binir_registry_entry_t entries[] = {\n"
             "    {0x0001, 0, some_handler},\n"
             "};\n", encoding="utf-8")
 
@@ -513,7 +513,7 @@ def run_selftest() -> int:
 
         # 恢复后回到同一个结论：只看得到那一处真实缺口。
         handlers.write_text(
-            "static const binrwir_registry_entry_t entries[] = {\n"
+            "static const binir_registry_entry_t entries[] = {\n"
             "    {0x0001, 0, some_handler},\n"
             "};\n", encoding="utf-8")
         findings, _ = audit(root)

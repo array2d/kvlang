@@ -3,7 +3,7 @@
  * 作用：v9 执行大循环的骨架。
  *
  * 现在只有两件事：创建 vthread（一次算完 `‥pc`/`‥status`/`‥msg` 三处地址），
- * 然后按 `‥status` 决定继续还是返回。执行体（BinRWIRGroup）尚未接入。
+ * 然后按 `‥status` 决定继续还是返回。执行体（BinIRGroup）尚未接入。
  */
 
 #include "runtime/interpreter.h"

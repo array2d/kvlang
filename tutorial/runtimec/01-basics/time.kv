@@ -17,43 +17,42 @@
 //   1 s = 1000000000 ns
 rwfunc test() -> () {
     println("before")
-    t0:time = time·now()
-    t1:time = time·now()
+    t0:int64 = time·now()
+    t1:int64 = time·now()
     println("after")
 
-    before:bool = time·before(t0, t1)
+    before:bool = t0 < t1
     print("t0 < t1: ")
     println(before)
 
-    after:bool = time·after(t0, t1)
+    after:bool = t0 > t1
     print("t0 > t1: ")
     println(after)
 
-    delta:time/duration = time·sub(t1, t0)
+    delta:int64 = t1 - t0
     print("delta >= 0 ns: ")
-    zero:time/duration = time/duration·nanos(0)
-    println(time/duration·before(zero, delta))
+    println(0 < delta)
 
-    ms:int64 = time/duration·as_millis(delta)
+    ms:int64 = delta ÷ 1000000
     print("delta ms = ")
     println(ms)
 
-    s:int64 = time/duration·as_seconds(delta)
+    s:int64 = delta ÷ 1000000000
     print("delta s = ")
     println(s)
 
-    sum:time = time·add(t0, delta)
+    sum:int64 = t0 + delta
     print("t0 + delta == t1: ")
-    a:bool = not(time·before(sum, t1))
-    b:bool = not(time·after(sum, t1))
+    a:bool = not(sum < t1)
+    b:bool = not(sum > t1)
     println(and(a, b))
 
     1000 -> n:int64
     print(n)
     println(" ms")
 
-    one_sec:time/duration = time/duration·seconds(1)
-    ns:int64 = time/duration·as_nanos(one_sec)
+    one_sec:int64 = 1000000000
+    ns:int64 = one_sec
     print("1 s = ")
     print(ns)
     println(" ns")
