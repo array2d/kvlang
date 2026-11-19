@@ -124,7 +124,9 @@ fn non_empty_map_literal_is_map_new() {
     assert!(out.unwrap().status.success());
     let mut kv = connect(&dir);
     assert_eq!(opcode(&mut kv, "/lib/p·f", 1), "map·new");
-    assert_eq!(declared(&mut kv, "/lib/p·f", 1), (3, 1));
+    // `map·new` 读参 0：能力表 `map·new(keyformatter, valuelangtype)` 收的是两个文本，
+    // 而 `{1 2 3}` 的元素走**成员写**（`elem -> base·<key>`），不是它的实参。
+    assert_eq!(declared(&mut kv, "/lib/p·f", 1), (0, 1));
 }
 
 /// structref 写槽走 `struct·new`，参数形态是 `(原型路径, 字段名, 值, …)`。
@@ -203,8 +205,9 @@ fn signature_declaration_supplies_the_map_type() {
         String::from_utf8_lossy(&out.stderr)
     );
     let mut kv = connect(&dir);
-    // 具名型是「名字, 值」交错：2 个成员 = 4 个读参。
-    assert_eq!(declared(&mut kv, "/lib/build", 1), (4, 1));
+    // 具名型与位置型同一形态：`map·new` 只建空根（nr=0），
+    // 2 个成员各走一条成员写（`42 -> m·n`、`7 -> m·x`）。
+    assert_eq!(declared(&mut kv, "/lib/build", 1), (0, 1));
 }
 
 fn declared(kv: &mut Kv, dir: &str, instruction: usize) -> (usize, usize) {

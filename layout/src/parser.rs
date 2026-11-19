@@ -2264,15 +2264,15 @@ impl Parser {
                 self.check_deref_operand(&arg, t.pos);
                 return Some(ast::call(ast::DEREF_OP, vec![arg]));
             }
-            // 一元前缀 & = 取址：&x ≡ kvspace/key·abs(x)（中缀 & 仍为按位与，走 pratt 中缀路径）。
-            // & 对成员链（`=` 读）→ kvspace/key·abs(base, segs...)：取成员路径地址，非读值取址。
+            // 一元前缀 & = 取址：&x ≡ key·abs(x)（中缀 & 仍为按位与，走 pratt 中缀路径）。
+            // & 对成员链（`=` 读）→ key·abs(base, segs...)：取成员路径地址，非读值取址。
             //
-            // 名字是 `kvspace/key·` 而不是 `kvspace·`：取址操作的是 **key 表达式**本身，
+            // 名字是 `key·abs`（能力表的登记名）。取址操作的是 **key 表达式**本身，
             // 不是一次存储存取——`kvspace·` 族是「base + 存储动作」，base 可以是容器值
             // 或 path 文本；取址收的是 key，两者不是同一个域。
             if symbol::lookup(&t.value).word == "bitand" {
                 let arg = self.parse_pratt(UNARY_PREC)?;
-                let op = format!("kvspace/key{}abs", keytree::MEMBER_SEP);
+                let op = format!("key{}abs", keytree::MEMBER_SEP);
                 if arg.op == ast::MEMBER_READ_OP && arg.args.len() >= 2 {
                     return Some(ast::call(&op, arg.args));
                 }
@@ -3287,7 +3287,15 @@ impl Parser {
          * 槽，否则「算出来的元素写回哪里」与「读的哪里」分裂成两个符号。
          * 上面 `ptr_params` 那条诊断**仍用原文 `arr`**——它判的是「基座是未显式
          * 解引用的裸指针名」，归一化与它无关。 */
-        let mut args = vec![ast::leaf(&arr_canonical)];
+        /*
+         * **array 在写侧，不在读参里。**
+         *
+         * 能力表 `compactarray·set(int64 #index, …|bool #value) -> ([?]… #array)`
+         * 把数组放在返回值上：读参只有 index 与 value，数组是**被原地写的目标**。
+         * 早先的形态把数组当第一个读参，原地写的宽度就落到「元素类型并集」上，
+         * crash_resume 随即判成 `heap`（宽度不定）——那是契约错位，不是判据严。
+         */
+        let mut args = Vec::new();
         for idx in idxs.split(',').map(|x| x.trim()) {
             if !idx.is_empty() {
                 args.push(ast::leaf(idx));

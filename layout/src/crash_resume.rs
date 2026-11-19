@@ -162,30 +162,19 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
     ("or", WHOLE),
     ("not", WHOLE),
     ("cast", WHOLE),
-    ("concat", WHOLE),
-    ("streq", WHOLE),
-    ("streq·not", WHOLE),
-    ("ptreq", WHOLE),
-    ("ptreq·not", WHOLE),
     ("bool·eq", WHOLE),
     ("bool·neq", WHOLE),
-    ("nonnull", WHOLE),
-    ("nonnull·not", WHOLE),
     /* scalar.c debugger: writes ‥status and yields. */
-    ("debugger", OPAQUE),
     /* container.c: creates go through write_new_value (map·new keeps old members, which
      * container slots tolerate because they never kill); copy, langtype, numel, dim and
      * bodylen store in place. */
     ("compactarray·new", CREATE),
     ("compactarray·fill", CREATE),
-    ("compactarray·newslice", CREATE),
     ("compactarray·newreshape", CREATE),
-    ("compactarray·newreinterpret", CREATE),
     ("compactarray·copy", WHOLE),
     ("compactarray·numel", WHOLE),
     ("compactarray·dim", WHOLE),
     ("compactarray·bodylen", WHOLE),
-    ("compactarray·langtype", WHOLE),
     /* `_ARRAY_INDEX` copies one element into the bound write slot. */
     ("compactarray·at", spec(WriteMode::Element, Store::InPlace)),
     /* `_ARRAY_INDEX_WRITE` patches read operand 0 and never writes the write slot. */
@@ -208,10 +197,7 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
     ),
     /* langtype.c: write_body. */
     ("compactarray·parselangtype", WHOLE),
-    ("xv·parselangtype", WHOLE),
     /* scatter.c: members are separate keys under the base. */
-    ("scatterarray·new", CREATE),
-    ("scatterarray·len", HEAP_READ),
     (
         "scatterarray·at",
         OpSpec {
@@ -236,9 +222,6 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
             ..HEAP_WRITE
         },
     ),
-    ("scatterarray·newscatter", HEAP_RW_CREATE),
-    ("scatterarray·newcompact", HEAP_RW_CREATE),
-    ("scatterarray·slice", HEAP_RW_CREATE),
     /* string.c, handler_call_text.h: text results are creates, scalar results in place;
      * set patches utf32 in place and rebuilds utf8 (`SET_BY_ENCODING`). */
     ("string·set", spec(WriteMode::Partial, Store::Both)),
@@ -262,30 +245,11 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
             ..CREATE
         },
     ),
-    ("time·sub", WHOLE),
-    ("time·add", WHOLE),
-    ("time·before", WHOLE),
-    ("time·after", WHOLE),
-    ("time/duration·nanos", WHOLE),
-    ("time/duration·millis", WHOLE),
-    ("time/duration·seconds", WHOLE),
-    ("time/duration·minutes", WHOLE),
-    ("time/duration·hours", WHOLE),
-    ("time/duration·as_nanos", WHOLE),
-    ("time/duration·as_millis", WHOLE),
-    ("time/duration·as_seconds", WHOLE),
-    ("time/duration·as_minutes", WHOLE),
-    ("time/duration·as_hours", WHOLE),
-    ("time/duration·add", WHOLE),
-    ("time/duration·sub", WHOLE),
-    ("time/duration·before", WHOLE),
-    ("time/duration·after", WHOLE),
     /* host.c: listlen, listat, random and pc store in place (listat only when the entry
      * exists); key·* are creates. */
     ("kvspace·del", HEAP_WRITE),
     ("kvspace·deltree", HEAP_WRITE),
     ("kvspace·mkindex", HEAP_WRITE),
-    ("kvspace·extindex", HEAP_WRITE),
     ("kvspace·delextindex", HEAP_WRITE),
     (
         "kvspace·cp",
@@ -317,8 +281,8 @@ pub const OP_TABLE: &[(&str, OpSpec)] = &[
         },
     ),
     ("kvspace·watch", OPAQUE),
-    ("kvspace/key·abs", CREATE),
-    ("kvspace/key·tostr", CREATE),
+    ("key·abs", CREATE),
+    ("key·tostr", CREATE),
     (
         "kvlang·resolvekey",
         OpSpec {
@@ -377,7 +341,14 @@ fn surface_rows() -> &'static HashMap<String, Vec<String>> {
 }
 
 /// Verified behavior of `name`, merged over every row it may resolve to; None = unverified.
+///
+/// 入口先过 [`crate::symbol::semantic_rwir_name`]：调用方可能拿的是源码字形
+/// （`flat()` 的产物、测试直接写的 `"="`/`"br"`），而能力清单按语义名登记。
+/// 映射放在**这里**而不是改 `flat()`——`flat()` 要用于显示与回写源码，
+/// 语义名会把「规范形态」和「用户写法」混在一起。
 pub fn op_spec(name: &str) -> Option<OpSpec> {
+    let name = crate::symbol::semantic_rwir_name(name);
+    let name = name.as_str();
     if OUTPUT_OPS.contains(&name) {
         return Some(NO_WRITE);
     }
@@ -882,7 +853,8 @@ fn parse_step(input: &StepInput, ctx: &Ctx, addr_taken: &mut BTreeSet<String>) -
             step.control = true;
             &[]
         }
-        "br" => {
+        // `input.op` 已过 `semantic_rwir_name`，分支的规范名是 `branch`（能力表登记名）。
+        "branch" => {
             step.control = true;
             &input.reads[..input.reads.len().min(1)]
         }
@@ -898,7 +870,7 @@ fn parse_step(input: &StepInput, ctx: &Ctx, addr_taken: &mut BTreeSet<String>) -
      * 后来 `resolveptr` 改名 `kvlang·resolvekey`（语义没变，仍是 base + 键值 → 位置）。
      * 之所以还并在这里：判据是「产出一个地址而不是值」，与命名族无关。
      * 看到两个不同前缀并排别当成手滑——是改名留下的痕迹。 */
-    let address_of = matches!(input.op.as_str(), "kvspace/key·abs" | "kvlang·resolvekey");
+    let address_of = matches!(input.op.as_str(), "key·abs" | "kvlang·resolvekey");
     let patches = spec.map_or(0, |s| s.patches);
     for (i, read) in reads.iter().enumerate() {
         match parse_operand(read, ctx) {
@@ -1674,12 +1646,15 @@ mod tests {
     use super::*;
 
     fn s(op: &str, reads: &[&str], writes: &[&str]) -> StepInput {
-        let callee = match op {
-            "" | "goto" | "br" | "return" => Callee::None,
+        // 与生产路径同一条映射：测试写字形（`"br"`/`"="`），分析的规范名是语义名。
+        // 不经映射就会出现「生产看 branch、测试看 br」两条真相。
+        let canonical = crate::symbol::semantic_rwir_name(op);
+        let callee = match canonical.as_str() {
+            "" | "goto" | "branch" | "return" => Callee::None,
             other => op_spec(other).map_or(Callee::Unverified(other.to_string()), Callee::Op),
         };
         StepInput {
-            op: op.to_string(),
+            op: canonical,
             reads: reads.iter().map(|x| x.to_string()).collect(),
             writes: writes.iter().map(|x| x.to_string()).collect(),
             write_types: Vec::new(),
@@ -1744,7 +1719,7 @@ mod tests {
             ];
             if extra_heap {
                 steps.push(s("=", &["\"q"], &["t"]));
-                steps.push(s("kvspace/key·abs", &["t"], &["_p"]));
+                steps.push(s("key·abs", &["t"], &["_p"]));
                 steps.push(s("=", &["\"r"], &["*_p"]));
             }
             steps.push(s("return", &[], &[]));
@@ -2295,7 +2270,7 @@ mod tests {
             vec![],
             vec![],
             vec![
-                s("kvspace/key·abs", &["x"], &["p"]),
+                s("key·abs", &["x"], &["p"]),
                 s("goto", &["L"], &[]),
                 s("=", &["0"], &["z"]),
                 s("=", &["x"], &["t"]),
@@ -2489,7 +2464,7 @@ mod tests {
             "int32",
             "int64",
             "int8",
-            "kvspace/key·abs",
+            "key·abs",
             "kvlang·resolvekey",
             "kvspace·cp",
             "kvspace·cpdir",

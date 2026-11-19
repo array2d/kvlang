@@ -27,12 +27,7 @@ fn store() -> Store {
     let _ = std::fs::remove_dir_all(&dir);
     let mut kv = Kv::conn(&format!("shm://{dir}"));
     init_dirs(&mut kv).unwrap();
-    kv.set(&[(
-        "/lib/println".to_string(),
-        kvkind::KIND_DEF_RWIR.to_string(),
-        kvkind::new_defrwir(1, 0, true).unwrap(),
-    )])
-    .unwrap();
+    kvkind::new_defrwir(&mut kv, "/lib/println", 1, 0, true).unwrap();
     Store { kv, dir }
 }
 
@@ -115,7 +110,7 @@ fn break_continue_outside_loop_is_positioned_error() {
         "rejected program must not be written"
     );
     // Valid inside a loop (including nested `if`).
-    let ok = "rwfunc t(*int64 #n) -> () {\n\ti = 0\n\twhile (i < *n) {\n\t\tif (i == 2) { break }\n\t\ti + 1 -> i\n\t}\n}\n";
+    let ok = "rwfunc t(*int64 #n) -> () {\n\ti:int64 = 0\n\twhile (i < *n) {\n\t\tif (i == 2) { break }\n\t\ti + 1 -> i\n\t}\n}\n";
     assert!(errors(ok).is_empty(), "{:?}", errors(ok));
     assert!(vet(ok).is_ok());
 }
@@ -158,7 +153,7 @@ fn targeted_label_is_entered_by_fallthrough() {
     let p = plane(&mut s.kv, "f");
     let (row, _) = p
         .iter()
-        .find(|(_, (op, reads))| op == "=" && reads == &vec!["1".to_string()])
+        .find(|(_, (op, reads))| op == "copy" && reads == &vec!["1".to_string()])
         .expect("`1 -> r` missing");
     let next = &p[&(row + 1)];
     assert_eq!(next.0, "goto", "after `1 -> r` must fall into L: {p:?}");
@@ -221,8 +216,8 @@ fn malformed_write_slots_are_errors_not_panics() {
         assert!(vet(src).is_err());
     }
     // `·*<literal>` write slot matches `·<literal>` static key.
-    let a = "rwfunc f() -> () {\n\t/tmp/s:[int64]·int64 = {}\n\t1 -> \"/tmp/s\"·*0\n}\n";
-    let b = "rwfunc f() -> () {\n\t/tmp/s:[int64]·int64 = {}\n\t1 -> \"/tmp/s\"·0\n}\n";
+    let a = "rwfunc f() -> () {\n\t/tmp/s:'[int64]'int64 = {}\n\t1 -> \"/tmp/s\"·*0\n}\n";
+    let b = "rwfunc f() -> () {\n\t/tmp/s:'[int64]'int64 = {}\n\t1 -> \"/tmp/s\"·0\n}\n";
     let (mut sa, mut sb) = (store(), store());
     compile(&mut sa.kv, a).unwrap();
     compile(&mut sb.kv, b).unwrap();
@@ -388,7 +383,7 @@ fn truncated_corpus_never_panics() {
 /// `format` preserves member reads and empty-kindexp params (`a:`) idempotently with identical layout output.
 #[test]
 fn format_round_trips_member_reads_and_empty_kindexp() {
-    let src = "rwfunc f(*int64 #a, *int64 #n) -> (*int64 #r) {\n\tm:[]char/utf8·int64 = {}\n\tk = \"x\"\n\tm·x = 1\n\tm·x -> v1\n\tm·*k -> v2\n\t\"/tmp/up\"·*n -> v3\n\t\"/tmp/up\"·0 -> v4\n\tm·\"a b\" -> v5\n\tm·\"if\" -> v6\n\tv1 + m·x -> *r\n}\n";
+    let src = "rwfunc f(*int64 #a, *int64 #n) -> (*int64 #r) {\n\tm:'[]char/utf8'int64 = {}\n\tk:[]char/utf32 = \"x\"\n\tm·x = 1\n\tm·x -> v1:int64\n\tm·*k -> v2:int64\n\t\"/tmp/up\"·*n -> v3:int64\n\t\"/tmp/up\"·0 -> v4:int64\n\tm·\"a b\" -> v5:int64\n\tm·\"if\" -> v6:int64\n\tv1 + m·x -> *r\n}\n";
     let once = kvlanglayout::format(src).unwrap();
     assert!(
         !once.contains("=("),
@@ -417,17 +412,17 @@ fn format_round_trips_member_reads_and_empty_kindexp() {
 /// 写 `(*a)·b` 才是它的对应形态。这条测的是 flat 的健壮性，不是解引用规则。
 #[test]
 fn deref_of_expression_does_not_panic() {
-    let src = "rwfunc t(*int64 #a) -> () {\n\t*(*a + 1) -> x\n\t(*a)·b -> y\n}\n";
+    let src = "rwfunc t(*int64 #a) -> () {\n\t*(*a + 1) -> x:int64\n\t(*a)·b -> y:int64\n}\n";
     assert!(vet(src).is_ok());
     let mut s = store();
     compile(&mut s.kv, src).unwrap();
     // `*a` 先展开成第 1 条拷贝指令（`_1 = *a`），`add` 因此落在第 2 条。
     // 形参名在槽里替换成帧坐标（`param_slot`）：`*a` → `*[0,-1]`，读写两侧同一规则。
     let p = plane(&mut s.kv, "t");
-    assert_eq!(p[&1], ("=".to_string(), vec!["*[0,-1]".to_string()]));
+    assert_eq!(p[&1], ("copy".to_string(), vec!["*[0,-1]".to_string()]));
     assert_eq!(p[&2].0, "add");
-    assert_eq!(p[&3], ("=".to_string(), vec!["*_1".to_string()]));
-    let src2 = "rwfunc f(*int64 #a) -> (*int64 #r) { *a -> *r }\nrwfunc t(*int64 #a) -> () {\n\tx = *f(*a)\n}\n";
+    assert_eq!(p[&3], ("copy".to_string(), vec!["*_2".to_string()]));
+    let src2 = "rwfunc f(*int64 #a) -> (*int64 #r) { *a -> *r }\nrwfunc t(*int64 #a) -> () {\n\tx:int64 = *f(*a)\n}\n";
     assert!(vet(src2).is_ok());
     compile(&mut store().kv, src2).unwrap();
 }

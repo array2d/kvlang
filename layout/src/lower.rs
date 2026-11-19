@@ -520,7 +520,9 @@ fn check_subscript_expr(
     addr: &[&str],
     diags: &mut Vec<Diagnostic>,
 ) {
-    if (e.op == "compactarray·at" || e.op == "compactarray·set") && !e.args.is_empty() {
+    // `compactarray·set` 的读参是 `(index, value)`——**没有 base**（数组在写侧），
+    // 所以 `[]` 误用检查只适用于 `at`（它确实读 base）。
+    if e.op == "compactarray·at" && !e.args.is_empty() {
         let base = &e.args[0];
         if base.is_leaf() && !addr.contains(&base.val.as_str()) {
             if let Some(t) = tm.get(&base.val) {
@@ -867,6 +869,31 @@ fn annotate_returns_inst(inst: &mut Instruction, sigs: &SigTable) {
         Some(e) if !e.is_leaf() => e,
         _ => return,
     };
+    /*
+     * **`compactarray·set` 的返回类型不写进 `write_types`。**
+     *
+     * 能力表把它写成 `-> ([?]int8|…|[?]bool #array)`——「能接任何数组」的类型变量
+     * 表达，能力表做不到更具体。这里若照抄进写槽，宽度就是并集 ⇒ 不定 ⇒
+     * crash_resume 判 `heap`（实测 `NOT_RESUMABLE:n:heap`）。
+     *
+     * 写槽的真正类型是**被写的那个数组**在布局期的声明类型（`a:[]int64`）。
+     * 这里留空，由 `write_slot_type` 从 `declared` 解析——那是唯一知道目标类型的地方。
+     * 目标若是绝对 key、布局期没有类型信息，`write_slot_type` 会停在那里，不拿并集冒充。
+     */
+    /*
+     * 这三个算子的返回类型**不能照抄能力表**：
+     *   - `compactarray·set` / `string·set`：能力表返回的是类型变量并集
+     *     （`[?]int8|…`），拿它当写槽宽度就不定；
+     *   - `key·abs`：能力表返回 `[]char/utf8`（key 的**文本形态**），而写槽要的是
+     *     **指针值**（`&x -> p:*int64` 里 `p` 是 `*int64`）。文本是 wire 表示，
+     *     不是值的类型——照抄会把指针槽写成文本槽，实测
+     *     `cannot assign *int64 to []char/utf8`。
+     *
+     * 三者的写槽类型都由**声明**决定，见 `write_slot_type`。
+     */
+    if matches!(e.op.as_str(), "compactarray·set" | "string·set" | "key·abs") {
+        return;
+    }
     let sym = symbol::lookup(&e.op);
     if sym.arith || sym.cmp || is_cast_op(&e.op) {
         return;
@@ -1747,12 +1774,20 @@ fn infer_sparse_type(e: &Expr, tm: &HashMap<String, String>) -> Vec<String> {
     }
 }
 
-/// 散 key 数组字面量（parser 产出的 "map·new"）→ 单条 `map·new(v0, v1, ...) -> base`，
-/// 运行时 map builtin 创建 map 根（kind=map）+ 子键 `base/[i]`（相对 key，方括号索引串）。
+/// 散 key 数组字面量（parser 产出的 "map·new"）→ **建空 map 根 + 逐元素成员写**。
+///
+/// 能力表 `runtimec_rwircap.kv` 的 `map·new(keyformatter, valuelangtype)` 收的是两个
+/// **文本**参数（键怎么格式化、值是什么 langtype），不是容器的元素。旧 catalog 里这行
+/// 没有签名，把 `{1 2 3}` 的元素当读参传也能过；换源后那成了类型错
+/// （实测 `cannot pass int64 to []char/utf8 (parameter keyformatter)`）。
+///
+/// 正确形态与手写 `m = {}` + `v -> m·k` 落盘结果一致（已实测比对 printlib 输出）：
+///   1. `map·new()` 无读参 → 建 map 根，写 `base`；
+///   2. 每个元素一条成员写 `elem -> base·<key>`。
 fn expand_sparse(base: &str, e: &Expr, wtypes: &[String], _lg: &mut LabelGen) -> Vec<Stmt> {
-    let inst = Instruction {
+    let root = Instruction {
         comments: Vec::new(),
-        expr: Some(ast::call("map·new", e.args.clone())),
+        expr: Some(ast::call("map·new", Vec::new())),
         writes: vec![base.to_string()],
         // 写类型**必须原样带过来**：容器字面量的 map langtype 就靠它落到写槽
         // （`nums:[int64]·int64 = {…}`；见 [[map容器]]）。曾在此清空，runtime 无从得知容器类型。
@@ -1762,7 +1797,39 @@ fn expand_sparse(base: &str, e: &Expr, wtypes: &[String], _lg: &mut LabelGen) ->
         operand_kind: String::new(),
         pos: Pos::default(),
     };
-    vec![Stmt::Instruction(inst)]
+    let mut out = vec![Stmt::Instruction(root)];
+    // 具名型 `{k=v …}`：parser 把键包成字符串字面量（`quote != 0`）；位置型 `{v0 v1 …}`：
+    // 键是下标。判据与 `dispatch_struct_literal` 同一条（首参是否为字符串字面量）。
+    let named = e.args.first().is_some_and(|a| a.quote != 0);
+    let mut i = 0usize;
+    while i < e.args.len() {
+        let (key, elem) = if named {
+            let Some(v) = e.args.get(i + 1) else {
+                break;
+            };
+            (
+                format!("{}{}{}", base, keytree::MEMBER_SEP, e.args[i].val),
+                v.clone(),
+            )
+        } else {
+            (
+                format!("{}{}{}", base, keytree::MEMBER_SEP, i),
+                e.args[i].clone(),
+            )
+        };
+        out.push(Stmt::Instruction(Instruction {
+            comments: Vec::new(),
+            expr: Some(ast::call("=", vec![elem])),
+            writes: vec![key],
+            write_types: Vec::new(),
+            arrow_left: false,
+            operator: false,
+            operand_kind: String::new(),
+            pos: Pos::default(),
+        }));
+        i += if named { 2 } else { 1 };
+    }
+    out
 }
 
 fn make_copy_inst(val: &str, dest: &str) -> Stmt {
@@ -2603,7 +2670,7 @@ fn infer_op_type(
     if symbol::lookup(opcode).cmp {
         return "bool".to_string();
     }
-    if opcode == "kvspace/key·abs" {
+    if opcode == "key·abs" {
         // `&x` 取址产 Ptr：类型记 `*<目标类型>`（目标类型未知则记裸 `*`）——`*` 前缀即 ref 轴标记，
         // 供 `[]` 下标校验拦下「指针当数组」（见 [[ptr]]）。
         let t = reads.first().map(|r| slot_type(r, tm)).unwrap_or_default();
@@ -2672,7 +2739,10 @@ fn infer_op_type(
             }
             return format!("*{member}");
         }
-        "string·char" | "string·set" | "string·slice" | "string·formatint"
+        // `string·set(index, value) -> text`：返回的是**被写的那个文本**，类型由写槽
+        // 的声明决定（`s:[]char/utf32` 就是 `[]char/utf32`），这里不猜。
+        "string·set" => return String::new(),
+        "string·char" | "string·slice" | "string·formatint"
         | "string·formatuint" => return "char/utf32".to_string(),
         "random.int63" => return "int64".to_string(),
         "random·intn" | "random.uint64" | "string·parseuint" => return "uint64".to_string(),
@@ -2744,18 +2814,16 @@ fn infer_op_type(
             return String::new();
         }
         "compactarray·set" => {
+            // 新契约：读参是 `(index, value)`，**数组在写侧**（`-> [#array]`）。
+            // 所以「这个表达式是什么类型」答不出来——它产出的就是被写的那个数组，
+            // 类型由写槽的声明提供，不从这里推。
             if let Some(last) = reads.last() {
                 let t = slot_type(last, tm);
                 if !t.is_empty() {
-                    let key = format!("{}.0", reads[0]);
-                    tm.entry(key).or_insert(t);
+                    tm.entry(format!("{}.0", last)).or_insert(t);
                 }
             }
-            return if !reads.is_empty() {
-                slot_type(&reads[0], tm)
-            } else {
-                String::new()
-            };
+            return String::new();
         }
         "compactarray·newreshape" => {
             return if !reads.is_empty() {
@@ -3106,7 +3174,7 @@ fn exact_kind(
             .and_then(|a| exact_kind(a, declared, stable))?;
         return Some(deref_value_type(&inner).to_string());
     }
-    if op == "kvspace/key·abs" {
+    if op == "key·abs" {
         // `&x` 产 kvlang 指针：结果类型 = `*` + 目标类型（与 `infer_op_type` 同一规则）。
         // 旧实现返回 None，于是 `&x -> eh` 的 `eh` 推不出类型，
         // 再传给 `**T` 形参时判成值与指针不符。
@@ -3202,7 +3270,9 @@ fn exact_kind(
                 .collect();
             return concat_result_encoding(&operand_types);
         }
-        "string·char" | "string·set" | "string·slice" | "string·formatint"
+        // 同上一处：`string·set` 的返回类型取自写目标，不在这里固定。
+        "string·set" => return None,
+        "string·char" | "string·slice" | "string·formatint"
         | "string·formatuint" => return Some("char/utf32".to_string()),
         _ => {}
     }
@@ -3395,7 +3465,7 @@ fn collect_inst_stability(
             sources.entry(w.clone()).or_default().push(e.clone());
         }
     }
-    if e.op == "kvspace/key·abs" {
+    if e.op == "key·abs" {
         if let Some(a) = e.args.first() {
             if a.is_leaf() {
                 disq.insert(a.val.clone());
@@ -4569,7 +4639,7 @@ fn expr_result_type(
     if sym.cmp {
         return "bool".to_string();
     }
-    if e.op == "kvspace/key·abs" {
+    if e.op == "key·abs" {
         let t = e.args.first().map(|a| arg_type(a, tm)).unwrap_or_default();
         return format!("*{t}");
     }
@@ -4729,6 +4799,37 @@ fn check_call_args(
         || is_cast_op(&e.op)
         || matches!(e.op.as_str(), "compactarray·new" | "map·new")
     {
+        return;
+    }
+    /*
+     * **`key·abs` 的实参是 key 表达式，不是值。**
+     *
+     * `&x` 脱糖成 `key·abs(x)`，它产出的是 `x` 这个**变量的 key 文本**
+     * （能力表 `#keyexpr` 是 `[]char/ascii`），不是 `x` 里存的值。所以拿
+     * `provable_arg_type`（按声明类型答，`v:int64` → `int64`）去对
+     * `[]char/ascii`，必然报
+     * `cannot pass int64 to []char/ascii (parameter keyexpr)`——
+     * 那是拿**值的类型**去校验**名字的文本**。
+     *
+     * 与 `compactarray·new` / `map·new` 同类：它们的前几个实参也不是值。
+     */
+    if e.op == format!("key{}abs", keytree::MEMBER_SEP) {
+        return;
+    }
+    /*
+     * **`kvspace·listat` / `listlen` 的首参是容器，不是 key 文本。**
+     *
+     * 能力表写 `listat([]char/utf8 #key, int64 #index)`，那个 `#key` 描述的是
+     * **`listat` 产出**的成员 key 文本（返回值的形态），而首参要收的是**整个容器**
+     * ——`for (x in data)` 脱糖成 `listat(data, i)`，`data` 的类型就是容器的类型
+     * （`[int64]'int64`）。
+     *
+     * 拿 `#key` 的 `[]char/utf8` 去校验容器变量，对 int64 键的 map 必然报
+     * `cannot pass '[int64]'int64 to []char/utf8 (parameter key)`；utf32 键的
+     * map 侥幸不报只是因为类型推导在那条路径上返回空（不匹配就不检查），
+     * **不是它更对**。判据不能靠「推不出来就跳过」这种偶然。
+     */
+    if matches!(e.op.as_str(), "kvspace·listat" | "kvspace·listlen") {
         return;
     }
     let Some(sig) = sig_lookup(sigs, &e.op) else {
@@ -5058,10 +5159,11 @@ fn walk_inst(
     if e.op == format!("struct{}new", keytree::MEMBER_SEP) {
         check_struct_literal(e, structs, diags);
     }
-    // 容器元素写：xv·set(container, index, value)。kvspace·set 已死刑（成员写走 =）。
-    if (e.op == "compactarray·set") && e.args.len() >= 3 {
-        if e.args[0].is_leaf() {
-            if let Some(cty) = declared.get(&e.args[0].val) {
+    // 容器元素写：`compactarray·set(index, value)`，**容器在写侧**。
+    // 容器类型只能从写目标（`declared` 里的写槽名）取——读参里没有它。
+    if (e.op == "compactarray·set") && e.args.len() >= 2 {
+        if let Some(w) = s.writes.first() {
+            if let Some(cty) = declared.get(w) {
                 let elem = container_elem(cty);
                 if let Some(kind) = elem {
                     if builtin::is_num_kind(&kind) {
@@ -5231,6 +5333,20 @@ fn check_one_call_shape(
     tm: &HashMap<String, String>,
     diags: &mut Vec<Diagnostic>,
 ) {
+    /*
+     * **容器字面量不是调用**：`{1 2 3}` 的 args 是**元素**，不是 `map·new` 的实参。
+     *
+     * 能力表 `map·new(keyformatter, valuelangtype)` 描述的是「由两个文本构造 map」，
+     * 而字面量走另一条路（`expand_sparse`：建空 map 根 + 逐元素成员写）。把元素当
+     * 实参去对签名，必然报 `cannot pass int64 to []char/utf8 (parameter keyformatter)`
+     * ——那是拿 A 的契约校验 B 的输入。
+     *
+     * 元素的类型由成员写那一层判：`expand_sparse` 产出 `elem -> base·<key>`，
+     * 写槽检查看得见写目标的 langtype，判据在那边。
+     */
+    if e.op == "map·new" && !e.args.is_empty() {
+        return;
+    }
     let Some(sig) = sig_lookup(sigs, &e.op) else {
         return;
     };

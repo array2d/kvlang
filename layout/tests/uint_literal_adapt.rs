@@ -74,9 +74,9 @@ fn write_kind(kv: &mut Kv, key: &str) -> String {
 #[test]
 fn cast_plus_literal_adapts_to_unsigned() {
     for src in [
-        "rwfunc f() -> () {\n    uint64(5) + 1 -> r\n}\n",
-        "rwfunc f() -> () {\n    1 + uint64(5) -> r\n}\n",
-        "rwfunc f() -> () {\n    u:uint64 = 5\n    u + 1 -> r\n}\n",
+        "rwfunc f() -> () {\n    uint64(5) + 1 -> r:uint64\n}\n",
+        "rwfunc f() -> () {\n    1 + uint64(5) -> r:uint64\n}\n",
+        "rwfunc f() -> () {\n    u:uint64 = 5\n    u + 1 -> r:uint64\n}\n",
     ] {
         let (_store, mut kv) = fresh_kv("cast");
         compile(&mut kv, src).unwrap();
@@ -95,7 +95,7 @@ fn cast_plus_literal_adapts_to_unsigned() {
 #[test]
 fn write_slot_kind_matches_specialized_op() {
     let (_store, mut kv) = fresh_kv("kind");
-    compile(&mut kv, "rwfunc f() -> () {\n    uint64(5) + 1 -> r\n}\n").unwrap();
+    compile(&mut kv, "rwfunc f() -> () {\n    uint64(5) + 1 -> r:uint64\n}\n").unwrap();
     // [2] 是 add；写槽 [2,1] 的 kind 必须是 uint64（不能算对却记 int64）。
     let k = write_kind(&mut kv, "/lib/f/[2,1]");
     assert_eq!(k, "uint64", "写槽 kind 应为 uint64，实际 {k}");
@@ -106,7 +106,7 @@ fn uint8_literal_boundary_fits_and_overflows() {
     let (_store, mut kv) = fresh_kv("bound");
     compile(
         &mut kv,
-        "rwfunc f() -> () {\n    u:uint8 = 200\n    u + 255 -> r\n}\n",
+        "rwfunc f() -> () {\n    u:uint8 = 200\n    u + 255 -> r:uint8\n}\n",
     )
     .unwrap();
     assert!(
@@ -117,7 +117,7 @@ fn uint8_literal_boundary_fits_and_overflows() {
     let (_store, mut kv) = fresh_kv("overflow");
     compile(
         &mut kv,
-        "rwfunc f() -> () {\n    u:uint8 = 200\n    u + 256 -> r\n}\n",
+        "rwfunc f() -> () {\n    u:uint8 = 200\n    u + 256 -> r:int64\n}\n",
     )
     .unwrap();
     assert!(
@@ -131,7 +131,7 @@ fn float_still_wins_over_literal_adaptation() {
     let (_store, mut kv) = fresh_kv("float");
     compile(
         &mut kv,
-        "rwfunc f() -> () {\n    u:uint64 = 5\n    u + 1.0 -> r\n}\n",
+        "rwfunc f() -> () {\n    u:uint64 = 5\n    u + 1.0 -> r:float64\n}\n",
     )
     .unwrap();
     assert!(
@@ -145,7 +145,7 @@ fn two_unsigned_widths_still_widen() {
     let (_store, mut kv) = fresh_kv("widen");
     compile(
         &mut kv,
-        "rwfunc f() -> () {\n    a:uint64 = 5\n    b:uint8 = 1\n    a + b -> r\n}\n",
+        "rwfunc f() -> () {\n    a:uint64 = 5\n    b:uint8 = 1\n    a + b -> r:uint64\n}\n",
     )
     .unwrap();
     let os = ops(&mut kv, "f");
@@ -157,7 +157,7 @@ fn confirmed_mixed_signs_stay_untyped() {
     let (_store, mut kv) = fresh_kv("mixed");
     compile(
         &mut kv,
-        "rwfunc f() -> () {\n    a:uint64 = 5\n    b:int64 = 1\n    a + b -> r\n}\n",
+        "rwfunc f() -> () {\n    a:uint64 = 5\n    b:int64 = 1\n    a + b -> r:int64\n}\n",
     )
     .unwrap();
     let os = ops(&mut kv, "f");
@@ -180,7 +180,7 @@ fn comparison_with_literal_adapts_but_negative_does_not() {
     let (_store, mut kv) = fresh_kv("cmp");
     compile(
         &mut kv,
-        "rwfunc f() -> () {\n    u:uint64 = 5\n    u == 1 -> r\n}\n",
+        "rwfunc f() -> () {\n    u:uint64 = 5\n    u == 1 -> r:bool\n}\n",
     )
     .unwrap();
     assert!(
@@ -191,7 +191,7 @@ fn comparison_with_literal_adapts_but_negative_does_not() {
     let (_store, mut kv) = fresh_kv("cmpneg");
     compile(
         &mut kv,
-        "rwfunc f() -> () {\n    u:uint64 = 5\n    u == -1 -> r\n}\n",
+        "rwfunc f() -> () {\n    u:uint64 = 5\n    u == -1 -> r:bool\n}\n",
     )
     .unwrap();
     assert!(

@@ -265,7 +265,11 @@ fn step_callee(
     ext: &mut Externals,
 ) -> crash_resume::Callee {
     use crash_resume::Callee;
-    if matches!(op, "" | "goto" | "br" | "return") {
+    // 控制流三件套。**用语义名 `branch`**：`op` 传进来时已过
+    // `semantic_rwir_name`（字形 `br` → `branch`），这里写 `"br"` 永远匹配不到，
+    // 会落到下面 `verified("branch")` → OP_TABLE 无此条 → `Unverified`，
+    // 于是分支被判成不可恢复的算子调用（实测 `unverified:branch`）。
+    if matches!(op, "" | "goto" | "branch" | "return") {
         return Callee::None;
     }
     let verified = |name: &str| match crash_resume::op_spec(name) {
@@ -339,9 +343,13 @@ fn crash_resume_input(
             .zip(&a.slot_types)
             .map(|(inst, slot_types)| {
                 let (op, reads) = inst.flat();
-                let callee = step_callee(inst, &op, unit, ext);
+                // `flat()` 给的是源码字形；崩溃恢复按**语义 rwir 名**查能力表
+                // （`runtimec_rwircap.kv` 里只有 `copy`/`branch`，没有 `=`/`br`）。
+                // 与写盘走**同一个** `semantic_rwir_name`——两处各写一份就是两份真相。
+                let sem = symbol::semantic_rwir_name(&op);
+                let callee = step_callee(inst, &sem, unit, ext);
                 crash_resume::StepInput {
-                    op,
+                    op: sem,
                     reads,
                     writes: inst.writes.clone(),
                     write_types: slot_types.clone(),
@@ -1375,50 +1383,48 @@ pub fn write_func(
         param_langtype.insert(r.name.clone(), param_types[nr as usize + i].clone());
     }
 
-    let mut pairs: Vec<(String, String, Vec<u8>)> = Vec::new();
-    pairs.push((
-        format!("{func_dir}/"),
-        kvkind::KIND_RWFUNC.to_string(),
-        kvkind::new_rwfunc_dir()?,
-    ));
-    // Write `‥ctime` last (after all instructions and labels) so runtimes never rebuild from a half-written segment.
-    pairs.push((
-        format!("{func_dir}/[0,0]"),
-        kvkind::KIND_RWFUNC.to_string(),
-        kvkind::new_rwfunc_anchor(nr, nw, fn_.sig.dynamic())?,
-    ));
+    // Incrementally replace only this function's subtree without disturbing sibling `/lib` entries.
+    let werr = |e: String| format!("kvspace write {func_dir}: {e}");
+    kv.del_tree(&func_dir).map_err(werr)?;
+    kv.mkindex(&format!("{func_dir}/")).map_err(werr)?;
+
+    /* **逐条就地构造**——没有 `pairs` 批写了。
+     *
+     * 新 ABI 的构造器直接把 wire 写进 kvspace 的映射，构造即落库，所以「攒一批
+     * (key, lt, Vec<u8>) 再一次写」的模型不存在。顺序由这里自己保证：
+     * 先建目录与锚点，再写 `.src` 与参数定义键，最后让 `write_linear_inst` 写指令。
+     */
+    kvkind::new_rwfunc_dir(kv, &format!("{func_dir}/")).map_err(werr)?;
+    // 锚点 [0,0]：签名计数 [nr][nw][dynamic]。
+    kvkind::new_rwfunc_anchor(kv, &format!("{func_dir}/[0,0]"), nr, nw, fn_.sig.dynamic())
+        .map_err(werr)?;
     // `.src` 是**源码副本槽**：字符串在这里只能以数组形态存在。裸 `char/utf8`
     // 表示「单个 UTF-8 字符」，而这里存的是整段源码——两者不是一回事。
     // 与 runtimec 的系统槽常量 `RUNTIMEC_KVSPACE_SYSTEM_LANGTYPE` 同值。
-    pairs.push((
-        keytree::lib_src(pkg, &fn_.sig.name),
-        "[]char/utf8".to_string(),
-        ffi::new_char_byte(fn_.full_text().as_bytes())?,
-    ));
+    ffi::new_char_byte(
+        kv,
+        &keytree::lib_src(pkg, &fn_.sig.name),
+        fn_.full_text().as_bytes(),
+        "[]char/utf8",
+    )
+    .map_err(werr)?;
     // 参数定义键 funcDir.[0,±k]（点后缀，与坐标斜杠键 /[0,±k] 区分）：langtype=def langtype，
     // body 只有类型串（写参可带 ` inplace`）——**名字不落库**：`#name` 是源码注释。
     // 坐标斜杠键 [0,±k] 留给 runtime call 期写实参地址 Ptr；点后缀键
     // 不同名、不触发 extindex 写保护。函数体形参引用已替换为 *[0,±k] 显式解引用。
     for (i, _) in fn_.sig.params.iter().enumerate() {
-        pairs.push((
-            format!("{func_dir}.[0,-{}]", i + 1),
-            kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_param(&param_types[i])?,
-        ));
+        kvkind::new_def_param(kv, &format!("{func_dir}.[0,-{}]", i + 1), &param_types[i])
+            .map_err(werr)?;
     }
     for (i, r) in fn_.sig.returns.iter().enumerate() {
-        pairs.push((
-            format!("{func_dir}.[0,{}]", i + 1),
-            kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_param_with_inplace(&param_types[nr as usize + i], r.inplace)?,
-        ));
+        kvkind::new_def_param_with_inplace(
+            kv,
+            &format!("{func_dir}.[0,{}]", i + 1),
+            &param_types[nr as usize + i],
+            r.inplace,
+        )
+        .map_err(werr)?;
     }
-
-    // Incrementally replace only this function's subtree without disturbing sibling `/lib` entries.
-    let werr = |e: String| format!("kvspace write {func_dir}: {e}");
-    kv.del_tree(&func_dir).map_err(werr)?;
-    kv.mkindex(&format!("{func_dir}/")).map_err(werr)?;
-    kv.set(&pairs).map_err(werr)?;
 
     for (i, inst) in seq.iter().enumerate() {
         write_linear_inst(
@@ -1536,16 +1542,16 @@ pub fn write_func(
     if !labels.is_empty() {
         kv.mkindex(&keytree::lib_labels_dir(pkg, &fn_.sig.name))
             .map_err(werr)?;
-        let mut lpairs: Vec<(String, String, Vec<u8>)> = Vec::with_capacity(labels.len());
         for (label, irseq) in labels {
             // `‥labels/<label>` stores an `int64` irseq (its leaf name has no `‥`, so `printlib` needs `"int64"` langtype).
-            lpairs.push((
-                keytree::lib_label(pkg, &fn_.sig.name, label),
-                "int64".to_string(),
-                ffi::new_int64(*irseq as i64)?,
-            ));
+            ffi::new_int64(
+                kv,
+                &keytree::lib_label(pkg, &fn_.sig.name, label),
+                *irseq as i64,
+                "int64",
+            )
+            .map_err(werr)?;
         }
-        kv.set(&lpairs).map_err(werr)?;
     }
     /*
      * `‥crash_resume`：本函数的崩溃恢复判定，随产物一起落盘供 dump 与驱动读。
@@ -1561,12 +1567,11 @@ pub fn write_func(
             keytree::RUNTIME_MEMBER_SEP,
             keytree::SEG_CRASH_RESUME
         );
-        kv.set(&[(key, langtype, ffi::new_char_byte(text.as_bytes())?)])
-            .map_err(werr)?;
+        ffi::new_char_byte(kv, &key, text.as_bytes(), &langtype).map_err(werr)?;
     }
     // Commit `‥ctime` last once all instruction and label slots are persisted.
-    kv.set(&[(ctime_key, String::new(), ffi::new_int64(ctime)?)])
-        .map_err(werr)?;
+    // `‥ctime` 是系统变量本体：**无 langtype**（空串），不是"忘了给类型"。
+    ffi::new_int64(kv, &ctime_key, ctime, "").map_err(werr)?;
     Ok(())
 }
 
@@ -1582,46 +1587,49 @@ pub fn write_struct_decl(kv: &mut Kv, decl: &StructDecl) -> Result<(), String> {
         name = format!("{}{}{name}", decl.pkg, keytree::MEMBER_SEP);
     }
     let base = keytree::rwir(&name);
-    let mut pairs: Vec<(String, String, Vec<u8>)> = Vec::new();
-    pairs.push((
-        base.clone(),
-        kvkind::KIND_DEF_STRUCT.to_string(),
-        kvkind::new_struct()?,
-    ));
+    kvkind::new_struct(kv, &base)?;
     for fld in &decl.fields {
-        pairs.push((
-            format!("{base}/{}", fld.name),
-            kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_langtype(&fld.ty)?,
-        ));
+        kvkind::new_def_langtype(kv, &format!("{base}/{}", fld.name), &fld.ty)?;
         // *T 字段的默认值是空指针 None——不落键。None 在 kvspace 即"无值"（键不存在），
         // 故原型不带该字段、实例读回 None（见 [[ptr]]）；不造"空 Ptr"这第二种空值表示。
         if fld.ty.starts_with('*') {
             continue;
         }
-        pairs.push((
-            keytree::member(&base, &fld.name),
-            fld.ty.clone(),
-            field_default(&fld.ty, fld.default.as_ref())?,
-        ));
     }
     let werr = |e: String| format!("kvspace write {base}: {e}");
     kv.del_tree(&base).map_err(werr)?;
-    kv.set(&pairs).map_err(werr)
+    kvkind::new_struct(kv, &base).map_err(werr)?;
+    for fld in &decl.fields {
+        kvkind::new_def_langtype(kv, &format!("{base}/{}", fld.name), &fld.ty).map_err(werr)?;
+        // *T 字段的默认值是空指针 None——不落键。None 在 kvspace 即"无值"（键不存在），
+        // 故原型不带该字段、实例读回 None（见 [[ptr]]）；不造"空 Ptr"这第二种空值表示。
+        if fld.ty.starts_with('*') {
+            continue;
+        }
+        field_default(kv, &keytree::member(&base, &fld.name), &fld.ty, fld.default.as_ref())
+            .map_err(werr)?;
+    }
+    Ok(())
 }
 
 /// 字段默认值 XValue：head kind = 字段类型，body = 默认字面量（未给则零值）。
 /// 标量+char 直接编码；带 dims / structref 仅记录类型（空 body），嵌套 struct 待定。
 /// Representability is validated earlier by `lower::check_field_default`; this only encodes.
-fn field_default(ty: &str, default: Option<&Expr>) -> Result<Vec<u8>, String> {
+fn field_default(
+    kv: &mut Kv,
+    key: &str,
+    ty: &str,
+    default: Option<&Expr>,
+) -> Result<(), String> {
     // *T 指针字段不在此列——write_struct_decl 已按"空指针 = None = 不落键"跳过。
     let (dims, base) = kvkind::parse_langtype(ty);
     let s = default.map(|e| e.val.clone()).unwrap_or_default();
+    let langtype = ty;
     if base.starts_with("char/") {
-        return ffi::new_char(&base, &s);
+        return ffi::new_char(kv, key, &base, &s, langtype);
     }
     if !dims.is_empty() {
-        return ffi::xvalue_to_wire(&base, &[], dims.iter().product());
+        return ffi::xvalue_to_wire(kv, key, &base, &[], dims.iter().product(), langtype);
     }
     // Allow integral float literals (e.g. `x:int64=3.0`) already validated by `check_literal`.
     let i = || {
@@ -1632,18 +1640,18 @@ fn field_default(ty: &str, default: Option<&Expr>) -> Result<Vec<u8>, String> {
     };
     let f = || s.parse::<f64>().unwrap_or(0.0);
     match base.as_str() {
-        "bool" => ffi::new_bool(s == "true"),
-        "int8" => ffi::xvalue_to_wire("int8", &(i() as i8).to_le_bytes(), 1),
-        "int16" => ffi::xvalue_to_wire("int16", &(i() as i16).to_le_bytes(), 1),
-        "int32" => ffi::xvalue_to_wire("int32", &(i() as i32).to_le_bytes(), 1),
-        "int64" => ffi::new_int64(i() as i64),
-        "uint8" => ffi::xvalue_to_wire("uint8", &[i() as u8], 1),
-        "uint16" => ffi::xvalue_to_wire("uint16", &(i() as u16).to_le_bytes(), 1),
-        "uint32" => ffi::xvalue_to_wire("uint32", &(i() as u32).to_le_bytes(), 1),
-        "uint64" => ffi::xvalue_to_wire("uint64", &(i() as u64).to_le_bytes(), 1),
-        "float32" => ffi::xvalue_to_wire("float32", &(f() as f32).to_le_bytes(), 1),
-        "float64" => ffi::new_float64(f()),
-        _ => ffi::xvalue_to_wire(&base, &[], 1),
+        "bool" => ffi::new_bool(kv, key, s == "true", langtype),
+        "int8" => ffi::xvalue_to_wire(kv, key, "int8", &(i() as i8).to_le_bytes(), 1, langtype),
+        "int16" => ffi::xvalue_to_wire(kv, key, "int16", &(i() as i16).to_le_bytes(), 1, langtype),
+        "int32" => ffi::xvalue_to_wire(kv, key, "int32", &(i() as i32).to_le_bytes(), 1, langtype),
+        "int64" => ffi::new_int64(kv, key, i() as i64, langtype),
+        "uint8" => ffi::xvalue_to_wire(kv, key, "uint8", &[i() as u8], 1, langtype),
+        "uint16" => ffi::xvalue_to_wire(kv, key, "uint16", &(i() as u16).to_le_bytes(), 1, langtype),
+        "uint32" => ffi::xvalue_to_wire(kv, key, "uint32", &(i() as u32).to_le_bytes(), 1, langtype),
+        "uint64" => ffi::xvalue_to_wire(kv, key, "uint64", &(i() as u64).to_le_bytes(), 1, langtype),
+        "float32" => ffi::xvalue_to_wire(kv, key, "float32", &(f() as f32).to_le_bytes(), 1, langtype),
+        "float64" => ffi::new_float64(kv, key, f(), langtype),
+        _ => ffi::xvalue_to_wire(kv, key, &base, &[], 1, langtype),
     }
 }
 
@@ -1664,30 +1672,22 @@ pub fn write_rwir_decl(kv: &mut Kv, decl: &RwirDecl) -> Result<(), String> {
     let param_types = decl.sig.langtype_list();
     let base = keytree::rwir(&opcode);
     // 路由头：仅计数头（无参数载荷）；各参数类型落 [0,x] 签名行槽（def langtype）。
-    let mut pairs: Vec<(String, String, Vec<u8>)> = vec![(
-        base.clone(),
-        kvkind::KIND_DEF_RWIR.to_string(),
-        kvkind::new_defrwir(nr, nw, decl.sig.dynamic())?,
-    )];
+    let werr = |e: String| format!("kvspace write {base}: {e}");
+    kvkind::new_defrwir(kv, &base, nr, nw, decl.sig.dynamic()).map_err(werr)?;
     for i in 0..nr as usize {
-        pairs.push((
-            format!("{base}/[0,-{}]", i + 1),
-            kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_langtype(&param_types[i])?,
-        ));
+        kvkind::new_def_langtype(kv, &format!("{base}/[0,-{}]", i + 1), &param_types[i])
+            .map_err(werr)?;
     }
     for i in 0..nw as usize {
-        pairs.push((
-            format!("{base}/[0,{}]", i + 1),
-            kvkind::KIND_DEF_LANGTYPE.to_string(),
-            kvkind::new_def_langtype_with_inplace(
-                &param_types[nr as usize + i],
-                decl.sig.returns[i].inplace,
-            )?,
-        ));
+        kvkind::new_def_langtype_with_inplace(
+            kv,
+            &format!("{base}/[0,{}]", i + 1),
+            &param_types[nr as usize + i],
+            decl.sig.returns[i].inplace,
+        )
+        .map_err(werr)?;
     }
-    kv.set(&pairs)
-        .map_err(|e| format!("kvspace write {base}: {e}"))
+    Ok(())
 }
 
 /// Flatten body into seq; ScopeStmt records label → irseq (1-based; [0,0] is the signature).
@@ -1965,13 +1965,25 @@ fn annotate_slot_types(
         } else {
             expr_slot_type(expr, declared, sigs, stable, structs, coord).unwrap_or_default()
         };
-        let ty = (!ty.is_empty()).then_some(ty);
-        if let Some(ty) = ty.filter(|value| !value.is_empty()) {
-            if inst.write_types.len() < inst.writes.len() {
-                inst.write_types.resize(inst.writes.len(), String::new());
-            }
-            if inst.write_types[0].is_empty() {
-                inst.write_types[0] = ty;
+        /*
+         * **`compactarray·set` 不从这里取类型。**
+         *
+         * `expr_slot_type` 对它返回的是能力表的**返回值**——`[?]int8|…|[?]bool` 那个
+         * 并集。那是「能接任何数组」的类型变量表达，能力表做不到更具体；拿它当写槽
+         * 类型，宽度就不定，crash_resume 判 `heap`。
+         *
+         * 但写目标（`a`）在布局期有声明类型（`a:[]int64`）。写槽类型应该来自**那个
+         * 数组**，由 `write_slot_type` 从 `declared` 解析，不在这里用返回值覆盖。
+         */
+        if !inst.expr.as_ref().is_some_and(|e| e.op == "compactarray·set") {
+            let ty = (!ty.is_empty()).then_some(ty);
+            if let Some(ty) = ty.filter(|value| !value.is_empty()) {
+                if inst.write_types.len() < inst.writes.len() {
+                    inst.write_types.resize(inst.writes.len(), String::new());
+                }
+                if inst.write_types[0].is_empty() {
+                    inst.write_types[0] = ty;
+                }
             }
         }
         let learned: Vec<(String, String)> = inst
@@ -2231,6 +2243,27 @@ fn write_slot_type(
     if let Some(t) = s.write_types.get(j).filter(|t| !t.is_empty()) {
         return t.clone();
     }
+    /*
+     * **`compactarray·set` 的写槽取目标数组的具体类型，不用能力表的返回并集。**
+     *
+     * 能力表把它写成 `-> ([?]int8|…|[?]bool #array)`——那是「能接任何数组」的类型变量
+     * 表达，能力表**做不到**更具体。拿它当写槽类型，宽度就是并集 ⇒ 不定 ⇒
+     * crash_resume 判 `heap`（实测 `NOT_RESUMABLE:n:heap`）。
+     *
+     * 但写目标在布局期是有具体类型的（`a:[]int64 = …` 的声明就在眼前）。所以这里
+     * 直接按写槽名取它——「元素写回哪个数组、那个数组多宽」本来就只有声明说了算。
+     * 取不到（绝对 key 等布局期无类型信息的目标）就**不猜**，往下走原路径。
+     */
+
+    if s.expr.as_ref().is_some_and(|e| e.op == "compactarray·set") {
+        if let Some(t) = lower::resolve_slot_type(orig, declared_source, structs, declared_source)
+            .or_else(|| lower::resolve_slot_type(orig, declared, structs, declared))
+        {
+            if !t.is_empty() {
+                return t;
+            }
+        }
+    }
     if let Some(t) = member_read_type(s, declared, structs, stable) {
         return t;
     }
@@ -2310,7 +2343,7 @@ fn write_scalar_kind(resolved: &str) -> Option<String> {
 /// 隐式数值转换：把跨 kind 的标量写补一条 `cast`。
 ///
 /// 四条路径在 `seq` 这一层**同形**（一条指令 + 一个写槽），所以只有两个分支：
-///   1. `compactarray·set` —— 目标是第三个读参，换 `args[2]`；
+///   1. `compactarray·set` —— 目标元素的宽度由元素 kind 决定（见下方长注释），不在此插；
 ///   2. 其余 —— 目标就是写槽，换整条 `expr`。
 ///
 /// `writes` 与 `write_types` 一律不动：本 pass 只换 RHS 的**求值类型**，不改写位置。
@@ -2329,7 +2362,7 @@ fn insert_write_casts(
          * **容器元素写不在这里插 cast**（`compactarray·set`）。
          *
          * 代价不是「多做一步」，是**做错**：本 pass 跑在 `lower_func` 之后，此时
-         * `compactarray·set` 的第三个实参**已经是 `flatten_expr` 物化出来的叶子
+         * `compactarray·set` 的 value 实参**已经是 `flatten_expr` 物化出来的叶子
          * 临时槽**（`_3`）。在叶子上套 `cast(_3)` 只是给表达式换了 op，lower 不会
          * 再展开它，于是源槽里留下一个 `rwir` 类型、`body_size == 5`、没有文本的
          * 空参数槽；编码器读到它判 `vmkv rwir: argument value is malformed`。
@@ -2420,35 +2453,7 @@ fn write_linear_inst(
         Some(identifier) => identifier.to_string(),
         None => opcode,
     };
-    /*
-     * 落盘的名字必须是**语义 rwir 名**，不是源码字形。
-     *
-     * 源码里 `a + b`、`a = b`、`br(...)` 的 `op` 存的是字形（parser 直接取
-     * `self.advance().value`），而 `runtimec_rwircap.kv` 是唯一能力清单、按语义名
-     * 登记（`add`、`copy`、`branch`）。v9 按名字查 opid，字形名直接查不到——
-     * 实测 layout 对 iops 的产物曾是 `[1,0] rwir: =`、`[6,0] rwir: br`。
-     *
-     * 语言表面语法**不变**（`+ - × ÷ % == ≤` 照旧写），只改落进 kvspace 的名字。
-     *
-     * 三层顺序不能颠倒：
-     *   1. `symbol::lookup` 覆盖中缀/一元字形（`+`→`add`、`==`→`eq`、`≤`→`le`…），
-     *      表里 `word` 恰好就是能力表中的名字，所以查表就是权威映射，无需第二份表；
-     *   2. 两个字形不在 symbol 表里但能力表要求语义名：`=`→`copy`（`flat()` 对叶/
-     *      成员读统一返回 `=`）、`br`→`branch`（layout 内部合成）；
-     *   3. 其余（`goto`、`compactarray·new`、扩展 rwir 名）本身已是语义名，原样保留。
-     */
-    let opcode = match opcode.as_str() {
-        "=" => "copy".to_string(),
-        "br" => "branch".to_string(),
-        glyph => {
-            let word = symbol::lookup(glyph).word;
-            if word.is_empty() {
-                glyph.to_string()
-            } else {
-                word.to_string()
-            }
-        }
-    };
+    let opcode = symbol::semantic_rwir_name(&opcode);
     // Already validated by `check_jumps`; still return `Result` to avoid panic paths.
     match opcode.as_str() {
         "goto" if reads.len() == 1 => {
@@ -2518,25 +2523,25 @@ fn write_linear_inst(
         ""
     };
 
-    let mut pairs: Vec<(String, String, Vec<u8>)> =
-        Vec::with_capacity(1 + reads.len() + s.writes.len());
     if !opcode.is_empty() {
-        let (wire, lt) = opcode_value(
+        let key = format!("{prefix}/[{n},0]");
+        opcode_value(
             kv,
+            &key,
             &opcode,
             reads.len() as i32,
             s.writes.len() as i32,
             local_funcs,
             s.operator,
         )?;
-        pairs.push((format!("{prefix}/[{n},0]"), lt, wire));
     }
     for (j, r) in reads.iter().enumerate() {
         let rv = param_slot(params, r);
         // 未定型整数字面量适配（spec 03-类型系统/01 第 10 条）：算子操作数的字面量
         // 按 promotion 结果 kind 落槽（`uint64_var > 1` 的 `1` 落成 uint64）。
-        if let Some((wire, lt)) = adapted_literal_slot(rv, &s.operand_kind)? {
-            pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
+        if let Some((kind, raw)) = adapted_literal_slot(rv, &s.operand_kind)? {
+            let key = format!("{prefix}/[{n},-{}]", j + 1);
+            ffi::xvalue_to_wire(kv, &key, &kind, &raw, 1, &kind)?;
             continue;
         }
         if Some(j) == none_index {
@@ -2573,7 +2578,6 @@ fn write_linear_inst(
              *     架构约束（p3）——曾经就是这么写的，后果是编码器的 None 判据
              *     永不成立、判空静默走数值 `eq`。
              */
-            let wire = ffi::new_none()?;
             let other_index = if j == 0 { 1 } else { 0 };
             let other_type = reads
                 .get(other_index)
@@ -2597,7 +2601,10 @@ fn write_linear_inst(
             } else {
                 String::new()
             };
-            pairs.push((format!("{prefix}/[{n},-{}]", j + 1), slot_type, wire));
+            // None 槽就地构造：空 body、**空 langtype**。
+            let key = format!("{prefix}/[{n},-{}]", j + 1);
+            ffi::new_none(kv, &key)?;
+            let _ = slot_type;
             continue;
         }
         let ty = read_slot_type(
@@ -2610,8 +2617,8 @@ fn write_linear_inst(
             structs,
             stable,
         );
-        let (wire, lt) = typed_slot_value(rv, &ty, target_char)?;
-        pairs.push((format!("{prefix}/[{n},-{}]", j + 1), lt, wire));
+        let key = format!("{prefix}/[{n},-{}]", j + 1);
+        typed_slot_value(kv, &key, rv, &ty, target_char)?;
     }
     for (j, w) in s.writes.iter().enumerate() {
         let orig = w.as_str();
@@ -2628,11 +2635,8 @@ fn write_linear_inst(
             structs,
             stable,
         );
-        let (wire, lt) = typed_slot_value(wv, &ty, "")?;
-        pairs.push((format!("{prefix}/[{n},{}]", j + 1), lt, wire));
-    }
-    if !pairs.is_empty() {
-        kv.set(&pairs)?;
+        let key = format!("{prefix}/[{n},{}]", j + 1);
+        typed_slot_value(kv, &key, wv, &ty, "")?;
     }
     Ok(())
 }
@@ -2748,19 +2752,17 @@ fn is_bare_identifier(s: &str) -> bool {
 
 fn opcode_value(
     kv: &mut Kv,
+    key: &str,
     opcode: &str,
     nr: i32,
     nw: i32,
     local_funcs: &HashSet<String>,
     is_operator: bool,
-) -> Result<(Vec<u8>, String), String> {
+) -> Result<(), String> {
     // lower 认定的算子永不是函数调用：语义名可能与同包 rwfunc 同名
     // （`==` → `eq` vs `lib string { rwfunc eq }`），不得被裸名解析抢走。
     if is_operator {
-        return Ok((
-            kvkind::new_rwir(nr, nw, opcode)?,
-            kvkind::KIND_RWIR.to_string(),
-        ));
+        return kvkind::new_rwir(kv, key, nr, nw, opcode);
     }
     // 裸名只有一条解析路径：`/lib/<name>`。删除「回退到 `<pkg>·<name>`」分支
     // （包内裸名与全局函数争名空间，是 6976 层递归的根源）；同包调用必须写
@@ -2771,7 +2773,7 @@ fn opcode_value(
             &kv.get_one(&format!("/lib/{name}/")),
             &kv.langtype_of(&format!("/lib/{name}/")),
         ) == kvkind::KIND_RWFUNC;
-    Ok(if is_func {
+    if is_func {
         // 全局函数调用一律落绝对路径，运行期不得再做包内回退。
         let target = if opcode.starts_with("/lib/")
             || name.contains(keytree::MEMBER_SEP)
@@ -2781,16 +2783,10 @@ fn opcode_value(
         } else {
             format!("/lib/{name}")
         };
-        (
-            kvkind::new_rwfunc_call(nr, nw, &target)?,
-            kvkind::KIND_RWFUNC.to_string(),
-        )
+        kvkind::new_rwfunc_call(kv, key, nr, nw, &target)
     } else {
-        (
-            kvkind::new_rwir(nr, nw, opcode)?,
-            kvkind::KIND_RWIR.to_string(),
-        )
-    })
+        kvkind::new_rwir(kv, key, nr, nw, opcode)
+    }
 }
 
 /// Preserve the target type.
@@ -2803,7 +2799,7 @@ fn integer_literal_text(s: &str) -> bool {
 }
 
 /// 无符号算子的字面量操作数：按 promotion 结果 kind 编码（范围复检，越界不改编码）。
-fn adapted_literal_slot(text: &str, kind: &str) -> Result<Option<(Vec<u8>, String)>, String> {
+fn adapted_literal_slot(text: &str, kind: &str) -> Result<Option<(String, Vec<u8>)>, String> {
     if !builtin::is_unsigned_kind(kind) || !integer_literal_text(text) {
         return Ok(None);
     }
@@ -2824,11 +2820,16 @@ fn adapted_literal_slot(text: &str, kind: &str) -> Result<Option<(Vec<u8>, Strin
     if v > max {
         return Ok(None);
     }
-    let wire = ffi::xvalue_to_wire(kind, &bytes, 1)?;
-    Ok(Some((wire, kind.to_string())))
+    Ok(Some((kind.to_string(), bytes)))
 }
 
-fn typed_slot_value(name: &str, ty: &str, target_char: &str) -> Result<(Vec<u8>, String), String> {
+fn typed_slot_value(
+    kv: &mut Kv,
+    key: &str,
+    name: &str,
+    ty: &str,
+    target_char: &str,
+) -> Result<String, String> {
     if !ty.is_empty() && (name.starts_with('/') || !is_literal(name)) {
         /*
          * **这里保留 `ty` 的原样，不剥 `*`。**
@@ -2843,16 +2844,19 @@ fn typed_slot_value(name: &str, ty: &str, target_char: &str) -> Result<(Vec<u8>,
          * 与 spec 的「指针性走 head ptr 位」是两条尚未对齐的规则。改一边就会
          * 让另一边失真。对齐方案待定（见 coding2 的 3b 报告），此处保持原状。
          */
-        return Ok((
-            kvkind::new_typed_rwir(name, ty)?,
-            kvkind::KIND_RWIR.to_string(),
-        ));
+        kvkind::new_typed_rwir(kv, key, name, ty)?;
+        return Ok(kvkind::KIND_RWIR.to_string());
     }
-    slot_value(name, target_char)
+    slot_value(kv, key, name, target_char)
 }
 
 /// 指令操作数的 wire 解析；langtype 精确匹配 wire 的 kind。
-fn slot_value(val: &str, target_char: &str) -> Result<(Vec<u8>, String), String> {
+fn slot_value(
+    kv: &mut Kv,
+    key: &str,
+    val: &str,
+    target_char: &str,
+) -> Result<String, String> {
     /*
      * `None` 是字面量，不是名字。它的 wire 是一条长度 0 的短内联头、langtype 空。
      *
@@ -2864,10 +2868,12 @@ fn slot_value(val: &str, target_char: &str) -> Result<(Vec<u8>, String), String>
      * 只处理读侧：写目标叫 `None` 的情形不该走到这里，也不在这里放行。
      */
     if val == "None" {
-        return Ok((ffi::new_none()?, String::new()));
+        ffi::new_none(kv, key)?;
+        return Ok(String::new());
     }
     if !is_literal(val) {
-        return Ok((kvkind::new_rwir(0, 0, val)?, kvkind::KIND_RWIR.to_string()));
+        kvkind::new_rwir(kv, key, 0, 0, val)?;
+        return Ok(kvkind::KIND_RWIR.to_string());
     }
     let b = val.as_bytes();
     if b[0] == b'"' {
@@ -2882,24 +2888,24 @@ fn slot_value(val: &str, target_char: &str) -> Result<(Vec<u8>, String), String>
         };
         /* 字符串 langtype 带 [len] 形状段（码点数）——xv/array 下标按它解 dims。 */
         let lt = format!("[{}]{k}", s.chars().count());
-        return Ok((ffi::new_char(k, s)?, lt));
+        ffi::new_char(kv, key, k, s, &lt)?;
+        return Ok(lt);
     }
     if val == "true" || val == "false" {
-        return Ok((ffi::new_bool(val == "true")?, "bool".to_string()));
+        ffi::new_bool(kv, key, val == "true", "bool")?;
+        return Ok("bool".to_string());
     }
     if b[0].is_ascii_digit() || (b[0] == b'-' && val.len() > 1) {
         if val.contains('.') || val.contains('e') || val.contains('E') {
-            return Ok((
-                ffi::new_float64(val.parse::<f64>().unwrap_or(0.0))?,
-                "float64".to_string(),
-            ));
+            ffi::new_float64(kv, key, val.parse::<f64>().unwrap_or(0.0), "float64")?;
+            return Ok("float64".to_string());
         }
-        return Ok(match builtin::try_parse_number(val)? {
-            Some((w, lt)) => (w, lt.to_string()),
-            None => (ffi::new_int64(0)?, "int64".to_string()),
-        });
+        let lt = builtin::number_langtype(val);
+        ffi::xvalue_to_wire(kv, key, lt, &builtin::number_body(val, lt), 1, lt)?;
+        return Ok(lt.to_string());
     }
-    Ok((kvkind::new_rwir(0, 0, val)?, kvkind::KIND_RWIR.to_string()))
+    kvkind::new_rwir(kv, key, 0, 0, val)?;
+    Ok(kvkind::KIND_RWIR.to_string())
 }
 
 fn is_literal(s: &str) -> bool {
@@ -3240,12 +3246,7 @@ mod tests {
         let mut kv = Kv::conn(&dsn_call_kind);
         init_dirs(&mut kv).unwrap();
         // `println` 是运行时提供的内建，由它 def rwir 声明（布局期必须有声明来源）。
-        kv.set(&[(
-            "/lib/println".to_string(),
-            kvkind::KIND_DEF_RWIR.to_string(),
-            kvkind::new_defrwir(1, 0, false).unwrap(),
-        )])
-        .unwrap();
+        kvkind::new_defrwir(&mut kv, "/lib/println", 1, 0, false).unwrap();
         compile(&mut kv, "rwfunc caller() -> () {\ny:int64 = callee(1)\nprintln(y)\n}\nrwfunc callee(int64 #x) -> (int64 #r) {\nx -> *r\n}\n").unwrap();
         assert_eq!(
             kvkind::kind(
@@ -3374,12 +3375,7 @@ mod tests {
         let mut kv = Kv::conn(&dsn_dot);
         init_dirs(&mut kv).unwrap();
         // `baz` 是外部内建：裸名必须有声明来源（def rwir），否则布局期报错。
-        kv.set(&[(
-            "/lib/baz".to_string(),
-            kvkind::KIND_DEF_RWIR.to_string(),
-            kvkind::new_defrwir(1, 1, false).unwrap(),
-        )])
-        .unwrap();
+        kvkind::new_defrwir(&mut kv, "/lib/baz", 1, 1, false).unwrap();
         compile(
             &mut kv,
             "lib t {\nrwfunc main() -> () {\ny:int64 = foo.bar(\"x\")\nw:int64 = baz(\"z\")\n}\n}\n",

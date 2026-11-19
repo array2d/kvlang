@@ -591,7 +591,7 @@ var (
 
 func init() {
 	sep = cconst("KVSPACE_MEMBER_SEP")
-	runtimeSep = cconst("KVSPACE_RUNTIME_MEMBER_SEP")
+	runtimeSep = cconst("KVLANG_RUNTIME_MEMBER_SEP")
 	dirSuf = cconst("KVSPACE_DIR_INDEX_SUF")
 	kindMap = cconst("KVLANG_KIND_MAP")
 	kindInt64 = cconst("KVLANG_KIND_INT64")
