@@ -11,6 +11,7 @@
 - [Tutorials](https://github.com/array2d/kvlang/tree/master/tutorial)
 - [Standard library documents](https://kvlang.com/stdlib/)
 - [Install script](https://raw.githubusercontent.com/array2d/kvlang/master/install.sh)
+- [Paper (PDF)](https://kvlang.com/paper.pdf)
 - [Source repository](https://github.com/array2d/kvlang)
 
 ## Notes
