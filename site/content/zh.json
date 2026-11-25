@@ -45,6 +45,10 @@
         "href": "/zh/benchmarks/"
       },
       {
+        "label": "论文",
+        "href": "/paper.pdf"
+      },
+      {
         "label": "GitHub",
         "href": "https://github.com/array2d/kvlang"
       }
@@ -107,9 +111,9 @@
         "featureClass": "feature",
         "title": "字节一致的双后端",
         "body": "一套 PascalCase C ABI，两个实现由 DSN 选择。同一份程序在共享内存、文件或 Redis 上运行，落盘字节完全一致。",
-        "code": "KVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-durable",
+        "code": "KVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # libkvspace\n# fs:// and redis:// require linking kvspace-durable instead of libkvspace.",
         "source": "README.md",
-        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nKVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-durable</code></pre>"
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nKVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # libkvspace\n# fs:// and redis:// require linking kvspace-durable instead of libkvspace.</code></pre>"
       },
       {
         "featureClass": "feature single",
@@ -189,6 +193,12 @@
           "body": "逐篇浏览 .kv 文档及其源码结构。",
           "href": "/stdlib/",
           "label": "stdlib 文档 →"
+        },
+        {
+          "title": "论文",
+          "body": "《Stop, Edit, and Resume without Replay: Control State in a Single Addressable Tree》技术论文。",
+          "href": "/paper.pdf",
+          "label": "paper.pdf →"
         }
       ]
     },
@@ -370,6 +380,10 @@
       {
         "label": "GitHub",
         "href": "https://github.com/array2d/kvlang"
+      },
+      {
+        "label": "论文",
+        "href": "/paper.pdf"
       },
       {
         "label": "贡献指南",

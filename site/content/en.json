@@ -45,6 +45,10 @@
         "href": "/benchmarks/"
       },
       {
+        "label": "Paper",
+        "href": "/paper.pdf"
+      },
+      {
         "label": "GitHub",
         "href": "https://github.com/array2d/kvlang"
       }
@@ -107,9 +111,9 @@
         "featureClass": "feature",
         "title": "Byte-identical backends",
         "body": "One PascalCase C ABI, two implementations chosen by DSN. The same program runs against shared memory, files, or Redis with identical bytes.",
-        "code": "KVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-durable",
+        "code": "KVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # libkvspace\n# fs:// and redis:// require linking kvspace-durable instead of libkvspace.",
         "source": "README.md",
-        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nKVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-c\nKVSPACE=fs:///tmp/kvlang-fs   ./bin/byteseek tutorial/01-basics/hello.kv   # kvspace-durable</code></pre>"
+        "codeHtml": "<pre class=\"code\"><code><!-- source: README.md -->\nKVSPACE=shm:///tmp/kvlang.shm ./bin/byteseek tutorial/01-basics/hello.kv   # libkvspace\n# fs:// and redis:// require linking kvspace-durable instead of libkvspace.</code></pre>"
       },
       {
         "featureClass": "feature single",
@@ -189,6 +193,12 @@
           "body": "Browse every .kv document with source and structure.",
           "href": "/stdlib/",
           "label": "stdlib docs →"
+        },
+        {
+          "title": "Paper",
+          "body": "Stop, Edit, and Resume without Replay: Control State in a Single Addressable Tree.",
+          "href": "/paper.pdf",
+          "label": "paper.pdf →"
         }
       ]
     },
@@ -370,6 +380,10 @@
       {
         "label": "GitHub",
         "href": "https://github.com/array2d/kvlang"
+      },
+      {
+        "label": "Paper",
+        "href": "/paper.pdf"
       },
       {
         "label": "Contributing",
